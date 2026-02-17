@@ -1,0 +1,55 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: issuebot
+  config:
+    import: optional:file:${user.home}/.issuebot/config.yml
+  datasource:
+    url: jdbc:h2:file:${user.home}/.issuebot/issuebot;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:not-set}
+      chat:
+        options:
+          model: claude-sonnet-4-5-20250929
+
+# IssueBot defaults (overridden by ~/.issuebot/config.yml)
+issuebot:
+  poll-interval-seconds: 60
+  max-concurrent-issues: 3
+  work-directory: ${user.home}/.issuebot/repos
+  claude-code:
+    max-turns-per-invocation: 30
+    model: claude-sonnet-4-5-20250929
+    timeout-minutes: 10
+  github:
+    token: ${GITHUB_TOKEN:not-set}
+  notifications:
+    desktop: true
+    dashboard: true
+  repositories: []
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
