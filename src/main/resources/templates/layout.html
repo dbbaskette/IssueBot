@@ -24,7 +24,9 @@
                     <span th:if="${pendingApprovals != null and pendingApprovals > 0}" class="badge" th:text="${pendingApprovals}">0</span>
                 </a>
             </li>
+            <li><a th:classappend="${activePage == 'costs' ? 'active' : ''}" href="/costs" hx-get="/costs" hx-target="#content" hx-push-url="true">Cost Report</a></li>
             <li><a th:classappend="${activePage == 'settings' ? 'active' : ''}" href="/settings" hx-get="/settings" hx-target="#content" hx-push-url="true">Settings</a></li>
+            <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
         </ul>
         <footer>
             <div class="agent-status">
