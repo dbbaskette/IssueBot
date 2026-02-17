@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h2>Cost Report</h2>
+    </div>
+
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="label">Total Cost</div>
+            <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 4)}">$0.0000</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Input Tokens</div>
+            <div class="value" th:text="${#numbers.formatInteger(totalInputTokens, 1, 'COMMA')}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Output Tokens</div>
+            <div class="value" th:text="${#numbers.formatInteger(totalOutputTokens, 1, 'COMMA')}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Total Tokens</div>
+            <div class="value" th:text="${#numbers.formatInteger(totalTokens, 1, 'COMMA')}">0</div>
+        </div>
+    </div>
+
+    <!-- Per-repo breakdown -->
+    <div class="panel mb-3">
+        <div class="panel-header">
+            <h3>Cost by Repository</h3>
+        </div>
+        <div class="panel-body">
+            <table class="data-table" th:if="${not #lists.isEmpty(repoBreakdowns)}">
+                <thead>
+                    <tr>
+                        <th>Repository</th>
+                        <th>Issues Processed</th>
+                        <th>Total Cost</th>
+                        <th>Avg Cost / Issue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="rb : ${repoBreakdowns}">
+                        <td th:text="${rb.repoName()}">owner/repo</td>
+                        <td th:text="${rb.issueCount()}">0</td>
+                        <td th:text="'$' + ${#numbers.formatDecimal(rb.totalCost(), 1, 4)}">$0.0000</td>
+                        <td th:text="'$' + ${#numbers.formatDecimal(rb.avgCostPerIssue(), 1, 4)}">$0.0000</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="text-muted" th:if="${#lists.isEmpty(repoBreakdowns)}">No repositories with cost data yet.</p>
+        </div>
+    </div>
+
+    <!-- Per-issue breakdown -->
+    <div class="panel">
+        <div class="panel-header">
+            <h3>Cost by Issue</h3>
+        </div>
+        <div class="panel-body">
+            <table class="data-table" th:if="${not #lists.isEmpty(issueBreakdowns)}">
+                <thead>
+                    <tr>
+                        <th>Repository</th>
+                        <th>Issue</th>
+                        <th>Status</th>
+                        <th>Iterations</th>
+                        <th>Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="ib : ${issueBreakdowns}">
+                        <td th:text="${ib.repoName()}">owner/repo</td>
+                        <td>
+                            <a th:href="@{/issues/{id}(id=${ib.issueNumber()})}"
+                               th:text="'#' + ${ib.issueNumber()} + ' ' + ${ib.title()}">
+                                #1 Title
+                            </a>
+                        </td>
+                        <td>
+                            <span class="status"
+                                  th:classappend="'status-' + ${ib.status().toLowerCase()}"
+                                  th:text="${ib.status()}">STATUS</span>
+                        </td>
+                        <td th:text="${ib.iterations()}">0</td>
+                        <td th:text="'$' + ${#numbers.formatDecimal(ib.cost(), 1, 4)}">$0.0000</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="text-muted" th:if="${#lists.isEmpty(issueBreakdowns)}">No issues with cost data yet.</p>
+        </div>
+    </div>
+</div>
+</body>
+</html>
