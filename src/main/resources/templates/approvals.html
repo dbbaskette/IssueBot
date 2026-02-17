@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h2>Approvals</h2>
+    </div>
+
+    <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
+
+    <div th:if="${#lists.isEmpty(approvals)}">
+        <div class="panel">
+            <div class="panel-body text-muted" style="text-align:center;padding:3rem">
+                No pending approvals. Issues in approval-gated repos will appear here when ready for review.
+            </div>
+        </div>
+    </div>
+
+    <div th:each="issue : ${approvals}" class="panel mb-3">
+        <div class="panel-header">
+            <div>
+                <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+            </div>
+            <span class="status status-awaiting_approval">AWAITING APPROVAL</span>
+        </div>
+        <div class="panel-body">
+            <div class="metrics-grid mb-2">
+                <div class="metric-card">
+                    <div class="label">Iteration</div>
+                    <div class="value" th:text="${issue.currentIteration}">1</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">Branch</div>
+                    <div class="value small" th:text="${issue.branchName}">branch</div>
+                </div>
+            </div>
+
+            <!-- Last iteration details -->
+            <div th:if="${lastIterations.containsKey(issue.id)}">
+                <details>
+                    <summary>View Diff</summary>
+                    <div class="diff-viewer" th:text="${lastIterations.get(issue.id).diff}">diff</div>
+                </details>
+                <details th:if="${lastIterations.get(issue.id).selfAssessment != null}" class="mt-1">
+                    <summary>Self-Assessment</summary>
+                    <pre class="text-sm" style="white-space:pre-wrap;background:#f8f9fa;padding:0.5rem;border-radius:4px"
+                         th:text="${lastIterations.get(issue.id).selfAssessment}">assessment</pre>
+                </details>
+            </div>
+
+            <div class="form-actions mt-2">
+                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/approve'" hx-target="#content" style="display:inline">
+                    <button type="submit" class="btn btn-success">Approve</button>
+                </form>
+                <button class="btn btn-danger" th:attr="onclick='toggleReject(' + ${issue.id} + ')'">Reject</button>
+            </div>
+
+            <div th:id="${'reject-form-' + issue.id}" style="display:none" class="mt-2">
+                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/reject'" hx-target="#content">
+                    <label th:for="${'feedback-' + issue.id}">Rejection Feedback</label>
+                    <textarea th:id="${'feedback-' + issue.id}" name="feedback" rows="3"
+                              placeholder="Describe what needs to change..." required
+                              style="width:100%;font-size:0.85rem"></textarea>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-danger">Submit Rejection</button>
+                        <button type="button" class="btn btn-outline" th:attr="onclick='toggleReject(' + ${issue.id} + ')'">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleReject(id) {
+            var el = document.getElementById('reject-form-' + id);
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+    </script>
+</div>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h2>Issue Queue</h2>
+    </div>
+
+    <div class="filter-bar">
+        <select hx-get="/issues" hx-target="#content" name="status" hx-include="[name='repoId']">
+            <option value="">All Statuses</option>
+            <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}" th:selected="${s.name() == selectedStatus}">STATUS</option>
+        </select>
+        <select hx-get="/issues" hx-target="#content" name="repoId" hx-include="[name='status']">
+            <option value="">All Repos</option>
+            <option th:each="repo : ${repos}" th:value="${repo.id}" th:text="${repo.fullName()}" th:selected="${repo.id == selectedRepoId}">owner/repo</option>
+        </select>
+    </div>
+
+    <div hx-ext="sse" th:attr="sse-connect='/api/events/stream'" sse-swap="issue-update" hx-target="#issue-table-body" hx-swap="innerHTML">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Repo</th>
+                    <th>#</th>
+                    <th>Title</th>
+                    <th>Status</th>
+                    <th>Iteration</th>
+                    <th>Branch</th>
+                    <th>Updated</th>
+                </tr>
+            </thead>
+            <tbody id="issue-table-body">
+                <tr th:each="issue : ${issues}"
+                    style="cursor:pointer"
+                    th:attr="hx-get='/issues/' + ${issue.id}"
+                    hx-target="#content"
+                    hx-push-url="true">
+                    <td th:text="${issue.repo.fullName()}">owner/repo</td>
+                    <td th:text="${'#' + issue.issueNumber}">#1</td>
+                    <td th:text="${issue.issueTitle}">Issue title</td>
+                    <td>
+                        <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">PENDING</span>
+                    </td>
+                    <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
+                    <td class="text-sm text-muted" th:text="${issue.branchName != null ? issue.branchName : '—'}">—</td>
+                    <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
+                </tr>
+                <tr th:if="${#lists.isEmpty(issues)}">
+                    <td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

@@ -176,4 +176,8 @@ public class IssuePollingService {
     public void setEnabled(boolean enabled) {
         this.enabled.set(enabled);
     }
+
+    public boolean isEnabled() {
+        return this.enabled.get();
+    }
 }

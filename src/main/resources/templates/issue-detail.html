@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <div>
+            <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
+            <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
+        </div>
+        <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
+    </div>
+
+    <div class="metrics-grid mb-3">
+        <div class="metric-card">
+            <div class="label">Repository</div>
+            <div class="value small" th:text="${issue.repo.fullName()}">owner/repo</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Iteration</div>
+            <div class="value" th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Branch</div>
+            <div class="value small" th:text="${issue.branchName != null ? issue.branchName : '—'}">—</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Cost</div>
+            <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 4)}">$0.00</div>
+        </div>
+    </div>
+
+    <div class="panel mb-3">
+        <div class="panel-header">
+            <h3>Iteration History</h3>
+        </div>
+        <div class="panel-body">
+            <ul class="iteration-timeline" th:if="${not #lists.isEmpty(iterations)}">
+                <li th:each="iter : ${iterations}"
+                    th:classappend="${iter.ciResult == 'PASSED' ? 'passed' : (iter.completedAt != null ? 'failed' : 'active')}">
+                    <div class="flex-between mb-1">
+                        <strong th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</strong>
+                        <span class="text-sm text-muted" th:if="${iter.completedAt != null}" th:text="${#temporals.format(iter.startedAt, 'MMM d HH:mm') + ' — ' + #temporals.format(iter.completedAt, 'HH:mm')}">time</span>
+                    </div>
+
+                    <div th:if="${iter.ciResult != null}" class="mb-1">
+                        <span class="text-sm">CI: </span>
+                        <span class="status" th:classappend="${iter.ciResult == 'PASSED' ? 'status-completed' : 'status-failed'}" th:text="${iter.ciResult}">RESULT</span>
+                    </div>
+
+                    <details th:if="${iter.selfAssessment != null}">
+                        <summary class="text-sm">Self-Assessment</summary>
+                        <pre class="text-sm" style="white-space:pre-wrap;background:#f8f9fa;padding:0.5rem;border-radius:4px" th:text="${iter.selfAssessment}">assessment</pre>
+                    </details>
+
+                    <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
+                        <summary class="text-sm">Diff</summary>
+                        <div class="diff-viewer" th:text="${iter.diff}">diff content</div>
+                    </details>
+
+                    <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">
+                        <summary class="text-sm">Claude Code Output</summary>
+                        <pre class="text-sm" style="white-space:pre-wrap;background:#f8f9fa;padding:0.5rem;border-radius:4px;max-height:300px;overflow-y:auto" th:text="${iter.claudeOutput}">output</pre>
+                    </details>
+                </li>
+            </ul>
+            <p class="text-muted" th:if="${#lists.isEmpty(iterations)}">No iterations yet.</p>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">
+            <h3>Events</h3>
+        </div>
+        <div class="panel-body">
+            <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
+                <li th:each="event : ${events}">
+                    <span class="time" th:text="${#temporals.format(event.createdAt, 'MMM d HH:mm')}">12:00</span>
+                    <span class="type" th:text="${event.eventType}">EVENT</span>
+                    <span th:text="${event.message}">message</span>
+                </li>
+            </ul>
+            <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events for this issue.</p>
+        </div>
+    </div>
+</div>
+</body>
+</html>
