@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h2>Dashboard</h2>
+    </div>
+
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="label">Completed</div>
+            <div class="value" th:text="${completed}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">In Progress</div>
+            <div class="value" th:text="${inProgress}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Pending</div>
+            <div class="value" th:text="${pending}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Failed</div>
+            <div class="value" th:text="${failed}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Watched Repos</div>
+            <div class="value" th:text="${repoCount}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Total Cost</div>
+            <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">
+            <h3>Recent Events</h3>
+        </div>
+        <div class="panel-body">
+            <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
+                <li th:each="event : ${events}">
+                    <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm')}">12:00</span>
+                    <span class="type" th:text="${event.eventType}">EVENT</span>
+                    <span th:text="${event.message}">Event message</span>
+                </li>
+            </ul>
+            <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events yet. Configure a repository and label an issue <code>agent-ready</code> to get started.</p>
+        </div>
+    </div>
+</div>
+</body>
+</html>

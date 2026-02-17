@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${pageTitle != null ? pageTitle + ' — IssueBot' : 'IssueBot'}">IssueBot</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+</head>
+<body>
+    <nav class="sidebar">
+        <header>
+            <h1>IssueBot</h1>
+        </header>
+        <ul>
+            <li><a th:classappend="${activePage == 'dashboard' ? 'active' : ''}" href="/" hx-get="/" hx-target="#content" hx-push-url="true">Dashboard</a></li>
+            <li><a th:classappend="${activePage == 'repositories' ? 'active' : ''}" href="/repositories" hx-get="/repositories" hx-target="#content" hx-push-url="true">Repositories</a></li>
+            <li><a th:classappend="${activePage == 'issues' ? 'active' : ''}" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">Issue Queue</a></li>
+            <li>
+                <a th:classappend="${activePage == 'approvals' ? 'active' : ''}" href="/approvals" hx-get="/approvals" hx-target="#content" hx-push-url="true">
+                    Approvals
+                    <span th:if="${pendingApprovals != null and pendingApprovals > 0}" class="badge" th:text="${pendingApprovals}">0</span>
+                </a>
+            </li>
+            <li><a th:classappend="${activePage == 'settings' ? 'active' : ''}" href="/settings" hx-get="/settings" hx-target="#content" hx-push-url="true">Settings</a></li>
+        </ul>
+        <footer>
+            <div class="agent-status">
+                <span class="status-dot" th:classappend="${agentRunning != null and agentRunning ? 'running' : 'paused'}"></span>
+                <span th:text="${agentRunning != null and agentRunning ? 'Agent Running' : 'Agent Paused'}">Agent Running</span>
+            </div>
+        </footer>
+    </nav>
+    <main id="content">
+        <div th:replace="~{${contentTemplate} :: content}"></div>
+    </main>
+</body>
+</html>

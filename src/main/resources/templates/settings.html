@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h2>Settings</h2>
+        <div class="flex gap-1">
+            <form th:if="${agentRunning}" hx-post="/settings/pause" hx-target="#content">
+                <button type="submit" class="btn btn-outline">Pause Agent</button>
+            </form>
+            <form th:if="${!agentRunning}" hx-post="/settings/resume" hx-target="#content">
+                <button type="submit" class="btn btn-success">Resume Agent</button>
+            </form>
+        </div>
+    </div>
+
+    <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
+    <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
+
+    <!-- Quick Settings -->
+    <div class="panel mb-3">
+        <div class="panel-header">
+            <h3>Quick Settings</h3>
+        </div>
+        <div class="panel-body">
+            <form hx-post="/settings/quick" hx-target="#content">
+                <div class="form-grid">
+                    <div>
+                        <label for="poll-interval">Poll Interval (seconds)</label>
+                        <input type="number" id="poll-interval" name="pollIntervalSeconds"
+                               th:value="${config.pollIntervalSeconds}" min="10" max="3600">
+                    </div>
+                    <div>
+                        <label for="max-concurrent">Max Concurrent Issues</label>
+                        <input type="number" id="max-concurrent" name="maxConcurrentIssues"
+                               th:value="${config.maxConcurrentIssues}" min="1" max="10">
+                    </div>
+                    <div>
+                        <label for="desktop-notif">Desktop Notifications</label>
+                        <select id="desktop-notif" name="desktopNotifications">
+                            <option value="true" th:selected="${config.notifications.desktop}">Enabled</option>
+                            <option value="false" th:selected="${!config.notifications.desktop}">Disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="dashboard-notif">Dashboard Notifications</label>
+                        <select id="dashboard-notif" name="dashboardNotifications">
+                            <option value="true" th:selected="${config.notifications.dashboard}">Enabled</option>
+                            <option value="false" th:selected="${!config.notifications.dashboard}">Disabled</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Quick Settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- YAML Config Editor -->
+    <div class="panel">
+        <div class="panel-header">
+            <h3>Configuration File</h3>
+            <span class="text-sm text-muted" th:text="${configPath}">~/.issuebot/config.yml</span>
+        </div>
+        <div class="panel-body">
+            <form hx-post="/settings/config" hx-target="#content">
+                <textarea class="config-editor" name="configContent" th:text="${configContent}"></textarea>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save &amp; Reload</button>
+                    <button type="button" class="btn btn-outline" hx-get="/settings" hx-target="#content">Discard Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

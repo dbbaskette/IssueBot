@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div class="page-header">
+        <h2>Repositories</h2>
+        <button class="btn btn-primary" onclick="document.getElementById('add-repo-form').style.display='block'">Add Repository</button>
+    </div>
+
+    <!-- Add/Edit Form -->
+    <div id="add-repo-form" class="panel mb-3" style="display:none">
+        <div class="panel-header">
+            <h3 id="form-title">Add Repository</h3>
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('add-repo-form').style.display='none'">Cancel</button>
+        </div>
+        <div class="panel-body">
+            <form hx-post="/repositories" hx-target="#content" hx-swap="innerHTML">
+                <input type="hidden" id="edit-id" name="id" value="">
+                <div class="form-grid">
+                    <div>
+                        <label for="owner">Owner</label>
+                        <input type="text" id="owner" name="owner" required placeholder="e.g. my-org">
+                    </div>
+                    <div>
+                        <label for="repo-name">Repository</label>
+                        <input type="text" id="repo-name" name="name" required placeholder="e.g. my-app">
+                    </div>
+                    <div>
+                        <label for="branch">Branch</label>
+                        <input type="text" id="branch" name="branch" value="main" required>
+                    </div>
+                    <div>
+                        <label for="mode">Mode</label>
+                        <select id="mode" name="mode">
+                            <option value="AUTONOMOUS">Autonomous</option>
+                            <option value="APPROVAL_GATED">Approval Gated</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="max-iterations">Max Iterations</label>
+                        <input type="number" id="max-iterations" name="maxIterations" value="5" min="1" max="20">
+                    </div>
+                    <div>
+                        <label for="ci-timeout">CI Timeout (min)</label>
+                        <input type="number" id="ci-timeout" name="ciTimeoutMinutes" value="15" min="1" max="60">
+                    </div>
+                    <div class="full-width">
+                        <label for="allowed-paths">Allowed Paths (comma-separated)</label>
+                        <input type="text" id="allowed-paths" name="allowedPaths" placeholder="src/, test/">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Success/Error messages -->
+    <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
+    <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
+
+    <!-- Repository table -->
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Repository</th>
+                <th>Branch</th>
+                <th>Mode</th>
+                <th>Max Iter.</th>
+                <th>CI Timeout</th>
+                <th>Issues</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr th:each="repo : ${repos}">
+                <td>
+                    <strong th:text="${repo.owner + '/' + repo.name}">owner/repo</strong>
+                </td>
+                <td th:text="${repo.branch}">main</td>
+                <td>
+                    <span class="status" th:classappend="${repo.mode.name() == 'AUTONOMOUS' ? 'status-completed' : 'status-awaiting_approval'}" th:text="${repo.mode}">AUTONOMOUS</span>
+                </td>
+                <td th:text="${repo.maxIterations}">5</td>
+                <td th:text="${repo.ciTimeoutMinutes + ' min'}">15 min</td>
+                <td th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
+                <td>
+                    <button class="btn btn-danger btn-sm"
+                            th:attr="hx-delete='/repositories/' + ${repo.id}"
+                            hx-target="#content"
+                            hx-confirm="Remove this repository? Local clones will not be deleted.">Remove</button>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(repos)}">
+                <td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+</body>
+</html>

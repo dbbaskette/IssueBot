@@ -16,15 +16,18 @@ public class EventService {
     private static final Logger log = LoggerFactory.getLogger(EventService.class);
 
     private final EventRepository eventRepository;
+    private final SseService sseService;
 
-    public EventService(EventRepository eventRepository) {
+    public EventService(EventRepository eventRepository, SseService sseService) {
         this.eventRepository = eventRepository;
+        this.sseService = sseService;
     }
 
     public Event log(String eventType, String message) {
         Event event = new Event(eventType, message);
         Event saved = eventRepository.save(event);
         log.info("[EVENT] {}: {}", eventType, message);
+        sseService.sendIssueUpdate();
         return saved;
     }
 
@@ -32,6 +35,7 @@ public class EventService {
         Event event = new Event(eventType, message, repo, null);
         Event saved = eventRepository.save(event);
         log.info("[EVENT] {} ({}): {}", eventType, repo.fullName(), message);
+        sseService.sendIssueUpdate();
         return saved;
     }
 
@@ -39,6 +43,7 @@ public class EventService {
         Event event = new Event(eventType, message, repo, issue);
         Event saved = eventRepository.save(event);
         log.info("[EVENT] {} ({} #{}): {}", eventType, repo.fullName(), issue.getIssueNumber(), message);
+        sseService.sendIssueUpdate();
         return saved;
     }
 
