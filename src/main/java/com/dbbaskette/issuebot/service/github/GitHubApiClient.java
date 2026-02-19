@@ -261,20 +261,30 @@ public class GitHubApiClient {
                 }
                 """.formatted(nodeId);
 
-        webClient.post()
+        JsonNode response = webClient.post()
                 .uri("/graphql")
+                .header("Accept", "application/json")
                 .bodyValue(Map.of("query", mutation))
                 .retrieve()
                 .bodyToMono(JsonNode.class)
                 .retryWhen(retryOnServerError())
-                .doOnNext(response -> {
-                    JsonNode errors = response.path("errors");
-                    if (errors.isArray() && !errors.isEmpty()) {
-                        String msg = errors.get(0).path("message").asText("Unknown GraphQL error");
-                        throw new RuntimeException("GraphQL error marking PR ready: " + msg);
-                    }
-                })
                 .block(Duration.ofSeconds(15));
+
+        if (response != null && response.has("errors")) {
+            JsonNode errors = response.get("errors");
+            if (errors.isArray() && !errors.isEmpty()) {
+                String msg = errors.get(0).path("message").asText("Unknown GraphQL error");
+                throw new RuntimeException("GraphQL error marking PR ready: " + msg);
+            }
+        }
+
+        boolean stillDraft = response != null
+                && response.path("data").path("markPullRequestAsReady")
+                        .path("pullRequest").path("isDraft").asBoolean(true);
+        if (stillDraft) {
+            throw new RuntimeException("PR #" + prNumber + " is still draft after markPullRequestAsReady");
+        }
+        log.info("Successfully marked PR #{} as ready (no longer draft)", prNumber);
     }
 
     // --- CI / Check Runs ---
