@@ -5,6 +5,15 @@
 
 set -e
 
+# ── Load .env if present ─────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+    echo "> Loaded environment from .env"
+fi
+
 PORT=8090
 APP_NAME="issuebot"
 ISSUEBOT_HOME="${HOME}/.issuebot"
