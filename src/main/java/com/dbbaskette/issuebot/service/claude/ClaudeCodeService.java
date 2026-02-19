@@ -239,7 +239,7 @@ public class ClaudeCodeService {
     }
 
     /**
-     * Verify Claude Code authentication works by sending a simple prompt.
+     * Verify Claude Code authentication via 'claude auth status'.
      * Result is cached after first check.
      */
     public boolean checkAuthentication() {
@@ -247,28 +247,28 @@ public class ClaudeCodeService {
             return cliAuthenticated;
         }
         try {
-            ProcessBuilder pb = new ProcessBuilder("claude", "-p", "Say hello", "--max-turns", "1",
-                    "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions");
+            ProcessBuilder pb = new ProcessBuilder("claude", "auth", "status");
             pb.redirectErrorStream(true);
             pb.environment().putAll(System.getenv());
             Process process = pb.start();
-            // Drain output to prevent blocking
-            Thread.ofVirtual().start(() -> {
-                try { process.getInputStream().readAllBytes(); } catch (IOException ignored) {}
-            });
-            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+            String output;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                output = reader.lines().reduce("", (a, b) -> a + b);
+            }
+            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                log.warn("Claude Code auth check timed out");
+                log.warn("Claude Code auth status check timed out");
                 cliAuthenticated = false;
                 return false;
             }
-            if (process.exitValue() == 0) {
+            if (process.exitValue() == 0 && output.contains("\"loggedIn\":true")) {
                 log.info("Claude Code authentication verified");
                 cliAuthenticated = true;
                 return true;
             }
-            log.warn("Claude Code auth check exited with code {}", process.exitValue());
+            log.warn("Claude Code auth status: {}", output);
         } catch (Exception e) {
             log.debug("Claude Code auth check failed: {}", e.getMessage());
         }
