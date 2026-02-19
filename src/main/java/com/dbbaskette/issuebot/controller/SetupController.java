@@ -29,19 +29,33 @@ public class SetupController {
         this.issueRepository = issueRepository;
     }
 
+    /**
+     * Main setup page — loads instantly with "Checking..." placeholders.
+     * Actual prereq checks are loaded async via /setup/prereqs.
+     */
     @GetMapping("/setup")
     public String setup(Model model) {
         model.addAttribute("activePage", "setup");
         model.addAttribute("contentTemplate", "setup");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        return "layout";
+    }
 
-        // Prerequisites checks
-        boolean cliAvailable = claudeCodeService.isCliAvailable();
+    /**
+     * HTMX fragment endpoint — runs the actual prerequisite checks.
+     * Called async after the setup page renders.
+     */
+    @GetMapping("/setup/prereqs")
+    public String prereqs(Model model) {
+        // Fresh CLI check (don't rely on stale cache)
+        boolean cliAvailable = claudeCodeService.checkCliAvailable();
         model.addAttribute("cliAvailable", cliAvailable);
 
+        // Fresh auth check (clear cache so we re-verify)
         boolean cliAuthenticated = false;
         if (cliAvailable) {
+            claudeCodeService.clearAuthCache();
             cliAuthenticated = claudeCodeService.checkAuthentication();
         }
         model.addAttribute("cliAuthenticated", cliAuthenticated);
@@ -70,6 +84,6 @@ public class SetupController {
 
         model.addAttribute("allPassed", cliAvailable && cliAuthenticated && githubTokenSet && workDirOk);
 
-        return "layout";
+        return "setup :: prereqs";
     }
 }

@@ -259,18 +259,20 @@ public class ClaudeCodeService {
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                log.warn("Claude Code auth status check timed out");
+                log.warn("Claude Code auth status check timed out after 10s");
                 cliAuthenticated = false;
                 return false;
             }
-            if (process.exitValue() == 0 && output.contains("\"loggedIn\":true")) {
+            int exitCode = process.exitValue();
+            log.info("Claude auth status: exitCode={}, output={}", exitCode, output);
+            if (exitCode == 0 && output.contains("\"loggedIn\"") && output.contains("true")) {
                 log.info("Claude Code authentication verified");
                 cliAuthenticated = true;
                 return true;
             }
-            log.warn("Claude Code auth status: {}", output);
+            log.warn("Claude Code auth check failed: exitCode={}, output={}", exitCode, output);
         } catch (Exception e) {
-            log.debug("Claude Code auth check failed: {}", e.getMessage());
+            log.warn("Claude Code auth check exception: {}", e.getMessage(), e);
         }
         cliAuthenticated = false;
         return false;
@@ -278,5 +280,12 @@ public class ClaudeCodeService {
 
     public boolean isCliAvailable() {
         return cliAvailable;
+    }
+
+    /**
+     * Clear the cached auth result so the next checkAuthentication() call re-verifies.
+     */
+    public void clearAuthCache() {
+        cliAuthenticated = null;
     }
 }

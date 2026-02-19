@@ -11,58 +11,40 @@
             <h3>Prerequisites Check</h3>
         </div>
         <div class="panel-body">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Component</th>
-                        <th>Status</th>
-                        <th>Details</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Claude Code CLI</td>
-                        <td>
-                            <span class="status" th:classappend="${cliAvailable ? 'status-completed' : 'status-failed'}"
-                                  th:text="${cliAvailable ? 'OK' : 'MISSING'}">OK</span>
-                        </td>
-                        <td th:if="${cliAvailable}">Claude Code CLI is installed and accessible.</td>
-                        <td th:unless="${cliAvailable}">
-                            Install Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Claude Code Auth</td>
-                        <td>
-                            <span class="status" th:classappend="${cliAuthenticated ? 'status-completed' : 'status-failed'}"
-                                  th:text="${cliAuthenticated ? 'OK' : 'FAILED'}">OK</span>
-                        </td>
-                        <td th:if="${cliAuthenticated}">Authentication verified (Pro/Max subscription).</td>
-                        <td th:unless="${cliAuthenticated}">
-                            Run <code>claude</code> in a terminal and complete login.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>GitHub Token</td>
-                        <td>
-                            <span class="status" th:classappend="${githubTokenSet ? 'status-completed' : 'status-failed'}"
-                                  th:text="${githubTokenSet ? 'OK' : 'MISSING'}">OK</span>
-                        </td>
-                        <td th:if="${githubTokenSet}">GitHub token is configured.</td>
-                        <td th:unless="${githubTokenSet}">
-                            Set <code>GITHUB_TOKEN</code> environment variable with <code>repo</code> scope.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Work Directory</td>
-                        <td>
-                            <span class="status" th:classappend="${workDirOk ? 'status-completed' : 'status-failed'}"
-                                  th:text="${workDirOk ? 'OK' : 'ISSUE'}">OK</span>
-                        </td>
-                        <td th:text="${workDirMessage}">Work directory details</td>
-                    </tr>
-                </tbody>
-            </table>
+            <!-- Loads instantly with "Checking..." then swaps in real results -->
+            <div id="prereqs-table" hx-get="/setup/prereqs" hx-trigger="load" hx-swap="innerHTML">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Claude Code CLI</td>
+                            <td><span class="status status-queued">CHECKING</span></td>
+                            <td style="color: var(--text-tertiary)">Verifying CLI installation...</td>
+                        </tr>
+                        <tr>
+                            <td>Claude Code Auth</td>
+                            <td><span class="status status-queued">CHECKING</span></td>
+                            <td style="color: var(--text-tertiary)">Verifying authentication...</td>
+                        </tr>
+                        <tr>
+                            <td>GitHub Token</td>
+                            <td><span class="status status-queued">CHECKING</span></td>
+                            <td style="color: var(--text-tertiary)">Checking environment...</td>
+                        </tr>
+                        <tr>
+                            <td>Work Directory</td>
+                            <td><span class="status status-queued">CHECKING</span></td>
+                            <td style="color: var(--text-tertiary)">Checking directory...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -71,14 +53,7 @@
             <h3>Quick Start</h3>
         </div>
         <div class="panel-body">
-            <p th:if="${allPassed}" style="color: var(--color-completed); font-weight: 600;">
-                All prerequisites are met. You're ready to go!
-            </p>
-            <p th:unless="${allPassed}" style="color: var(--color-failed); font-weight: 600;">
-                Some prerequisites are not met. Please resolve the issues above.
-            </p>
-
-            <h4 class="mt-2">Next Steps</h4>
+            <h4>Next Steps</h4>
             <ol>
                 <li>Go to <a href="/repositories">Repositories</a> and add a GitHub repository to watch.</li>
                 <li>On your GitHub repo, add the label <code>agent-ready</code> to an issue you want IssueBot to work on.</li>
@@ -126,6 +101,68 @@
       auto-merge: false</pre>
         </div>
     </div>
+</div>
+
+<!-- HTMX fragment: prerequisite check results (loaded async) -->
+<div th:fragment="prereqs">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Component</th>
+                <th>Status</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Claude Code CLI</td>
+                <td>
+                    <span class="status" th:classappend="${cliAvailable ? 'status-completed' : 'status-failed'}"
+                          th:text="${cliAvailable ? 'OK' : 'MISSING'}">OK</span>
+                </td>
+                <td th:if="${cliAvailable}">Claude Code CLI is installed and accessible.</td>
+                <td th:unless="${cliAvailable}">
+                    Install Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>
+                </td>
+            </tr>
+            <tr>
+                <td>Claude Code Auth</td>
+                <td>
+                    <span class="status" th:classappend="${cliAuthenticated ? 'status-completed' : 'status-failed'}"
+                          th:text="${cliAuthenticated ? 'OK' : 'FAILED'}">OK</span>
+                </td>
+                <td th:if="${cliAuthenticated}">Authentication verified (Pro/Max subscription).</td>
+                <td th:unless="${cliAuthenticated}">
+                    Run <code>claude</code> in a terminal and complete login.
+                </td>
+            </tr>
+            <tr>
+                <td>GitHub Token</td>
+                <td>
+                    <span class="status" th:classappend="${githubTokenSet ? 'status-completed' : 'status-failed'}"
+                          th:text="${githubTokenSet ? 'OK' : 'MISSING'}">OK</span>
+                </td>
+                <td th:if="${githubTokenSet}">GitHub token is configured.</td>
+                <td th:unless="${githubTokenSet}">
+                    Set <code>GITHUB_TOKEN</code> environment variable with <code>repo</code> scope.
+                </td>
+            </tr>
+            <tr>
+                <td>Work Directory</td>
+                <td>
+                    <span class="status" th:classappend="${workDirOk ? 'status-completed' : 'status-failed'}"
+                          th:text="${workDirOk ? 'OK' : 'ISSUE'}">OK</span>
+                </td>
+                <td th:text="${workDirMessage}">Work directory details</td>
+            </tr>
+        </tbody>
+    </table>
+    <p th:if="${allPassed}" class="mt-1" style="color: var(--color-completed); font-weight: 600;">
+        All prerequisites are met. You're ready to go!
+    </p>
+    <p th:unless="${allPassed}" class="mt-1" style="color: var(--color-failed); font-weight: 600;">
+        Some prerequisites are not met. Please resolve the issues above.
+    </p>
 </div>
 </body>
 </html>

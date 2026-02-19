@@ -40,5 +40,18 @@
     <main id="content">
         <div th:replace="~{${contentTemplate} :: content}"></div>
     </main>
+    <script>
+        // Update sidebar active state on HTMX navigation
+        document.body.addEventListener('htmx:pushedIntoHistory', function(e) {
+            var path = window.location.pathname;
+            document.querySelectorAll('.sidebar ul li a').forEach(function(link) {
+                link.classList.remove('active');
+                var href = link.getAttribute('href');
+                if (path === href || (href !== '/' && path.startsWith(href))) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
 </body>
 </html>
