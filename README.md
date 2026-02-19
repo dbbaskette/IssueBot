@@ -67,9 +67,8 @@ If CI or review fails, IssueBot loops back to implementation with enhanced conte
 ### Prerequisites
 
 - **Java 21+** - [Download](https://adoptium.net/)
-- **Claude Code CLI** - [Install guide](https://docs.anthropic.com/en/docs/claude-code)
+- **Claude Code CLI** - [Install guide](https://docs.anthropic.com/en/docs/claude-code) (log in via `claude` before first use)
 - **GitHub Personal Access Token** - With `repo` scope for the repositories you want IssueBot to manage
-- **Anthropic API Key** - Set as `ANTHROPIC_API_KEY` for Claude Code CLI
 
 ### Installation
 
@@ -80,11 +79,11 @@ git clone https://github.com/dbbaskette/IssueBot.git
 cd IssueBot
 ```
 
-2. Set environment variables
+2. Add your GitHub token to `.env`
 
 ```bash
-export GITHUB_TOKEN=ghp_your_token_here
-export ANTHROPIC_API_KEY=sk-ant-your_key_here
+cp .env.example .env
+# Edit .env and set GITHUB_TOKEN=ghp_your_token_here
 ```
 
 3. Run IssueBot
@@ -203,7 +202,6 @@ The web dashboard at `http://localhost:8090` provides:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude Code CLI |
 
 ## Architecture
 
