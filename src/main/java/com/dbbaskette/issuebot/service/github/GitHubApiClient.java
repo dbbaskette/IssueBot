@@ -241,15 +241,39 @@ public class GitHubApiClient {
 
     /**
      * Mark a draft PR as ready for review.
+     * Uses the GraphQL API because the REST API does not support changing draft status.
      */
     public void markPrReady(String owner, String repo, int prNumber) {
         log.info("Marking PR #{} as ready in {}/{}", prNumber, owner, repo);
-        webClient.patch()
-                .uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, prNumber)
-                .bodyValue(Map.of("draft", false))
+
+        // First, get the PR's node_id (needed for GraphQL mutation)
+        JsonNode pr = getPullRequest(owner, repo, prNumber);
+        String nodeId = pr.path("node_id").asText();
+        if (nodeId.isBlank()) {
+            throw new RuntimeException("Could not get node_id for PR #" + prNumber);
+        }
+
+        String mutation = """
+                mutation {
+                  markPullRequestAsReady(input: {pullRequestId: "%s"}) {
+                    pullRequest { isDraft }
+                  }
+                }
+                """.formatted(nodeId);
+
+        webClient.post()
+                .uri("/graphql")
+                .bodyValue(Map.of("query", mutation))
                 .retrieve()
-                .toBodilessEntity()
+                .bodyToMono(JsonNode.class)
                 .retryWhen(retryOnServerError())
+                .doOnNext(response -> {
+                    JsonNode errors = response.path("errors");
+                    if (errors.isArray() && !errors.isEmpty()) {
+                        String msg = errors.get(0).path("message").asText("Unknown GraphQL error");
+                        throw new RuntimeException("GraphQL error marking PR ready: " + msg);
+                    }
+                })
                 .block(Duration.ofSeconds(15));
     }
 
