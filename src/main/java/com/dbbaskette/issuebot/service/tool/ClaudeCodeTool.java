@@ -5,8 +5,6 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -25,12 +23,10 @@ public class ClaudeCodeTool {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(description = "Execute a coding task using Claude Code CLI. Runs in the specified working directory " +
-            "with optional tool restrictions. Returns structured result with files changed, output, and token usage.")
     public String executeTask(
-            @ToolParam(description = "The coding task prompt describing what to implement") String prompt,
-            @ToolParam(description = "Absolute path to the working directory") String workingDirectory,
-            @ToolParam(description = "Comma-separated list of allowed tools (e.g. 'Read,Write,Edit,Bash(npm test:*)')") String allowedTools) {
+            String prompt,
+            String workingDirectory,
+            String allowedTools) {
         try {
             Path workDir = Path.of(workingDirectory);
             ClaudeCodeResult result = claudeCodeService.executeTask(prompt, workDir,

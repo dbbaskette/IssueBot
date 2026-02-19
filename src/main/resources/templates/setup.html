@@ -37,9 +37,9 @@
                             <span class="status" th:classappend="${cliAuthenticated ? 'status-completed' : 'status-failed'}"
                                   th:text="${cliAuthenticated ? 'OK' : 'FAILED'}">OK</span>
                         </td>
-                        <td th:if="${cliAuthenticated}">Authentication verified.</td>
+                        <td th:if="${cliAuthenticated}">Authentication verified (Pro/Max subscription or API key).</td>
                         <td th:unless="${cliAuthenticated}">
-                            Set <code>ANTHROPIC_API_KEY</code> environment variable.
+                            Run <code>claude</code> in a terminal and complete login, or set <code>ANTHROPIC_API_KEY</code>.
                         </td>
                     </tr>
                     <tr>

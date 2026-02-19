@@ -7,9 +7,13 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.dbbaskette.issuebot.service.ci.CiTemplateService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
@@ -25,12 +29,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Implements the 5-phase issue implementation workflow:
+ * Implements the 6-phase issue implementation workflow:
  * Phase 1 - Setup: Clone/pull repo, create branch, assemble context
- * Phase 2 - Implementation: Invoke Claude Code CLI
- * Phase 3 - Self-Assessment: Review changes against requirements
- * Phase 4 - CI Verification: Push and poll CI checks
- * Phase 5 - Completion: Create PR and update issue
+ * Phase 2 - Implementation: Invoke Claude Code CLI (Opus)
+ * Phase 3 - CI Verification: Push and poll CI checks
+ * Phase 4 - PR Creation: Create draft PR on GitHub
+ * Phase 5 - Independent Review: Sonnet reviews code against spec (future)
+ * Phase 6 - Completion: Finalize PR, auto-merge if configured
  */
 @Service
 public class IssueWorkflowService {
@@ -40,10 +45,13 @@ public class IssueWorkflowService {
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
     private final ClaudeCodeService claudeCode;
+    private final CodeReviewService codeReviewService;
+    private final CiTemplateService ciTemplateService;
     private final TrackedIssueRepository issueRepository;
     private final IterationRepository iterationRepository;
     private final CostTrackingRepository costRepository;
     private final EventService eventService;
+    private final SseService sseService;
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
     private final ObjectMapper objectMapper;
@@ -51,27 +59,33 @@ public class IssueWorkflowService {
     public IssueWorkflowService(GitOperationsService gitOps,
                                  GitHubApiClient gitHubApi,
                                  ClaudeCodeService claudeCode,
+                                 CodeReviewService codeReviewService,
+                                 CiTemplateService ciTemplateService,
                                  TrackedIssueRepository issueRepository,
                                  IterationRepository iterationRepository,
                                  CostTrackingRepository costRepository,
                                  EventService eventService,
+                                 SseService sseService,
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
         this.claudeCode = claudeCode;
+        this.codeReviewService = codeReviewService;
+        this.ciTemplateService = ciTemplateService;
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
         this.costRepository = costRepository;
         this.eventService = eventService;
+        this.sseService = sseService;
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * Process an issue asynchronously through the full 5-phase workflow.
+     * Process an issue asynchronously through the full 6-phase workflow.
      */
     @Async
     public void processIssueAsync(TrackedIssue trackedIssue) {
@@ -81,6 +95,7 @@ public class IssueWorkflowService {
             log.error("Unhandled error processing issue #{}: {}",
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
             trackedIssue.setStatus(IssueStatus.FAILED);
+            trackedIssue.setCurrentPhase(null);
             issueRepository.save(trackedIssue);
             eventService.log("WORKFLOW_ERROR", "Unhandled error: " + e.getMessage(),
                     trackedIssue.getRepo(), trackedIssue);
@@ -95,6 +110,7 @@ public class IssueWorkflowService {
                 trackedIssue.getIssueTitle());
 
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
+        trackedIssue.setCurrentPhase("SETUP");
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow", repo, trackedIssue);
 
@@ -106,19 +122,28 @@ public class IssueWorkflowService {
             phaseSetup(trackedIssue);
             branchName = trackedIssue.getBranchName();
             repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
+            log.info("Fetching issue details from GitHub for {} #{}...", repo.fullName(), issueNumber);
             issueDetails = gitHubApi.getIssue(repo.getOwner(), repo.getName(), issueNumber);
+            log.info("Issue details fetched: title='{}', body length={}",
+                    issueDetails.path("title").asText(),
+                    issueDetails.path("body").asText("").length());
         } catch (Exception e) {
             log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, e);
             trackedIssue.setStatus(IssueStatus.FAILED);
+            trackedIssue.setCurrentPhase(null);
             issueRepository.save(trackedIssue);
             eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
             return;
         }
 
-        // === Iteration Loop (Phases 2-4) ===
+        log.info("Entering iteration loop for {} #{}, maxIterations={}",
+                repo.fullName(), issueNumber, repo.getMaxIterations());
+
+        // === Iteration Loop (Phases 2-3) ===
         String previousDiff = null;
-        String previousAssessment = null;
+        String previousFeedback = null;
         String previousCiLogs = null;
+        int prNumber = 0;
 
         while (iterationManager.canIterate(trackedIssue)) {
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
@@ -131,20 +156,22 @@ public class IssueWorkflowService {
             eventService.log("ITERATION_STARTED",
                     "Starting iteration " + iterationNum, repo, trackedIssue);
 
-            // === Phase 2: Implementation ===
+            // === Phase 2: Implementation (Opus) ===
             ClaudeCodeResult implResult;
             try {
+                trackedIssue.setCurrentPhase("IMPLEMENTATION");
+                issueRepository.save(trackedIssue);
                 implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
-                        previousDiff, previousAssessment, previousCiLogs);
+                        previousDiff, previousFeedback, previousCiLogs);
                 iteration.setClaudeOutput(implResult.getOutput());
-                trackCost(trackedIssue, iterationNum, implResult);
+                trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
             } catch (Exception e) {
                 log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
                 eventService.log("PHASE_IMPL_FAILED",
                         "Implementation failed: " + e.getMessage(), repo, trackedIssue);
-                previousAssessment = "Implementation failed: " + e.getMessage();
+                previousFeedback = "Implementation failed: " + e.getMessage();
                 continue;
             }
 
@@ -152,7 +179,7 @@ public class IssueWorkflowService {
                 log.warn("Claude Code returned failure for iteration {}", iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
-                previousAssessment = "Claude Code failed: " + implResult.getErrorMessage();
+                previousFeedback = "Claude Code failed: " + implResult.getErrorMessage();
                 continue;
             }
 
@@ -166,39 +193,22 @@ public class IssueWorkflowService {
                 log.warn("Failed to get diff after implementation", e);
             }
 
-            // === Phase 3: Self-Assessment ===
-            SelfAssessmentResult assessment;
-            try {
-                assessment = phaseSelfAssessment(trackedIssue, issueDetails, diff, repoPath);
-                iteration.setSelfAssessment(assessment.toString());
-            } catch (Exception e) {
-                log.error("Phase 3 (Self-Assessment) failed, iteration {}", iterationNum, e);
-                iteration.setCompletedAt(LocalDateTime.now());
-                iterationRepository.save(iteration);
-                previousDiff = diff;
-                previousAssessment = "Self-assessment error: " + e.getMessage();
-                continue;
-            }
-
-            if (!assessment.isPassed()) {
-                log.info("Self-assessment failed for iteration {}: {}", iterationNum, assessment.getSummary());
-                iteration.setCompletedAt(LocalDateTime.now());
-                iterationRepository.save(iteration);
-                previousDiff = diff;
-                previousAssessment = assessment.getSummary();
-                if (assessment.getIssues() != null) {
-                    previousAssessment += "\nIssues found:\n- " + String.join("\n- ", assessment.getIssues());
-                }
-                continue;
-            }
-
-            // === Phase 4: CI Verification ===
+            // === Phase 3: CI Verification ===
             boolean ciPassed;
+            trackedIssue.setCurrentPhase("CI_VERIFICATION");
+            issueRepository.save(trackedIssue);
+
             try {
-                ciPassed = phaseCiVerification(trackedIssue, branchName);
-                iteration.setCiResult(ciPassed ? "PASSED" : "FAILED");
+                if (repo.isCiEnabled()) {
+                    ciPassed = phaseCiVerification(trackedIssue, branchName);
+                    iteration.setCiResult(ciPassed ? "PASSED" : "FAILED");
+                } else {
+                    ciPassed = phaseCommitAndPush(trackedIssue, branchName);
+                    iteration.setCiResult("SKIPPED");
+                    eventService.log("PHASE_CI_SKIPPED", "CI disabled — skipped check polling", repo, trackedIssue);
+                }
             } catch (Exception e) {
-                log.error("Phase 4 (CI) failed, iteration {}", iterationNum, e);
+                log.error("Phase 3 (CI) failed, iteration {}", iterationNum, e);
                 iteration.setCiResult("ERROR");
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
@@ -214,17 +224,57 @@ public class IssueWorkflowService {
                 log.info("CI checks failed for iteration {}", iterationNum);
                 previousDiff = diff;
                 previousCiLogs = extractCiFailureLogs(trackedIssue, branchName);
-                previousAssessment = null;
+                previousFeedback = null;
                 continue;
             }
 
-            // === Phase 5: Completion === (both assessment and CI passed)
+            // === Phase 4: PR Creation (draft) ===
             try {
-                phaseCompletion(trackedIssue, issueDetails, branchName, iterationNum, diff);
+                trackedIssue.setCurrentPhase("PR_CREATION");
+                issueRepository.save(trackedIssue);
+                prNumber = phasePrCreation(trackedIssue, issueDetails, branchName, iterationNum);
+            } catch (Exception e) {
+                log.error("Phase 4 (PR Creation) failed", e);
+                trackedIssue.setStatus(IssueStatus.FAILED);
+                trackedIssue.setCurrentPhase(null);
+                issueRepository.save(trackedIssue);
+                eventService.log("PHASE_PR_CREATION_FAILED",
+                        "PR creation failed: " + e.getMessage(), repo, trackedIssue);
+                return;
+            }
+
+            // === Phase 5: Independent Review (Sonnet) ===
+            trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
+            issueRepository.save(trackedIssue);
+
+            CodeReviewResult reviewResult = phaseIndependentReview(
+                    trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration);
+
+            if (reviewResult != null && !reviewResult.passed()) {
+                // Review failed — check review budget
+                if (!iterationManager.canReviewIterate(trackedIssue)) {
+                    iterationManager.handleMaxReviewIterationsReached(trackedIssue);
+                    return;
+                }
+
+                // Feed findings back as feedback for next implementation iteration
+                previousFeedback = buildReviewFeedback(reviewResult);
+                previousDiff = diff;
+                previousCiLogs = null;
+                log.info("Review failed — feeding findings back to Opus for iteration {}", iterationNum + 1);
+                continue;
+            }
+
+            // === Phase 6: Completion ===
+            try {
+                trackedIssue.setCurrentPhase("COMPLETION");
+                issueRepository.save(trackedIssue);
+                phaseCompletion(trackedIssue, issueDetails, branchName, iterationNum, diff, prNumber);
                 return; // Success!
             } catch (Exception e) {
-                log.error("Phase 5 (Completion) failed", e);
+                log.error("Phase 6 (Completion) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
+                trackedIssue.setCurrentPhase(null);
                 issueRepository.save(trackedIssue);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);
@@ -256,6 +306,16 @@ public class IssueWorkflowService {
         trackedIssue.setBranchName(branchName);
         issueRepository.save(trackedIssue);
 
+        // Generate CI template if CI is enabled and no workflow exists
+        if (repo.isCiEnabled()) {
+            Path repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
+            String buildTool = ciTemplateService.detectBuildTool(repoPath);
+            if (ciTemplateService.ensureCiWorkflow(repoPath, buildTool)) {
+                eventService.log("CI_TEMPLATE_CREATED",
+                        "Generated CI workflow for " + buildTool, repo, trackedIssue);
+            }
+        }
+
         git.close();
         eventService.log("PHASE_SETUP_COMPLETE",
                 "Setup complete, branch: " + branchName, repo, trackedIssue);
@@ -273,9 +333,10 @@ public class IssueWorkflowService {
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
                 previousAssessment, previousCiLogs);
 
-        String allowedTools = "Read,Write,Edit,Bash(git diff:*),Bash(npm test:*),Bash(mvn test:*),Bash(gradle test:*)";
-
-        ClaudeCodeResult result = claudeCode.executeTask(prompt, repoPath, allowedTools, null);
+        Long issueId = trackedIssue.getId();
+        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code (Opus) for implementation...");
+        ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
+                line -> streamClaudeLog(issueId, line));
 
         eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
                 "Implementation complete: " + result, repo, trackedIssue);
@@ -283,28 +344,7 @@ public class IssueWorkflowService {
     }
 
     /**
-     * Phase 3 — Self-Assessment: Separate session to review changes
-     */
-    SelfAssessmentResult phaseSelfAssessment(TrackedIssue trackedIssue, JsonNode issueDetails,
-                                              String diff, Path repoPath) {
-        WatchedRepo repo = trackedIssue.getRepo();
-        eventService.log("PHASE_SELF_ASSESSMENT", "Starting self-assessment", repo, trackedIssue);
-
-        String prompt = buildSelfAssessmentPrompt(issueDetails, diff);
-
-        ClaudeCodeResult result = claudeCode.executeTask(prompt, repoPath,
-                "Read,Bash(git diff:*)", null);
-
-        SelfAssessmentResult assessment = parseSelfAssessment(result.getOutput());
-        trackCost(trackedIssue, trackedIssue.getCurrentIteration(), result);
-
-        eventService.log("PHASE_SELF_ASSESSMENT_COMPLETE",
-                "Self-assessment: " + assessment, repo, trackedIssue);
-        return assessment;
-    }
-
-    /**
-     * Phase 4 — CI Verification: Push branch and poll checks
+     * Phase 3 — CI Verification: Push branch and poll checks
      */
     boolean phaseCiVerification(TrackedIssue trackedIssue, String branchName) throws Exception {
         WatchedRepo repo = trackedIssue.getRepo();
@@ -327,32 +367,79 @@ public class IssueWorkflowService {
     }
 
     /**
-     * Phase 5 — Completion: Create PR and update issue
+     * Phase 3 (CI disabled) — Commit and push without polling CI checks.
      */
-    void phaseCompletion(TrackedIssue trackedIssue, JsonNode issueDetails,
-                          String branchName, int iterationCount, String diff) {
+    boolean phaseCommitAndPush(TrackedIssue trackedIssue, String branchName) throws Exception {
         WatchedRepo repo = trackedIssue.getRepo();
-        eventService.log("PHASE_COMPLETION", "Starting completion phase", repo, trackedIssue);
+        try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
+            gitOps.commit(git, "IssueBot: implement #" + trackedIssue.getIssueNumber()
+                    + " (iteration " + trackedIssue.getCurrentIteration() + ")");
+            gitOps.push(git, branchName);
+        }
+        return true;
+    }
 
-        boolean isDraft = repo.getMode() == RepoMode.APPROVAL_GATED;
+    /**
+     * Phase 4 — PR Creation: Create a draft PR on GitHub.
+     * If a PR already exists for this branch (review retry), reuse it.
+     * Returns the PR number.
+     */
+    int phasePrCreation(TrackedIssue trackedIssue, JsonNode issueDetails,
+                          String branchName, int iterationCount) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        eventService.log("PHASE_PR_CREATION", "Starting PR creation phase", repo, trackedIssue);
 
-        // Build PR description
+        // Check if a PR already exists for this branch (review retry case)
+        List<JsonNode> existingPrs = gitHubApi.listOpenPullRequests(
+                repo.getOwner(), repo.getName(), branchName);
+        if (!existingPrs.isEmpty()) {
+            int existingPrNumber = existingPrs.get(0).path("number").asInt();
+            log.info("PR #{} already exists for branch {} — reusing", existingPrNumber, branchName);
+            eventService.log("PHASE_PR_CREATION_COMPLETE",
+                    "Reusing existing PR #" + existingPrNumber, repo, trackedIssue);
+            return existingPrNumber;
+        }
+
+        // Create draft PR
         String prTitle = "IssueBot: " + trackedIssue.getIssueTitle() + " (#" + trackedIssue.getIssueNumber() + ")";
         BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
         String prBody = buildPrDescription(trackedIssue, issueDetails, iterationCount, totalCost);
 
-        // Create PR
         JsonNode pr = gitHubApi.createPullRequest(
                 repo.getOwner(), repo.getName(),
-                prTitle, prBody, branchName, repo.getBranch(), isDraft);
+                prTitle, prBody, branchName, repo.getBranch(), true); // always draft
 
         int prNumber = pr.path("number").asInt();
-        String prUrl = pr.path("html_url").asText();
+        log.info("Created draft PR #{} for {} #{}", prNumber, repo.fullName(), trackedIssue.getIssueNumber());
+        eventService.log("PHASE_PR_CREATION_COMPLETE",
+                "Created draft PR #" + prNumber, repo, trackedIssue);
+        return prNumber;
+    }
+
+    /**
+     * Phase 6 — Completion: Finalize draft PR, auto-merge if configured, update issue.
+     */
+    void phaseCompletion(TrackedIssue trackedIssue, JsonNode issueDetails,
+                          String branchName, int iterationCount, String diff, int prNumber) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        eventService.log("PHASE_COMPLETION", "Starting completion phase", repo, trackedIssue);
+
+        boolean isApprovalGated = repo.getMode() == RepoMode.APPROVAL_GATED;
+
+        // Mark draft PR as ready
+        try {
+            gitHubApi.markPrReady(repo.getOwner(), repo.getName(), prNumber);
+            log.info("Marked PR #{} as ready for review", prNumber);
+        } catch (Exception e) {
+            log.warn("Failed to mark PR #{} as ready: {}", prNumber, e.getMessage());
+        }
+
+        String prUrl = "https://github.com/" + repo.fullName() + "/pull/" + prNumber;
+        BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
 
         // Comment on the issue
         gitHubApi.addComment(repo.getOwner(), repo.getName(), trackedIssue.getIssueNumber(),
-                "IssueBot has created a " + (isDraft ? "draft " : "")
-                        + "pull request: " + prUrl
+                "IssueBot has created a pull request: " + prUrl
                         + "\n\nIterations: " + iterationCount
                         + " | Estimated cost: $" + totalCost.setScale(4, RoundingMode.HALF_UP));
 
@@ -362,22 +449,222 @@ public class IssueWorkflowService {
         gitHubApi.removeLabel(repo.getOwner(), repo.getName(),
                 trackedIssue.getIssueNumber(), "agent-ready");
 
+        // Auto-merge if enabled and not approval-gated
+        boolean merged = false;
+        if (repo.isAutoMerge() && !isApprovalGated) {
+            try {
+                String prTitle = "IssueBot: " + trackedIssue.getIssueTitle()
+                        + " (#" + trackedIssue.getIssueNumber() + ") (#" + prNumber + ")";
+                gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
+                        prNumber, prTitle, "squash");
+                merged = true;
+                eventService.log("PR_AUTO_MERGED",
+                        "Auto-merged PR #" + prNumber, repo, trackedIssue);
+                log.info("Auto-merged PR #{} for {} #{}", prNumber, repo.fullName(),
+                        trackedIssue.getIssueNumber());
+            } catch (Exception e) {
+                log.warn("Auto-merge failed for PR #{}: {} — PR remains open",
+                        prNumber, e.getMessage());
+                eventService.log("AUTO_MERGE_FAILED",
+                        "Auto-merge failed for PR #" + prNumber + ": " + e.getMessage(),
+                        repo, trackedIssue);
+            }
+        }
+
         // Update tracked issue status
-        if (isDraft) {
+        trackedIssue.setCurrentPhase(null);
+        if (isApprovalGated) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
             notificationService.info("PR Ready for Review",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
-                            + " — Draft PR created, awaiting approval");
+                            + " — PR created, awaiting approval");
         } else {
             trackedIssue.setStatus(IssueStatus.COMPLETED);
             notificationService.info("Issue Completed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
-                            + " — PR #" + prNumber + " created");
+                            + " — PR #" + prNumber + (merged ? " created & merged" : " created"));
         }
         issueRepository.save(trackedIssue);
 
         eventService.log("WORKFLOW_COMPLETED",
                 "Workflow completed — PR #" + prNumber + " (" + prUrl + ")", repo, trackedIssue);
+    }
+
+    /**
+     * Phase 5 — Independent Review: Invoke Sonnet via CodeReviewService,
+     * post findings as PR review comments, track cost.
+     */
+    CodeReviewResult phaseIndependentReview(TrackedIssue trackedIssue, JsonNode issueDetails,
+                                             Path repoPath, String branchName,
+                                             int prNumber, Iteration iteration) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        eventService.log("PHASE_INDEPENDENT_REVIEW", "Starting independent code review (Sonnet)",
+                repo, trackedIssue);
+
+        Long issueId = trackedIssue.getId();
+        sseService.broadcastClaudeLog(issueId, "[system] Launching Sonnet for independent review...");
+
+        int reviewIter = trackedIssue.getCurrentReviewIteration() + 1;
+        trackedIssue.setCurrentReviewIteration(reviewIter);
+        issueRepository.save(trackedIssue);
+
+        CodeReviewResult reviewResult;
+        try {
+            reviewResult = codeReviewService.reviewCode(
+                    repoPath,
+                    issueDetails.path("title").asText(),
+                    issueDetails.path("body").asText(""),
+                    repo.getBranch(),
+                    repo.isSecurityReviewEnabled(),
+                    line -> streamClaudeLog(issueId, line));
+        } catch (Exception e) {
+            log.error("Independent review failed", e);
+            eventService.log("PHASE_REVIEW_FAILED",
+                    "Review invocation error: " + e.getMessage(), repo, trackedIssue);
+            return null;
+        }
+
+        // Track review cost
+        trackCost(trackedIssue, trackedIssue.getCurrentIteration(),
+                reviewResult.inputTokens(), reviewResult.outputTokens(),
+                reviewResult.modelUsed(), "REVIEW");
+
+        // Store review result on iteration
+        iteration.setReviewPassed(reviewResult.passed());
+        iteration.setReviewJson(reviewResult.rawJson());
+        iteration.setReviewModel(reviewResult.modelUsed());
+        iterationRepository.save(iteration);
+
+        log.info("Review result for {} #{}: passed={}, scores=[spec={}, correct={}, quality={}]",
+                repo.fullName(), trackedIssue.getIssueNumber(), reviewResult.passed(),
+                reviewResult.specComplianceScore(), reviewResult.correctnessScore(),
+                reviewResult.codeQualityScore());
+
+        // Post review as PR comments
+        if (prNumber > 0) {
+            postReviewToGitHub(trackedIssue, prNumber, reviewResult);
+        }
+
+        eventService.log("PHASE_REVIEW_COMPLETE",
+                "Review complete: " + (reviewResult.passed() ? "PASSED" : "FAILED")
+                        + " — " + reviewResult.summary(),
+                repo, trackedIssue);
+
+        return reviewResult;
+    }
+
+    /**
+     * Post review findings as GitHub PR review comments.
+     */
+    private void postReviewToGitHub(TrackedIssue trackedIssue, int prNumber,
+                                     CodeReviewResult reviewResult) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        try {
+            // Build inline comments from findings
+            List<GitHubApiClient.ReviewComment> comments = reviewResult.findings().stream()
+                    .filter(f -> f.file() != null && !f.file().isBlank())
+                    .map(f -> new GitHubApiClient.ReviewComment(
+                            f.file(), f.line(),
+                            "**[" + f.severity().toUpperCase() + " — " + f.category() + "]** "
+                                    + f.finding()
+                                    + (f.suggestion() != null && !f.suggestion().isBlank()
+                                    ? "\n\n**Suggestion:** " + f.suggestion() : "")))
+                    .toList();
+
+            String summary = formatReviewSummary(reviewResult);
+            String event = reviewResult.passed() ? "APPROVE" : "REQUEST_CHANGES";
+
+            gitHubApi.createPullRequestReview(
+                    repo.getOwner(), repo.getName(), prNumber,
+                    summary, event, comments);
+
+            log.info("Posted {} review on PR #{} with {} comments",
+                    event, prNumber, comments.size());
+        } catch (Exception e) {
+            log.warn("Failed to post PR review for {} #{}: {}",
+                    repo.fullName(), prNumber, e.getMessage());
+        }
+    }
+
+    /**
+     * Format the review result into a markdown summary for the PR review body.
+     */
+    private String formatReviewSummary(CodeReviewResult r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## IssueBot Independent Review (").append(r.modelUsed() != null ? r.modelUsed() : "Sonnet").append(")\n\n");
+        sb.append(r.passed() ? "**PASSED**" : "**CHANGES REQUESTED**").append("\n\n");
+        sb.append(r.summary()).append("\n\n");
+
+        sb.append("| Dimension | Score |\n|---|---|\n");
+        sb.append("| Spec Compliance | ").append(formatScore(r.specComplianceScore())).append(" |\n");
+        sb.append("| Correctness | ").append(formatScore(r.correctnessScore())).append(" |\n");
+        sb.append("| Code Quality | ").append(formatScore(r.codeQualityScore())).append(" |\n");
+        sb.append("| Test Coverage | ").append(formatScore(r.testCoverageScore())).append(" |\n");
+        sb.append("| Architecture Fit | ").append(formatScore(r.architectureFitScore())).append(" |\n");
+        sb.append("| Regressions | ").append(formatScore(r.regressionsScore())).append(" |\n");
+        if (r.securityScore() < 1.0) {
+            sb.append("| Security | ").append(formatScore(r.securityScore())).append(" |\n");
+        }
+
+        if (r.advice() != null && !r.advice().isBlank()) {
+            sb.append("\n**Advice:** ").append(r.advice()).append("\n");
+        }
+
+        sb.append("\n---\n*Reviewed by [IssueBot](https://github.com/dbbaskette/IssueBot)*");
+        return sb.toString();
+    }
+
+    private String formatScore(double score) {
+        String bar;
+        if (score >= 0.9) bar = "🟢";
+        else if (score >= 0.7) bar = "🟡";
+        else bar = "🔴";
+        return bar + " " + String.format("%.0f%%", score * 100);
+    }
+
+    /**
+     * Build feedback string from a failed review to pass back to Opus.
+     */
+    String buildReviewFeedback(CodeReviewResult review) {
+        StringBuilder fb = new StringBuilder();
+        fb.append("The independent code review (Sonnet) found issues with your implementation.\n\n");
+        fb.append("**Overall:** ").append(review.summary()).append("\n\n");
+
+        fb.append("**Scores:** ");
+        fb.append("spec=").append(String.format("%.0f%%", review.specComplianceScore() * 100));
+        fb.append(", correctness=").append(String.format("%.0f%%", review.correctnessScore() * 100));
+        fb.append(", quality=").append(String.format("%.0f%%", review.codeQualityScore() * 100));
+        fb.append(", tests=").append(String.format("%.0f%%", review.testCoverageScore() * 100));
+        fb.append(", architecture=").append(String.format("%.0f%%", review.architectureFitScore() * 100));
+        fb.append(", regressions=").append(String.format("%.0f%%", review.regressionsScore() * 100));
+        if (review.securityScore() < 1.0) {
+            fb.append(", security=").append(String.format("%.0f%%", review.securityScore() * 100));
+        }
+        fb.append("\n\n");
+
+        if (!review.findings().isEmpty()) {
+            fb.append("**Findings to address:**\n");
+            for (CodeReviewResult.ReviewFinding f : review.findings()) {
+                fb.append("- [").append(f.severity().toUpperCase()).append("] ");
+                if (f.file() != null && !f.file().isBlank()) {
+                    fb.append(f.file());
+                    if (f.line() != null) fb.append(":").append(f.line());
+                    fb.append(" — ");
+                }
+                fb.append(f.finding());
+                if (f.suggestion() != null && !f.suggestion().isBlank()) {
+                    fb.append(" (Suggestion: ").append(f.suggestion()).append(")");
+                }
+                fb.append("\n");
+            }
+        }
+
+        if (review.advice() != null && !review.advice().isBlank()) {
+            fb.append("\n**Reviewer advice:** ").append(review.advice()).append("\n");
+        }
+
+        fb.append("\nPlease address ALL findings above, especially high-severity ones.\n");
+        return fb.toString();
     }
 
     // =====================================================
@@ -429,38 +716,16 @@ public class IssueWorkflowService {
         return prompt.toString();
     }
 
-    String buildSelfAssessmentPrompt(JsonNode issueDetails, String diff) {
-        return """
-                You are reviewing code changes made to address a GitHub issue.
-                Evaluate the changes and respond with ONLY a JSON object (no markdown, no code fences).
-
-                ## Issue
-                Title: %s
-                Body:
-                %s
-
-                ## Changes (diff)
-                ```
-                %s
-                ```
-
-                ## Evaluation Criteria
-                1. **Completeness**: Do the changes fully address the issue requirements?
-                2. **Correctness**: Are the changes logically correct with no bugs?
-                3. **Test Coverage**: Are there adequate tests for the changes?
-                4. **Code Style**: Do the changes follow existing code conventions?
-                5. **Regressions**: Could the changes break existing functionality?
-
-                Respond with this exact JSON structure:
-                {"passed": true/false, "summary": "brief assessment", "issues": ["issue1", "issue2"], "completenessScore": 0.0-1.0, "correctnessScore": 0.0-1.0, "testCoverageScore": 0.0-1.0, "codeStyleScore": 0.0-1.0}
-                """.formatted(
-                issueDetails.path("title").asText(),
-                issueDetails.path("body").asText("No description"),
-                truncate(diff, 8000));
-    }
-
     String buildPrDescription(TrackedIssue trackedIssue, JsonNode issueDetails,
                                 int iterationCount, BigDecimal totalCost) {
+        BigDecimal implCost = costRepository.totalCostForIssueByPhase(trackedIssue, "IMPLEMENTATION");
+        BigDecimal reviewCost = costRepository.totalCostForIssueByPhase(trackedIssue, "REVIEW");
+
+        StringBuilder costDetail = new StringBuilder();
+        costDetail.append("$").append(totalCost.setScale(4, RoundingMode.HALF_UP));
+        costDetail.append(" (impl: $").append(implCost.setScale(4, RoundingMode.HALF_UP));
+        costDetail.append(", review: $").append(reviewCost.setScale(4, RoundingMode.HALF_UP)).append(")");
+
         return """
                 ## Summary
                 Resolves #%d
@@ -468,8 +733,8 @@ public class IssueWorkflowService {
                 %s
 
                 ## IssueBot Metadata
-                - **Iterations:** %d
-                - **Estimated Cost:** $%s
+                - **Iterations:** %d (review: %d)
+                - **Estimated Cost:** %s
                 - **Mode:** %s
 
                 ---
@@ -478,7 +743,8 @@ public class IssueWorkflowService {
                 trackedIssue.getIssueNumber(),
                 issueDetails.path("body").asText("No description"),
                 iterationCount,
-                totalCost.setScale(4, RoundingMode.HALF_UP),
+                trackedIssue.getCurrentReviewIteration(),
+                costDetail,
                 trackedIssue.getRepo().getMode());
     }
 
@@ -486,45 +752,38 @@ public class IssueWorkflowService {
     // Helpers
     // =====================================================
 
-    SelfAssessmentResult parseSelfAssessment(String output) {
-        if (output == null || output.isBlank()) {
-            return new SelfAssessmentResult(false, "Empty assessment output", List.of());
-        }
-
-        try {
-            // Try to extract JSON from the output
-            String json = output.trim();
-            // Handle case where output contains extra text around JSON
-            int braceStart = json.indexOf('{');
-            int braceEnd = json.lastIndexOf('}');
-            if (braceStart >= 0 && braceEnd > braceStart) {
-                json = json.substring(braceStart, braceEnd + 1);
-            }
-
-            return objectMapper.readValue(json, SelfAssessmentResult.class);
-        } catch (Exception e) {
-            log.warn("Failed to parse self-assessment JSON, treating as failure: {}", e.getMessage());
-            return new SelfAssessmentResult(false,
-                    "Failed to parse assessment: " + output.substring(0, Math.min(200, output.length())),
-                    List.of("Assessment output was not valid JSON"));
-        }
+    private void trackCost(TrackedIssue trackedIssue, int iterationNum,
+                            ClaudeCodeResult result, String phase) {
+        trackCost(trackedIssue, iterationNum, result.getInputTokens(),
+                result.getOutputTokens(), result.getModel(), phase);
     }
 
-    private void trackCost(TrackedIssue trackedIssue, int iterationNum, ClaudeCodeResult result) {
-        BigDecimal cost = estimateCost(result.getInputTokens(), result.getOutputTokens());
+    private void trackCost(TrackedIssue trackedIssue, int iterationNum,
+                            long inputTokens, long outputTokens, String model, String phase) {
+        BigDecimal cost = estimateCost(inputTokens, outputTokens, phase);
         CostTracking ct = new CostTracking(trackedIssue, iterationNum,
-                result.getInputTokens(), result.getOutputTokens(),
-                cost, result.getModel());
+                inputTokens, outputTokens, cost, model);
+        ct.setPhase(phase);
         costRepository.save(ct);
     }
 
-    private BigDecimal estimateCost(long inputTokens, long outputTokens) {
+    private BigDecimal estimateCost(long inputTokens, long outputTokens, String phase) {
+        // Opus pricing: $15/1M input, $75/1M output
         // Sonnet pricing: $3/1M input, $15/1M output
+        double inputRate;
+        double outputRate;
+        if ("REVIEW".equals(phase)) {
+            inputRate = 3.0;
+            outputRate = 15.0;
+        } else {
+            inputRate = 15.0;
+            outputRate = 75.0;
+        }
         BigDecimal inputCost = BigDecimal.valueOf(inputTokens)
-                .multiply(BigDecimal.valueOf(3.0))
+                .multiply(BigDecimal.valueOf(inputRate))
                 .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
         BigDecimal outputCost = BigDecimal.valueOf(outputTokens)
-                .multiply(BigDecimal.valueOf(15.0))
+                .multiply(BigDecimal.valueOf(outputRate))
                 .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);
         return inputCost.add(outputCost);
     }
@@ -550,6 +809,68 @@ public class IssueWorkflowService {
             return failures.isEmpty() ? "No failure details available" : failures.toString();
         } catch (Exception e) {
             return "Error extracting CI logs: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Parse a stream-json line from Claude Code and broadcast readable text via SSE.
+     */
+    private void streamClaudeLog(Long issueId, String line) {
+        if (line == null || line.isBlank()) return;
+        try {
+            JsonNode node = objectMapper.readTree(line);
+            String type = node.path("type").asText("");
+            String text = null;
+
+            switch (type) {
+                case "assistant" -> {
+                    JsonNode content = node.path("message").path("content");
+                    if (content.isArray()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (JsonNode block : content) {
+                            String blockType = block.path("type").asText();
+                            if ("text".equals(blockType)) {
+                                sb.append(block.path("text").asText());
+                            } else if ("tool_use".equals(blockType)) {
+                                if (sb.length() > 0) sb.append("\n");
+                                sb.append("[tool] ").append(block.path("name").asText());
+                            }
+                        }
+                        text = sb.toString();
+                    }
+                }
+                case "tool_result", "tool_use" -> {
+                    // Show tool results for visibility
+                    String toolName = node.path("tool_name").asText(node.path("name").asText(""));
+                    text = "[" + type + "] " + toolName;
+                }
+                case "result" -> {
+                    String resultText = node.path("result").asText(
+                            node.path("message").asText("Session complete"));
+                    text = "[result] " + resultText;
+                }
+                case "system" -> {
+                    text = "[system] " + node.path("message").asText(node.path("text").asText("init"));
+                }
+                case "stderr" -> {
+                    text = "[stderr] " + node.path("text").asText("");
+                }
+                default -> {
+                    // Show unknown types so we can diagnose
+                    text = "[" + type + "] " + node.toString().substring(0, Math.min(200, node.toString().length()));
+                }
+            }
+
+            if (text != null && !text.isBlank()) {
+                if (text.length() > 500) {
+                    text = text.substring(0, 500) + "...";
+                }
+                sseService.broadcastClaudeLog(issueId, text);
+            }
+        } catch (Exception e) {
+            // Not valid JSON — show raw line for debugging
+            String raw = line.length() > 200 ? line.substring(0, 200) + "..." : line;
+            sseService.broadcastClaudeLog(issueId, "[raw] " + raw);
         }
     }
 

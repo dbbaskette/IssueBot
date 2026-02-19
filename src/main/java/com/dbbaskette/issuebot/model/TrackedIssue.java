@@ -2,6 +2,9 @@ package com.dbbaskette.issuebot.model;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 @Entity
 @Table(name = "tracked_issues", uniqueConstraints = @UniqueConstraint(columnNames = {"repo_id", "issue_number"}))
@@ -11,7 +14,7 @@ public class TrackedIssue {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "repo_id", nullable = false)
     private WatchedRepo repo;
 
@@ -39,6 +42,15 @@ public class TrackedIssue {
 
     @Column(name = "cooldown_until")
     private LocalDateTime cooldownUntil;
+
+    @Column(name = "current_phase")
+    private String currentPhase;
+
+    @Column(name = "current_review_iteration", nullable = false)
+    private int currentReviewIteration = 0;
+
+    @Column(name = "blocked_by_issues", length = 500)
+    private String blockedByIssues;
 
     public TrackedIssue() {}
 
@@ -81,4 +93,24 @@ public class TrackedIssue {
 
     public LocalDateTime getCooldownUntil() { return cooldownUntil; }
     public void setCooldownUntil(LocalDateTime cooldownUntil) { this.cooldownUntil = cooldownUntil; }
+
+    public String getCurrentPhase() { return currentPhase; }
+    public void setCurrentPhase(String currentPhase) { this.currentPhase = currentPhase; }
+
+    public int getCurrentReviewIteration() { return currentReviewIteration; }
+    public void setCurrentReviewIteration(int currentReviewIteration) { this.currentReviewIteration = currentReviewIteration; }
+
+    public String getBlockedByIssues() { return blockedByIssues; }
+    public void setBlockedByIssues(String blockedByIssues) { this.blockedByIssues = blockedByIssues; }
+
+    public List<Integer> getBlockerNumbers() {
+        if (blockedByIssues == null || blockedByIssues.isBlank()) {
+            return Collections.emptyList();
+        }
+        return Arrays.stream(blockedByIssues.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(Integer::parseInt)
+                .toList();
+    }
 }

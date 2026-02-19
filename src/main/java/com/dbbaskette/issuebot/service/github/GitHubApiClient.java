@@ -115,11 +115,120 @@ public class GitHubApiClient {
                 .block(Duration.ofSeconds(30));
     }
 
+    /**
+     * List open pull requests whose head branch starts with the given prefix.
+     * Used to detect active IssueBot PRs (prefix = "issuebot/").
+     */
+    public List<JsonNode> listOpenPullRequests(String owner, String repo, String headPrefix) {
+        log.debug("Listing open PRs for {}/{} with head prefix '{}'", owner, repo, headPrefix);
+        List<JsonNode> allPrs = webClient.get()
+                .uri("/repos/{owner}/{repo}/pulls?state=open&per_page=30", owner, repo)
+                .retrieve()
+                .bodyToFlux(JsonNode.class)
+                .retryWhen(retryOnServerError())
+                .collectList()
+                .block(Duration.ofSeconds(30));
+
+        if (allPrs == null) return List.of();
+        if (headPrefix == null || headPrefix.isBlank()) return allPrs;
+
+        return allPrs.stream()
+                .filter(pr -> pr.path("head").path("ref").asText("").startsWith(headPrefix))
+                .toList();
+    }
+
+    public JsonNode mergePullRequest(String owner, String repo, int prNumber,
+                                      String commitTitle, String mergeMethod) {
+        log.info("Merging PR #{} in {}/{} via {}", prNumber, owner, repo, mergeMethod);
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("merge_method", mergeMethod);
+        if (commitTitle != null) {
+            payload.put("commit_title", commitTitle);
+        }
+        return webClient.put()
+                .uri("/repos/{owner}/{repo}/pulls/{number}/merge", owner, repo, prNumber)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(30));
+    }
+
     public JsonNode getPullRequest(String owner, String repo, int prNumber) {
         return webClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, prNumber)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
+                .block(Duration.ofSeconds(15));
+    }
+
+    /**
+     * Post a pull request review with inline file comments.
+     * event: "APPROVE", "REQUEST_CHANGES", or "COMMENT"
+     */
+    public void createPullRequestReview(String owner, String repo, int prNumber,
+                                         String body, String event,
+                                         List<ReviewComment> comments) {
+        log.info("Creating PR review on {}/{} #{} — event={}, comments={}",
+                owner, repo, prNumber, event, comments.size());
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("body", body);
+        payload.put("event", event);
+        if (comments != null && !comments.isEmpty()) {
+            payload.put("comments", comments.stream()
+                    .map(c -> {
+                        Map<String, Object> m = new java.util.HashMap<>();
+                        m.put("path", c.path());
+                        m.put("body", c.body());
+                        if (c.line() != null) {
+                            m.put("line", c.line());
+                        }
+                        return m;
+                    })
+                    .toList());
+        }
+        webClient.post()
+                .uri("/repos/{owner}/{repo}/pulls/{number}/reviews", owner, repo, prNumber)
+                .bodyValue(payload)
+                .retrieve()
+                .toBodilessEntity()
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(30));
+    }
+
+    /**
+     * Approve a pull request.
+     */
+    public void approvePullRequest(String owner, String repo, int prNumber, String message) {
+        createPullRequestReview(owner, repo, prNumber,
+                message != null ? message : "Approved by IssueBot independent review.",
+                "APPROVE", List.of());
+    }
+
+    /**
+     * Request changes on a pull request with review findings.
+     */
+    public void requestChanges(String owner, String repo, int prNumber,
+                                String summary, List<ReviewComment> comments) {
+        createPullRequestReview(owner, repo, prNumber, summary, "REQUEST_CHANGES", comments);
+    }
+
+    /**
+     * A single inline comment on a PR review.
+     */
+    public record ReviewComment(String path, Integer line, String body) {}
+
+    /**
+     * Mark a draft PR as ready for review.
+     */
+    public void markPrReady(String owner, String repo, int prNumber) {
+        log.info("Marking PR #{} as ready in {}/{}", prNumber, owner, repo);
+        webClient.patch()
+                .uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, prNumber)
+                .bodyValue(Map.of("draft", false))
+                .retrieve()
+                .toBodilessEntity()
+                .retryWhen(retryOnServerError())
                 .block(Duration.ofSeconds(15));
     }
 
@@ -143,6 +252,8 @@ public class GitHubApiClient {
         log.info("Waiting for CI checks on {}/{} ref={} (timeout={}min)", owner, repo, ref, timeoutMinutes);
         long deadline = System.currentTimeMillis() + (long) timeoutMinutes * 60 * 1000;
         int pollIntervalMs = 30_000;
+        int noCiGracePeriodMs = 90_000; // Wait 90s for checks to appear before assuming no CI
+        long firstPollTime = 0;
 
         while (System.currentTimeMillis() < deadline) {
             JsonNode checks = getCheckRuns(owner, repo, ref);
@@ -153,6 +264,13 @@ public class GitHubApiClient {
 
             JsonNode checkRuns = checks.get("check_runs");
             if (checkRuns.isEmpty()) {
+                if (firstPollTime == 0) {
+                    firstPollTime = System.currentTimeMillis();
+                } else if (System.currentTimeMillis() - firstPollTime > noCiGracePeriodMs) {
+                    log.info("No CI checks found for {}/{} ref={} after {}s — treating as passed",
+                            owner, repo, ref, noCiGracePeriodMs / 1000);
+                    return true;
+                }
                 sleep(pollIntervalMs);
                 continue;
             }

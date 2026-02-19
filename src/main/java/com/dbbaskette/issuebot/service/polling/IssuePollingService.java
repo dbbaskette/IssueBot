@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
+import com.dbbaskette.issuebot.service.dependency.DependencyResolverService;
+import com.dbbaskette.issuebot.service.dependency.DependencyResolverService.DependencyResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 @Service
 public class IssuePollingService {
@@ -33,6 +36,7 @@ public class IssuePollingService {
     private final NotificationService notificationService;
     private final IssueWorkflowService workflowService;
     private final IssueBotProperties properties;
+    private final DependencyResolverService dependencyResolver;
     private final AtomicBoolean enabled = new AtomicBoolean(true);
 
     public IssuePollingService(GitHubApiClient gitHubApiClient,
@@ -41,7 +45,8 @@ public class IssuePollingService {
                                 EventService eventService,
                                 NotificationService notificationService,
                                 IssueWorkflowService workflowService,
-                                IssueBotProperties properties) {
+                                IssueBotProperties properties,
+                                DependencyResolverService dependencyResolver) {
         this.gitHubApiClient = gitHubApiClient;
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
@@ -49,6 +54,7 @@ public class IssuePollingService {
         this.notificationService = notificationService;
         this.workflowService = workflowService;
         this.properties = properties;
+        this.dependencyResolver = dependencyResolver;
     }
 
     @Scheduled(fixedDelayString = "${issuebot.poll-interval-seconds:60}000")
@@ -73,11 +79,87 @@ public class IssuePollingService {
 
         for (WatchedRepo repo : repos) {
             try {
+                recheckBlockedIssues(repo);
+                drainQueuedIssues(repo);
                 pollRepo(repo, maxConcurrent - activeCount);
             } catch (Exception e) {
                 log.error("Error polling {}: {}", repo.fullName(), e.getMessage());
                 eventService.log("POLL_ERROR", "Failed to poll: " + e.getMessage(), repo);
             }
+        }
+    }
+
+    /**
+     * Re-check BLOCKED issues: promote to QUEUED when all dependencies are resolved.
+     */
+    private void recheckBlockedIssues(WatchedRepo repo) {
+        List<TrackedIssue> blocked = issueRepository.findByRepoAndStatus(repo, IssueStatus.BLOCKED);
+        for (TrackedIssue issue : blocked) {
+            if (dependencyResolver.allBlockersResolved(repo, issue.getBlockedByIssues())) {
+                log.info("All blockers resolved for {} #{} — promoting to QUEUED",
+                        repo.fullName(), issue.getIssueNumber());
+                issue.setStatus(IssueStatus.QUEUED);
+                issue.setBlockedByIssues(null);
+                issueRepository.save(issue);
+
+                eventService.log("ISSUE_UNBLOCKED",
+                        "Dependencies resolved for #" + issue.getIssueNumber() + " — now queued",
+                        repo, issue);
+
+                try {
+                    gitHubApiClient.addComment(repo.getOwner(), repo.getName(), issue.getIssueNumber(),
+                            "All dependencies resolved. This issue is now queued for processing.");
+                } catch (Exception e) {
+                    log.warn("Failed to post unblocked comment on #{}: {}", issue.getIssueNumber(), e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if a repo has an open IssueBot PR. If not, promote any QUEUED issues to processing.
+     * Uses topological sort to pick the correct next issue.
+     */
+    private void drainQueuedIssues(WatchedRepo repo) {
+        List<TrackedIssue> queued = issueRepository.findByRepoAndStatus(repo, IssueStatus.QUEUED);
+        if (queued.isEmpty()) return;
+
+        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+        if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
+            log.debug("{} has active issue or open IssueBot PR — {} issue(s) remain queued",
+                    repo.fullName(), queued.size());
+            return;
+        }
+
+        // Gate is clear — process the first queued issue using topological ordering
+        List<TrackedIssue> sorted = dependencyResolver.topologicalSort(queued);
+        TrackedIssue next = sorted.getFirst();
+        log.info("Gate cleared for {} — dequeuing issue #{}: {}",
+                repo.fullName(), next.getIssueNumber(), next.getIssueTitle());
+        next.setStatus(IssueStatus.PENDING);
+        issueRepository.save(next);
+
+        eventService.log("ISSUE_DEQUEUED",
+                "No open IssueBot PR — starting issue #" + next.getIssueNumber(), repo, next);
+        notificationService.info("Issue Dequeued",
+                repo.fullName() + " #" + next.getIssueNumber() + " — gate cleared, starting work");
+
+        workflowService.processIssueAsync(next);
+    }
+
+    /**
+     * Returns true if there is at least one open PR with a branch starting with "issuebot/".
+     */
+    private boolean hasOpenIssueBotPR(WatchedRepo repo) {
+        try {
+            List<JsonNode> prs = gitHubApiClient.listOpenPullRequests(
+                    repo.getOwner(), repo.getName(), "issuebot/");
+            return prs != null && !prs.isEmpty();
+        } catch (Exception e) {
+            log.warn("Failed to check open PRs for {}: {}", repo.fullName(), e.getMessage());
+            // If we can't check, err on the side of caution — assume gated
+            return true;
         }
     }
 
@@ -112,8 +194,67 @@ public class IssuePollingService {
 
             if (!qualifiesForProcessing(repo, issueNumber)) continue;
 
-            // Create tracked issue
+            // Check dependencies before creating tracked issue
+            DependencyResult deps = dependencyResolver.resolve(repo, issueNumber);
+
+            if (!deps.unresolvedBlockers().isEmpty()) {
+                // Auto-label all blocker issues with agent-ready
+                for (int blockerNum : deps.unresolvedBlockers()) {
+                    try {
+                        gitHubApiClient.addLabels(repo.getOwner(), repo.getName(),
+                                blockerNum, List.of(AGENT_READY_LABEL));
+                        log.info("Auto-labeled blocker #{} with '{}' in {}",
+                                blockerNum, AGENT_READY_LABEL, repo.fullName());
+                    } catch (Exception e) {
+                        log.warn("Failed to auto-label blocker #{}: {}", blockerNum, e.getMessage());
+                    }
+                }
+
+                // Save as BLOCKED with blocker list
+                TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
+                tracked.setStatus(IssueStatus.BLOCKED);
+                tracked.setBlockedByIssues(deps.unresolvedBlockers().stream()
+                        .map(String::valueOf)
+                        .collect(Collectors.joining(",")));
+                issueRepository.save(tracked);
+
+                // Post dependency chain comment
+                try {
+                    gitHubApiClient.addComment(repo.getOwner(), repo.getName(),
+                            issueNumber, deps.chainDescription());
+                } catch (Exception e) {
+                    log.warn("Failed to post dependency comment on #{}: {}", issueNumber, e.getMessage());
+                }
+
+                eventService.log("ISSUE_BLOCKED",
+                        "Issue #" + issueNumber + " blocked by " +
+                                deps.unresolvedBlockers().stream()
+                                        .map(n -> "#" + n)
+                                        .collect(Collectors.joining(", ")),
+                        repo, tracked);
+                notificationService.info("Issue Blocked",
+                        repo.fullName() + " #" + issueNumber + " waiting on dependencies");
+                continue;
+            }
+
+            // No blockers — existing flow
             TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
+
+            // Per-repo serialization: queue if another issue is active or an IssueBot PR is open
+            boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
+                    List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+            if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
+                tracked.setStatus(IssueStatus.QUEUED);
+                issueRepository.save(tracked);
+                eventService.log("ISSUE_QUEUED",
+                        "Issue #" + issueNumber + " queued — open IssueBot PR must merge first",
+                        repo, tracked);
+                notificationService.info("Issue Queued",
+                        repo.fullName() + " #" + issueNumber + ": " + title
+                                + " (waiting for open PR to merge)");
+                continue;
+            }
+
             issueRepository.save(tracked);
 
             eventService.log("ISSUE_DETECTED",
@@ -122,7 +263,7 @@ public class IssuePollingService {
             notificationService.info("New Issue Detected",
                     repo.fullName() + " #" + issueNumber + ": " + title);
 
-            // Queue for processing
+            // Start workflow
             workflowService.processIssueAsync(tracked);
             slotsUsed++;
         }
@@ -142,9 +283,10 @@ public class IssuePollingService {
         TrackedIssue tracked = existing.get();
         IssueStatus status = tracked.getStatus();
 
-        // Skip issues currently being processed or already completed
-        if (status == IssueStatus.IN_PROGRESS || status == IssueStatus.AWAITING_APPROVAL
-                || status == IssueStatus.COMPLETED) {
+        // Skip issues currently being processed, queued, blocked, or already completed
+        if (status == IssueStatus.IN_PROGRESS || status == IssueStatus.QUEUED
+                || status == IssueStatus.AWAITING_APPROVAL || status == IssueStatus.COMPLETED
+                || status == IssueStatus.BLOCKED) {
             return false;
         }
 

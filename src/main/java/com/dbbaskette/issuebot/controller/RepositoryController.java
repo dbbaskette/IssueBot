@@ -2,11 +2,12 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.RepoMode;
+import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
-import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
+import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,13 +21,22 @@ public class RepositoryController {
 
     private final WatchedRepoRepository repoRepository;
     private final TrackedIssueRepository issueRepository;
+    private final IterationRepository iterationRepository;
+    private final CostTrackingRepository costRepository;
+    private final EventRepository eventRepository;
     private final IssuePollingService pollingService;
 
     public RepositoryController(WatchedRepoRepository repoRepository,
                                  TrackedIssueRepository issueRepository,
+                                 IterationRepository iterationRepository,
+                                 CostTrackingRepository costRepository,
+                                 EventRepository eventRepository,
                                  IssuePollingService pollingService) {
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
+        this.iterationRepository = iterationRepository;
+        this.costRepository = costRepository;
+        this.eventRepository = eventRepository;
         this.pollingService = pollingService;
     }
 
@@ -44,7 +54,11 @@ public class RepositoryController {
                                @RequestParam String branch,
                                @RequestParam String mode,
                                @RequestParam int maxIterations,
+                               @RequestParam(required = false, defaultValue = "false") boolean ciEnabled,
                                @RequestParam int ciTimeoutMinutes,
+                               @RequestParam(required = false, defaultValue = "false") boolean autoMerge,
+                               @RequestParam(required = false, defaultValue = "false") boolean securityReviewEnabled,
+                               @RequestParam(defaultValue = "2") int maxReviewIterations,
                                @RequestParam(required = false) String allowedPaths) {
         WatchedRepo repo;
         if (id != null) {
@@ -59,7 +73,11 @@ public class RepositoryController {
         repo.setBranch(branch);
         repo.setMode(RepoMode.valueOf(mode));
         repo.setMaxIterations(maxIterations);
+        repo.setCiEnabled(ciEnabled);
         repo.setCiTimeoutMinutes(ciTimeoutMinutes);
+        repo.setAutoMerge(autoMerge);
+        repo.setSecurityReviewEnabled(securityReviewEnabled);
+        repo.setMaxReviewIterations(maxReviewIterations);
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             repo.setAllowedPaths("[\"" + String.join("\",\"", allowedPaths.split("\\s*,\\s*")) + "\"]");
         }
@@ -70,8 +88,17 @@ public class RepositoryController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public String delete(Model model, @PathVariable Long id) {
         repoRepository.findById(id).ifPresent(repo -> {
+            // Delete children in FK order: events, cost_tracking, iterations, tracked_issues, repo
+            eventRepository.deleteByRepo(repo);
+            List<TrackedIssue> issues = issueRepository.findByRepo(repo);
+            for (TrackedIssue issue : issues) {
+                costRepository.deleteByIssue(issue);
+                iterationRepository.deleteByIssue(issue);
+            }
+            issueRepository.deleteAll(issues);
             repoRepository.delete(repo);
         });
         populateModel(model, "Repository removed.", null);

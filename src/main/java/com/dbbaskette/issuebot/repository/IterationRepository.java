@@ -8,4 +8,6 @@ import java.util.List;
 public interface IterationRepository extends JpaRepository<Iteration, Long> {
 
     List<Iteration> findByIssueOrderByIterationNumAsc(TrackedIssue issue);
+
+    void deleteByIssue(TrackedIssue issue);
 }

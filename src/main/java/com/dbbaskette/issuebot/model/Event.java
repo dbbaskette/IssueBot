@@ -17,11 +17,11 @@ public class Event {
     @Column(name = "event_type", nullable = false)
     private String eventType;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "repo_id")
     private WatchedRepo repo;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "issue_id")
     private TrackedIssue issue;
 

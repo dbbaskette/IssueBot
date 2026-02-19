@@ -62,12 +62,29 @@ public class IssueBotProperties {
         @Min(1)
         private int timeoutMinutes = 10;
 
+        // Dual-model support: Opus for implementation, Sonnet for review
+        private String implementationModel = "claude-opus-4-6";
+        private String reviewModel = "claude-sonnet-4-6";
+        @Min(1)
+        private int reviewMaxTurns = 15;
+        @Min(1)
+        private int reviewTimeoutMinutes = 5;
+
         public int getMaxTurnsPerInvocation() { return maxTurnsPerInvocation; }
         public void setMaxTurnsPerInvocation(int v) { this.maxTurnsPerInvocation = v; }
         public String getModel() { return model; }
         public void setModel(String model) { this.model = model; }
         public int getTimeoutMinutes() { return timeoutMinutes; }
         public void setTimeoutMinutes(int v) { this.timeoutMinutes = v; }
+
+        public String getImplementationModel() { return implementationModel; }
+        public void setImplementationModel(String implementationModel) { this.implementationModel = implementationModel; }
+        public String getReviewModel() { return reviewModel; }
+        public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
+        public int getReviewMaxTurns() { return reviewMaxTurns; }
+        public void setReviewMaxTurns(int v) { this.reviewMaxTurns = v; }
+        public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
+        public void setReviewTimeoutMinutes(int v) { this.reviewTimeoutMinutes = v; }
     }
 
     public static class GitHubConfig {

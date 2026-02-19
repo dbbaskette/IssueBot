@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
+import com.dbbaskette.issuebot.service.dependency.DependencyResolverService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -35,7 +36,8 @@ class IssuePollingServiceTest {
                 mock(EventService.class),
                 mock(NotificationService.class),
                 mock(IssueWorkflowService.class),
-                new IssueBotProperties()
+                new IssueBotProperties(),
+                mock(DependencyResolverService.class)
         );
         testRepo = new WatchedRepo("owner", "repo");
     }
@@ -50,6 +52,25 @@ class IssuePollingServiceTest {
     void qualifiesForProcessing_inProgressIssue() {
         TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
         tracked.setStatus(IssueStatus.IN_PROGRESS);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.of(tracked));
+
+        assertFalse(pollingService.qualifiesForProcessing(testRepo, 1));
+    }
+
+    @Test
+    void qualifiesForProcessing_queuedIssue() {
+        TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
+        tracked.setStatus(IssueStatus.QUEUED);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.of(tracked));
+
+        assertFalse(pollingService.qualifiesForProcessing(testRepo, 1));
+    }
+
+    @Test
+    void qualifiesForProcessing_blockedIssue() {
+        TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
+        tracked.setStatus(IssueStatus.BLOCKED);
+        tracked.setBlockedByIssues("5,6");
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.of(tracked));
 
         assertFalse(pollingService.qualifiesForProcessing(testRepo, 1));

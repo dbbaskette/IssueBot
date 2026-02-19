@@ -72,6 +72,16 @@ public class GitOperationsService {
         String branchName = String.format("issuebot/issue-%d-%s", issueNumber, slug);
         log.info("Creating branch: {}", branchName);
 
+        // Delete existing local branch if it exists (e.g. from a previous run)
+        List<Ref> branches = git.branchList().call();
+        for (Ref ref : branches) {
+            if (ref.getName().equals("refs/heads/" + branchName)) {
+                log.info("Branch {} already exists locally, deleting it first", branchName);
+                git.branchDelete().setBranchNames(branchName).setForce(true).call();
+                break;
+            }
+        }
+
         git.checkout()
                 .setCreateBranch(true)
                 .setName(branchName)
@@ -101,34 +111,50 @@ public class GitOperationsService {
     }
 
     /**
-     * Get the diff between the current branch and the default branch.
+     * Get the diff of all changes (committed + staged + unstaged + untracked)
+     * on the current branch compared to the default branch.
+     *
+     * Strategy: stage everything, diff HEAD against base, then unstage.
+     * This captures working-tree changes that haven't been committed yet.
      */
     public String diff(Git git, String defaultBranch) throws GitAPIException, IOException {
         Repository repo = git.getRepository();
 
-        ObjectId headId = repo.resolve("HEAD^{tree}");
         ObjectId baseId = repo.resolve("origin/" + defaultBranch + "^{tree}");
-
-        if (headId == null || baseId == null) {
-            log.warn("Could not resolve HEAD or base branch for diff");
+        if (baseId == null) {
+            log.warn("Could not resolve origin/{} for diff", defaultBranch);
             return "";
         }
 
+        // Stage everything (including untracked) so the index reflects the full working tree
+        git.add().addFilepattern(".").call();
+
+        // Also stage deletions
+        git.add().addFilepattern(".").setUpdate(true).call();
+
+        // Diff the index (staged state) against the base branch tree
         try (var reader = repo.newObjectReader()) {
-            CanonicalTreeParser headTree = new CanonicalTreeParser();
-            headTree.reset(reader, headId);
             CanonicalTreeParser baseTree = new CanonicalTreeParser();
             baseTree.reset(reader, baseId);
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (DiffFormatter formatter = new DiffFormatter(out)) {
                 formatter.setRepository(repo);
-                List<DiffEntry> diffs = formatter.scan(baseTree, headTree);
+                // Diff base tree vs index (staged changes)
+                List<DiffEntry> diffs = git.diff()
+                        .setOldTree(baseTree)
+                        .setCached(true)
+                        .call();
                 for (DiffEntry entry : diffs) {
                     formatter.format(entry);
                 }
             }
-            return out.toString();
+
+            String result = out.toString();
+            log.info("Diff against origin/{}: {} bytes, {} lines",
+                    defaultBranch, result.length(),
+                    result.isEmpty() ? 0 : result.split("\n").length);
+            return result;
         }
     }
 

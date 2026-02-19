@@ -16,9 +16,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .anyRequest().permitAll()
             )
-            .csrf(csrf -> csrf
-                .ignoringRequestMatchers("/api/**", "/h2-console/**")
-            )
+            .csrf(csrf -> csrf.disable())
             .headers(headers -> headers
                 .frameOptions(frame -> frame.sameOrigin()) // Allow H2 console iframe
             );

@@ -44,7 +44,7 @@ public class StartupValidator {
         if (claudeCodeService.checkAuthentication()) {
             log.info("[OK] Claude Code authentication verified");
         } else {
-            log.warn("[WARN] Claude Code authentication failed. Set ANTHROPIC_API_KEY environment variable.");
+            log.warn("[WARN] Claude Code authentication failed. Run 'claude' in a terminal to log in, or set ANTHROPIC_API_KEY.");
         }
     }
 

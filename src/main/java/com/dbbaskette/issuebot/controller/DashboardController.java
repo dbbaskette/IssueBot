@@ -43,7 +43,9 @@ public class DashboardController {
         model.addAttribute("completed", issueRepository.countByStatus(IssueStatus.COMPLETED));
         model.addAttribute("inProgress", issueRepository.countByStatus(IssueStatus.IN_PROGRESS));
         model.addAttribute("pending", issueRepository.countByStatus(IssueStatus.PENDING));
+        model.addAttribute("queued", issueRepository.countByStatus(IssueStatus.QUEUED));
         model.addAttribute("failed", issueRepository.countByStatus(IssueStatus.FAILED));
+        model.addAttribute("blocked", issueRepository.countByStatus(IssueStatus.BLOCKED));
         model.addAttribute("repoCount", repoRepository.count());
 
         BigDecimal totalCost = costRepository.findAll().stream()

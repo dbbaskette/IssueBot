@@ -72,19 +72,37 @@ public class IssueController {
         return "layout";
     }
 
+    /**
+     * HTMX fragment endpoint — returns just the issue table body rows for SSE-triggered refresh.
+     */
+    @GetMapping("/table")
+    public String table(Model model) {
+        model.addAttribute("issues", issueRepository.findAll());
+        return "issues :: table-rows";
+    }
+
     @GetMapping("/{id}")
     public String detail(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        populateDetailModel(model, issue, id);
+        return "layout";
+    }
+
+    /**
+     * HTMX fragment endpoint — returns just the status section (metrics + phase pipeline)
+     * for live refresh without disrupting the terminal or EventSource.
+     */
+    @GetMapping("/{id}/live-status")
+    public String liveStatus(Model model, @PathVariable Long id) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        populateDetailModel(model, issue, id);
+        return "issue-detail :: live-status";
+    }
+
+    private void populateDetailModel(Model model, TrackedIssue issue, Long id) {
         List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
-
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
-
-        // Get events for this issue
-        List<Event> events = eventRepository.findAll().stream()
-                .filter(e -> e.getIssue() != null && e.getIssue().getId().equals(id))
-                .sorted((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()))
-                .limit(20)
-                .toList();
+        List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
@@ -94,6 +112,5 @@ public class IssueController {
         model.addAttribute("events", events);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        return "layout";
     }
 }

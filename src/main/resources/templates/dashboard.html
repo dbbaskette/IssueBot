@@ -20,6 +20,14 @@
             <div class="value" th:text="${pending}">0</div>
         </div>
         <div class="metric-card">
+            <div class="label">Queued</div>
+            <div class="value" th:text="${queued}">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="label">Blocked</div>
+            <div class="value" th:text="${blocked}">0</div>
+        </div>
+        <div class="metric-card">
             <div class="label">Failed</div>
             <div class="value" th:text="${failed}">0</div>
         </div>

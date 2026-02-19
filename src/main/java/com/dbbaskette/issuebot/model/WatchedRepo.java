@@ -27,8 +27,20 @@ public class WatchedRepo {
     @Column(name = "max_iterations", nullable = false)
     private int maxIterations = 5;
 
+    @Column(name = "ci_enabled", nullable = false)
+    private boolean ciEnabled = true;
+
     @Column(name = "ci_timeout_minutes", nullable = false)
     private int ciTimeoutMinutes = 15;
+
+    @Column(name = "auto_merge", nullable = false)
+    private boolean autoMerge = false;
+
+    @Column(name = "security_review_enabled", nullable = false)
+    private boolean securityReviewEnabled = false;
+
+    @Column(name = "max_review_iterations", nullable = false)
+    private int maxReviewIterations = 2;
 
     @Column(name = "allowed_paths")
     @Lob
@@ -76,8 +88,20 @@ public class WatchedRepo {
     public int getMaxIterations() { return maxIterations; }
     public void setMaxIterations(int maxIterations) { this.maxIterations = maxIterations; }
 
+    public boolean isCiEnabled() { return ciEnabled; }
+    public void setCiEnabled(boolean ciEnabled) { this.ciEnabled = ciEnabled; }
+
     public int getCiTimeoutMinutes() { return ciTimeoutMinutes; }
     public void setCiTimeoutMinutes(int ciTimeoutMinutes) { this.ciTimeoutMinutes = ciTimeoutMinutes; }
+
+    public boolean isAutoMerge() { return autoMerge; }
+    public void setAutoMerge(boolean autoMerge) { this.autoMerge = autoMerge; }
+
+    public boolean isSecurityReviewEnabled() { return securityReviewEnabled; }
+    public void setSecurityReviewEnabled(boolean securityReviewEnabled) { this.securityReviewEnabled = securityReviewEnabled; }
+
+    public int getMaxReviewIterations() { return maxReviewIterations; }
+    public void setMaxReviewIterations(int maxReviewIterations) { this.maxReviewIterations = maxReviewIterations; }
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }

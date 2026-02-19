@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,15 +20,14 @@ public class GitHubPrTool {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(description = "Create a pull request on GitHub. Returns the created PR details including number and URL.")
     public String createPullRequest(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "PR title") String title,
-            @ToolParam(description = "PR body in Markdown") String body,
-            @ToolParam(description = "Head branch name (the branch with changes)") String head,
-            @ToolParam(description = "Base branch name to merge into") String base,
-            @ToolParam(description = "Whether to create as a draft PR") boolean draft) {
+            String owner,
+            String repo,
+            String title,
+            String body,
+            String head,
+            String base,
+            boolean draft) {
         try {
             JsonNode pr = gitHubApiClient.createPullRequest(owner, repo, title, body, head, base, draft);
             return objectMapper.writeValueAsString(pr);
@@ -40,11 +37,10 @@ public class GitHubPrTool {
         }
     }
 
-    @Tool(description = "Get pull request status including review state and merge status")
     public String getPrStatus(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "PR number") int prNumber) {
+            String owner,
+            String repo,
+            int prNumber) {
         try {
             JsonNode pr = gitHubApiClient.getPullRequest(owner, repo, prNumber);
             return objectMapper.writeValueAsString(pr);
@@ -54,11 +50,10 @@ public class GitHubPrTool {
         }
     }
 
-    @Tool(description = "Get CI check runs for a pull request")
     public String getPrChecks(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Git ref (branch name or commit SHA) to check") String ref) {
+            String owner,
+            String repo,
+            String ref) {
         try {
             JsonNode checks = gitHubApiClient.getCheckRuns(owner, repo, ref);
             return objectMapper.writeValueAsString(checks);

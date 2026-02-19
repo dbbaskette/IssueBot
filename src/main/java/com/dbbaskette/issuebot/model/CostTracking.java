@@ -11,7 +11,7 @@ public class CostTracking {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "issue_id", nullable = false)
     private TrackedIssue issue;
 
@@ -29,6 +29,9 @@ public class CostTracking {
 
     @Column(name = "model_used")
     private String modelUsed;
+
+    @Column(name = "phase", length = 50)
+    private String phase = "IMPLEMENTATION";
 
     public CostTracking() {}
 
@@ -64,4 +67,7 @@ public class CostTracking {
 
     public String getModelUsed() { return modelUsed; }
     public void setModelUsed(String modelUsed) { this.modelUsed = modelUsed; }
+
+    public String getPhase() { return phase; }
+    public void setPhase(String phase) { this.phase = phase; }
 }

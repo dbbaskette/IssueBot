@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -24,12 +22,11 @@ public class GitHubIssueTool {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(description = "List issues from a GitHub repository, filtered by label and state")
     public String listIssues(
-            @ToolParam(description = "Repository owner (e.g. 'octocat')") String owner,
-            @ToolParam(description = "Repository name (e.g. 'hello-world')") String repo,
-            @ToolParam(description = "Label to filter by (e.g. 'agent-ready')") String label,
-            @ToolParam(description = "Issue state: 'open', 'closed', or 'all'") String state) {
+            String owner,
+            String repo,
+            String label,
+            String state) {
         try {
             List<JsonNode> issues = gitHubApiClient.listIssues(owner, repo, label, state);
             return objectMapper.writeValueAsString(issues);
@@ -39,11 +36,10 @@ public class GitHubIssueTool {
         }
     }
 
-    @Tool(description = "Get a single GitHub issue with full details including body, labels, and assignees")
     public String getIssue(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Issue number") int issueNumber) {
+            String owner,
+            String repo,
+            int issueNumber) {
         try {
             JsonNode issue = gitHubApiClient.getIssue(owner, repo, issueNumber);
             return objectMapper.writeValueAsString(issue);
@@ -53,12 +49,11 @@ public class GitHubIssueTool {
         }
     }
 
-    @Tool(description = "Add a comment to a GitHub issue")
     public String addComment(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Issue number") int issueNumber,
-            @ToolParam(description = "Comment body in Markdown") String body) {
+            String owner,
+            String repo,
+            int issueNumber,
+            String body) {
         try {
             JsonNode comment = gitHubApiClient.addComment(owner, repo, issueNumber, body);
             return objectMapper.writeValueAsString(comment);
@@ -68,12 +63,11 @@ public class GitHubIssueTool {
         }
     }
 
-    @Tool(description = "Assign users to a GitHub issue")
     public String assignIssue(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Issue number") int issueNumber,
-            @ToolParam(description = "Comma-separated list of GitHub usernames to assign") String assignees) {
+            String owner,
+            String repo,
+            int issueNumber,
+            String assignees) {
         try {
             List<String> assigneeList = List.of(assignees.split(","));
             gitHubApiClient.assignIssue(owner, repo, issueNumber, assigneeList);
@@ -85,12 +79,11 @@ public class GitHubIssueTool {
         }
     }
 
-    @Tool(description = "Add labels to a GitHub issue")
     public String addLabels(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Issue number") int issueNumber,
-            @ToolParam(description = "Comma-separated list of labels to add") String labels) {
+            String owner,
+            String repo,
+            int issueNumber,
+            String labels) {
         try {
             List<String> labelList = List.of(labels.split(","));
             gitHubApiClient.addLabels(owner, repo, issueNumber, labelList);
@@ -102,11 +95,10 @@ public class GitHubIssueTool {
         }
     }
 
-    @Tool(description = "Close a GitHub issue")
     public String closeIssue(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Issue number") int issueNumber) {
+            String owner,
+            String repo,
+            int issueNumber) {
         try {
             gitHubApiClient.addComment(owner, repo, issueNumber,
                     "Closing issue — resolved by IssueBot.");

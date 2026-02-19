@@ -11,7 +11,7 @@ public class Iteration {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "issue_id", nullable = false)
     private TrackedIssue issue;
 
@@ -32,6 +32,16 @@ public class Iteration {
     @Lob
     @Column(name = "diff")
     private String diff;
+
+    @Lob
+    @Column(name = "review_json")
+    private String reviewJson;
+
+    @Column(name = "review_passed")
+    private Boolean reviewPassed;
+
+    @Column(name = "review_model", length = 100)
+    private String reviewModel;
 
     @Column(name = "started_at", nullable = false, updatable = false)
     private LocalDateTime startedAt = LocalDateTime.now();
@@ -72,4 +82,13 @@ public class Iteration {
     public LocalDateTime getStartedAt() { return startedAt; }
     public LocalDateTime getCompletedAt() { return completedAt; }
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
+
+    public String getReviewJson() { return reviewJson; }
+    public void setReviewJson(String reviewJson) { this.reviewJson = reviewJson; }
+
+    public Boolean getReviewPassed() { return reviewPassed; }
+    public void setReviewPassed(Boolean reviewPassed) { this.reviewPassed = reviewPassed; }
+
+    public String getReviewModel() { return reviewModel; }
+    public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
 }

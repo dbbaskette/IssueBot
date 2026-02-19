@@ -15,6 +15,9 @@ public interface CostTrackingRepository extends JpaRepository<CostTracking, Long
     @Query("SELECT COALESCE(SUM(c.estimatedCost), 0) FROM CostTracking c WHERE c.issue = :issue")
     BigDecimal totalCostForIssue(TrackedIssue issue);
 
+    @Query("SELECT COALESCE(SUM(c.estimatedCost), 0) FROM CostTracking c WHERE c.issue = :issue AND c.phase = :phase")
+    BigDecimal totalCostForIssueByPhase(TrackedIssue issue, String phase);
+
     @Query("SELECT COALESCE(SUM(c.estimatedCost), 0) FROM CostTracking c WHERE c.issue.repo = :repo")
     BigDecimal totalCostForRepo(WatchedRepo repo);
 
@@ -25,4 +28,6 @@ public interface CostTrackingRepository extends JpaRepository<CostTracking, Long
     long totalOutputTokens();
 
     List<CostTracking> findByIssueRepoOrderByIdDesc(WatchedRepo repo);
+
+    void deleteByIssue(TrackedIssue issue);
 }

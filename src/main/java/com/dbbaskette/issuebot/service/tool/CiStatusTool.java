@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,11 +20,10 @@ public class CiStatusTool {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(description = "Get CI check runs for a specific branch or commit SHA")
     public String getCheckRuns(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Git ref (branch name or commit SHA)") String ref) {
+            String owner,
+            String repo,
+            String ref) {
         try {
             JsonNode checks = gitHubApiClient.getCheckRuns(owner, repo, ref);
             return objectMapper.writeValueAsString(checks);
@@ -36,12 +33,11 @@ public class CiStatusTool {
         }
     }
 
-    @Tool(description = "Wait for all CI checks to complete on a branch. Polls until all checks finish or timeout is reached. Returns true if all checks passed.")
     public String waitForChecks(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String repo,
-            @ToolParam(description = "Git ref (branch name or commit SHA)") String ref,
-            @ToolParam(description = "Timeout in minutes to wait for checks") int timeoutMinutes) {
+            String owner,
+            String repo,
+            String ref,
+            int timeoutMinutes) {
         try {
             boolean passed = gitHubApiClient.waitForChecks(owner, repo, ref, timeoutMinutes);
             return "{\"passed\": " + passed + ", \"ref\": \"" + ref + "\"}";

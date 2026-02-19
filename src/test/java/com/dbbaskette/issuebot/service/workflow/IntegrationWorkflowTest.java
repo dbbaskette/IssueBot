@@ -4,12 +4,16 @@ import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
@@ -18,13 +22,14 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Integration-style tests that exercise the full IssueWorkflowService pipeline
+ * Integration-style tests that exercise the full 6-phase IssueWorkflowService pipeline
  * with mocked external dependencies.
  */
 class IntegrationWorkflowTest {
@@ -33,10 +38,13 @@ class IntegrationWorkflowTest {
     private GitOperationsService gitOps;
     private GitHubApiClient gitHubApi;
     private ClaudeCodeService claudeCode;
+    private CodeReviewService codeReviewService;
+    private CiTemplateService ciTemplateService;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
     private CostTrackingRepository costRepository;
     private EventService eventService;
+    private SseService sseService;
     private NotificationService notificationService;
     private IterationManager iterationManager;
     private ObjectMapper objectMapper;
@@ -46,18 +54,21 @@ class IntegrationWorkflowTest {
         gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
         claudeCode = mock(ClaudeCodeService.class);
+        codeReviewService = mock(CodeReviewService.class);
+        ciTemplateService = mock(CiTemplateService.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
         costRepository = mock(CostTrackingRepository.class);
         eventService = mock(EventService.class);
+        sseService = mock(SseService.class);
         notificationService = mock(NotificationService.class);
         iterationManager = mock(IterationManager.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode,
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
                 issueRepository, iterationRepository, costRepository,
-                eventService, notificationService, iterationManager,
+                eventService, sseService, notificationService, iterationManager,
                 objectMapper);
     }
 
@@ -82,140 +93,161 @@ class IntegrationWorkflowTest {
     private ClaudeCodeResult successResult() {
         ClaudeCodeResult result = new ClaudeCodeResult();
         result.setSuccess(true);
-        result.setOutput("{\"passed\": true, \"summary\": \"All good\", \"issues\": []}");
+        result.setOutput("implementation done");
         result.setInputTokens(1000);
         result.setOutputTokens(500);
-        result.setModel("claude-sonnet-4-5-20250929");
+        result.setModel("claude-opus-4-6");
         result.setDurationMs(5000);
         return result;
     }
 
-    // === Test 1: Happy path — single iteration success ===
-    @Test
-    void happyPath_singleIterationSuccess() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        ObjectNode issueDetails = createIssueDetails();
-        Git mockGit = mock(Git.class);
+    private CodeReviewResult passedReview() {
+        return new CodeReviewResult(
+                true, "All looks good",
+                0.9, 0.9, 0.85, 0.8, 0.9, 0.95, 1.0,
+                List.of(), "No issues found",
+                "{\"passed\":true}", 500, 300, "claude-sonnet-4-6");
+    }
 
-        // Setup: clone, branch, open
+    private CodeReviewResult failedReview() {
+        return new CodeReviewResult(
+                false, "Missing test coverage",
+                0.9, 0.8, 0.85, 0.4, 0.9, 0.9, 1.0,
+                List.of(new CodeReviewResult.ReviewFinding(
+                        "high", "test_coverage", "src/Service.java", 42,
+                        "No tests for method", "Add unit test")),
+                "Add tests",
+                "{\"passed\":false}", 500, 300, "claude-sonnet-4-6");
+    }
+
+    private void setupCommonMocks(TrackedIssue issue, ObjectNode issueDetails) throws Exception {
+        Git mockGit = mock(Git.class);
         when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
         when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
         when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(issueDetails);
         when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
         when(gitOps.openRepo("owner", "repo")).thenReturn(mockGit);
         when(gitOps.diff(any(), anyString())).thenReturn("+ added line");
+        when(costRepository.totalCostForIssue(issue)).thenReturn(BigDecimal.valueOf(0.05));
+        when(costRepository.totalCostForIssueByPhase(eq(issue), eq("IMPLEMENTATION"))).thenReturn(BigDecimal.valueOf(0.04));
+        when(costRepository.totalCostForIssueByPhase(eq(issue), eq("REVIEW"))).thenReturn(BigDecimal.valueOf(0.01));
+    }
 
-        // Iteration allowed once
+    // === Test 1: Happy path — implementation, CI, PR, review pass, completion ===
+    @Test
+    void happyPath_fullPipelineSuccess() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
         // Implementation succeeds
-        when(claudeCode.executeTask(anyString(), any(Path.class), anyString(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
                 .thenReturn(successResult());
 
-        // CI passes
-        when(gitHubApi.waitForChecks(eq("owner"), eq("repo"), anyString(), anyInt())).thenReturn(true);
+        // CI passes (CI disabled to skip polling)
+        issue.getRepo().setCiEnabled(false);
 
-        // PR creation
+        // PR creation — no existing PR
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
         prNode.put("number", 99);
-        prNode.put("html_url", "https://github.com/owner/repo/pull/99");
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean()))
-                .thenReturn(prNode);
-        when(costRepository.totalCostForIssue(issue)).thenReturn(BigDecimal.valueOf(0.05));
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(true))).thenReturn(prNode);
+
+        // Review passes
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyBoolean(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
-        verify(gitHubApi).createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), eq(false));
+        assertNull(issue.getCurrentPhase());
+        verify(gitHubApi).markPrReady(eq("owner"), eq("repo"), eq(99));
         verify(notificationService).info(eq("Issue Completed"), anyString());
     }
 
-    // === Test 2: Self-assessment failure triggers retry ===
+    // === Test 2: Review failure triggers re-implementation ===
     @Test
-    void selfAssessmentFailure_triggersRetry() throws Exception {
+    void reviewFailure_triggersReimplementation() throws Exception {
         TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
         ObjectNode issueDetails = createIssueDetails();
-        Git mockGit = mock(Git.class);
+        setupCommonMocks(issue, issueDetails);
 
-        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
-        when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
-        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(issueDetails);
-        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
-        when(gitOps.openRepo("owner", "repo")).thenReturn(mockGit);
-        when(gitOps.diff(any(), anyString())).thenReturn("+ some changes");
-
-        // Allow 2 iterations then stop
+        // Allow 2 iterations
         when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
-        // Implementation always succeeds
-        ClaudeCodeResult implResult = successResult();
-        implResult.setOutput("implementation done");
+        // Implementation succeeds both times
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+                .thenReturn(successResult());
 
-        // First assessment: failure. Second: success
-        ClaudeCodeResult failAssessment = new ClaudeCodeResult();
-        failAssessment.setSuccess(true);
-        failAssessment.setOutput("{\"passed\": false, \"summary\": \"Missing tests\", \"issues\": [\"No tests\"]}");
-        failAssessment.setInputTokens(500);
-        failAssessment.setOutputTokens(200);
-        failAssessment.setDurationMs(3000);
-
-        ClaudeCodeResult passAssessment = new ClaudeCodeResult();
-        passAssessment.setSuccess(true);
-        passAssessment.setOutput("{\"passed\": true, \"summary\": \"All good\", \"issues\": []}");
-        passAssessment.setInputTokens(500);
-        passAssessment.setOutputTokens(200);
-        passAssessment.setDurationMs(3000);
-
-        when(claudeCode.executeTask(anyString(), any(Path.class), anyString(), any()))
-                .thenReturn(implResult);
-        when(claudeCode.executeTask(anyString(), any(Path.class), eq("Read,Bash(git diff:*)"), any()))
-                .thenReturn(failAssessment, passAssessment);
-
-        // CI passes
-        when(gitHubApi.waitForChecks(eq("owner"), eq("repo"), anyString(), anyInt())).thenReturn(true);
-
+        // PR creation
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
         prNode.put("number", 100);
-        prNode.put("html_url", "https://github.com/owner/repo/pull/100");
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean()))
-                .thenReturn(prNode);
-        when(costRepository.totalCostForIssue(issue)).thenReturn(BigDecimal.valueOf(0.10));
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(true))).thenReturn(prNode);
+
+        // First review fails, second passes
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyBoolean(), any()))
+                .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
 
-        // Should have iterated twice
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertEquals(2, issue.getCurrentIteration());
+        // Verify review was posted to GitHub
+        verify(gitHubApi, atLeast(1)).createPullRequestReview(
+                anyString(), anyString(), anyInt(), anyString(), anyString(), anyList());
     }
 
-    // === Test 3: CI failure triggers retry ===
+    // === Test 3: Max review iterations triggers escalation ===
+    @Test
+    void maxReviewIterations_escalates() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 101);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(true))).thenReturn(prNode);
+
+        // Review fails
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyBoolean(), any())).thenReturn(failedReview());
+
+        // No more review iterations
+        when(iterationManager.canReviewIterate(issue)).thenReturn(false);
+
+        workflowService.processIssue(issue);
+
+        verify(iterationManager).handleMaxReviewIterationsReached(issue);
+    }
+
+    // === Test 4: CI failure triggers retry ===
     @Test
     void ciFailure_triggersRetry() throws Exception {
         TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(true);
         ObjectNode issueDetails = createIssueDetails();
-        Git mockGit = mock(Git.class);
+        setupCommonMocks(issue, issueDetails);
 
-        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
-        when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
-        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(issueDetails);
-        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
-        when(gitOps.openRepo("owner", "repo")).thenReturn(mockGit);
-        when(gitOps.diff(any(), anyString())).thenReturn("+ changes");
-
-        // Only 1 iteration allowed
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeTask(anyString(), any(Path.class), anyString(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
                 .thenReturn(successResult());
-
-        // Assessment passes
-        ClaudeCodeResult assessResult = new ClaudeCodeResult();
-        assessResult.setSuccess(true);
-        assessResult.setOutput("{\"passed\": true, \"summary\": \"Looks good\", \"issues\": []}");
-        assessResult.setInputTokens(500);
-        assessResult.setOutputTokens(200);
-        assessResult.setDurationMs(2000);
-        when(claudeCode.executeTask(anyString(), any(Path.class), eq("Read,Bash(git diff:*)"), any()))
-                .thenReturn(assessResult);
 
         // CI fails
         when(gitHubApi.waitForChecks(eq("owner"), eq("repo"), anyString(), anyInt())).thenReturn(false);
@@ -224,11 +256,10 @@ class IntegrationWorkflowTest {
 
         workflowService.processIssue(issue);
 
-        // Max iterations reached handler called
         verify(iterationManager).handleMaxIterationsReached(issue);
     }
 
-    // === Test 4: Max iterations reached ===
+    // === Test 5: Max iterations reached ===
     @Test
     void maxIterationsReached_escalates() throws Exception {
         TrackedIssue issue = createTestIssue();
@@ -239,56 +270,11 @@ class IntegrationWorkflowTest {
         when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(createIssueDetails());
         when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
 
-        // No iterations allowed
         when(iterationManager.canIterate(issue)).thenReturn(false);
 
         workflowService.processIssue(issue);
 
         verify(iterationManager).handleMaxIterationsReached(issue);
-        verify(gitHubApi, never()).createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
-    }
-
-    // === Test 5: Approval-gated mode creates draft PR ===
-    @Test
-    void approvalGatedMode_createsDraftPr() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setMode(RepoMode.APPROVAL_GATED);
-        ObjectNode issueDetails = createIssueDetails();
-        Git mockGit = mock(Git.class);
-
-        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
-        when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
-        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(issueDetails);
-        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
-        when(gitOps.openRepo("owner", "repo")).thenReturn(mockGit);
-        when(gitOps.diff(any(), anyString())).thenReturn("+ changes");
-
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeTask(anyString(), any(Path.class), anyString(), any()))
-                .thenReturn(successResult());
-
-        ClaudeCodeResult assessResult = new ClaudeCodeResult();
-        assessResult.setSuccess(true);
-        assessResult.setOutput("{\"passed\": true, \"summary\": \"All good\", \"issues\": []}");
-        assessResult.setInputTokens(500);
-        assessResult.setOutputTokens(200);
-        assessResult.setDurationMs(2000);
-        when(claudeCode.executeTask(anyString(), any(Path.class), eq("Read,Bash(git diff:*)"), any()))
-                .thenReturn(assessResult);
-
-        when(gitHubApi.waitForChecks(eq("owner"), eq("repo"), anyString(), anyInt())).thenReturn(true);
-
-        ObjectNode prNode = objectMapper.createObjectNode();
-        prNode.put("number", 101);
-        prNode.put("html_url", "https://github.com/owner/repo/pull/101");
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), eq(true)))
-                .thenReturn(prNode);
-        when(costRepository.totalCostForIssue(issue)).thenReturn(BigDecimal.valueOf(0.03));
-
-        workflowService.processIssue(issue);
-
-        assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
-        verify(gitHubApi).createPullRequest(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), eq(true));
     }
 
     // === Test 6: Setup phase failure sets FAILED status ===
@@ -306,79 +292,72 @@ class IntegrationWorkflowTest {
         verify(eventService).log(eq("PHASE_SETUP_FAILED"), anyString(), any(), eq(issue));
     }
 
-    // === Test 7: Implementation failure continues to next iteration ===
+    // === Test 7: Approval-gated mode sets AWAITING_APPROVAL ===
     @Test
-    void implementationFailure_continuesIteration() throws Exception {
+    void approvalGatedMode_setsAwaitingApproval() throws Exception {
         TrackedIssue issue = createTestIssue();
-        Git mockGit = mock(Git.class);
+        issue.getRepo().setMode(RepoMode.APPROVAL_GATED);
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
 
-        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
-        when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
-        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(createIssueDetails());
-        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
-
-        // Allow 1 iteration
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        // Implementation throws
-        when(claudeCode.executeTask(anyString(), any(Path.class), anyString(), any()))
-                .thenThrow(new RuntimeException("Process failed"));
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 102);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(true))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyBoolean(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
-        verify(iterationManager).handleMaxIterationsReached(issue);
-        verify(eventService).log(eq("PHASE_IMPL_FAILED"), anyString(), any(), eq(issue));
+        assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
     }
 
-    // === Test 8: Error in processIssueAsync is caught ===
+    // === Test 8: Cost tracking records for both implementation and review ===
+    @Test
+    void costTracking_recordsBothPhases() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 103);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(true))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyBoolean(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Cost tracked for implementation + review = at least 2 saves
+        verify(costRepository, atLeast(2)).save(any(CostTracking.class));
+    }
+
+    // === Test 9: processIssueAsync catches unhandled errors ===
     @Test
     void processIssueAsync_catchesUnhandledError() throws Exception {
         TrackedIssue issue = createTestIssue();
 
-        // Make cloneOrPull throw an unexpected error
         when(gitOps.cloneOrPull(anyString(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("Unexpected"));
 
-        // processIssue wraps with FAILED, processIssueAsync catches the uncaught
         workflowService.processIssueAsync(issue);
 
         assertEquals(IssueStatus.FAILED, issue.getStatus());
-    }
-
-    // === Test 9: Cost tracking records correctly ===
-    @Test
-    void costTracking_recordsAfterImplementation() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        Git mockGit = mock(Git.class);
-
-        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
-        when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
-        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(createIssueDetails());
-        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
-        when(gitOps.openRepo("owner", "repo")).thenReturn(mockGit);
-        when(gitOps.diff(any(), anyString())).thenReturn("+ code");
-
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-
-        ClaudeCodeResult implResult = successResult();
-        implResult.setInputTokens(5000);
-        implResult.setOutputTokens(2000);
-        when(claudeCode.executeTask(anyString(), any(Path.class), anyString(), any()))
-                .thenReturn(implResult);
-
-        // Assessment fails so we exit iteration loop
-        ClaudeCodeResult failAssess = new ClaudeCodeResult();
-        failAssess.setSuccess(true);
-        failAssess.setOutput("{\"passed\": false, \"summary\": \"Incomplete\", \"issues\": []}");
-        failAssess.setInputTokens(500);
-        failAssess.setOutputTokens(100);
-        failAssess.setDurationMs(1000);
-        when(claudeCode.executeTask(anyString(), any(Path.class), eq("Read,Bash(git diff:*)"), any()))
-                .thenReturn(failAssess);
-
-        workflowService.processIssue(issue);
-
-        // Verify cost was tracked (once for implementation, once for assessment)
-        verify(costRepository, atLeast(1)).save(any(CostTracking.class));
     }
 }

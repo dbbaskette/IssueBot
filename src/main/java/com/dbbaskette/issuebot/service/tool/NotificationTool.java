@@ -3,8 +3,6 @@ package com.dbbaskette.issuebot.service.tool;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -18,11 +16,10 @@ public class NotificationTool {
         this.notificationService = notificationService;
     }
 
-    @Tool(description = "Send a desktop notification to the user via the OS notification system")
     public String sendDesktopNotification(
-            @ToolParam(description = "Notification title") String title,
-            @ToolParam(description = "Notification message") String message,
-            @ToolParam(description = "Notification type: INFO, WARNING, or ERROR") String type) {
+            String title,
+            String message,
+            String type) {
         try {
             switch (type.toUpperCase()) {
                 case "WARNING" -> notificationService.warn(title, message);
@@ -36,10 +33,9 @@ public class NotificationTool {
         }
     }
 
-    @Tool(description = "Send an event to the IssueBot dashboard for real-time display")
     public String sendDashboardEvent(
-            @ToolParam(description = "Event type (e.g. 'ISSUE_DETECTED', 'BUILD_FAILED')") String eventType,
-            @ToolParam(description = "Event message") String message) {
+            String eventType,
+            String message) {
         try {
             notificationService.sendDashboardEvent(eventType, message);
             return "{\"success\": true}";

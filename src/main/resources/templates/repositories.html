@@ -40,9 +40,31 @@
                         <label for="max-iterations">Max Iterations</label>
                         <input type="number" id="max-iterations" name="maxIterations" value="5" min="1" max="20">
                     </div>
-                    <div>
+                    <div style="display:flex;flex-direction:column;gap:0.6rem">
+                        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:1.6rem">
+                            <input type="checkbox" id="ci-enabled" name="ciEnabled" value="true" checked
+                                   style="width:auto;accent-color:var(--amber)"
+                                   onchange="document.getElementById('ci-timeout-group').style.display = this.checked ? '' : 'none'">
+                            <label for="ci-enabled" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">CI / GitHub Actions enabled</label>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:0.5rem">
+                            <input type="checkbox" id="auto-merge" name="autoMerge" value="true"
+                                   style="width:auto;accent-color:var(--amber)">
+                            <label for="auto-merge" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Auto-merge PRs (squash)</label>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:0.5rem">
+                            <input type="checkbox" id="security-review" name="securityReviewEnabled" value="true"
+                                   style="width:auto;accent-color:var(--amber)">
+                            <label for="security-review" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Security review (OWASP)</label>
+                        </div>
+                    </div>
+                    <div id="ci-timeout-group">
                         <label for="ci-timeout">CI Timeout (min)</label>
                         <input type="number" id="ci-timeout" name="ciTimeoutMinutes" value="15" min="1" max="60">
+                    </div>
+                    <div>
+                        <label for="max-review-iterations">Max Review Iterations</label>
+                        <input type="number" id="max-review-iterations" name="maxReviewIterations" value="2" min="1" max="10">
                     </div>
                     <div class="full-width">
                         <label for="allowed-paths">Allowed Paths (comma-separated)</label>
@@ -68,7 +90,9 @@
                 <th>Branch</th>
                 <th>Mode</th>
                 <th>Max Iter.</th>
-                <th>CI Timeout</th>
+                <th>CI</th>
+                <th>Review</th>
+                <th>Merge</th>
                 <th>Issues</th>
                 <th>Actions</th>
             </tr>
@@ -83,7 +107,18 @@
                     <span class="status" th:classappend="${repo.mode.name() == 'AUTONOMOUS' ? 'status-completed' : 'status-awaiting_approval'}" th:text="${repo.mode}">AUTONOMOUS</span>
                 </td>
                 <td th:text="${repo.maxIterations}">5</td>
-                <td th:text="${repo.ciTimeoutMinutes + ' min'}">15 min</td>
+                <td>
+                    <span th:if="${repo.ciEnabled}" class="status status-completed">ON</span>
+                    <span th:unless="${repo.ciEnabled}" class="status status-pending">OFF</span>
+                </td>
+                <td>
+                    <span th:if="${repo.securityReviewEnabled}" class="status status-awaiting_approval" title="Security review enabled">SEC</span>
+                    <span th:text="${repo.maxReviewIterations}" class="text-sm text-muted" th:title="'Max ' + ${repo.maxReviewIterations} + ' review iterations'"></span>
+                </td>
+                <td>
+                    <span th:if="${repo.autoMerge}" class="status status-completed">AUTO</span>
+                    <span th:unless="${repo.autoMerge}" class="status status-pending">MANUAL</span>
+                </td>
                 <td th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
                 <td>
                     <button class="btn btn-danger btn-sm"
@@ -93,7 +128,7 @@
                 </td>
             </tr>
             <tr th:if="${#lists.isEmpty(repos)}">
-                <td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
+                <td colspan="9" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
             </tr>
         </tbody>
     </table>

@@ -4,6 +4,10 @@
 <div th:fragment="content">
     <div class="page-header">
         <h2>Issue Queue</h2>
+        <button class="btn btn-outline btn-sm"
+                hx-get="/issues/table"
+                hx-target="#issue-table-body"
+                hx-swap="innerHTML">Refresh</button>
     </div>
 
     <div class="filter-bar">
@@ -17,7 +21,7 @@
         </select>
     </div>
 
-    <div hx-ext="sse" th:attr="sse-connect='/api/events/stream'" sse-swap="issue-update" hx-target="#issue-table-body" hx-swap="innerHTML">
+    <div hx-ext="sse" sse-connect="/api/events/stream">
         <table class="data-table">
             <thead>
                 <tr>
@@ -25,33 +29,43 @@
                     <th>#</th>
                     <th>Title</th>
                     <th>Status</th>
+                    <th>Phase</th>
                     <th>Iteration</th>
-                    <th>Branch</th>
                     <th>Updated</th>
                 </tr>
             </thead>
-            <tbody id="issue-table-body">
-                <tr th:each="issue : ${issues}"
-                    style="cursor:pointer"
-                    th:attr="hx-get='/issues/' + ${issue.id}"
-                    hx-target="#content"
-                    hx-push-url="true">
-                    <td th:text="${issue.repo.fullName()}">owner/repo</td>
-                    <td th:text="${'#' + issue.issueNumber}">#1</td>
-                    <td th:text="${issue.issueTitle}">Issue title</td>
-                    <td>
-                        <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">PENDING</span>
-                    </td>
-                    <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
-                    <td class="text-sm text-muted" th:text="${issue.branchName != null ? issue.branchName : '—'}">—</td>
-                    <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
-                </tr>
-                <tr th:if="${#lists.isEmpty(issues)}">
-                    <td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
-                </tr>
+            <tbody id="issue-table-body"
+                   hx-ext="morph"
+                   hx-get="/issues/table"
+                   hx-trigger="sse:issue-update"
+                   hx-swap="morph:innerHTML"
+                   hx-on::after-swap="htmx.process(this)">
+                <tr th:replace="~{issues :: table-rows}"></tr>
             </tbody>
         </table>
     </div>
 </div>
+
+<!-- Fragment: just the table rows, returned by /issues/table -->
+<th:block th:fragment="table-rows">
+    <tr th:each="issue : ${issues}"
+        style="cursor:pointer"
+        th:attr="hx-get='/issues/' + ${issue.id}"
+        hx-target="#content"
+        hx-push-url="true">
+        <td th:text="${issue.repo.fullName()}">owner/repo</td>
+        <td th:text="${'#' + issue.issueNumber}">#1</td>
+        <td th:text="${issue.issueTitle}">Issue title</td>
+        <td>
+            <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">PENDING</span>
+        </td>
+        <td class="text-sm" th:text="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null ? 'Waiting on #' + issue.blockedByIssues.replace(',', ', #') : (issue.currentPhase != null ? issue.currentPhase : '—')}">—</td>
+        <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
+        <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
+    </tr>
+    <tr th:if="${#lists.isEmpty(issues)}">
+        <td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
+    </tr>
+</th:block>
 </body>
 </html>

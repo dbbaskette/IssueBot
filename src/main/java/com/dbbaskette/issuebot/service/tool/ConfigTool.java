@@ -4,8 +4,6 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.tool.annotation.Tool;
-import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -24,10 +22,9 @@ public class ConfigTool {
         this.objectMapper = objectMapper;
     }
 
-    @Tool(description = "Get configuration for a specific watched repository including mode, max iterations, and allowed paths")
     public String getRepoConfig(
-            @ToolParam(description = "Repository owner") String owner,
-            @ToolParam(description = "Repository name") String name) {
+            String owner,
+            String name) {
         try {
             for (IssueBotProperties.RepositoryConfig repo : properties.getRepositories()) {
                 if (repo.getOwner().equals(owner) && repo.getName().equals(name)) {
@@ -49,7 +46,6 @@ public class ConfigTool {
         }
     }
 
-    @Tool(description = "Get global IssueBot configuration including poll interval, Claude Code settings, and notification preferences")
     public String getGlobalConfig() {
         try {
             Map<String, Object> config = new LinkedHashMap<>();
