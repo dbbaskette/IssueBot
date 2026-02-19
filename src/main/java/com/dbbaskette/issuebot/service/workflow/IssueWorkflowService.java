@@ -434,6 +434,11 @@ public class IssueWorkflowService {
         try {
             gitHubApi.markPrReady(repo.getOwner(), repo.getName(), prNumber);
             log.info("Marked PR #{} as ready for review", prNumber);
+            // Brief pause to let GitHub process the draft→ready state change
+            // before attempting merge (GitHub API returns 405 if PR is still draft)
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         } catch (Exception e) {
             log.warn("Failed to mark PR #{} as ready: {}", prNumber, e.getMessage());
         }
@@ -456,22 +461,34 @@ public class IssueWorkflowService {
         // Auto-merge if enabled and not approval-gated
         boolean merged = false;
         if (repo.isAutoMerge() && !isApprovalGated) {
-            try {
-                String prTitle = "IssueBot: " + trackedIssue.getIssueTitle()
-                        + " (#" + trackedIssue.getIssueNumber() + ") (#" + prNumber + ")";
-                gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
-                        prNumber, prTitle, "squash");
-                merged = true;
-                eventService.log("PR_AUTO_MERGED",
-                        "Auto-merged PR #" + prNumber, repo, trackedIssue);
-                log.info("Auto-merged PR #{} for {} #{}", prNumber, repo.fullName(),
-                        trackedIssue.getIssueNumber());
-            } catch (Exception e) {
-                log.warn("Auto-merge failed for PR #{}: {} — PR remains open",
-                        prNumber, e.getMessage());
-                eventService.log("AUTO_MERGE_FAILED",
-                        "Auto-merge failed for PR #" + prNumber + ": " + e.getMessage(),
-                        repo, trackedIssue);
+            String prTitle = "IssueBot: " + trackedIssue.getIssueTitle()
+                    + " (#" + trackedIssue.getIssueNumber() + ") (#" + prNumber + ")";
+            // Retry once if merge fails (e.g. 405 while GitHub processes draft→ready)
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
+                            prNumber, prTitle, "squash");
+                    merged = true;
+                    eventService.log("PR_AUTO_MERGED",
+                            "Auto-merged PR #" + prNumber, repo, trackedIssue);
+                    log.info("Auto-merged PR #{} for {} #{}", prNumber, repo.fullName(),
+                            trackedIssue.getIssueNumber());
+                    break;
+                } catch (Exception e) {
+                    if (attempt == 1) {
+                        log.warn("Auto-merge attempt 1 failed for PR #{}: {} — retrying in 5s",
+                                prNumber, e.getMessage());
+                        try { Thread.sleep(5000); } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt(); break;
+                        }
+                    } else {
+                        log.warn("Auto-merge failed for PR #{}: {} — PR remains open",
+                                prNumber, e.getMessage());
+                        eventService.log("AUTO_MERGE_FAILED",
+                                "Auto-merge failed for PR #" + prNumber + ": " + e.getMessage(),
+                                repo, trackedIssue);
+                    }
+                }
             }
         }
 

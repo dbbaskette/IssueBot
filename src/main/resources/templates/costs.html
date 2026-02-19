@@ -73,7 +73,7 @@
                     <tr th:each="ib : ${issueBreakdowns}">
                         <td th:text="${ib.repoName()}">owner/repo</td>
                         <td>
-                            <a th:href="@{/issues/{id}(id=${ib.issueNumber()})}"
+                            <a th:href="@{/issues/{id}(id=${ib.id()})}"
                                th:text="'#' + ${ib.issueNumber()} + ' ' + ${ib.title()}">
                                 #1 Title
                             </a>

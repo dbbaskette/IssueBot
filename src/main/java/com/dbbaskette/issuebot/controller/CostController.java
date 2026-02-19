@@ -72,6 +72,7 @@ public class CostController {
         for (TrackedIssue issue : recentIssues) {
             BigDecimal issueCost = costRepository.totalCostForIssue(issue);
             issueBreakdowns.add(new IssueBreakdown(
+                    issue.getId(),
                     issue.getRepo().fullName(),
                     issue.getIssueNumber(),
                     issue.getIssueTitle(),
@@ -85,5 +86,5 @@ public class CostController {
     }
 
     public record RepoBreakdown(String repoName, BigDecimal totalCost, long issueCount, BigDecimal avgCostPerIssue) {}
-    public record IssueBreakdown(String repoName, int issueNumber, String title, String status, int iterations, BigDecimal cost) {}
+    public record IssueBreakdown(Long id, String repoName, int issueNumber, String title, String status, int iterations, BigDecimal cost) {}
 }
