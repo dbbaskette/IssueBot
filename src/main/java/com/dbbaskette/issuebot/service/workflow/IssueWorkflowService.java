@@ -350,14 +350,8 @@ public class IssueWorkflowService {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_CI_VERIFICATION", "Starting CI verification", repo, trackedIssue);
 
-        // Commit and push
-        try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
-            gitOps.commit(git, "IssueBot: implement #" + trackedIssue.getIssueNumber()
-                    + " (iteration " + trackedIssue.getCurrentIteration() + ")");
-            gitOps.push(git, branchName);
-        }
+        commitAndPush(trackedIssue, branchName);
 
-        // Poll CI checks
         boolean passed = gitHubApi.waitForChecks(repo.getOwner(), repo.getName(),
                 branchName, repo.getCiTimeoutMinutes());
 
@@ -370,13 +364,18 @@ public class IssueWorkflowService {
      * Phase 3 (CI disabled) — Commit and push without polling CI checks.
      */
     boolean phaseCommitAndPush(TrackedIssue trackedIssue, String branchName) throws Exception {
+        commitAndPush(trackedIssue, branchName);
+        return true;
+    }
+
+    private void commitAndPush(TrackedIssue trackedIssue, String branchName) throws Exception {
         WatchedRepo repo = trackedIssue.getRepo();
+        String message = "IssueBot: implement #" + trackedIssue.getIssueNumber()
+                + " (iteration " + trackedIssue.getCurrentIteration() + ")";
         try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
-            gitOps.commit(git, "IssueBot: implement #" + trackedIssue.getIssueNumber()
-                    + " (iteration " + trackedIssue.getCurrentIteration() + ")");
+            gitOps.commit(git, message);
             gitOps.push(git, branchName);
         }
-        return true;
     }
 
     /**
@@ -590,20 +589,23 @@ public class IssueWorkflowService {
      * Format the review result into a markdown summary for the PR review body.
      */
     private String formatReviewSummary(CodeReviewResult r) {
+        String model = r.modelUsed() != null ? r.modelUsed() : "Sonnet";
+        String verdict = r.passed() ? "**PASSED**" : "**CHANGES REQUESTED**";
+
         StringBuilder sb = new StringBuilder();
-        sb.append("## IssueBot Independent Review (").append(r.modelUsed() != null ? r.modelUsed() : "Sonnet").append(")\n\n");
-        sb.append(r.passed() ? "**PASSED**" : "**CHANGES REQUESTED**").append("\n\n");
+        sb.append("## IssueBot Independent Review (").append(model).append(")\n\n");
+        sb.append(verdict).append("\n\n");
         sb.append(r.summary()).append("\n\n");
 
         sb.append("| Dimension | Score |\n|---|---|\n");
-        sb.append("| Spec Compliance | ").append(formatScore(r.specComplianceScore())).append(" |\n");
-        sb.append("| Correctness | ").append(formatScore(r.correctnessScore())).append(" |\n");
-        sb.append("| Code Quality | ").append(formatScore(r.codeQualityScore())).append(" |\n");
-        sb.append("| Test Coverage | ").append(formatScore(r.testCoverageScore())).append(" |\n");
-        sb.append("| Architecture Fit | ").append(formatScore(r.architectureFitScore())).append(" |\n");
-        sb.append("| Regressions | ").append(formatScore(r.regressionsScore())).append(" |\n");
+        appendScoreRow(sb, "Spec Compliance", r.specComplianceScore());
+        appendScoreRow(sb, "Correctness", r.correctnessScore());
+        appendScoreRow(sb, "Code Quality", r.codeQualityScore());
+        appendScoreRow(sb, "Test Coverage", r.testCoverageScore());
+        appendScoreRow(sb, "Architecture Fit", r.architectureFitScore());
+        appendScoreRow(sb, "Regressions", r.regressionsScore());
         if (r.securityScore() < 1.0) {
-            sb.append("| Security | ").append(formatScore(r.securityScore())).append(" |\n");
+            appendScoreRow(sb, "Security", r.securityScore());
         }
 
         if (r.advice() != null && !r.advice().isBlank()) {
@@ -614,12 +616,24 @@ public class IssueWorkflowService {
         return sb.toString();
     }
 
+    private void appendScoreRow(StringBuilder sb, String dimension, double score) {
+        sb.append("| ").append(dimension).append(" | ").append(formatScore(score)).append(" |\n");
+    }
+
     private String formatScore(double score) {
-        String bar;
-        if (score >= 0.9) bar = "🟢";
-        else if (score >= 0.7) bar = "🟡";
-        else bar = "🔴";
-        return bar + " " + String.format("%.0f%%", score * 100);
+        String indicator;
+        if (score >= 0.9) {
+            indicator = "🟢";
+        } else if (score >= 0.7) {
+            indicator = "🟡";
+        } else {
+            indicator = "🔴";
+        }
+        return indicator + " " + formatPercent(score);
+    }
+
+    private String formatPercent(double score) {
+        return String.format("%.0f%%", score * 100);
     }
 
     /**
@@ -631,14 +645,14 @@ public class IssueWorkflowService {
         fb.append("**Overall:** ").append(review.summary()).append("\n\n");
 
         fb.append("**Scores:** ");
-        fb.append("spec=").append(String.format("%.0f%%", review.specComplianceScore() * 100));
-        fb.append(", correctness=").append(String.format("%.0f%%", review.correctnessScore() * 100));
-        fb.append(", quality=").append(String.format("%.0f%%", review.codeQualityScore() * 100));
-        fb.append(", tests=").append(String.format("%.0f%%", review.testCoverageScore() * 100));
-        fb.append(", architecture=").append(String.format("%.0f%%", review.architectureFitScore() * 100));
-        fb.append(", regressions=").append(String.format("%.0f%%", review.regressionsScore() * 100));
+        fb.append("spec=").append(formatPercent(review.specComplianceScore()));
+        fb.append(", correctness=").append(formatPercent(review.correctnessScore()));
+        fb.append(", quality=").append(formatPercent(review.codeQualityScore()));
+        fb.append(", tests=").append(formatPercent(review.testCoverageScore()));
+        fb.append(", architecture=").append(formatPercent(review.architectureFitScore()));
+        fb.append(", regressions=").append(formatPercent(review.regressionsScore()));
         if (review.securityScore() < 1.0) {
-            fb.append(", security=").append(String.format("%.0f%%", review.securityScore() * 100));
+            fb.append(", security=").append(formatPercent(review.securityScore()));
         }
         fb.append("\n\n");
 
@@ -856,8 +870,8 @@ public class IssueWorkflowService {
                     text = "[stderr] " + node.path("text").asText("");
                 }
                 default -> {
-                    // Show unknown types so we can diagnose
-                    text = "[" + type + "] " + node.toString().substring(0, Math.min(200, node.toString().length()));
+                    String raw = node.toString();
+                    text = "[" + type + "] " + raw.substring(0, Math.min(200, raw.length()));
                 }
             }
 

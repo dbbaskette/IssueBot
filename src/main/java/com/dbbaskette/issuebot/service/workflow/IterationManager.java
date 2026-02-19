@@ -57,54 +57,17 @@ public class IterationManager {
 
     /**
      * Handle the case when max iterations have been reached without success.
-     * - Mark issue as FAILED
-     * - Add needs-human label
-     * - Comment on issue with summary
-     * - Send notification
-     * - Enter cooldown
      */
     public void handleMaxIterationsReached(TrackedIssue trackedIssue) {
-        WatchedRepo repo = trackedIssue.getRepo();
-        int issueNumber = trackedIssue.getIssueNumber();
-        int maxIterations = repo.getMaxIterations();
-
-        log.warn("Max iterations ({}) reached for {} #{}", maxIterations,
-                repo.fullName(), issueNumber);
-
-        // Mark as FAILED
-        trackedIssue.setStatus(IssueStatus.FAILED);
-        trackedIssue.setCurrentPhase(null);
-        issueRepository.save(trackedIssue);
-
-        // Add needs-human label
-        try {
-            gitHubApi.addLabels(repo.getOwner(), repo.getName(), issueNumber,
-                    List.of("needs-human"));
-        } catch (Exception e) {
-            log.warn("Failed to add needs-human label to {} #{}: {}",
-                    repo.fullName(), issueNumber, e.getMessage());
-        }
-
-        // Post summary comment
+        int maxIterations = trackedIssue.getRepo().getMaxIterations();
         String comment = buildMaxIterationsComment(trackedIssue, maxIterations);
-        try {
-            gitHubApi.addComment(repo.getOwner(), repo.getName(), issueNumber, comment);
-        } catch (Exception e) {
-            log.warn("Failed to post max-iterations comment to {} #{}: {}",
-                    repo.fullName(), issueNumber, e.getMessage());
-        }
 
-        // Enter cooldown
-        enterCooldown(trackedIssue);
-
-        // Notify
-        notificationService.warn("Max Iterations Reached",
-                repo.fullName() + " #" + issueNumber
-                        + " — Failed after " + maxIterations + " iterations, needs human attention");
-
-        eventService.log("MAX_ITERATIONS_REACHED",
+        escalateFailure(trackedIssue,
+                "Max Iterations Reached",
+                "Failed after " + maxIterations + " iterations, needs human attention",
+                "MAX_ITERATIONS_REACHED",
                 "Failed after " + maxIterations + " iterations, entering cooldown",
-                repo, trackedIssue);
+                comment);
     }
 
     /**
@@ -118,21 +81,35 @@ public class IterationManager {
 
     /**
      * Handle the case when max review iterations have been reached.
-     * Similar to handleMaxIterationsReached but with review-specific messaging.
      */
     public void handleMaxReviewIterationsReached(TrackedIssue trackedIssue) {
+        int maxReviewIterations = trackedIssue.getRepo().getMaxReviewIterations();
+        String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations);
+
+        escalateFailure(trackedIssue,
+                "Review Budget Exhausted",
+                "Independent review could not be satisfied after "
+                        + maxReviewIterations + " iterations, needs human attention",
+                "MAX_REVIEW_ITERATIONS_REACHED",
+                "Review failed after " + maxReviewIterations + " iterations, entering cooldown",
+                comment);
+    }
+
+    /**
+     * Shared escalation logic: mark FAILED, label, comment, cooldown, notify, log.
+     */
+    private void escalateFailure(TrackedIssue trackedIssue, String notificationTitle,
+                                   String notificationDetail, String eventType,
+                                   String eventMessage, String issueComment) {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
-        int maxReviewIterations = repo.getMaxReviewIterations();
 
-        log.warn("Max review iterations ({}) reached for {} #{}", maxReviewIterations,
-                repo.fullName(), issueNumber);
+        log.warn("{} for {} #{}", notificationTitle, repo.fullName(), issueNumber);
 
         trackedIssue.setStatus(IssueStatus.FAILED);
         trackedIssue.setCurrentPhase(null);
         issueRepository.save(trackedIssue);
 
-        // Add needs-human label
         try {
             gitHubApi.addLabels(repo.getOwner(), repo.getName(), issueNumber,
                     List.of("needs-human"));
@@ -141,25 +118,19 @@ public class IterationManager {
                     repo.fullName(), issueNumber, e.getMessage());
         }
 
-        // Post review-specific comment
-        String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations);
         try {
-            gitHubApi.addComment(repo.getOwner(), repo.getName(), issueNumber, comment);
+            gitHubApi.addComment(repo.getOwner(), repo.getName(), issueNumber, issueComment);
         } catch (Exception e) {
-            log.warn("Failed to post max-review-iterations comment to {} #{}: {}",
+            log.warn("Failed to post escalation comment to {} #{}: {}",
                     repo.fullName(), issueNumber, e.getMessage());
         }
 
         enterCooldown(trackedIssue);
 
-        notificationService.warn("Review Budget Exhausted",
-                repo.fullName() + " #" + issueNumber
-                        + " — Independent review could not be satisfied after "
-                        + maxReviewIterations + " iterations, needs human attention");
+        notificationService.warn(notificationTitle,
+                repo.fullName() + " #" + issueNumber + " — " + notificationDetail);
 
-        eventService.log("MAX_REVIEW_ITERATIONS_REACHED",
-                "Review failed after " + maxReviewIterations + " iterations, entering cooldown",
-                repo, trackedIssue);
+        eventService.log(eventType, eventMessage, repo, trackedIssue);
     }
 
     /**

@@ -97,20 +97,20 @@ public class CodeReviewService {
         git.add().addFilepattern(".").call();
         git.add().addFilepattern(".").setUpdate(true).call();
 
-        var reader = repo.newObjectReader();
-        var baseTree = new org.eclipse.jgit.treewalk.CanonicalTreeParser();
-        baseTree.reset(reader, baseId);
-
-        var diffs = git.diff().setOldTree(baseTree).setCached(true).call();
         List<String> files = new ArrayList<>();
-        for (var entry : diffs) {
-            String path = entry.getNewPath();
-            if ("/dev/null".equals(path)) {
-                path = entry.getOldPath();
+        try (var reader = repo.newObjectReader()) {
+            var baseTree = new org.eclipse.jgit.treewalk.CanonicalTreeParser();
+            baseTree.reset(reader, baseId);
+
+            var diffs = git.diff().setOldTree(baseTree).setCached(true).call();
+            for (var entry : diffs) {
+                String path = entry.getNewPath();
+                if ("/dev/null".equals(path)) {
+                    path = entry.getOldPath();
+                }
+                files.add(path);
             }
-            files.add(path);
         }
-        reader.close();
         return files;
     }
 
@@ -143,11 +143,13 @@ public class CodeReviewService {
             JsonNode findingsNode = root.path("findings");
             if (findingsNode.isArray()) {
                 for (JsonNode f : findingsNode) {
+                    Integer line = f.has("line") && !f.path("line").isNull()
+                            ? f.path("line").asInt() : null;
                     findings.add(new CodeReviewResult.ReviewFinding(
                             f.path("severity").asText("medium"),
                             f.path("category").asText(""),
                             f.path("file").asText(""),
-                            f.has("line") && !f.path("line").isNull() ? f.path("line").asInt() : null,
+                            line,
                             f.path("finding").asText(""),
                             f.path("suggestion").asText("")
                     ));
@@ -177,17 +179,10 @@ public class CodeReviewService {
 
     /**
      * Extract JSON object from output that may contain surrounding text.
+     * Tries code-fenced JSON first, then falls back to brace matching.
      */
     private String extractJson(String output) {
         String trimmed = output.trim();
-
-        // Try direct parse first
-        if (trimmed.startsWith("{")) {
-            int lastBrace = trimmed.lastIndexOf('}');
-            if (lastBrace > 0) {
-                return trimmed.substring(0, lastBrace + 1);
-            }
-        }
 
         // Try to find JSON between code fences
         int fenceStart = trimmed.indexOf("```json");

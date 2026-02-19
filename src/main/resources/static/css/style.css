@@ -17,17 +17,17 @@
     --bg-card-hover: #1c1c25;
     --bg-input: #0f0f14;
 
-    /* Borders */
-    --border-dim: rgba(255,255,255,0.04);
-    --border-subtle: rgba(255,255,255,0.07);
-    --border-medium: rgba(255,255,255,0.12);
-    --border-bright: rgba(255,255,255,0.2);
+    /* Borders — slightly elevated for structure */
+    --border-dim: rgba(255,255,255,0.06);
+    --border-subtle: rgba(255,255,255,0.09);
+    --border-medium: rgba(255,255,255,0.15);
+    --border-bright: rgba(255,255,255,0.25);
 
-    /* Text */
-    --text-primary: #e8e8ed;
-    --text-secondary: #8b8b9e;
-    --text-tertiary: #55556a;
-    --text-ghost: #3a3a4d;
+    /* Text — high contrast for readability */
+    --text-primary: #ededf2;
+    --text-secondary: #b0b0c5;
+    --text-tertiary: #8c8ca6;
+    --text-ghost: #656580;
 
     /* Accent: Electric Amber — the "alive" signal */
     --amber: #f59e0b;
@@ -398,9 +398,9 @@ main::before {
 }
 
 .status-pending {
-    background: rgba(107,114,128,0.12);
-    color: #9ca3af;
-    border-color: rgba(107,114,128,0.2);
+    background: rgba(107,114,128,0.15);
+    color: #b0b7c3;
+    border-color: rgba(107,114,128,0.25);
 }
 
 .status-queued {
@@ -727,7 +727,7 @@ select {
    ============================================================ */
 .diff-viewer {
     background: var(--bg-void);
-    color: #a0a0b8;
+    color: #c4c4d8;
     border: 1px solid var(--border-subtle);
     border-radius: 4px;
     padding: 1rem 1.2rem;
@@ -765,7 +765,7 @@ select {
     line-height: 1.6;
     padding: 1rem 1.2rem;
     background: var(--bg-void);
-    color: #a0a0b8;
+    color: #c4c4d8;
     border: 1px solid var(--border-medium);
     border-radius: 4px;
     resize: vertical;
@@ -997,7 +997,7 @@ details summary:hover {
 .code-output {
     white-space: pre-wrap;
     background: var(--bg-void);
-    color: #a0a0b8;
+    color: #c4c4d8;
     padding: 0.75rem 1rem;
     border-radius: 4px;
     border: 1px solid var(--border-subtle);
@@ -1022,7 +1022,7 @@ details summary:hover {
 
 .live-terminal {
     background: #050508;
-    color: #b0b0c0;
+    color: #d0d0de;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     line-height: 1.6;

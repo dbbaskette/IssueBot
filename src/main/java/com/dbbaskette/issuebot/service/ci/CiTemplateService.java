@@ -54,12 +54,26 @@ public class CiTemplateService {
      * Detect the build tool used by a repository.
      */
     public String detectBuildTool(Path repoPath) {
-        if (Files.exists(repoPath.resolve("pom.xml"))) return "maven";
-        if (Files.exists(repoPath.resolve("build.gradle")) || Files.exists(repoPath.resolve("build.gradle.kts"))) return "gradle";
-        if (Files.exists(repoPath.resolve("package.json"))) return "node";
-        if (Files.exists(repoPath.resolve("Cargo.toml"))) return "cargo";
-        if (Files.exists(repoPath.resolve("go.mod"))) return "go";
-        if (Files.exists(repoPath.resolve("requirements.txt")) || Files.exists(repoPath.resolve("pyproject.toml"))) return "python";
+        if (Files.exists(repoPath.resolve("pom.xml"))) {
+            return "maven";
+        }
+        if (Files.exists(repoPath.resolve("build.gradle"))
+                || Files.exists(repoPath.resolve("build.gradle.kts"))) {
+            return "gradle";
+        }
+        if (Files.exists(repoPath.resolve("package.json"))) {
+            return "node";
+        }
+        if (Files.exists(repoPath.resolve("Cargo.toml"))) {
+            return "cargo";
+        }
+        if (Files.exists(repoPath.resolve("go.mod"))) {
+            return "go";
+        }
+        if (Files.exists(repoPath.resolve("requirements.txt"))
+                || Files.exists(repoPath.resolve("pyproject.toml"))) {
+            return "python";
+        }
         return "unknown";
     }
 

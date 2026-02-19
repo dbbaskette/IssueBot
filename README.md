@@ -3,49 +3,64 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Java](https://img.shields.io/badge/java-21-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)
-![Spring AI](https://img.shields.io/badge/Spring%20AI-1.1.2-green.svg)
 
-An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI, and delivers pull requests.
+An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI (Opus), runs independent code review (Sonnet), and delivers pull requests.
 
-## About
+## How It Works
 
-IssueBot is a locally-running, Spring AI-powered agent that automates software development tasks. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured implementation loop: plan, implement, self-assess, verify CI, and create a pull request. Each issue goes through up to N iterations (configurable) with built-in guardrails, cooldown logic, and human escalation when needed.
+IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: **Opus** writes the code, **Sonnet** reviews it independently.
 
 ```mermaid
 flowchart LR
     A[GitHub Issue<br>agent-ready] --> B[IssueBot<br>Polling]
     B --> C[Setup<br>Clone & Branch]
-    C --> D[Implement<br>Claude Code CLI]
-    D --> E[Self-Assess<br>Review Changes]
-    E -->|Pass| F[CI Verify<br>Push & Check]
+    C --> D[Implement<br>Opus]
+    D --> E[CI Verify<br>Push & Check]
     E -->|Fail| D
-    F -->|Pass| G[Create PR]
-    F -->|Fail| D
-    G --> H[Done]
+    E -->|Pass| F[Draft PR]
+    F --> G[Code Review<br>Sonnet]
+    G -->|Fail| D
+    G -->|Pass| H[Finalize PR]
+    H --> I[Done]
 ```
+
+### The 6-Phase Pipeline
+
+| Phase | What Happens | Model |
+|-------|-------------|-------|
+| **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
+| **2. Implementation** | Claude Code CLI writes code based on issue spec | Opus |
+| **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
+| **4. Draft PR** | Create draft pull request on GitHub | - |
+| **5. Independent Review** | Separate model reviews code against spec, posts PR comments | Sonnet |
+| **6. Completion** | Mark PR ready, auto-merge if configured, update labels | - |
+
+If CI or review fails, IssueBot loops back to implementation with enhanced context (failure logs, review findings) and tries again up to the configured max iterations.
 
 ## Key Features
 
-- **Autonomous Issue Resolution** - Detects `agent-ready` issues, implements changes, and opens PRs without human intervention
-- **5-Phase Workflow** - Structured pipeline: Setup, Implementation, Self-Assessment, CI Verification, Completion
-- **Self-Assessment Loop** - Separate Claude Code session reviews changes against requirements before pushing
+- **Dual-Model Architecture** - Opus (implementation) + Sonnet (independent review) for checks and balances
+- **6-Phase Workflow** - Setup, Implementation, CI Verification, Draft PR, Independent Review, Completion
+- **Independent Code Review** - Sonnet evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
+- **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration
-- **Iteration Guardrails** - Configurable max iterations per repo, automatic cooldown, and `needs-human` escalation
+- **Security Review** - Optional OWASP-focused security analysis per repository (injection, auth, data exposure, access control)
+- **Iteration Guardrails** - Separate budgets for implementation iterations and review iterations, automatic cooldown, `needs-human` escalation
+- **Issue Dependency Resolution** - Parses `**Blocked by:** #N` in issue bodies and processes issues in dependency order
+- **CI Template Generation** - Auto-generates GitHub Actions workflows (Maven, Gradle, Node, Go) for repos without CI
 - **Dual Mode** - Fully autonomous or approval-gated (draft PRs with human review)
-- **Spring AI Tool Integration** - All external capabilities (GitHub, Git, Claude Code, CI, notifications) exposed as Spring AI tools
-- **Cost Tracking** - Per-iteration token usage and estimated cost recorded in the database
-- **Desktop Notifications** - OS-level notifications via SystemTray with graceful fallback
+- **Web Dashboard** - Real-time monitoring with live terminal streaming, phase pipeline, iteration history, review scores
+- **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns
 - **Local-First** - Runs on your machine with an embedded H2 database; no external infrastructure required
 
 ## Built With
 
 - [Spring Boot 3.4.2](https://spring.io/projects/spring-boot) - Application framework
-- [Spring AI 1.1.2](https://docs.spring.io/spring-ai/reference/) - AI/LLM integration with Anthropic
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) - Headless code generation
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) - Headless code generation and review
 - [JGit 7.1.0](https://www.eclipse.org/jgit/) - Git operations in Java
+- [Thymeleaf](https://www.thymeleaf.org/) + [HTMX](https://htmx.org/) - Dashboard with SSE live updates
 - [H2 Database](https://www.h2database.com/) - Embedded SQL database
 - [Flyway](https://flywaydb.org/) - Database migrations
-- [Thymeleaf](https://www.thymeleaf.org/) - Server-side templates (dashboard, Phase 3)
 
 ## Getting Started
 
@@ -54,7 +69,7 @@ flowchart LR
 - **Java 21+** - [Download](https://adoptium.net/)
 - **Claude Code CLI** - [Install guide](https://docs.anthropic.com/en/docs/claude-code)
 - **GitHub Personal Access Token** - With `repo` scope for the repositories you want IssueBot to manage
-- **Anthropic API Key** - For the Spring AI orchestration agent
+- **Anthropic API Key** - Set as `ANTHROPIC_API_KEY` for Claude Code CLI
 
 ### Installation
 
@@ -72,29 +87,43 @@ export GITHUB_TOKEN=ghp_your_token_here
 export ANTHROPIC_API_KEY=sk-ant-your_key_here
 ```
 
-3. Build the project
+3. Run IssueBot
+
+```bash
+./run.sh
+```
+
+This builds the project, kills any existing instance, and starts IssueBot on port **8090**.
+
+Alternatively, build and run manually:
 
 ```bash
 ./mvnw clean package -DskipTests
+java -jar target/issuebot-0.1.0-SNAPSHOT.jar
 ```
 
-4. Run IssueBot
+4. Open the dashboard at [http://localhost:8090](http://localhost:8090)
+
+### Fresh Start
+
+To wipe the database and all cloned repos:
 
 ```bash
-./mvnw spring-boot:run
-```
-
-IssueBot starts on port **8090**. Verify with:
-
-```bash
-curl http://localhost:8090/actuator/health
+./run.sh --cleanup
 ```
 
 ## Usage
 
+### Quick Start
+
+1. Open the dashboard at `http://localhost:8090`
+2. Navigate to **Repositories** and add a GitHub repository
+3. Label a GitHub issue with `agent-ready`
+4. IssueBot picks it up on the next poll cycle (default: 60s) and starts the 6-phase workflow
+
 ### Configuration
 
-On first run, IssueBot creates `~/.issuebot/config.yml`. Edit it to add your repositories:
+IssueBot can be configured via the dashboard UI or by editing `~/.issuebot/config.yml`:
 
 ```yaml
 issuebot:
@@ -102,9 +131,12 @@ issuebot:
   max-concurrent-issues: 3
 
   claude-code:
+    implementation-model: claude-opus-4-6
+    review-model: claude-sonnet-4-6
     max-turns-per-invocation: 30
-    model: claude-sonnet-4-5-20250929
     timeout-minutes: 10
+    review-max-turns: 15
+    review-timeout-minutes: 5
 
   github:
     token: ${GITHUB_TOKEN}
@@ -113,75 +145,128 @@ issuebot:
     - owner: my-org
       name: my-app
       branch: main
-      mode: autonomous        # or 'approval-gated'
+      mode: autonomous
       max-iterations: 5
+      max-review-iterations: 2
+      security-review-enabled: false
+      ci-enabled: true
       ci-timeout-minutes: 15
+      auto-merge: false
       allowed-paths:
         - src/
         - test/
 ```
 
-### How It Works
+### Repository Settings
 
-1. **Label an issue** `agent-ready` on any watched repository
-2. **IssueBot detects it** on the next poll cycle (default: 60s)
-3. **Clones the repo**, creates a branch `issuebot/issue-{number}-{slug}`
-4. **Invokes Claude Code CLI** with a structured prompt based on the issue
-5. **Self-assesses** the changes in a separate session
-6. **Pushes and waits for CI** to pass
-7. **Creates a pull request** (or draft PR in approval-gated mode)
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `mode` | `autonomous` | `autonomous` (auto-merge) or `approval-gated` (draft PR, human review) |
+| `max-iterations` | `5` | Max implementation attempts before escalating |
+| `max-review-iterations` | `2` | Max review cycles before escalating |
+| `security-review-enabled` | `false` | Enable OWASP security analysis in code review |
+| `ci-enabled` | `true` | Push and poll GitHub Actions after implementation |
+| `ci-timeout-minutes` | `15` | How long to wait for CI checks |
+| `auto-merge` | `false` | Auto-merge PRs via squash after review passes |
 
-If self-assessment or CI fails, IssueBot loops back with enhanced context (previous diff, failure logs) and tries again up to the configured max iterations.
+### Issue Dependencies
 
-### Modes
+IssueBot respects dependency chains. Add this line to an issue body:
 
-| Mode | Behavior |
-|------|----------|
-| `autonomous` | Creates PR directly, comments on issue, removes `agent-ready` label |
-| `approval-gated` | Creates draft PR, sends notification, waits for human approval |
+```
+**Blocked by:** #5, #12
+```
+
+IssueBot will wait until issues #5 and #12 are completed before processing the blocked issue.
+
+### Dashboard
+
+The web dashboard at `http://localhost:8090` provides:
+
+- **Dashboard** - Overview metrics: active issues, completion rate, total cost
+- **Issues** - Queue with status filters, click into any issue for detail view
+- **Issue Detail** - Live terminal streaming, phase pipeline, iteration history with diffs, review scores
+- **Repositories** - Add/configure repos with review and CI settings
+- **Costs** - Per-issue and per-repo cost breakdowns
 
 ### Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
+| `http://localhost:8090` | Web dashboard |
 | `GET /actuator/health` | Health check |
 | `GET /actuator/metrics` | Application metrics |
-| `GET /h2-console` | H2 database console (dev) |
+| `GET /h2-console` | H2 database console |
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Spring AI orchestration |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude Code CLI |
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph IssueBot
+        Polling[Issue Polling Service]
+        Workflow[Workflow Engine]
+        Claude[Claude Code Service]
+        Review[Code Review Service]
+        GitOps[Git Operations]
+        GitHub[GitHub API Client]
+        CI[CI Template Service]
+        DB[(H2 Database)]
+        Dashboard[Thymeleaf Dashboard]
+    end
+
+    GH[GitHub API] --> Polling
+    Polling --> Workflow
+    Workflow --> Claude
+    Workflow --> Review
+    Workflow --> GitOps
+    Workflow --> GitHub
+    Workflow --> CI
+    Claude -->|Opus| CLI[Claude Code CLI]
+    Review -->|Sonnet| CLI
+    GitHub --> GH
+    Workflow --> DB
+    Dashboard --> DB
+    Dashboard -->|SSE| Browser[Browser]
+```
 
 ## Project Structure
 
 ```
 src/main/java/com/dbbaskette/issuebot/
-├── config/              # Configuration properties, async, WebClient
+├── config/              # Configuration properties, async, WebClient, HTMX
+├── controller/          # Dashboard controllers (issues, repos, costs, approvals)
 ├── model/               # JPA entities (WatchedRepo, TrackedIssue, Iteration, Event, CostTracking)
 ├── repository/          # Spring Data JPA repositories
+├── security/            # Security configuration
 ├── service/
-│   ├── claude/          # Claude Code CLI wrapper and stream-json parser
-│   ├── event/           # Event logging service
-│   ├── git/             # JGit operations (clone, branch, diff, push)
-│   ├── github/          # GitHub API client (issues, PRs, CI checks)
-│   ├── notification/    # Desktop and dashboard notifications
-│   ├── orchestration/   # Spring AI ChatClient orchestration agent
-│   ├── polling/         # Scheduled issue detection and qualification
-│   ├── tool/            # Spring AI tool definitions (7 tool classes)
-│   └── workflow/        # 5-phase workflow engine and iteration manager
+│   ├── ci/             # CI workflow template generation (Maven, Gradle, Node, Go)
+│   ├── claude/         # Claude Code CLI wrapper, stream-json parser, dual-model support
+│   ├── dependency/     # Issue dependency resolution (Blocked by #N parsing)
+│   ├── event/          # Event logging and SSE broadcasting
+│   ├── git/            # JGit operations (clone, branch, diff, commit, push)
+│   ├── github/         # GitHub API client (issues, PRs, CI checks, PR reviews)
+│   ├── notification/   # Desktop and dashboard notifications
+│   ├── orchestration/  # Spring AI ChatClient orchestration agent
+│   ├── polling/        # Scheduled issue detection and qualification
+│   ├── review/         # Independent code review (prompt builder, result parser)
+│   ├── tool/           # Spring AI tool definitions
+│   └── workflow/       # 6-phase workflow engine and iteration manager
 ├── validation/          # Startup validation (CLI, auth, token checks)
 └── IssueBotApplication.java
+
+src/main/resources/
+├── db/migration/        # Flyway migrations (V1-V6)
+├── static/css/          # Dashboard styles
+├── templates/           # Thymeleaf templates (dashboard, issues, repos, costs)
+└── application.yml      # Default configuration
 ```
-
-## Roadmap
-
-- [x] **Phase 1: Foundation** - Spring Boot scaffolding, database, config, GitHub/Git/Claude services
-- [x] **Phase 2: Core Agent Loop** - MCP tools, polling, orchestration, 5-phase workflow, iteration guardrails
-- [ ] **Phase 3: User Interface** - Thymeleaf + HTMX dashboard, issue queue, approval workflow UI
-- [ ] **Phase 4: Polish & Hardening** - Observability, error handling, cost reporting, integration tests
 
 ## Contributing
 

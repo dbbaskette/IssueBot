@@ -9,6 +9,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.util.retry.Retry;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -140,7 +141,7 @@ public class GitHubApiClient {
     public JsonNode mergePullRequest(String owner, String repo, int prNumber,
                                       String commitTitle, String mergeMethod) {
         log.info("Merging PR #{} in {}/{} via {}", prNumber, owner, repo, mergeMethod);
-        Map<String, Object> payload = new java.util.HashMap<>();
+        Map<String, Object> payload = new HashMap<>();
         payload.put("merge_method", mergeMethod);
         if (commitTitle != null) {
             payload.put("commit_title", commitTitle);
@@ -171,20 +172,12 @@ public class GitHubApiClient {
                                          List<ReviewComment> comments) {
         log.info("Creating PR review on {}/{} #{} — event={}, comments={}",
                 owner, repo, prNumber, event, comments.size());
-        Map<String, Object> payload = new java.util.HashMap<>();
+        Map<String, Object> payload = new HashMap<>();
         payload.put("body", body);
         payload.put("event", event);
         if (comments != null && !comments.isEmpty()) {
             payload.put("comments", comments.stream()
-                    .map(c -> {
-                        Map<String, Object> m = new java.util.HashMap<>();
-                        m.put("path", c.path());
-                        m.put("body", c.body());
-                        if (c.line() != null) {
-                            m.put("line", c.line());
-                        }
-                        return m;
-                    })
+                    .map(this::toCommentMap)
                     .toList());
         }
         webClient.post()
@@ -217,6 +210,16 @@ public class GitHubApiClient {
      * A single inline comment on a PR review.
      */
     public record ReviewComment(String path, Integer line, String body) {}
+
+    private Map<String, Object> toCommentMap(ReviewComment c) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("path", c.path());
+        m.put("body", c.body());
+        if (c.line() != null) {
+            m.put("line", c.line());
+        }
+        return m;
+    }
 
     /**
      * Mark a draft PR as ready for review.
