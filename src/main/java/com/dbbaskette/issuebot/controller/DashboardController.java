@@ -48,9 +48,7 @@ public class DashboardController {
         model.addAttribute("blocked", issueRepository.countByStatus(IssueStatus.BLOCKED));
         model.addAttribute("repoCount", repoRepository.count());
 
-        BigDecimal totalCost = costRepository.findAll().stream()
-                .map(c -> c.getEstimatedCost())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalCost = costRepository.totalCost();
         model.addAttribute("totalCost", totalCost);
 
         model.addAttribute("events", eventService.getRecentEvents(15));

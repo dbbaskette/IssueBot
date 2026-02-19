@@ -109,7 +109,7 @@ public class TrackedIssue {
         }
         return Arrays.stream(blockedByIssues.split(","))
                 .map(String::trim)
-                .filter(s -> !s.isEmpty())
+                .filter(s -> !s.isEmpty() && s.chars().allMatch(Character::isDigit))
                 .map(Integer::parseInt)
                 .toList();
     }

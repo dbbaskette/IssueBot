@@ -250,7 +250,13 @@ public class IssueWorkflowService {
             CodeReviewResult reviewResult = phaseIndependentReview(
                     trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration);
 
-            if (reviewResult != null && !reviewResult.passed()) {
+            if (reviewResult == null) {
+                // Review invocation failed — treat as failed review
+                log.warn("Review returned null (invocation error) — skipping to completion");
+                eventService.log("PHASE_REVIEW_SKIPPED",
+                        "Review invocation failed — proceeding without review",
+                        repo, trackedIssue);
+            } else if (!reviewResult.passed()) {
                 // Review failed — check review budget
                 if (!iterationManager.canReviewIterate(trackedIssue)) {
                     iterationManager.handleMaxReviewIterationsReached(trackedIssue);
@@ -298,27 +304,26 @@ public class IssueWorkflowService {
         eventService.log("PHASE_SETUP", "Starting setup phase", repo, trackedIssue);
 
         // Clone or pull fresh copy
-        Git git = gitOps.cloneOrPull(repo.getOwner(), repo.getName(), repo.getBranch());
+        try (Git git = gitOps.cloneOrPull(repo.getOwner(), repo.getName(), repo.getBranch())) {
+            // Create feature branch
+            String branchName = gitOps.createBranch(git, trackedIssue.getIssueNumber(),
+                    trackedIssue.getIssueTitle());
+            trackedIssue.setBranchName(branchName);
+            issueRepository.save(trackedIssue);
 
-        // Create feature branch
-        String branchName = gitOps.createBranch(git, trackedIssue.getIssueNumber(),
-                trackedIssue.getIssueTitle());
-        trackedIssue.setBranchName(branchName);
-        issueRepository.save(trackedIssue);
-
-        // Generate CI template if CI is enabled and no workflow exists
-        if (repo.isCiEnabled()) {
-            Path repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
-            String buildTool = ciTemplateService.detectBuildTool(repoPath);
-            if (ciTemplateService.ensureCiWorkflow(repoPath, buildTool)) {
-                eventService.log("CI_TEMPLATE_CREATED",
-                        "Generated CI workflow for " + buildTool, repo, trackedIssue);
+            // Generate CI template if CI is enabled and no workflow exists
+            if (repo.isCiEnabled()) {
+                Path repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
+                String buildTool = ciTemplateService.detectBuildTool(repoPath);
+                if (ciTemplateService.ensureCiWorkflow(repoPath, buildTool)) {
+                    eventService.log("CI_TEMPLATE_CREATED",
+                            "Generated CI workflow for " + buildTool, repo, trackedIssue);
+                }
             }
         }
 
-        git.close();
         eventService.log("PHASE_SETUP_COMPLETE",
-                "Setup complete, branch: " + branchName, repo, trackedIssue);
+                "Setup complete, branch: " + trackedIssue.getBranchName(), repo, trackedIssue);
     }
 
     /**

@@ -11,6 +11,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +83,14 @@ public class RepositoryController {
         repo.setSecurityReviewEnabled(securityReviewEnabled);
         repo.setMaxReviewIterations(maxReviewIterations);
         if (allowedPaths != null && !allowedPaths.isBlank()) {
-            repo.setAllowedPaths("[\"" + String.join("\",\"", allowedPaths.split("\\s*,\\s*")) + "\"]");
+            try {
+                List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))
+                        .filter(s -> !s.isBlank())
+                        .toList();
+                repo.setAllowedPaths(new ObjectMapper().writeValueAsString(paths));
+            } catch (JsonProcessingException e) {
+                repo.setAllowedPaths("[]");
+            }
         }
 
         repoRepository.save(repo);
@@ -109,9 +120,7 @@ public class RepositoryController {
         List<WatchedRepo> repos = repoRepository.findAll();
         Map<Long, Long> issueCounts = new HashMap<>();
         for (WatchedRepo repo : repos) {
-            long count = issueRepository.findByRepo(repo).stream()
-                    .filter(i -> i.getStatus() != IssueStatus.COMPLETED)
-                    .count();
+            long count = issueRepository.countByRepoAndStatusNot(repo, IssueStatus.COMPLETED);
             issueCounts.put(repo.getId(), count);
         }
 

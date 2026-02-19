@@ -160,6 +160,7 @@ public class GitHubApiClient {
                 .uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, prNumber)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
+                .retryWhen(retryOnServerError())
                 .block(Duration.ofSeconds(15));
     }
 
@@ -311,6 +312,7 @@ public class GitHubApiClient {
                 .uri("/repos/{owner}/{repo}", owner, repo)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
+                .retryWhen(retryOnServerError())
                 .block(Duration.ofSeconds(15));
     }
 

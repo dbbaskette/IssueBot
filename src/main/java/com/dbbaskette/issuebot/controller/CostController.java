@@ -42,9 +42,7 @@ public class CostController {
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
 
         // Global totals
-        BigDecimal totalCost = costRepository.findAll().stream()
-                .map(c -> c.getEstimatedCost())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalCost = costRepository.totalCost();
         long totalInput = costRepository.totalInputTokens();
         long totalOutput = costRepository.totalOutputTokens();
 

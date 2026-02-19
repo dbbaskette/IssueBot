@@ -46,12 +46,20 @@ public class IssueController {
         List<TrackedIssue> issues;
 
         if (status != null && !status.isBlank() && repoId != null) {
-            var repo = repoRepository.findById(repoId);
-            issues = repo.map(r -> issueRepository.findByRepo(r).stream()
-                    .filter(i -> i.getStatus().name().equals(status))
-                    .toList()).orElseGet(List::of);
+            try {
+                IssueStatus issueStatus = IssueStatus.valueOf(status);
+                issues = repoRepository.findById(repoId)
+                        .map(r -> issueRepository.findByRepoAndStatus(r, issueStatus))
+                        .orElseGet(List::of);
+            } catch (IllegalArgumentException e) {
+                issues = List.of();
+            }
         } else if (status != null && !status.isBlank()) {
-            issues = issueRepository.findByStatus(IssueStatus.valueOf(status));
+            try {
+                issues = issueRepository.findByStatus(IssueStatus.valueOf(status));
+            } catch (IllegalArgumentException e) {
+                issues = List.of();
+            }
         } else if (repoId != null) {
             issues = repoRepository.findById(repoId)
                     .map(issueRepository::findByRepo)

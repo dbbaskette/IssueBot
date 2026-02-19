@@ -134,6 +134,10 @@ public class IssuePollingService {
 
         // Gate is clear — process the first queued issue using topological ordering
         List<TrackedIssue> sorted = dependencyResolver.topologicalSort(queued);
+        if (sorted.isEmpty()) {
+            log.debug("{} — all queued issues blocked by dependencies", repo.fullName());
+            return;
+        }
         TrackedIssue next = sorted.getFirst();
         log.info("Gate cleared for {} — dequeuing issue #{}: {}",
                 repo.fullName(), next.getIssueNumber(), next.getIssueTitle());

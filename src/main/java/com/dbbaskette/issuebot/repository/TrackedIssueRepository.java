@@ -24,4 +24,6 @@ public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long
     List<TrackedIssue> findByRepoAndStatus(WatchedRepo repo, IssueStatus status);
 
     List<TrackedIssue> findByRepoAndStatusIn(WatchedRepo repo, List<IssueStatus> statuses);
+
+    long countByRepoAndStatusNot(WatchedRepo repo, IssueStatus status);
 }
