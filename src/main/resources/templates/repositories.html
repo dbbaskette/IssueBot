@@ -4,7 +4,7 @@
 <div th:fragment="content">
     <div class="page-header">
         <h2>Repositories</h2>
-        <button class="btn btn-primary" onclick="document.getElementById('add-repo-form').style.display='block'">Add Repository</button>
+        <button class="btn btn-primary" onclick="resetAndShowForm()">Add Repository</button>
     </div>
 
     <!-- Add/Edit Form -->
@@ -120,7 +120,19 @@
                     <span th:unless="${repo.autoMerge}" class="status status-pending">MANUAL</span>
                 </td>
                 <td th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
-                <td>
+                <td style="display:flex;gap:0.3rem">
+                    <button class="btn btn-outline btn-sm"
+                            th:attr="onclick='editRepo(' + ${repo.id} + ', '
+                                + '\'' + ${repo.owner} + '\', '
+                                + '\'' + ${repo.name} + '\', '
+                                + '\'' + ${repo.branch} + '\', '
+                                + '\'' + ${repo.mode.name()} + '\', '
+                                + ${repo.maxIterations} + ', '
+                                + ${repo.ciEnabled} + ', '
+                                + ${repo.ciTimeoutMinutes} + ', '
+                                + ${repo.autoMerge} + ', '
+                                + ${repo.securityReviewEnabled} + ', '
+                                + ${repo.maxReviewIterations} + ')'">Edit</button>
                     <button class="btn btn-danger btn-sm"
                             th:attr="hx-delete='/repositories/' + ${repo.id}"
                             hx-target="#content"
@@ -132,6 +144,42 @@
             </tr>
         </tbody>
     </table>
+
+    <script>
+        function resetAndShowForm() {
+            document.getElementById('form-title').textContent = 'Add Repository';
+            document.getElementById('edit-id').value = '';
+            document.getElementById('owner').value = '';
+            document.getElementById('repo-name').value = '';
+            document.getElementById('branch').value = 'main';
+            document.getElementById('mode').value = 'AUTONOMOUS';
+            document.getElementById('max-iterations').value = '5';
+            document.getElementById('ci-enabled').checked = true;
+            document.getElementById('ci-timeout').value = '15';
+            document.getElementById('ci-timeout-group').style.display = '';
+            document.getElementById('auto-merge').checked = false;
+            document.getElementById('security-review').checked = false;
+            document.getElementById('max-review-iterations').value = '2';
+            document.getElementById('add-repo-form').style.display = 'block';
+        }
+
+        function editRepo(id, owner, name, branch, mode, maxIterations, ciEnabled, ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations) {
+            document.getElementById('form-title').textContent = 'Edit Repository';
+            document.getElementById('edit-id').value = id;
+            document.getElementById('owner').value = owner;
+            document.getElementById('repo-name').value = name;
+            document.getElementById('branch').value = branch;
+            document.getElementById('mode').value = mode;
+            document.getElementById('max-iterations').value = maxIterations;
+            document.getElementById('ci-enabled').checked = ciEnabled;
+            document.getElementById('ci-timeout').value = ciTimeoutMinutes;
+            document.getElementById('ci-timeout-group').style.display = ciEnabled ? '' : 'none';
+            document.getElementById('auto-merge').checked = autoMerge;
+            document.getElementById('security-review').checked = securityReviewEnabled;
+            document.getElementById('max-review-iterations').value = maxReviewIterations;
+            document.getElementById('add-repo-form').style.display = 'block';
+        }
+    </script>
 </div>
 </body>
 </html>
