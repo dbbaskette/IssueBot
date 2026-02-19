@@ -81,6 +81,7 @@ public class IssuePollingService {
             try {
                 recheckBlockedIssues(repo);
                 drainQueuedIssues(repo);
+                resumePendingIssues(repo);
                 pollRepo(repo, maxConcurrent - activeCount);
             } catch (Exception e) {
                 log.error("Error polling {}: {}", repo.fullName(), e.getMessage());
@@ -114,6 +115,30 @@ public class IssuePollingService {
                 }
             }
         }
+    }
+
+    /**
+     * Resume PENDING issues that were never started (e.g. retried FAILED issues,
+     * expired COOLDOWN issues). These got set to PENDING but processIssueAsync was
+     * never called on them.
+     */
+    private void resumePendingIssues(WatchedRepo repo) {
+        List<TrackedIssue> pending = issueRepository.findByRepoAndStatus(repo, IssueStatus.PENDING);
+        if (pending.isEmpty()) return;
+
+        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+        if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
+            log.debug("{} has active work — {} pending issue(s) will wait", repo.fullName(), pending.size());
+            return;
+        }
+
+        TrackedIssue next = pending.getFirst();
+        log.info("Resuming pending issue {} #{}: {}", repo.fullName(),
+                next.getIssueNumber(), next.getIssueTitle());
+        eventService.log("ISSUE_RESUMED",
+                "Resuming pending issue #" + next.getIssueNumber(), repo, next);
+        workflowService.processIssueAsync(next);
     }
 
     /**
@@ -290,7 +315,7 @@ public class IssuePollingService {
         // Skip issues currently being processed, queued, blocked, or already completed
         if (status == IssueStatus.IN_PROGRESS || status == IssueStatus.QUEUED
                 || status == IssueStatus.AWAITING_APPROVAL || status == IssueStatus.COMPLETED
-                || status == IssueStatus.BLOCKED) {
+                || status == IssueStatus.BLOCKED || status == IssueStatus.PENDING) {
             return false;
         }
 
