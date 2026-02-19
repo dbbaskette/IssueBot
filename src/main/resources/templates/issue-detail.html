@@ -222,45 +222,45 @@
             <span class="status status-in_progress" style="font-size:0.6rem">ACTIVE</span>
         </div>
         <div class="panel-body">
-            <div class="phase-pipeline" th:with="phase=${issue.currentPhase},
+            <div class="phase-pipeline" th:with="phase=${issue.currentPhase != null ? issue.currentPhase : ''},
                      phases=${ {'SETUP','IMPLEMENTATION','CI_VERIFICATION','PR_CREATION','INDEPENDENT_REVIEW','COMPLETION'} },
                      phaseIndex=${phase == 'SETUP' ? 0 : (phase == 'IMPLEMENTATION' ? 1 : (phase == 'CI_VERIFICATION' ? 2 : (phase == 'PR_CREATION' ? 3 : (phase == 'INDEPENDENT_REVIEW' ? 4 : (phase == 'COMPLETION' ? 5 : -1)))))}">
-                <div class="phase-step" th:classappend="${phaseIndex == 0} ? 'active' : (phaseIndex > 0 ? 'done' : 'pending')">
+                <div class="phase-step" th:classappend="${phaseIndex == 0 ? 'active' : (phaseIndex > 0 ? 'done' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Setup</div>
                         <div class="phase-desc">Clone &amp; branch</div>
                     </div>
                 </div>
-                <div class="phase-step" th:classappend="${phaseIndex == 1} ? 'active' : (phaseIndex > 1 ? 'done' : 'pending')">
+                <div class="phase-step" th:classappend="${phaseIndex == 1 ? 'active' : (phaseIndex > 1 ? 'done' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Implementation</div>
                         <div class="phase-desc">Opus writing code</div>
                     </div>
                 </div>
-                <div class="phase-step" th:classappend="${phaseIndex == 2} ? 'active' : (phaseIndex > 2 ? 'done' : 'pending')">
+                <div class="phase-step" th:classappend="${phaseIndex == 2 ? 'active' : (phaseIndex > 2 ? 'done' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">CI Checks</div>
                         <div class="phase-desc">Compile &amp; test</div>
                     </div>
                 </div>
-                <div class="phase-step" th:classappend="${phaseIndex == 3} ? 'active' : (phaseIndex > 3 ? 'done' : 'pending')">
+                <div class="phase-step" th:classappend="${phaseIndex == 3 ? 'active' : (phaseIndex > 3 ? 'done' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Draft PR</div>
                         <div class="phase-desc">Create pull request</div>
                     </div>
                 </div>
-                <div class="phase-step" th:classappend="${phaseIndex == 4} ? 'active' : (phaseIndex > 4 ? 'done' : 'pending')">
+                <div class="phase-step" th:classappend="${phaseIndex == 4 ? 'active' : (phaseIndex > 4 ? 'done' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Code Review</div>
                         <div class="phase-desc">Sonnet 4.6 review</div>
                     </div>
                 </div>
-                <div class="phase-step" th:classappend="${phaseIndex == 5} ? 'active' : 'pending'">
+                <div class="phase-step" th:classappend="${phaseIndex == 5 ? 'active' : 'pending'}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Completion</div>

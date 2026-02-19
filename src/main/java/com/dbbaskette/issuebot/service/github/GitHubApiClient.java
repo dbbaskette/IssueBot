@@ -95,6 +95,23 @@ public class GitHubApiClient {
         }
     }
 
+    public JsonNode createIssue(String owner, String repo, String title, String body, List<String> labels) {
+        log.debug("Creating issue in {}/{}: {}", owner, repo, title);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("title", title);
+        payload.put("body", body);
+        if (labels != null && !labels.isEmpty()) {
+            payload.put("labels", labels);
+        }
+        return webClient.post()
+                .uri("/repos/{owner}/{repo}/issues", owner, repo)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(30));
+    }
+
     // --- Pull Requests ---
 
     public JsonNode createPullRequest(String owner, String repo, String title, String body,

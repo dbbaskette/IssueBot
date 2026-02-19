@@ -183,6 +183,11 @@ public class IssueWorkflowService {
                 continue;
             }
 
+            // Post implementation response to issue when addressing review feedback
+            if (previousFeedback != null) {
+                postImplementationResponseToIssue(trackedIssue, implResult, previousFeedback, iterationNum);
+            }
+
             // Get diff after implementation
             String diff;
             try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
@@ -250,6 +255,11 @@ public class IssueWorkflowService {
             CodeReviewResult reviewResult = phaseIndependentReview(
                     trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration);
 
+            // Post review to issue thread (regardless of pass/fail)
+            if (reviewResult != null) {
+                postReviewToIssue(trackedIssue, reviewResult, iterationNum);
+            }
+
             if (reviewResult == null) {
                 // Review invocation failed — treat as failed review
                 log.warn("Review returned null (invocation error) — skipping to completion");
@@ -271,11 +281,21 @@ public class IssueWorkflowService {
                 continue;
             }
 
+            // Create follow-up issue for non-blocking review findings
+            if (reviewResult != null && reviewResult.passed()) {
+                try {
+                    createFollowUpIssue(trackedIssue, reviewResult, prNumber);
+                } catch (Exception e) {
+                    log.warn("Failed to create follow-up issue for {} #{}: {}",
+                            repo.fullName(), trackedIssue.getIssueNumber(), e.getMessage());
+                }
+            }
+
             // === Phase 6: Completion ===
             try {
                 trackedIssue.setCurrentPhase("COMPLETION");
                 issueRepository.save(trackedIssue);
-                phaseCompletion(trackedIssue, issueDetails, branchName, iterationNum, diff, prNumber);
+                phaseCompletion(trackedIssue, issueDetails, branchName, iterationNum, diff, prNumber, reviewResult);
                 return; // Success!
             } catch (Exception e) {
                 log.error("Phase 6 (Completion) failed", e);
@@ -424,7 +444,8 @@ public class IssueWorkflowService {
      * Phase 6 — Completion: Finalize draft PR, auto-merge if configured, update issue.
      */
     void phaseCompletion(TrackedIssue trackedIssue, JsonNode issueDetails,
-                          String branchName, int iterationCount, String diff, int prNumber) {
+                          String branchName, int iterationCount, String diff, int prNumber,
+                          CodeReviewResult reviewResult) {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_COMPLETION", "Starting completion phase", repo, trackedIssue);
 
@@ -441,6 +462,12 @@ public class IssueWorkflowService {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             log.warn("Failed to mark PR #{} as ready: {}", prNumber, e.getMessage());
+        }
+
+        // Post review to PR now that it's no longer a draft
+        // (submitting reviews on draft PRs can interfere with merge)
+        if (reviewResult != null && prNumber > 0) {
+            postReviewToGitHub(trackedIssue, prNumber, reviewResult);
         }
 
         String prUrl = "https://github.com/" + repo.fullName() + "/pull/" + prNumber;
@@ -561,10 +588,9 @@ public class IssueWorkflowService {
                 reviewResult.specComplianceScore(), reviewResult.correctnessScore(),
                 reviewResult.codeQualityScore());
 
-        // Post review as PR comments
-        if (prNumber > 0) {
-            postReviewToGitHub(trackedIssue, prNumber, reviewResult);
-        }
+        // NOTE: PR review comments are posted later in phaseCompletion,
+        // after the PR is marked as ready (no longer draft), to avoid
+        // GitHub 405 errors when merging.
 
         eventService.log("PHASE_REVIEW_COMPLETE",
                 "Review complete: " + (reviewResult.passed() ? "PASSED" : "FAILED")
@@ -701,6 +727,168 @@ public class IssueWorkflowService {
 
         fb.append("\nPlease address ALL findings above, especially high-severity ones.\n");
         return fb.toString();
+    }
+
+    /**
+     * Post Sonnet's review findings as a comment on the GitHub issue,
+     * creating a visible reviewer conversation thread.
+     */
+    private void postReviewToIssue(TrackedIssue trackedIssue, CodeReviewResult review, int iterationNum) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        try {
+            String model = review.modelUsed() != null ? review.modelUsed() : "Sonnet 4.6";
+            String verdict = review.passed() ? "PASSED" : "CHANGES REQUESTED";
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("### Code Review — Iteration ").append(iterationNum)
+              .append(" (").append(model).append(")\n\n");
+            sb.append("**Verdict: ").append(verdict).append("**\n\n");
+            sb.append(review.summary()).append("\n\n");
+
+            sb.append("#### Scores\n");
+            sb.append("| Dimension | Score |\n|---|---|\n");
+            appendScoreRow(sb, "Spec Compliance", review.specComplianceScore());
+            appendScoreRow(sb, "Correctness", review.correctnessScore());
+            appendScoreRow(sb, "Code Quality", review.codeQualityScore());
+            appendScoreRow(sb, "Test Coverage", review.testCoverageScore());
+            appendScoreRow(sb, "Architecture Fit", review.architectureFitScore());
+            appendScoreRow(sb, "Regressions", review.regressionsScore());
+            if (review.securityScore() < 1.0) {
+                appendScoreRow(sb, "Security", review.securityScore());
+            }
+
+            if (!review.findings().isEmpty()) {
+                sb.append("\n#### Findings\n\n");
+                for (CodeReviewResult.ReviewFinding f : review.findings()) {
+                    sb.append("**[").append(f.severity().toUpperCase()).append(" — ").append(f.category()).append("]");
+                    if (f.file() != null && !f.file().isBlank()) {
+                        sb.append(" `").append(f.file());
+                        if (f.line() != null) sb.append(":").append(f.line());
+                        sb.append("`");
+                    }
+                    sb.append("**\n");
+                    sb.append(f.finding()).append("\n");
+                    if (f.suggestion() != null && !f.suggestion().isBlank()) {
+                        sb.append("> **Suggestion:** ").append(f.suggestion()).append("\n");
+                    }
+                    sb.append("\n");
+                }
+            }
+
+            if (review.advice() != null && !review.advice().isBlank()) {
+                sb.append("#### Reviewer Notes\n").append(review.advice()).append("\n\n");
+            }
+
+            sb.append("---\n*Review by ").append(model)
+              .append(" via [IssueBot](https://github.com/dbbaskette/IssueBot)*");
+
+            gitHubApi.addComment(repo.getOwner(), repo.getName(),
+                    trackedIssue.getIssueNumber(), sb.toString());
+            log.info("Posted review comment to issue #{}", trackedIssue.getIssueNumber());
+        } catch (Exception e) {
+            log.warn("Failed to post review comment to issue #{}: {}",
+                    trackedIssue.getIssueNumber(), e.getMessage());
+        }
+    }
+
+    /**
+     * Create a follow-up GitHub issue for non-blocking (medium/low severity) review findings.
+     * Posts a comment on the original issue linking to the follow-up.
+     */
+    private void createFollowUpIssue(TrackedIssue trackedIssue, CodeReviewResult reviewResult, int prNumber) {
+        List<CodeReviewResult.ReviewFinding> nonBlocking = reviewResult.findings().stream()
+                .filter(f -> "medium".equalsIgnoreCase(f.severity()) || "low".equalsIgnoreCase(f.severity()))
+                .toList();
+
+        if (nonBlocking.isEmpty()) {
+            return;
+        }
+
+        WatchedRepo repo = trackedIssue.getRepo();
+        int originalIssueNumber = trackedIssue.getIssueNumber();
+
+        String title = "Follow-Up: Code Review Findings from #" + originalIssueNumber;
+
+        StringBuilder body = new StringBuilder();
+        body.append("The following non-blocking items were identified during the automated code review for #")
+            .append(originalIssueNumber).append(" (PR #").append(prNumber)
+            .append(") and should be addressed in a future iteration.\n\n");
+        body.append("#### Findings\n\n");
+
+        for (CodeReviewResult.ReviewFinding f : nonBlocking) {
+            body.append("**[").append(f.severity().toUpperCase()).append(" — ").append(f.category()).append("]");
+            if (f.file() != null && !f.file().isBlank()) {
+                body.append(" `").append(f.file());
+                if (f.line() != null) body.append(":").append(f.line());
+                body.append("`");
+            }
+            body.append("**\n");
+            body.append(f.finding()).append("\n");
+            if (f.suggestion() != null && !f.suggestion().isBlank()) {
+                body.append("> **Suggestion:** ").append(f.suggestion()).append("\n");
+            }
+            body.append("\n");
+        }
+
+        body.append("---\n*Auto-created by [IssueBot](https://github.com/dbbaskette/IssueBot) from review of #")
+            .append(originalIssueNumber).append("*");
+
+        JsonNode newIssue = gitHubApi.createIssue(
+                repo.getOwner(), repo.getName(), title, body.toString(),
+                List.of("issuebot-followup"));
+
+        int followUpNumber = newIssue.path("number").asInt();
+        log.info("Created follow-up issue #{} for {} #{} with {} findings",
+                followUpNumber, repo.fullName(), originalIssueNumber, nonBlocking.size());
+
+        gitHubApi.addComment(repo.getOwner(), repo.getName(), originalIssueNumber,
+                "Non-blocking review findings have been captured in follow-up issue #" + followUpNumber);
+
+        eventService.log("FOLLOW_UP_ISSUE_CREATED",
+                "Created follow-up issue #" + followUpNumber + " with " + nonBlocking.size() + " findings",
+                repo, trackedIssue);
+    }
+
+    /**
+     * Post Opus's implementation response as a comment on the GitHub issue
+     * when it addresses review feedback, showing what changed.
+     */
+    private void postImplementationResponseToIssue(TrackedIssue trackedIssue, ClaudeCodeResult implResult,
+                                                    String previousFeedback, int iterationNum) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        try {
+            String model = implResult.getModel() != null ? implResult.getModel() : "Opus 4.6";
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("### Implementation Response — Iteration ").append(iterationNum)
+              .append(" (").append(model).append(")\n\n");
+            sb.append("Addressed the review findings from iteration ").append(iterationNum - 1).append(".\n\n");
+
+            sb.append("#### Changes Made\n");
+            sb.append("- Modified ").append(implResult.getFilesChanged().size()).append(" files\n");
+
+            String output = implResult.getOutput();
+            if (output != null && !output.isBlank()) {
+                sb.append("- ").append(truncate(output, 2000)).append("\n");
+            }
+
+            if (!implResult.getFilesChanged().isEmpty()) {
+                sb.append("\n#### Files Changed\n");
+                for (String file : implResult.getFilesChanged()) {
+                    sb.append("- `").append(file).append("`\n");
+                }
+            }
+
+            sb.append("\n---\n*Implementation by ").append(model)
+              .append(" via [IssueBot](https://github.com/dbbaskette/IssueBot)*");
+
+            gitHubApi.addComment(repo.getOwner(), repo.getName(),
+                    trackedIssue.getIssueNumber(), sb.toString());
+            log.info("Posted implementation response to issue #{}", trackedIssue.getIssueNumber());
+        } catch (Exception e) {
+            log.warn("Failed to post implementation response to issue #{}: {}",
+                    trackedIssue.getIssueNumber(), e.getMessage());
+        }
     }
 
     // =====================================================
