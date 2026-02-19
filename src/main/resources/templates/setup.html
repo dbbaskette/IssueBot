@@ -102,9 +102,12 @@
   max-concurrent-issues: 3
   work-directory: ${user.home}/.issuebot/repos
   claude-code:
+    implementation-model: claude-opus-4-6
+    review-model: claude-sonnet-4-6
     max-turns-per-invocation: 30
-    model: claude-sonnet-4-5-20250929
     timeout-minutes: 10
+    review-max-turns: 15
+    review-timeout-minutes: 5
   github:
     token: ${GITHUB_TOKEN}
   notifications:
@@ -116,7 +119,11 @@
       branch: main
       mode: autonomous
       max-iterations: 5
-      ci-timeout-minutes: 15</pre>
+      max-review-iterations: 2
+      ci-enabled: true
+      ci-timeout-minutes: 15
+      security-review-enabled: false
+      auto-merge: false</pre>
         </div>
     </div>
 </div>

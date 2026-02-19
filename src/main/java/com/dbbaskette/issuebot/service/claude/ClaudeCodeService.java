@@ -248,7 +248,7 @@ public class ClaudeCodeService {
         }
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "-p", "Say hello", "--max-turns", "1",
-                    "--output-format", "stream-json", "--verbose");
+                    "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions");
             pb.redirectErrorStream(true);
             pb.environment().putAll(System.getenv());
             Process process = pb.start();
