@@ -149,12 +149,12 @@ class IntegrationWorkflowTest {
         // CI passes (CI disabled to skip polling)
         issue.getRepo().setCiEnabled(false);
 
-        // PR creation — no existing PR
+        // PR creation — no existing PR (non-draft for autonomous mode)
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
         prNode.put("number", 99);
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(true))).thenReturn(prNode);
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         // Review passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
@@ -164,7 +164,7 @@ class IntegrationWorkflowTest {
 
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertNull(issue.getCurrentPhase());
-        verify(gitHubApi).markPrReady(eq("owner"), eq("repo"), eq(99));
+        verify(gitHubApi, never()).markPrReady(anyString(), anyString(), anyInt());
         verify(notificationService).info(eq("Issue Completed"), anyString());
     }
 
@@ -184,12 +184,12 @@ class IntegrationWorkflowTest {
         when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
                 .thenReturn(successResult());
 
-        // PR creation
+        // PR creation (non-draft for autonomous mode)
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
         prNode.put("number", 100);
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(true))).thenReturn(prNode);
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         // First review fails, second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
@@ -222,7 +222,7 @@ class IntegrationWorkflowTest {
         ObjectNode prNode = objectMapper.createObjectNode();
         prNode.put("number", 101);
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(true))).thenReturn(prNode);
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         // Review fails
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
@@ -337,7 +337,7 @@ class IntegrationWorkflowTest {
         ObjectNode prNode = objectMapper.createObjectNode();
         prNode.put("number", 103);
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(true))).thenReturn(prNode);
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyBoolean(), any())).thenReturn(passedReview());

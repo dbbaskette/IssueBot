@@ -404,7 +404,9 @@ public class IssueWorkflowService {
     }
 
     /**
-     * Phase 4 — PR Creation: Create a draft PR on GitHub.
+     * Phase 4 — PR Creation: Create a PR on GitHub.
+     * Creates as draft for approval-gated repos; non-draft otherwise so auto-merge works
+     * (GitHub's GraphQL markPullRequestAsReady mutation isn't available with all token types).
      * If a PR already exists for this branch (review retry), reuse it.
      * Returns the PR number.
      */
@@ -424,14 +426,16 @@ public class IssueWorkflowService {
             return existingPrNumber;
         }
 
-        // Create draft PR
+        // Only create as draft for approval-gated repos; non-draft for auto-merge
+        // so we don't need the GraphQL markPullRequestAsReady mutation
+        boolean draft = repo.getMode() == RepoMode.APPROVAL_GATED;
         String prTitle = "IssueBot: " + trackedIssue.getIssueTitle() + " (#" + trackedIssue.getIssueNumber() + ")";
         BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
         String prBody = buildPrDescription(trackedIssue, issueDetails, iterationCount, totalCost);
 
         JsonNode pr = gitHubApi.createPullRequest(
                 repo.getOwner(), repo.getName(),
-                prTitle, prBody, branchName, repo.getBranch(), true); // always draft
+                prTitle, prBody, branchName, repo.getBranch(), draft);
 
         int prNumber = pr.path("number").asInt();
         log.info("Created draft PR #{} for {} #{}", prNumber, repo.fullName(), trackedIssue.getIssueNumber());
@@ -451,20 +455,21 @@ public class IssueWorkflowService {
 
         boolean isApprovalGated = repo.getMode() == RepoMode.APPROVAL_GATED;
 
-        // Mark draft PR as ready
-        boolean prReady = false;
-        try {
-            gitHubApi.markPrReady(repo.getOwner(), repo.getName(), prNumber);
-            prReady = true;
-            // Brief pause to let GitHub process the draft→ready state change
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (Exception e) {
-            log.error("Failed to mark PR #{} as ready: {}", prNumber, e.getMessage(), e);
-            eventService.log("MARK_PR_READY_FAILED",
-                    "Failed to mark PR #" + prNumber + " as ready: " + e.getMessage(),
-                    repo, trackedIssue);
+        // Mark draft PR as ready (only needed for approval-gated repos that create draft PRs)
+        boolean prReady = !isApprovalGated; // non-draft PRs are already ready
+        if (isApprovalGated) {
+            try {
+                gitHubApi.markPrReady(repo.getOwner(), repo.getName(), prNumber);
+                prReady = true;
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception e) {
+                log.error("Failed to mark PR #{} as ready: {}", prNumber, e.getMessage(), e);
+                eventService.log("MARK_PR_READY_FAILED",
+                        "Failed to mark PR #" + prNumber + " as ready: " + e.getMessage(),
+                        repo, trackedIssue);
+            }
         }
 
         // Post review to PR now that it's no longer a draft
