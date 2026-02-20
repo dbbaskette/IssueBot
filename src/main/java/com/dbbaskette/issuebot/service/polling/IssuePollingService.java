@@ -319,26 +319,10 @@ public class IssuePollingService {
             return false;
         }
 
-        // Check cooldown expiry
-        if (status == IssueStatus.COOLDOWN) {
-            LocalDateTime cooldownUntil = tracked.getCooldownUntil();
-            if (cooldownUntil != null && LocalDateTime.now().isBefore(cooldownUntil)) {
-                log.debug("Issue #{} still in cooldown until {}", issueNumber, cooldownUntil);
-                return false;
-            }
-            // Cooldown expired - allow reprocessing
-            tracked.setStatus(IssueStatus.PENDING);
-            tracked.setCurrentIteration(0);
-            issueRepository.save(tracked);
-            return false; // Will be picked up next poll with PENDING status
-        }
-
-        // FAILED issues can be retried if they re-appear with agent-ready label
-        if (status == IssueStatus.FAILED) {
-            tracked.setStatus(IssueStatus.PENDING);
-            tracked.setCurrentIteration(0);
-            issueRepository.save(tracked);
-            return false; // Will be picked up next poll
+        // COOLDOWN and FAILED issues require manual retry via the dashboard
+        // to avoid endless retry loops burning tokens
+        if (status == IssueStatus.COOLDOWN || status == IssueStatus.FAILED) {
+            return false;
         }
 
         return false;

@@ -16,12 +16,15 @@ flowchart LR
     B --> C[Setup<br>Clone & Branch]
     C --> D[Implement<br>Opus]
     D --> E[CI Verify<br>Push & Check]
-    E -->|Fail| D
-    E -->|Pass| F[Draft PR]
-    F --> G[Code Review<br>Sonnet]
-    G -->|Fail| D
-    G -->|Pass| H[Finalize PR]
-    H --> I[Done]
+    E -->|Fail| F{Retry<br>Smart?}
+    F -->|Skip| G[FAILED<br>needs-human]
+    F -->|Yes| D
+    E -->|Pass| H[Create PR]
+    H --> I[Code Review<br>Sonnet]
+    I -->|Fail| D
+    I -->|Pass| J[Follow-Up<br>Issue?]
+    J --> K[Finalize &<br>Auto-Merge]
+    K --> L[Done]
 ```
 
 ### The 6-Phase Pipeline
@@ -31,24 +34,28 @@ flowchart LR
 | **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
 | **2. Implementation** | Claude Code CLI writes code based on issue spec | Opus |
 | **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
-| **4. Draft PR** | Create draft pull request on GitHub | - |
-| **5. Independent Review** | Separate model reviews code against spec, posts PR comments | Sonnet |
-| **6. Completion** | Mark PR ready, auto-merge if configured, update labels | - |
+| **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
+| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Sonnet |
+| **6. Completion** | Post review to PR, create follow-up issue for non-blocking findings, auto-merge if configured | - |
 
-If CI or review fails, IssueBot loops back to implementation with enhanced context (failure logs, review findings) and tries again up to the configured max iterations.
+If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
 
 ## Key Features
 
 - **Dual-Model Architecture** - Opus (implementation) + Sonnet (independent review) for checks and balances
-- **6-Phase Workflow** - Setup, Implementation, CI Verification, Draft PR, Independent Review, Completion
+- **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
 - **Independent Code Review** - Sonnet evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
 - **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
+- **Follow-Up Issues** - Non-blocking review findings (medium/low severity) are captured as a follow-up GitHub issue so they aren't lost after merge
+- **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
+- **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration
 - **Security Review** - Optional OWASP-focused security analysis per repository (injection, auth, data exposure, access control)
-- **Iteration Guardrails** - Separate budgets for implementation iterations and review iterations, automatic cooldown, `needs-human` escalation
+- **Iteration Guardrails** - Separate budgets for implementation iterations (default: 2) and review iterations, `needs-human` escalation when retries are exhausted
 - **Issue Dependency Resolution** - Parses `**Blocked by:** #N` in issue bodies and processes issues in dependency order
 - **CI Template Generation** - Auto-generates GitHub Actions workflows (Maven, Gradle, Node, Go) for repos without CI
-- **Dual Mode** - Fully autonomous or approval-gated (draft PRs with human review)
+- **Dual Mode** - Fully autonomous (auto-merge) or approval-gated (draft PRs with human review)
+- **Dashboard Authentication** - Optional username/password login via environment variables
 - **Web Dashboard** - Real-time monitoring with live terminal streaming, phase pipeline, iteration history, review scores
 - **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns
 - **Local-First** - Runs on your machine with an embedded H2 database; no external infrastructure required
@@ -145,7 +152,7 @@ issuebot:
       name: my-app
       branch: main
       mode: autonomous
-      max-iterations: 5
+      max-iterations: 2
       max-review-iterations: 2
       security-review-enabled: false
       ci-enabled: true
@@ -161,7 +168,7 @@ issuebot:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `mode` | `autonomous` | `autonomous` (auto-merge) or `approval-gated` (draft PR, human review) |
-| `max-iterations` | `5` | Max implementation attempts before escalating |
+| `max-iterations` | `2` | Max implementation attempts before escalating |
 | `max-review-iterations` | `2` | Max review cycles before escalating |
 | `security-review-enabled` | `false` | Enable OWASP security analysis in code review |
 | `ci-enabled` | `true` | Push and poll GitHub Actions after implementation |
@@ -202,6 +209,8 @@ The web dashboard at `http://localhost:8090` provides:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
+| `ISSUEBOT_USERNAME` | No | Dashboard login username (auth disabled if unset) |
+| `ISSUEBOT_PASSWORD` | No | Dashboard login password (auth disabled if unset) |
 
 ## Architecture
 

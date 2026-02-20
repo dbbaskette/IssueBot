@@ -96,30 +96,27 @@ class IssuePollingServiceTest {
     }
 
     @Test
-    void qualifiesForProcessing_cooldownExpired() {
+    void qualifiesForProcessing_cooldownExpired_requiresManualRetry() {
         TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
         tracked.setStatus(IssueStatus.COOLDOWN);
         tracked.setCooldownUntil(LocalDateTime.now().minusHours(1));
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.of(tracked));
 
-        // Returns false because it resets to PENDING for next poll cycle
+        // COOLDOWN issues require manual retry — not auto-picked-up
         assertFalse(pollingService.qualifiesForProcessing(testRepo, 1));
-        // But status should have been reset to PENDING
-        assertEquals(IssueStatus.PENDING, tracked.getStatus());
-        assertEquals(0, tracked.getCurrentIteration());
-        verify(issueRepository).save(tracked);
+        assertEquals(IssueStatus.COOLDOWN, tracked.getStatus());
     }
 
     @Test
-    void qualifiesForProcessing_failedIssue() {
+    void qualifiesForProcessing_failedIssue_requiresManualRetry() {
         TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
         tracked.setStatus(IssueStatus.FAILED);
         tracked.setCurrentIteration(3);
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.of(tracked));
 
-        // Returns false because it resets for next cycle
+        // FAILED issues require manual retry — not auto-picked-up
         assertFalse(pollingService.qualifiesForProcessing(testRepo, 1));
-        assertEquals(IssueStatus.PENDING, tracked.getStatus());
-        assertEquals(0, tracked.getCurrentIteration());
+        assertEquals(IssueStatus.FAILED, tracked.getStatus());
+        assertEquals(3, tracked.getCurrentIteration());
     }
 }

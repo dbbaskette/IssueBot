@@ -89,8 +89,13 @@ public class IssueWorkflowService {
      */
     @Async
     public void processIssueAsync(TrackedIssue trackedIssue) {
+        processIssueAsync(trackedIssue, null);
+    }
+
+    @Async
+    public void processIssueAsync(TrackedIssue trackedIssue, String additionalInstructions) {
         try {
-            processIssue(trackedIssue);
+            processIssue(trackedIssue, additionalInstructions);
         } catch (Exception e) {
             log.error("Unhandled error processing issue #{}: {}",
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
@@ -103,6 +108,10 @@ public class IssueWorkflowService {
     }
 
     public void processIssue(TrackedIssue trackedIssue) {
+        processIssue(trackedIssue, null);
+    }
+
+    public void processIssue(TrackedIssue trackedIssue, String additionalInstructions) {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 
@@ -141,7 +150,8 @@ public class IssueWorkflowService {
 
         // === Iteration Loop (Phases 2-3) ===
         String previousDiff = null;
-        String previousFeedback = null;
+        String previousFeedback = additionalInstructions != null && !additionalInstructions.isBlank()
+                ? "ADDITIONAL HUMAN INSTRUCTIONS:\n" + additionalInstructions : null;
         String previousCiLogs = null;
         int prNumber = 0;
 

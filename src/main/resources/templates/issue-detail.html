@@ -8,7 +8,32 @@
             <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
             <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
         </div>
-        <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
+        <div class="flex gap-1" style="align-items:center">
+            <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
+            <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                    type="button" class="btn btn-sm" style="font-size:0.75rem;padding:0.25rem 0.75rem"
+                    onclick="document.getElementById('retry-modal').style.display='flex'">Retry</button>
+        </div>
+
+        <!-- Retry Modal -->
+        <div th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+             id="retry-modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)"
+             onclick="if(event.target===this)this.style.display='none'">
+            <div style="background:var(--bg-card,#1e1e2e);border:1px solid var(--border,#333);border-radius:8px;padding:1.5rem;width:90%;max-width:500px;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+                <h3 style="margin:0 0 0.5rem">Retry Issue</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">Optionally add instructions for the next attempt. These will be posted as a comment on the GitHub issue and provided to Claude Code.</p>
+                <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post">
+                    <textarea name="instructions" rows="4"
+                              placeholder="e.g. Break this into smaller changes, focus on the API layer first..."
+                              style="width:100%;box-sizing:border-box;background:var(--bg-main,#12121a);color:var(--text,#e0e0e0);border:1px solid var(--border,#333);border-radius:4px;padding:0.75rem;font-family:inherit;font-size:0.875rem;resize:vertical"></textarea>
+                    <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:1rem">
+                        <button type="button" class="btn btn-sm" style="font-size:0.75rem;padding:0.25rem 0.75rem;opacity:0.7"
+                                onclick="document.getElementById('retry-modal').style.display='none'">Cancel</button>
+                        <button type="submit" class="btn btn-sm" style="font-size:0.75rem;padding:0.25rem 0.75rem">Start Retry</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 
     <!-- === BLOCKED-BY INFO PANEL === -->

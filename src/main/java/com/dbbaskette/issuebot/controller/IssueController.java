@@ -5,11 +5,17 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.*;
+import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -18,25 +24,36 @@ import java.util.List;
 @RequestMapping("/issues")
 public class IssueController {
 
+    private static final Logger log = LoggerFactory.getLogger(IssueController.class);
+
     private final TrackedIssueRepository issueRepository;
     private final WatchedRepoRepository repoRepository;
     private final IterationRepository iterationRepository;
     private final EventRepository eventRepository;
     private final CostTrackingRepository costRepository;
     private final IssuePollingService pollingService;
+    private final IssueWorkflowService workflowService;
+    private final EventService eventService;
+    private final GitHubApiClient gitHubApiClient;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
                             IterationRepository iterationRepository,
                             EventRepository eventRepository,
                             CostTrackingRepository costRepository,
-                            IssuePollingService pollingService) {
+                            IssuePollingService pollingService,
+                            IssueWorkflowService workflowService,
+                            EventService eventService,
+                            GitHubApiClient gitHubApiClient) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
         this.eventRepository = eventRepository;
         this.costRepository = costRepository;
         this.pollingService = pollingService;
+        this.workflowService = workflowService;
+        this.eventService = eventService;
+        this.gitHubApiClient = gitHubApiClient;
     }
 
     @GetMapping
@@ -105,6 +122,52 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id);
         return "issue-detail :: live-status";
+    }
+
+    @PostMapping("/{id}/retry")
+    public String retry(@PathVariable Long id,
+                        @RequestParam(required = false) String instructions,
+                        RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+
+        if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot retry issue in " + issue.getStatus() + " status");
+            return "redirect:/issues/" + id;
+        }
+
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(0);
+        issue.setCurrentReviewIteration(0);
+        issue.setCurrentPhase(null);
+        issue.setCooldownUntil(null);
+        issueRepository.save(issue);
+
+        String trimmedInstructions = (instructions != null && !instructions.isBlank())
+                ? instructions.trim() : null;
+
+        if (trimmedInstructions != null) {
+            eventService.log("MANUAL_RETRY",
+                    "Manual retry with instructions: " + trimmedInstructions,
+                    issue.getRepo(), issue);
+            try {
+                gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
+                        issue.getIssueNumber(),
+                        "**ADDITIONAL HUMAN INSTRUCTIONS** (manual retry):\n\n" + trimmedInstructions);
+            } catch (Exception e) {
+                // Log but don't block the retry
+                log.warn("Failed to post retry instructions comment on #{}: {}",
+                        issue.getIssueNumber(), e.getMessage());
+            }
+        } else {
+            eventService.log("MANUAL_RETRY",
+                    "Manual retry triggered from dashboard", issue.getRepo(), issue);
+        }
+
+        workflowService.processIssueAsync(issue, trimmedInstructions);
+
+        redirectAttributes.addFlashAttribute("success", "Issue retry started");
+        return "redirect:/issues/" + id;
     }
 
     private void populateDetailModel(Model model, TrackedIssue issue, Long id) {
