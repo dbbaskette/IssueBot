@@ -39,6 +39,9 @@ public class WatchedRepo {
     @Column(name = "security_review_enabled", nullable = false)
     private boolean securityReviewEnabled = false;
 
+    @Column(name = "auto_start", nullable = false)
+    private boolean autoStart = true;
+
     @Column(name = "max_review_iterations", nullable = false)
     private int maxReviewIterations = 2;
 
@@ -102,6 +105,9 @@ public class WatchedRepo {
 
     public int getMaxReviewIterations() { return maxReviewIterations; }
     public void setMaxReviewIterations(int maxReviewIterations) { this.maxReviewIterations = maxReviewIterations; }
+
+    public boolean isAutoStart() { return autoStart; }
+    public void setAutoStart(boolean autoStart) { this.autoStart = autoStart; }
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }

@@ -32,6 +32,7 @@
                     <th>Phase</th>
                     <th>Iteration</th>
                     <th>Updated</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="issue-table-body"
@@ -62,9 +63,16 @@
         <td class="text-sm" th:text="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null ? 'Waiting on #' + issue.blockedByIssues.replace(',', ', #') : (issue.currentPhase != null ? issue.currentPhase : '—')}">—</td>
         <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
         <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
+        <td>
+            <button th:if="${issue.status.name() == 'QUEUED' and !issue.repo.autoStart}"
+                    class="btn btn-primary btn-sm"
+                    th:attr="hx-post='/issues/' + ${issue.id} + '/start'"
+                    hx-target="#content"
+                    onclick="event.stopPropagation()">Start</button>
+        </td>
     </tr>
     <tr th:if="${#lists.isEmpty(issues)}">
-        <td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
+        <td colspan="8" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
     </tr>
 </th:block>
 </body>

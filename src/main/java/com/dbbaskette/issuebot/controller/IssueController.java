@@ -170,6 +170,27 @@ public class IssueController {
         return "redirect:/issues/" + id;
     }
 
+    @PostMapping("/{id}/start")
+    public String start(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+
+        if (issue.getStatus() != IssueStatus.QUEUED) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot start issue in " + issue.getStatus() + " status (must be QUEUED)");
+            return "redirect:/issues/" + id;
+        }
+
+        issue.setStatus(IssueStatus.PENDING);
+        issueRepository.save(issue);
+
+        eventService.log("MANUAL_START",
+                "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
+                issue.getRepo(), issue);
+
+        redirectAttributes.addFlashAttribute("success", "Issue queued for processing");
+        return "redirect:/issues/" + id;
+    }
+
     private void populateDetailModel(Model model, TrackedIssue issue, Long id) {
         List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);

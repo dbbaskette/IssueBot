@@ -149,6 +149,13 @@ public class IssuePollingService {
         List<TrackedIssue> queued = issueRepository.findByRepoAndStatus(repo, IssueStatus.QUEUED);
         if (queued.isEmpty()) return;
 
+        // Manual-start repos: don't auto-drain queued issues
+        if (!repo.isAutoStart()) {
+            log.debug("{} has auto-start OFF — {} queued issue(s) await manual start",
+                    repo.fullName(), queued.size());
+            return;
+        }
+
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
                 List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
         if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
@@ -281,6 +288,19 @@ public class IssuePollingService {
                 notificationService.info("Issue Queued",
                         repo.fullName() + " #" + issueNumber + ": " + title
                                 + " (waiting for open PR to merge)");
+                continue;
+            }
+
+            // Auto-start OFF: discover and queue but don't start
+            if (!repo.isAutoStart()) {
+                tracked.setStatus(IssueStatus.QUEUED);
+                issueRepository.save(tracked);
+                eventService.log("ISSUE_DISCOVERED",
+                        "Discovered issue #" + issueNumber + ": " + title + " (auto-start off, queued)",
+                        repo, tracked);
+                notificationService.info("Issue Discovered",
+                        repo.fullName() + " #" + issueNumber + ": " + title
+                                + " (queued — manual start required)");
                 continue;
             }
 
