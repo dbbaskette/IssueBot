@@ -179,6 +179,17 @@ public class IssueWorkflowService {
                 log.warn("Claude Code returned failure for iteration {}", iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
+
+                // Check if retrying is worthwhile before burning more tokens
+                String skipReason = iterationManager.shouldSkipRetry(
+                        trackedIssue, implResult, null, previousFeedback);
+                if (skipReason != null) {
+                    log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
+                            trackedIssue.getIssueNumber(), skipReason);
+                    iterationManager.handleRetrySkipped(trackedIssue, skipReason);
+                    return;
+                }
+
                 previousFeedback = "Claude Code failed: " + implResult.getErrorMessage();
                 continue;
             }
@@ -227,6 +238,17 @@ public class IssueWorkflowService {
 
             if (!ciPassed) {
                 log.info("CI checks failed for iteration {}", iterationNum);
+
+                // Check if retrying is worthwhile
+                String skipReason = iterationManager.shouldSkipRetry(
+                        trackedIssue, implResult, "FAILED", previousFeedback);
+                if (skipReason != null) {
+                    log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
+                            trackedIssue.getIssueNumber(), skipReason);
+                    iterationManager.handleRetrySkipped(trackedIssue, skipReason);
+                    return;
+                }
+
                 previousDiff = diff;
                 previousCiLogs = extractCiFailureLogs(trackedIssue, branchName);
                 previousFeedback = null;

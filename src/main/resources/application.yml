@@ -35,6 +35,9 @@ issuebot:
     review-model: claude-sonnet-4-6
     review-max-turns: 15
     review-timeout-minutes: 5
+  auth:
+    username: ${ISSUEBOT_USERNAME:}
+    password: ${ISSUEBOT_PASSWORD:}
   github:
     token: ${GITHUB_TOKEN:not-set}
   notifications:

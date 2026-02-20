@@ -112,7 +112,7 @@ public class IssueBotProperties {
         private String branch = "main";
         private String mode = "autonomous";
         @Min(1)
-        private int maxIterations = 5;
+        private int maxIterations = 2;
         @Min(1)
         private int ciTimeoutMinutes = 15;
         private List<String> allowedPaths = new ArrayList<>();

@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -86,6 +87,62 @@ class IterationManagerTest {
         issue.setStatus(IssueStatus.COOLDOWN);
         issue.setCooldownUntil(LocalDateTime.now().minusHours(1));
         assertTrue(iterationManager.isCooldownExpired(issue));
+    }
+
+    @Test
+    void shouldSkipRetry_timedOut() {
+        TrackedIssue issue = createIssue(1);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setTimedOut(true);
+        result.setSuccess(false);
+
+        String reason = iterationManager.shouldSkipRetry(issue, result, null, null);
+        assertNotNull(reason);
+        assertTrue(reason.contains("timed out"));
+    }
+
+    @Test
+    void shouldSkipRetry_excessiveTokens() {
+        TrackedIssue issue = createIssue(1);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(false);
+        result.setOutputTokens(200_000);
+
+        String reason = iterationManager.shouldSkipRetry(issue, result, null, null);
+        assertNotNull(reason);
+        assertTrue(reason.contains("too complex"));
+    }
+
+    @Test
+    void shouldSkipRetry_allowsRetryOnFirstNormalFailure() {
+        TrackedIssue issue = createIssue(1);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(false);
+        result.setOutputTokens(10_000);
+
+        String reason = iterationManager.shouldSkipRetry(issue, result, null, null);
+        assertNull(reason); // should allow retry
+    }
+
+    @Test
+    void shouldSkipRetry_repeatedFailure() {
+        TrackedIssue issue = createIssue(2);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(false);
+        result.setOutputTokens(10_000);
+        result.setFilesChanged(java.util.List.of("src/Foo.java")); // made some progress but still failed
+
+        String reason = iterationManager.shouldSkipRetry(issue, result, null, "previous feedback");
+        assertNotNull(reason);
+        assertTrue(reason.contains("failed again"));
+    }
+
+    private TrackedIssue createIssue(int currentIteration) {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setCurrentIteration(currentIteration);
+        issue.setBranchName("issuebot/issue-1-test");
+        return issue;
     }
 
     @Test

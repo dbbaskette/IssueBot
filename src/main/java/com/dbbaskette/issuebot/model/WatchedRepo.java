@@ -25,7 +25,7 @@ public class WatchedRepo {
     private RepoMode mode = RepoMode.AUTONOMOUS;
 
     @Column(name = "max_iterations", nullable = false)
-    private int maxIterations = 5;
+    private int maxIterations = 2;
 
     @Column(name = "ci_enabled", nullable = false)
     private boolean ciEnabled = true;
