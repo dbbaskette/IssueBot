@@ -12,6 +12,11 @@
     <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
 </head>
 <body>
+    <!-- Mobile menu toggle (hidden on desktop) -->
+    <button class="mobile-menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open'); document.querySelector('.sidebar-overlay').classList.toggle('open')" aria-label="Menu">
+        <span></span><span></span><span></span>
+    </button>
+    <div class="sidebar-overlay" onclick="document.querySelector('.sidebar').classList.remove('open'); this.classList.remove('open')"></div>
     <nav class="sidebar">
         <header>
             <h1>IssueBot</h1>
@@ -51,6 +56,9 @@
                     link.classList.add('active');
                 }
             });
+            // Close mobile sidebar on navigation
+            document.querySelector('.sidebar').classList.remove('open');
+            document.querySelector('.sidebar-overlay').classList.remove('open');
         });
     </script>
 </body>
