@@ -86,7 +86,81 @@ class DependencyResolverServiceTest {
         assertEquals(List.of(3, 7), resolver.parseBlockedBy(body));
     }
 
-    // --- resolve tests ---
+    // --- resolve tests (GraphQL-primary path) ---
+
+    @Test
+    void resolve_graphqlBlockers_someOpen() {
+        // Issue 20 blocked by #5 and #15 via native GitHub dependencies
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 20)).thenReturn(List.of(5, 15));
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 5)).thenReturn(List.of());
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 15)).thenReturn(List.of());
+
+        // #5 is closed
+        ObjectNode issue5 = mapper.createObjectNode();
+        issue5.put("state", "closed");
+        when(gitHubApiClient.getIssue("owner", "repo", 5)).thenReturn(issue5);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 5)).thenReturn(Optional.empty());
+
+        // #15 is open
+        ObjectNode issue15 = mapper.createObjectNode();
+        issue15.put("state", "open");
+        when(gitHubApiClient.getIssue("owner", "repo", 15)).thenReturn(issue15);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 15)).thenReturn(Optional.empty());
+
+        DependencyResult result = resolver.resolve(testRepo, 20);
+        assertEquals(List.of(5, 15), result.allBlockers());
+        assertEquals(List.of(15), result.unresolvedBlockers());
+        assertFalse(result.hasCycle());
+        // Body parsing should NOT be called since GraphQL returned results
+        verify(gitHubApiClient, never()).getIssue("owner", "repo", 20);
+    }
+
+    @Test
+    void resolve_graphqlBlockers_deepChain() {
+        // #20 -> #15 -> #5 via native dependencies
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 20)).thenReturn(List.of(15));
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 15)).thenReturn(List.of(5));
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 5)).thenReturn(List.of());
+
+        ObjectNode issue15 = mapper.createObjectNode();
+        issue15.put("state", "open");
+        when(gitHubApiClient.getIssue("owner", "repo", 15)).thenReturn(issue15);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 15)).thenReturn(Optional.empty());
+
+        ObjectNode issue5 = mapper.createObjectNode();
+        issue5.put("state", "open");
+        when(gitHubApiClient.getIssue("owner", "repo", 5)).thenReturn(issue5);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 5)).thenReturn(Optional.empty());
+
+        DependencyResult result = resolver.resolve(testRepo, 20);
+        assertEquals(List.of(5, 15), result.allBlockers());
+        assertEquals(List.of(5, 15), result.unresolvedBlockers());
+        assertFalse(result.hasCycle());
+    }
+
+    @Test
+    void resolve_graphqlEmpty_fallsBackToBody() {
+        // GraphQL returns nothing, but body has blockers
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 10)).thenReturn(List.of());
+
+        ObjectNode issue10 = mapper.createObjectNode();
+        issue10.put("body", "**Blocked by:** #5");
+        issue10.put("state", "open");
+        when(gitHubApiClient.getIssue("owner", "repo", 10)).thenReturn(issue10);
+
+        when(gitHubApiClient.getIssueBlockers("owner", "repo", 5)).thenReturn(List.of());
+        ObjectNode issue5 = mapper.createObjectNode();
+        issue5.put("body", "");
+        issue5.put("state", "closed");
+        when(gitHubApiClient.getIssue("owner", "repo", 5)).thenReturn(issue5);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 5)).thenReturn(Optional.empty());
+
+        DependencyResult result = resolver.resolve(testRepo, 10);
+        assertEquals(List.of(5), result.allBlockers());
+        assertTrue(result.unresolvedBlockers().isEmpty());
+    }
+
+    // --- resolve tests (body-parsing fallback path) ---
 
     @Test
     void resolve_noBlockers() {

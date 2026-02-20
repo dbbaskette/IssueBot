@@ -52,11 +52,11 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration
 - **Security Review** - Optional OWASP-focused security analysis per repository (injection, auth, data exposure, access control)
 - **Iteration Guardrails** - Separate budgets for implementation iterations (default: 2) and review iterations, `needs-human` escalation when retries are exhausted
-- **Issue Dependency Resolution** - Parses `**Blocked by:** #N` in issue bodies and processes issues in dependency order
+- **Issue Dependency Resolution** - Uses GitHub's native issue dependencies (`blockedBy` relationships) with body-text fallback, processes issues in topological order
 - **CI Template Generation** - Auto-generates GitHub Actions workflows (Maven, Gradle, Node, Go) for repos without CI
 - **Dual Mode** - Fully autonomous (auto-merge) or approval-gated (draft PRs with human review)
 - **Dashboard Authentication** - Optional username/password login via environment variables
-- **Web Dashboard** - Real-time monitoring with live terminal streaming, phase pipeline, iteration history, review scores
+- **Web Dashboard** - Real-time monitoring with live terminal streaming, phase pipeline, iteration history, review scores — mobile-responsive with hamburger menu
 - **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns
 - **Local-First** - Runs on your machine with an embedded H2 database; no external infrastructure required
 
@@ -177,13 +177,17 @@ issuebot:
 
 ### Issue Dependencies
 
-IssueBot respects dependency chains. Add this line to an issue body:
+IssueBot respects dependency chains. There are two ways to declare blockers:
+
+**1. GitHub native dependencies (recommended)** — Use GitHub's built-in "Mark as blocked by" feature on the issue sidebar. IssueBot reads these via the GraphQL API.
+
+**2. Body text (legacy fallback)** — Add this line to an issue body:
 
 ```
 **Blocked by:** #5, #12
 ```
 
-IssueBot will wait until issues #5 and #12 are completed before processing the blocked issue.
+Either way, IssueBot will wait until the blocking issues are completed before processing the blocked issue. Native GitHub dependencies are checked first; body text is used as a fallback.
 
 ### Dashboard
 
@@ -255,7 +259,7 @@ src/main/java/com/dbbaskette/issuebot/
 ├── service/
 │   ├── ci/             # CI workflow template generation (Maven, Gradle, Node, Go)
 │   ├── claude/         # Claude Code CLI wrapper, stream-json parser, dual-model support
-│   ├── dependency/     # Issue dependency resolution (Blocked by #N parsing)
+│   ├── dependency/     # Issue dependency resolution (GitHub native + body-text fallback)
 │   ├── event/          # Event logging and SSE broadcasting
 │   ├── git/            # JGit operations (clone, branch, diff, commit, push)
 │   ├── github/         # GitHub API client (issues, PRs, CI checks, PR reviews)

@@ -25,7 +25,11 @@ on:
 
 ## Convention
 
-Each issue body may contain a dependency line:
+Dependencies can be declared two ways:
+
+**1. GitHub native dependencies (recommended)** — Use GitHub's "Mark as blocked by" feature in the issue sidebar. IssueBot reads these via the GraphQL `blockedBy` field.
+
+**2. Body text (legacy fallback)** — Each issue body may contain a dependency line:
 
 ```markdown
 **Blocked by:** #14, #15
@@ -37,7 +41,7 @@ Completed dependencies use strikethrough:
 **Blocked by:** ~~#4~~ ✅, #14
 ```
 
-The bot ignores strikethrough references and verifies actual issue state via the GitHub API.
+The bot checks native GitHub dependencies first. If none are found, it falls back to parsing the body text. Strikethrough references are ignored, and actual issue state is always verified via the GitHub API.
 
 ---
 

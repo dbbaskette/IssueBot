@@ -9,6 +9,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.util.retry.Retry;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -285,6 +286,62 @@ public class GitHubApiClient {
             throw new RuntimeException("PR #" + prNumber + " is still draft after markPullRequestAsReady");
         }
         log.info("Successfully marked PR #{} as ready (no longer draft)", prNumber);
+    }
+
+    // --- Issue Dependencies (GraphQL) ---
+
+    /**
+     * Fetch the issue numbers that block the given issue, using GitHub's native
+     * issue dependency relationships (the "blocked by" field in the UI).
+     * Returns an empty list if none are found or on error.
+     */
+    public List<Integer> getIssueBlockers(String owner, String repo, int issueNumber) {
+        log.debug("Fetching blockers for {}/{} #{} via GraphQL", owner, repo, issueNumber);
+        String query = """
+                query {
+                  repository(owner: "%s", name: "%s") {
+                    issue(number: %d) {
+                      blockedBy(first: 50) {
+                        nodes {
+                          number
+                        }
+                      }
+                    }
+                  }
+                }
+                """.formatted(owner, repo, issueNumber);
+
+        try {
+            JsonNode response = webClient.post()
+                    .uri("/graphql")
+                    .header("Accept", "application/json")
+                    .bodyValue(Map.of("query", query))
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .retryWhen(retryOnServerError())
+                    .block(Duration.ofSeconds(15));
+
+            if (response == null) return List.of();
+            if (response.has("errors")) {
+                log.debug("GraphQL blockedBy query returned errors for {}/{} #{}: {}",
+                        owner, repo, issueNumber, response.get("errors"));
+                return List.of();
+            }
+
+            JsonNode nodes = response.path("data").path("repository")
+                    .path("issue").path("blockedBy").path("nodes");
+            if (nodes.isMissingNode() || !nodes.isArray()) return List.of();
+
+            List<Integer> blockers = new ArrayList<>();
+            for (JsonNode node : nodes) {
+                blockers.add(node.path("number").asInt());
+            }
+            return blockers;
+        } catch (Exception e) {
+            log.debug("GraphQL blockedBy query failed for {}/{} #{}: {}",
+                    owner, repo, issueNumber, e.getMessage());
+            return List.of();
+        }
     }
 
     // --- CI / Check Runs ---

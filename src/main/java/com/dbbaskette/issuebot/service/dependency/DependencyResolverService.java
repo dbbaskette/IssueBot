@@ -42,7 +42,9 @@ public class DependencyResolverService {
     ) {}
 
     /**
-     * Fetches issue body, parses Blocked by line, walks chain recursively with cycle detection.
+     * Resolves blockers using GitHub's native issue dependencies (blockedBy field),
+     * falling back to parsing the issue body for legacy "**Blocked by:**" lines.
+     * Walks the chain recursively with cycle detection.
      */
     public DependencyResult resolve(WatchedRepo repo, int issueNumber) {
         Set<Integer> visited = new HashSet<>();
@@ -207,11 +209,26 @@ public class DependencyResolverService {
     // --- Private helpers ---
 
     private List<Integer> fetchAndParseBlockers(WatchedRepo repo, int issueNumber) {
+        // Primary: use GitHub's native issue dependency relationships
+        List<Integer> graphqlBlockers = gitHubApiClient.getIssueBlockers(
+                repo.getOwner(), repo.getName(), issueNumber);
+        if (!graphqlBlockers.isEmpty()) {
+            log.debug("Found {} native blockers for {}/{} #{}", graphqlBlockers.size(),
+                    repo.getOwner(), repo.getName(), issueNumber);
+            return graphqlBlockers;
+        }
+
+        // Fallback: parse "**Blocked by:**" from issue body for legacy issues
         try {
             JsonNode issue = gitHubApiClient.getIssue(repo.getOwner(), repo.getName(), issueNumber);
             if (issue == null) return List.of();
             String body = issue.path("body").asText("");
-            return parseBlockedBy(body);
+            List<Integer> bodyBlockers = parseBlockedBy(body);
+            if (!bodyBlockers.isEmpty()) {
+                log.debug("Found {} body-text blockers for {}/{} #{}", bodyBlockers.size(),
+                        repo.getOwner(), repo.getName(), issueNumber);
+            }
+            return bodyBlockers;
         } catch (Exception e) {
             log.warn("Failed to fetch issue #{} from {}: {}", issueNumber, repo.fullName(), e.getMessage());
             return List.of();
