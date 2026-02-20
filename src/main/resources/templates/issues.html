@@ -64,7 +64,7 @@
         <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
         <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
         <td>
-            <button th:if="${issue.status.name() == 'QUEUED' and !issue.repo.autoStart}"
+            <button th:if="${issue.status.name() == 'QUEUED'}"
                     class="btn btn-primary btn-sm"
                     th:attr="hx-post='/issues/' + ${issue.id} + '/start'"
                     hx-target="#content"
