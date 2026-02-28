@@ -156,15 +156,22 @@ public class IssueWorkflowService {
         int prNumber = 0;
 
         while (iterationManager.canIterate(trackedIssue)) {
+            // Re-read entity from DB to pick up any external changes (e.g., maxIterations edits)
+            trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
+            repo = trackedIssue.getRepo();
+
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
+            int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
             issueRepository.save(trackedIssue);
 
             Iteration iteration = new Iteration(trackedIssue, iterationNum);
             iterationRepository.save(iteration);
 
+            log.info("Iteration counter updated: {}/{} for {} #{}",
+                    iterationNum, maxIterations, repo.fullName(), issueNumber);
             eventService.log("ITERATION_STARTED",
-                    "Starting iteration " + iterationNum, repo, trackedIssue);
+                    "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
             // === Phase 2: Implementation (Opus) ===
             ClaudeCodeResult implResult;

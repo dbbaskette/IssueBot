@@ -131,6 +131,8 @@ class IntegrationWorkflowTest {
         when(costRepository.totalCostForIssue(issue)).thenReturn(BigDecimal.valueOf(0.05));
         when(costRepository.totalCostForIssueByPhase(eq(issue), eq("IMPLEMENTATION"))).thenReturn(BigDecimal.valueOf(0.04));
         when(costRepository.totalCostForIssueByPhase(eq(issue), eq("REVIEW"))).thenReturn(BigDecimal.valueOf(0.01));
+        // Iteration loop re-reads entity from DB — return the same in-memory issue
+        when(issueRepository.findById(issue.getId())).thenReturn(java.util.Optional.of(issue));
     }
 
     // === Test 1: Happy path — implementation, CI, PR, review pass, completion ===

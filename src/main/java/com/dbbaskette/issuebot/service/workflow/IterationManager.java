@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -31,17 +32,20 @@ public class IterationManager {
     private static final int DEFAULT_COOLDOWN_HOURS = 24;
 
     private final TrackedIssueRepository issueRepository;
+    private final WatchedRepoRepository repoRepository;
     private final IterationRepository iterationRepository;
     private final GitHubApiClient gitHubApi;
     private final EventService eventService;
     private final NotificationService notificationService;
 
     public IterationManager(TrackedIssueRepository issueRepository,
+                             WatchedRepoRepository repoRepository,
                              IterationRepository iterationRepository,
                              GitHubApiClient gitHubApi,
                              EventService eventService,
                              NotificationService notificationService) {
         this.issueRepository = issueRepository;
+        this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
         this.gitHubApi = gitHubApi;
         this.eventService = eventService;
@@ -50,10 +54,25 @@ public class IterationManager {
 
     /**
      * Check if the issue can undergo another iteration.
+     * Re-reads maxIterations from the database to pick up any settings changes
+     * made while the workflow is running.
      */
     public boolean canIterate(TrackedIssue trackedIssue) {
-        int maxIterations = trackedIssue.getRepo().getMaxIterations();
-        return trackedIssue.getCurrentIteration() < maxIterations;
+        int maxIterations = getMaxIterationsFromDb(trackedIssue);
+        int current = trackedIssue.getCurrentIteration();
+        log.debug("canIterate check: currentIteration={}, maxIterations={}", current, maxIterations);
+        return current < maxIterations;
+    }
+
+    /**
+     * Read the current maxIterations value from the database, falling back
+     * to the in-memory value if the repo is not found.
+     */
+    private int getMaxIterationsFromDb(TrackedIssue trackedIssue) {
+        WatchedRepo repo = trackedIssue.getRepo();
+        return repoRepository.findById(repo.getId())
+                .map(WatchedRepo::getMaxIterations)
+                .orElse(repo.getMaxIterations());
     }
 
     /**
@@ -62,14 +81,19 @@ public class IterationManager {
      */
     public String shouldSkipRetry(TrackedIssue trackedIssue, ClaudeCodeResult implResult,
                                     String ciResult, String failureContext) {
+        int currentIter = trackedIssue.getCurrentIteration();
+
         // Timed out — task is too large for a single session, retrying will burn the same tokens
-        if (implResult != null && implResult.isTimedOut()) {
-            return "Implementation timed out — task is likely too large for automated resolution";
+        // Only skip after at least 2 attempts so the first timeout still allows one retry
+        if (implResult != null && implResult.isTimedOut() && currentIter > 1) {
+            return "Implementation timed out on iteration " + currentIter
+                    + " — task is likely too large for automated resolution";
         }
 
         // Excessive token usage without success — task is at the boundary of what can be done
         // Opus at ~200K+ output tokens means it wrote extensively and still failed
-        if (implResult != null && implResult.getOutputTokens() > 150_000) {
+        // Only skip after at least 2 attempts
+        if (implResult != null && implResult.getOutputTokens() > 150_000 && currentIter > 1) {
             return "Implementation consumed " + implResult.getOutputTokens()
                     + " output tokens without success — task is too complex for retry";
         }
@@ -77,15 +101,18 @@ public class IterationManager {
         // Implementation returned failure with no files changed — Claude couldn't make progress
         if (implResult != null && !implResult.isSuccess()
                 && implResult.getFilesChanged().isEmpty()
-                && trackedIssue.getCurrentIteration() > 1) {
-            return "Implementation made no progress (0 files changed) across multiple iterations";
+                && currentIter > 1) {
+            return "Implementation made no progress (0 files changed) across " + currentIter + " iterations";
         }
 
-        // Check for repeated implementation failures (same error both iterations)
-        if (implResult != null && !implResult.isSuccess() && failureContext != null
-                && trackedIssue.getCurrentIteration() > 1) {
-            return "Implementation failed again on iteration " + trackedIssue.getCurrentIteration()
-                    + " — unlikely to succeed on retry";
+        // Check for repeated implementation failures: only skip if the previous context
+        // was itself an implementation failure (not review feedback or human instructions)
+        if (implResult != null && !implResult.isSuccess()
+                && failureContext != null
+                && failureContext.startsWith("Claude Code failed:")
+                && currentIter > 1) {
+            return "Implementation failed again on iteration " + currentIter
+                    + " with same error type — unlikely to succeed on retry";
         }
 
         return null; // OK to retry
@@ -130,9 +157,13 @@ public class IterationManager {
     /**
      * Check if the issue can undergo another review iteration.
      * Uses maxReviewIterations from WatchedRepo (default 2).
+     * Re-reads from DB to pick up settings changes.
      */
     public boolean canReviewIterate(TrackedIssue trackedIssue) {
-        int maxReviewIterations = trackedIssue.getRepo().getMaxReviewIterations();
+        WatchedRepo repo = trackedIssue.getRepo();
+        int maxReviewIterations = repoRepository.findById(repo.getId())
+                .map(WatchedRepo::getMaxReviewIterations)
+                .orElse(repo.getMaxReviewIterations());
         return trackedIssue.getCurrentReviewIteration() < maxReviewIterations;
     }
 
