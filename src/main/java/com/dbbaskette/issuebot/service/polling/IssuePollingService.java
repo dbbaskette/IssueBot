@@ -332,10 +332,11 @@ public class IssuePollingService {
         TrackedIssue tracked = existing.get();
         IssueStatus status = tracked.getStatus();
 
-        // Skip issues currently being processed, queued, blocked, or already completed
+        // Skip issues currently being processed, queued, blocked, completed, or decomposed
         if (status == IssueStatus.IN_PROGRESS || status == IssueStatus.QUEUED
                 || status == IssueStatus.AWAITING_APPROVAL || status == IssueStatus.COMPLETED
-                || status == IssueStatus.BLOCKED || status == IssueStatus.PENDING) {
+                || status == IssueStatus.BLOCKED || status == IssueStatus.PENDING
+                || status == IssueStatus.DECOMPOSED) {
             return false;
         }
 

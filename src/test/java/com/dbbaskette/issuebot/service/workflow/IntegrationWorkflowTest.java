@@ -47,6 +47,7 @@ class IntegrationWorkflowTest {
     private SseService sseService;
     private NotificationService notificationService;
     private IterationManager iterationManager;
+    private IssueDecompositionService decompositionService;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -63,13 +64,14 @@ class IntegrationWorkflowTest {
         sseService = mock(SseService.class);
         notificationService = mock(NotificationService.class);
         iterationManager = mock(IterationManager.class);
+        decompositionService = mock(IssueDecompositionService.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
                 gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
-                objectMapper);
+                decompositionService, objectMapper);
     }
 
     private TrackedIssue createTestIssue() {

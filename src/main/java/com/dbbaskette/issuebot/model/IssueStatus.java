@@ -8,5 +8,6 @@ public enum IssueStatus {
     AWAITING_APPROVAL,
     COMPLETED,
     FAILED,
-    COOLDOWN
+    COOLDOWN,
+    DECOMPOSED
 }

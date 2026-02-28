@@ -54,6 +54,7 @@ public class IssueWorkflowService {
     private final SseService sseService;
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
+    private final IssueDecompositionService decompositionService;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -68,6 +69,7 @@ public class IssueWorkflowService {
                                  SseService sseService,
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
+                                 IssueDecompositionService decompositionService,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -81,6 +83,7 @@ public class IssueWorkflowService {
         this.sseService = sseService;
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
+        this.decompositionService = decompositionService;
         this.objectMapper = objectMapper;
     }
 
@@ -203,6 +206,12 @@ public class IssueWorkflowService {
                 if (skipReason != null) {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
+                    // Attempt decomposition for timeout/complexity issues
+                    if (decompositionService.isDecomposable(skipReason)
+                            && decompositionService.decompose(trackedIssue, issueDetails,
+                                    repoPath, skipReason)) {
+                        return;
+                    }
                     iterationManager.handleRetrySkipped(trackedIssue, skipReason);
                     return;
                 }
@@ -262,6 +271,11 @@ public class IssueWorkflowService {
                 if (skipReason != null) {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
+                    if (decompositionService.isDecomposable(skipReason)
+                            && decompositionService.decompose(trackedIssue, issueDetails,
+                                    repoPath, skipReason)) {
+                        return;
+                    }
                     iterationManager.handleRetrySkipped(trackedIssue, skipReason);
                     return;
                 }
@@ -347,7 +361,14 @@ public class IssueWorkflowService {
             }
         }
 
-        // Max iterations reached
+        // Max iterations reached — attempt decomposition before escalating
+        String maxIterReason = "Failed after " + repo.getMaxIterations()
+                + " iterations — task is likely too large for automated resolution";
+        if (decompositionService.isDecomposable(maxIterReason)
+                && decompositionService.decompose(trackedIssue, issueDetails,
+                        repoPath, maxIterReason)) {
+            return;
+        }
         iterationManager.handleMaxIterationsReached(trackedIssue);
     }
 
