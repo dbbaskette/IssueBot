@@ -148,6 +148,26 @@ public class IssueWorkflowService {
             return;
         }
 
+        // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
+        try {
+            IssueDecompositionService.PreScreenResult screenResult =
+                    decompositionService.preScreen(issueDetails, repoPath);
+            if (screenResult.tooLarge()) {
+                log.info("Pre-screen flagged {} #{} as too large: {}",
+                        repo.fullName(), issueNumber, screenResult.reason());
+                eventService.log("PRE_SCREEN_TOO_LARGE",
+                        "Pre-screen: " + screenResult.reason(), repo, trackedIssue);
+                if (decompositionService.decompose(trackedIssue, issueDetails,
+                        repoPath, "Pre-screen: " + screenResult.reason())) {
+                    return;
+                }
+                log.info("Decomposition failed after pre-screen, proceeding with implementation");
+            }
+        } catch (Exception e) {
+            log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
+                    repo.fullName(), issueNumber, e.getMessage());
+        }
+
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
                 repo.fullName(), issueNumber, repo.getMaxIterations());
 
