@@ -47,6 +47,7 @@ class IntegrationWorkflowTest {
     private SseService sseService;
     private NotificationService notificationService;
     private IterationManager iterationManager;
+    private IssueDecompositionService decompositionService;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -63,13 +64,14 @@ class IntegrationWorkflowTest {
         sseService = mock(SseService.class);
         notificationService = mock(NotificationService.class);
         iterationManager = mock(IterationManager.class);
+        decompositionService = mock(IssueDecompositionService.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
                 gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
-                objectMapper);
+                decompositionService, objectMapper);
     }
 
     private TrackedIssue createTestIssue() {
@@ -131,6 +133,11 @@ class IntegrationWorkflowTest {
         when(costRepository.totalCostForIssue(issue)).thenReturn(BigDecimal.valueOf(0.05));
         when(costRepository.totalCostForIssueByPhase(eq(issue), eq("IMPLEMENTATION"))).thenReturn(BigDecimal.valueOf(0.04));
         when(costRepository.totalCostForIssueByPhase(eq(issue), eq("REVIEW"))).thenReturn(BigDecimal.valueOf(0.01));
+        // Iteration loop re-reads entity from DB — return the same in-memory issue
+        when(issueRepository.findById(issue.getId())).thenReturn(java.util.Optional.of(issue));
+        // Default pre-screen: not too large
+        when(decompositionService.preScreen(any(), any()))
+                .thenReturn(new IssueDecompositionService.PreScreenResult(false, null));
     }
 
     // === Test 1: Happy path — implementation, CI, PR, review pass, completion ===
@@ -359,5 +366,59 @@ class IntegrationWorkflowTest {
         workflowService.processIssueAsync(issue);
 
         assertEquals(IssueStatus.FAILED, issue.getStatus());
+    }
+
+    // === Test 10: Pre-screen decomposes before implementation ===
+    @Test
+    void preScreen_tooLarge_decomposesWithoutImplementation() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Override pre-screen to flag as too large
+        when(decompositionService.preScreen(any(), any()))
+                .thenReturn(new IssueDecompositionService.PreScreenResult(true, "Spans 12+ files across 4 layers"));
+
+        // Decomposition succeeds
+        when(decompositionService.decompose(eq(issue), any(), any(), anyString())).thenReturn(true);
+
+        workflowService.processIssue(issue);
+
+        // Verify decomposition was called but implementation was NOT
+        verify(decompositionService).decompose(eq(issue), any(), any(), contains("Pre-screen"));
+        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), any());
+        verify(iterationManager, never()).canIterate(any());
+    }
+
+    // === Test 11: Pre-screen failure falls through to implementation ===
+    @Test
+    void preScreen_failureFallsThrough() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Pre-screen flags too large but decomposition fails
+        when(decompositionService.preScreen(any(), any()))
+                .thenReturn(new IssueDecompositionService.PreScreenResult(true, "Large issue"));
+        when(decompositionService.decompose(eq(issue), any(), any(), anyString())).thenReturn(false);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 104);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyBoolean(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Implementation still ran after decomposition failed
+        verify(claudeCode).executeImplementation(anyString(), any(Path.class), any());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 }

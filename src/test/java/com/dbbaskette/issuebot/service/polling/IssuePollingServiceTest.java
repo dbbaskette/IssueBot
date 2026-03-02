@@ -119,4 +119,14 @@ class IssuePollingServiceTest {
         assertEquals(IssueStatus.FAILED, tracked.getStatus());
         assertEquals(3, tracked.getCurrentIteration());
     }
+
+    @Test
+    void qualifiesForProcessing_decomposedIssue() {
+        TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
+        tracked.setStatus(IssueStatus.DECOMPOSED);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.of(tracked));
+
+        // DECOMPOSED issues are terminal — sub-issues handle the work
+        assertFalse(pollingService.qualifiesForProcessing(testRepo, 1));
+    }
 }

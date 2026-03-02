@@ -54,6 +54,7 @@ public class IssueWorkflowService {
     private final SseService sseService;
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
+    private final IssueDecompositionService decompositionService;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -68,6 +69,7 @@ public class IssueWorkflowService {
                                  SseService sseService,
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
+                                 IssueDecompositionService decompositionService,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -81,6 +83,7 @@ public class IssueWorkflowService {
         this.sseService = sseService;
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
+        this.decompositionService = decompositionService;
         this.objectMapper = objectMapper;
     }
 
@@ -145,6 +148,26 @@ public class IssueWorkflowService {
             return;
         }
 
+        // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
+        try {
+            IssueDecompositionService.PreScreenResult screenResult =
+                    decompositionService.preScreen(issueDetails, repoPath);
+            if (screenResult.tooLarge()) {
+                log.info("Pre-screen flagged {} #{} as too large: {}",
+                        repo.fullName(), issueNumber, screenResult.reason());
+                eventService.log("PRE_SCREEN_TOO_LARGE",
+                        "Pre-screen: " + screenResult.reason(), repo, trackedIssue);
+                if (decompositionService.decompose(trackedIssue, issueDetails,
+                        repoPath, "Pre-screen: " + screenResult.reason())) {
+                    return;
+                }
+                log.info("Decomposition failed after pre-screen, proceeding with implementation");
+            }
+        } catch (Exception e) {
+            log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
+                    repo.fullName(), issueNumber, e.getMessage());
+        }
+
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
                 repo.fullName(), issueNumber, repo.getMaxIterations());
 
@@ -156,15 +179,22 @@ public class IssueWorkflowService {
         int prNumber = 0;
 
         while (iterationManager.canIterate(trackedIssue)) {
+            // Re-read entity from DB to pick up any external changes (e.g., maxIterations edits)
+            trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
+            repo = trackedIssue.getRepo();
+
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
+            int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
             issueRepository.save(trackedIssue);
 
             Iteration iteration = new Iteration(trackedIssue, iterationNum);
             iterationRepository.save(iteration);
 
+            log.info("Iteration counter updated: {}/{} for {} #{}",
+                    iterationNum, maxIterations, repo.fullName(), issueNumber);
             eventService.log("ITERATION_STARTED",
-                    "Starting iteration " + iterationNum, repo, trackedIssue);
+                    "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
             // === Phase 2: Implementation (Opus) ===
             ClaudeCodeResult implResult;
@@ -196,6 +226,12 @@ public class IssueWorkflowService {
                 if (skipReason != null) {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
+                    // Attempt decomposition for timeout/complexity issues
+                    if (decompositionService.isDecomposable(skipReason)
+                            && decompositionService.decompose(trackedIssue, issueDetails,
+                                    repoPath, skipReason)) {
+                        return;
+                    }
                     iterationManager.handleRetrySkipped(trackedIssue, skipReason);
                     return;
                 }
@@ -255,6 +291,11 @@ public class IssueWorkflowService {
                 if (skipReason != null) {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
+                    if (decompositionService.isDecomposable(skipReason)
+                            && decompositionService.decompose(trackedIssue, issueDetails,
+                                    repoPath, skipReason)) {
+                        return;
+                    }
                     iterationManager.handleRetrySkipped(trackedIssue, skipReason);
                     return;
                 }
@@ -340,7 +381,14 @@ public class IssueWorkflowService {
             }
         }
 
-        // Max iterations reached
+        // Max iterations reached — attempt decomposition before escalating
+        String maxIterReason = "Failed after " + repo.getMaxIterations()
+                + " iterations — task is likely too large for automated resolution";
+        if (decompositionService.isDecomposable(maxIterReason)
+                && decompositionService.decompose(trackedIssue, issueDetails,
+                        repoPath, maxIterReason)) {
+            return;
+        }
         iterationManager.handleMaxIterationsReached(trackedIssue);
     }
 

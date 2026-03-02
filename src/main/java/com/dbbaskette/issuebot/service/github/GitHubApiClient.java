@@ -96,6 +96,17 @@ public class GitHubApiClient {
         }
     }
 
+    public void closeIssue(String owner, String repo, int issueNumber) {
+        log.debug("Closing issue {}/{} #{}", owner, repo, issueNumber);
+        webClient.patch()
+                .uri("/repos/{owner}/{repo}/issues/{number}", owner, repo, issueNumber)
+                .bodyValue(Map.of("state", "closed", "state_reason", "completed"))
+                .retrieve()
+                .toBodilessEntity()
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(15));
+    }
+
     public JsonNode createIssue(String owner, String repo, String title, String body, List<String> labels) {
         log.debug("Creating issue in {}/{}: {}", owner, repo, title);
         Map<String, Object> payload = new HashMap<>();
