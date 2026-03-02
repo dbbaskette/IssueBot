@@ -36,7 +36,7 @@ flowchart LR
 | **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
 | **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
 | **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Sonnet |
-| **6. Completion** | Post review to PR, create follow-up issue for non-blocking findings, auto-merge if configured | - |
+| **6. Completion** | Post review to PR, create follow-up issue for non-blocking findings (max one follow-up level), auto-merge if configured | - |
 
 If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
 
@@ -46,7 +46,7 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 - **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
 - **Independent Code Review** - Sonnet evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
 - **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
-- **Follow-Up Issues** - Non-blocking review findings (medium/low severity) are captured as a follow-up GitHub issue so they aren't lost after merge
+- **Follow-Up Issues** - Non-blocking review findings (medium/low severity) are captured as a follow-up GitHub issue so they aren't lost after merge; follow-up issues do not spawn additional follow-up issues
 - **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
 - **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration

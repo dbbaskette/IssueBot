@@ -14,6 +14,7 @@ import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -43,6 +44,7 @@ class IssueWorkflowServiceTest {
                 mock(SseService.class),
                 mock(NotificationService.class),
                 mock(IterationManager.class),
+                mock(IssueDecompositionService.class),
                 objectMapper
         );
     }
@@ -99,5 +101,35 @@ class IssueWorkflowServiceTest {
         assertTrue(feedback.contains("No tests for edge case"));
         assertTrue(feedback.contains("Focus on test coverage"));
         assertTrue(feedback.contains("tests=40%"));
+    }
+
+    @Test
+    void isFollowUpIssue_trueWhenIssueHasFollowUpLabel() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Tighten null handling");
+        ArrayNode labels = issue.putArray("labels");
+        labels.addObject().put("name", "bug");
+        labels.addObject().put("name", "issuebot-followup");
+
+        assertTrue(workflowService.isFollowUpIssue(issue));
+    }
+
+    @Test
+    void isFollowUpIssue_trueWhenTitleHasFollowUpPrefix() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Follow-Up: Code Review Findings from #42");
+        issue.putArray("labels");
+
+        assertTrue(workflowService.isFollowUpIssue(issue));
+    }
+
+    @Test
+    void isFollowUpIssue_falseForRegularIssue() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Fix retry modal z-index");
+        ArrayNode labels = issue.putArray("labels");
+        labels.addObject().put("name", "bug");
+
+        assertFalse(workflowService.isFollowUpIssue(issue));
     }
 }

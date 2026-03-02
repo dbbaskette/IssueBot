@@ -41,6 +41,8 @@ import java.util.List;
 public class IssueWorkflowService {
 
     private static final Logger log = LoggerFactory.getLogger(IssueWorkflowService.class);
+    private static final String FOLLOW_UP_LABEL = "issuebot-followup";
+    private static final String FOLLOW_UP_TITLE_PREFIX = "Follow-Up:";
 
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
@@ -357,7 +359,7 @@ public class IssueWorkflowService {
             // Create follow-up issue for non-blocking review findings
             if (reviewResult != null && reviewResult.passed()) {
                 try {
-                    createFollowUpIssue(trackedIssue, reviewResult, prNumber);
+                    createFollowUpIssue(trackedIssue, issueDetails, reviewResult, prNumber);
                 } catch (Exception e) {
                     log.warn("Failed to create follow-up issue for {} #{}: {}",
                             repo.fullName(), trackedIssue.getIssueNumber(), e.getMessage());
@@ -892,7 +894,14 @@ public class IssueWorkflowService {
      * Create a follow-up GitHub issue for non-blocking (medium/low severity) review findings.
      * Posts a comment on the original issue linking to the follow-up.
      */
-    private void createFollowUpIssue(TrackedIssue trackedIssue, CodeReviewResult reviewResult, int prNumber) {
+    private void createFollowUpIssue(TrackedIssue trackedIssue, JsonNode issueDetails,
+                                     CodeReviewResult reviewResult, int prNumber) {
+        if (isFollowUpIssue(issueDetails)) {
+            log.info("Skipping follow-up creation for {} #{} because it is already a follow-up issue",
+                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());
+            return;
+        }
+
         List<CodeReviewResult.ReviewFinding> nonBlocking = reviewResult.findings().stream()
                 .filter(f -> "medium".equalsIgnoreCase(f.severity()) || "low".equalsIgnoreCase(f.severity()))
                 .toList();
@@ -944,6 +953,28 @@ public class IssueWorkflowService {
         eventService.log("FOLLOW_UP_ISSUE_CREATED",
                 "Created follow-up issue #" + followUpNumber + " with " + nonBlocking.size() + " findings",
                 repo, trackedIssue);
+    }
+
+    boolean isFollowUpIssue(JsonNode issueDetails) {
+        if (issueDetails == null || issueDetails.isMissingNode()) {
+            return false;
+        }
+
+        String title = issueDetails.path("title").asText("");
+        if (title.startsWith(FOLLOW_UP_TITLE_PREFIX)) {
+            return true;
+        }
+
+        JsonNode labels = issueDetails.path("labels");
+        if (labels.isArray()) {
+            for (JsonNode label : labels) {
+                if (FOLLOW_UP_LABEL.equalsIgnoreCase(label.path("name").asText())) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
