@@ -1,0 +1,1 @@
+ALTER TABLE watched_repos ADD COLUMN follow_up_enabled BOOLEAN NOT NULL DEFAULT TRUE;
