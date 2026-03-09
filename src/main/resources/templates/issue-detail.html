@@ -13,6 +13,11 @@
             <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                     type="button" class="btn btn-sm" style="font-size:0.75rem;padding:0.25rem 0.75rem"
                     onclick="document.getElementById('retry-modal').style.display='flex'">Retry</button>
+            <form th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL'}"
+                  th:action="@{'/issues/' + ${issue.id} + '/complete'}" method="post" style="display:inline">
+                <button type="submit" class="btn btn-sm" style="font-size:0.75rem;padding:0.25rem 0.75rem"
+                        onclick="return confirm('Mark this issue as completed?')">Mark Complete</button>
+            </form>
         </div>
     </div>
 

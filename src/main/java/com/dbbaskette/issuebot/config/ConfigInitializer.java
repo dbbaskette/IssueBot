@@ -101,7 +101,6 @@ public class ConfigInitializer implements ApplicationRunner {
     }
 
     private void syncRepositories() {
-        int synced = 0;
         for (IssueBotProperties.RepositoryConfig repoCfg : properties.getRepositories()) {
             WatchedRepo repo = repoRepository.findByOwnerAndName(repoCfg.getOwner(), repoCfg.getName())
                     .orElseGet(() -> {
@@ -124,15 +123,14 @@ public class ConfigInitializer implements ApplicationRunner {
             }
 
             repoRepository.save(repo);
-            synced++;
         }
-        log.info("Synced {} repositories from config", synced);
+        log.info("Synced {} repositories from config", properties.getRepositories().size());
     }
 
     private RepoMode parseMode(String mode) {
         if (mode == null) return RepoMode.AUTONOMOUS;
         return switch (mode.toLowerCase().replace("-", "_")) {
-            case "approval_gated", "approval-gated" -> RepoMode.APPROVAL_GATED;
+            case "approval_gated" -> RepoMode.APPROVAL_GATED;
             default -> RepoMode.AUTONOMOUS;
         };
     }

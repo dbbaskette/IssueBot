@@ -255,7 +255,8 @@ src/main/java/com/dbbaskette/issuebot/
 ├── controller/          # Dashboard controllers (issues, repos, costs, approvals)
 ├── model/               # JPA entities (WatchedRepo, TrackedIssue, Iteration, Event, CostTracking)
 ├── repository/          # Spring Data JPA repositories
-├── security/            # Security configuration
+├── security/            # Security configuration, branch validation, log sanitization
+├── observability/       # Health indicators and Micrometer metrics
 ├── service/
 │   ├── ci/             # CI workflow template generation (Maven, Gradle, Node, Go)
 │   ├── claude/         # Claude Code CLI wrapper, stream-json parser, dual-model support
@@ -273,7 +274,7 @@ src/main/java/com/dbbaskette/issuebot/
 └── IssueBotApplication.java
 
 src/main/resources/
-├── db/migration/        # Flyway migrations (V1-V6)
+├── db/migration/        # Flyway migrations (V1-V8)
 ├── static/css/          # Dashboard styles
 ├── templates/           # Thymeleaf templates (dashboard, issues, repos, costs)
 └── application.yml      # Default configuration

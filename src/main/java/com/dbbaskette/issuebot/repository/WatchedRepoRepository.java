@@ -7,6 +7,4 @@ import java.util.Optional;
 public interface WatchedRepoRepository extends JpaRepository<WatchedRepo, Long> {
 
     Optional<WatchedRepo> findByOwnerAndName(String owner, String name);
-
-    boolean existsByOwnerAndName(String owner, String name);
 }

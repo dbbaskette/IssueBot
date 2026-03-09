@@ -35,21 +35,18 @@ public class SecurityConfig {
                     .defaultSuccessUrl("/", true)
                     .permitAll()
                 )
-                .httpBasic(basic -> {})
-                .csrf(csrf -> csrf.disable())
-                .headers(headers -> headers
-                    .frameOptions(frame -> frame.sameOrigin())
-                );
+                .httpBasic(basic -> {});
         } else {
             http
                 .authorizeHttpRequests(auth -> auth
                     .anyRequest().permitAll()
-                )
-                .csrf(csrf -> csrf.disable())
-                .headers(headers -> headers
-                    .frameOptions(frame -> frame.sameOrigin())
                 );
         }
+        http
+            .csrf(csrf -> csrf.disable())
+            .headers(headers -> headers
+                .frameOptions(frame -> frame.sameOrigin())
+            );
         return http.build();
     }
 

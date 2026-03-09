@@ -102,6 +102,7 @@ public class GitHubIssueTool {
         try {
             gitHubApiClient.addComment(owner, repo, issueNumber,
                     "Closing issue — resolved by IssueBot.");
+            gitHubApiClient.closeIssue(owner, repo, issueNumber);
             return """
                     {"success": true, "message": "Issue closed"}""";
         } catch (Exception e) {

@@ -10,6 +10,8 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.RemoteConfig;
+import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.slf4j.Logger;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +29,7 @@ import java.util.Locale;
 public class GitOperationsService {
 
     private static final Logger log = LoggerFactory.getLogger(GitOperationsService.class);
+    public static final String BRANCH_PREFIX = "issuebot/";
 
     private final IssueBotProperties properties;
 
@@ -47,6 +51,7 @@ public class GitOperationsService {
         if (dir.exists() && new File(dir, ".git").exists()) {
             log.info("Pulling latest for {}/{} on branch {}", owner, name, branch);
             Git git = Git.open(dir);
+            ensureOriginRemote(git, owner, name);
             git.fetch().setCredentialsProvider(credentials()).call();
 
             if (isEmptyRepo(git)) {
@@ -112,7 +117,7 @@ public class GitOperationsService {
      */
     public String createBranch(Git git, int issueNumber, String issueTitle) throws GitAPIException, IOException {
         String slug = slugify(issueTitle);
-        String branchName = String.format("issuebot/issue-%d-%s", issueNumber, slug);
+        String branchName = String.format(BRANCH_PREFIX + "issue-%d-%s", issueNumber, slug);
         log.info("Creating branch: {}", branchName);
 
         // Delete existing local branch if it exists (e.g. from a previous run).
@@ -227,6 +232,38 @@ public class GitOperationsService {
     }
 
     // --- Helpers ---
+
+    /**
+     * Ensure the "origin" remote is configured with the correct URL.
+     * Fixes repos where a prior run left a .git dir without a proper remote.
+     */
+    private void ensureOriginRemote(Git git, String owner, String name) {
+        try {
+            String expectedUrl = String.format("https://github.com/%s/%s.git", owner, name);
+            List<RemoteConfig> remotes = git.remoteList().call();
+            RemoteConfig origin = remotes.stream()
+                    .filter(r -> "origin".equals(r.getName()))
+                    .findFirst().orElse(null);
+            if (origin == null) {
+                log.warn("Remote 'origin' not found — adding it: {}", expectedUrl);
+                git.remoteAdd()
+                        .setName("origin")
+                        .setUri(new URIish(expectedUrl))
+                        .call();
+            } else {
+                String currentUrl = origin.getURIs().isEmpty() ? "" : origin.getURIs().get(0).toString();
+                if (!currentUrl.equals(expectedUrl)) {
+                    log.warn("Remote 'origin' URL mismatch: {} — updating to {}", currentUrl, expectedUrl);
+                    git.remoteSetUrl()
+                            .setRemoteName("origin")
+                            .setRemoteUri(new URIish(expectedUrl))
+                            .call();
+                }
+            }
+        } catch (GitAPIException | URISyntaxException e) {
+            log.error("Failed to verify/add origin remote", e);
+        }
+    }
 
     private CredentialsProvider credentials() {
         String token = properties.getGithub().getToken();

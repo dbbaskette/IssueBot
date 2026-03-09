@@ -194,6 +194,20 @@ public class GitHubApiClient {
     }
 
     /**
+     * Close a pull request without merging.
+     */
+    public void closePullRequest(String owner, String repo, int prNumber) {
+        log.info("Closing PR #{} in {}/{}", prNumber, owner, repo);
+        webClient.patch()
+                .uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, prNumber)
+                .bodyValue(Map.of("state", "closed"))
+                .retrieve()
+                .toBodilessEntity()
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(15));
+    }
+
+    /**
      * Post a pull request review with inline file comments.
      * event: "APPROVE", "REQUEST_CHANGES", or "COMMENT"
      */

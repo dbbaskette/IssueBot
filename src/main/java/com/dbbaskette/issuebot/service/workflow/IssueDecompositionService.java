@@ -334,34 +334,22 @@ public class IssueDecompositionService {
     }
 
     private String extractJsonArray(String text) {
-        // Find the first [ ... ] block
-        int start = text.indexOf('[');
-        if (start < 0) return null;
-
-        int depth = 0;
-        for (int i = start; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '[') depth++;
-            else if (c == ']') {
-                depth--;
-                if (depth == 0) {
-                    return text.substring(start, i + 1);
-                }
-            }
-        }
-        return null;
+        return extractJsonBlock(text, '[', ']');
     }
 
     private String extractJsonObject(String text) {
-        // Find the first { ... } block
-        int start = text.indexOf('{');
+        return extractJsonBlock(text, '{', '}');
+    }
+
+    private String extractJsonBlock(String text, char open, char close) {
+        int start = text.indexOf(open);
         if (start < 0) return null;
 
         int depth = 0;
         for (int i = start; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c == '{') depth++;
-            else if (c == '}') {
+            if (c == open) depth++;
+            else if (c == close) {
                 depth--;
                 if (depth == 0) {
                     return text.substring(start, i + 1);

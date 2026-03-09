@@ -9,6 +9,7 @@ import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.dependency.DependencyResolverService;
 import com.dbbaskette.issuebot.service.dependency.DependencyResolverService.DependencyResult;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
@@ -190,7 +191,7 @@ public class IssuePollingService {
     private boolean hasOpenIssueBotPR(WatchedRepo repo) {
         try {
             List<JsonNode> prs = gitHubApiClient.listOpenPullRequests(
-                    repo.getOwner(), repo.getName(), "issuebot/");
+                    repo.getOwner(), repo.getName(), GitOperationsService.BRANCH_PREFIX);
             return prs != null && !prs.isEmpty();
         } catch (Exception e) {
             log.warn("Failed to check open PRs for {}: {}", repo.fullName(), e.getMessage());
@@ -304,6 +305,10 @@ public class IssuePollingService {
                 continue;
             }
 
+            // Set IN_PROGRESS before saving so the per-repo gate sees it
+            // immediately (prevents race where multiple issues for the same
+            // repo slip through in the same polling cycle).
+            tracked.setStatus(IssueStatus.IN_PROGRESS);
             issueRepository.save(tracked);
 
             eventService.log("ISSUE_DETECTED",
@@ -319,34 +324,12 @@ public class IssuePollingService {
     }
 
     /**
-     * Check if an issue qualifies for processing:
-     * - Not already tracked (or tracked but in a terminal/cooldown state)
-     * - Not in cooldown period
+     * An issue qualifies for processing only if it is not already tracked.
+     * All tracked statuses (including COOLDOWN and FAILED) require manual
+     * retry via the dashboard to avoid endless retry loops burning tokens.
      */
     boolean qualifiesForProcessing(WatchedRepo repo, int issueNumber) {
-        var existing = issueRepository.findByRepoAndIssueNumber(repo, issueNumber);
-        if (existing.isEmpty()) {
-            return true;
-        }
-
-        TrackedIssue tracked = existing.get();
-        IssueStatus status = tracked.getStatus();
-
-        // Skip issues currently being processed, queued, blocked, completed, or decomposed
-        if (status == IssueStatus.IN_PROGRESS || status == IssueStatus.QUEUED
-                || status == IssueStatus.AWAITING_APPROVAL || status == IssueStatus.COMPLETED
-                || status == IssueStatus.BLOCKED || status == IssueStatus.PENDING
-                || status == IssueStatus.DECOMPOSED) {
-            return false;
-        }
-
-        // COOLDOWN and FAILED issues require manual retry via the dashboard
-        // to avoid endless retry loops burning tokens
-        if (status == IssueStatus.COOLDOWN || status == IssueStatus.FAILED) {
-            return false;
-        }
-
-        return false;
+        return issueRepository.findByRepoAndIssueNumber(repo, issueNumber).isEmpty();
     }
 
     public void setEnabled(boolean enabled) {

@@ -100,8 +100,6 @@ public class ClaudeCodeService {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workingDirectory.toFile());
             pb.redirectErrorStream(false);
-            // Inherit environment (includes ANTHROPIC_API_KEY)
-            pb.environment().putAll(System.getenv());
 
             Process process = pb.start();
             process.getOutputStream().close(); // Close stdin — headless, no interactive input
@@ -219,7 +217,6 @@ public class ClaudeCodeService {
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "--version");
             pb.redirectErrorStream(true);
-            pb.environment().putAll(System.getenv());
             Process process = pb.start();
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (finished && process.exitValue() == 0) {
@@ -249,19 +246,18 @@ public class ClaudeCodeService {
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "auth", "status");
             pb.redirectErrorStream(true);
-            pb.environment().putAll(System.getenv());
             Process process = pb.start();
-            String output;
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                output = reader.lines().reduce("", (a, b) -> a + b);
-            }
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
                 log.warn("Claude Code auth status check timed out after 10s");
                 cliAuthenticated = false;
                 return false;
+            }
+            String output;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                output = String.join("", reader.lines().toList());
             }
             int exitCode = process.exitValue();
             log.info("Claude auth status: exitCode={}, output={}", exitCode, output);

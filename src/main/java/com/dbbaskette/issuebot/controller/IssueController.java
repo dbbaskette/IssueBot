@@ -8,6 +8,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
@@ -142,8 +143,22 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
 
-        // Enforce the same gating as the polling service
-        String gateReason = checkGate(issue);
+        // Fetch open IssueBot PRs once for both cleanup and gate check
+        WatchedRepo retryRepo = issue.getRepo();
+        List<JsonNode> openPRs = List.of();
+        try {
+            List<JsonNode> fetched = gitHubApiClient.listOpenPullRequests(
+                    retryRepo.getOwner(), retryRepo.getName(), GitOperationsService.BRANCH_PREFIX);
+            if (fetched != null) openPRs = fetched;
+        } catch (Exception e) {
+            log.warn("Failed to fetch open PRs for {}: {}", retryRepo.fullName(), e.getMessage());
+        }
+
+        // Close any leftover IssueBot PRs for this issue's branch so the gate clears
+        List<JsonNode> remainingPRs = closeStaleIssueBotPrs(issue, openPRs);
+
+        // Enforce the same gating as the polling service (using filtered list)
+        String gateReason = checkGate(issue, remainingPRs);
         if (gateReason != null) {
             redirectAttributes.addFlashAttribute("error", gateReason);
             return "redirect:/issues/" + id;
@@ -159,22 +174,20 @@ public class IssueController {
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
                 ? instructions.trim() : null;
 
+        String retryMessage = trimmedInstructions != null
+                ? "Manual retry with instructions: " + trimmedInstructions
+                : "Manual retry triggered from dashboard";
+        eventService.log("MANUAL_RETRY", retryMessage, issue.getRepo(), issue);
+
         if (trimmedInstructions != null) {
-            eventService.log("MANUAL_RETRY",
-                    "Manual retry with instructions: " + trimmedInstructions,
-                    issue.getRepo(), issue);
             try {
                 gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
                         issue.getIssueNumber(),
                         "**ADDITIONAL HUMAN INSTRUCTIONS** (manual retry):\n\n" + trimmedInstructions);
             } catch (Exception e) {
-                // Log but don't block the retry
                 log.warn("Failed to post retry instructions comment on #{}: {}",
                         issue.getIssueNumber(), e.getMessage());
             }
-        } else {
-            eventService.log("MANUAL_RETRY",
-                    "Manual retry triggered from dashboard", issue.getRepo(), issue);
         }
 
         workflowService.processIssueAsync(issue, trimmedInstructions);
@@ -194,7 +207,7 @@ public class IssueController {
         }
 
         // Enforce the same gating as the polling service
-        String gateReason = checkGate(issue);
+        String gateReason = checkGate(issue, null);
         if (gateReason != null) {
             redirectAttributes.addFlashAttribute("error", gateReason);
             return "redirect:/issues/" + id;
@@ -214,11 +227,41 @@ public class IssueController {
         return "redirect:/issues/" + id;
     }
 
+    @PostMapping("/{id}/complete")
+    public String markComplete(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+
+        if (issue.getStatus() == IssueStatus.COMPLETED) {
+            redirectAttributes.addFlashAttribute("error", "Issue is already completed");
+            return "redirect:/issues/" + id;
+        }
+
+        if (issue.getStatus() == IssueStatus.IN_PROGRESS || issue.getStatus() == IssueStatus.AWAITING_APPROVAL) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot mark issue as completed while it is " + issue.getStatus()
+                            + ". Wait for the workflow to finish or retry after it fails.");
+            return "redirect:/issues/" + id;
+        }
+
+        issue.setStatus(IssueStatus.COMPLETED);
+        issue.setCurrentPhase(null);
+        issue.setCooldownUntil(null);
+        issueRepository.save(issue);
+
+        eventService.log("MANUAL_COMPLETE",
+                "Manually marked issue #" + issue.getIssueNumber() + " as completed",
+                issue.getRepo(), issue);
+
+        redirectAttributes.addFlashAttribute("success", "Issue marked as completed");
+        return "redirect:/issues/" + id;
+    }
+
     /**
      * Check repo-level and global concurrency gates. Returns null if clear,
      * or an error message explaining why the issue cannot start.
+     * Pass a pre-fetched PR list to avoid re-fetching, or null to fetch fresh.
      */
-    String checkGate(TrackedIssue issue) {
+    String checkGate(TrackedIssue issue, List<JsonNode> prefetchedPRs) {
         // Global concurrency cap
         long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
         if (activeCount >= properties.getMaxConcurrentIssues()) {
@@ -236,8 +279,9 @@ public class IssueController {
 
         // Per-repo gate: no open IssueBot PR
         try {
-            List<JsonNode> openPRs = gitHubApiClient.listOpenPullRequests(
-                    repo.getOwner(), repo.getName(), "issuebot/");
+            List<JsonNode> openPRs = prefetchedPRs != null ? prefetchedPRs
+                    : gitHubApiClient.listOpenPullRequests(
+                            repo.getOwner(), repo.getName(), GitOperationsService.BRANCH_PREFIX);
             if (openPRs != null && !openPRs.isEmpty()) {
                 return repo.fullName() + " has an open IssueBot PR. Merge or close it first.";
             }
@@ -246,6 +290,35 @@ public class IssueController {
         }
 
         return null;
+    }
+
+    /**
+     * Close any open IssueBot PRs for this issue's branch so a retry can proceed.
+     * Returns the remaining (non-closed) PRs for downstream gate checks.
+     */
+    private List<JsonNode> closeStaleIssueBotPrs(TrackedIssue issue, List<JsonNode> openPRs) {
+        String branchName = issue.getBranchName();
+        if (branchName == null || branchName.isBlank()) {
+            return openPRs;
+        }
+        WatchedRepo repo = issue.getRepo();
+        List<JsonNode> remaining = new java.util.ArrayList<>(openPRs);
+        remaining.removeIf(pr -> {
+            String headRef = pr.path("head").path("ref").asText("");
+            if (!headRef.equals(branchName)) return false;
+            int prNumber = pr.path("number").asInt();
+            log.info("Closing stale PR #{} for branch {} before retry", prNumber, branchName);
+            try {
+                gitHubApiClient.closePullRequest(repo.getOwner(), repo.getName(), prNumber);
+                eventService.log("STALE_PR_CLOSED",
+                        "Closed stale PR #" + prNumber + " before retry", repo, issue);
+            } catch (Exception e) {
+                log.warn("Failed to close stale PR #{}: {}", prNumber, e.getMessage());
+                return false; // keep in list if close failed
+            }
+            return true;
+        });
+        return remaining;
     }
 
     private void populateDetailModel(Model model, TrackedIssue issue, Long id) {
