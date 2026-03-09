@@ -48,6 +48,13 @@ public class GitOperationsService {
             log.info("Pulling latest for {}/{} on branch {}", owner, name, branch);
             Git git = Git.open(dir);
             git.fetch().setCredentialsProvider(credentials()).call();
+
+            if (isEmptyRepo(git)) {
+                log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
+                initializeEmptyRepo(git, dir, branch);
+                return git;
+            }
+
             git.checkout().setName(branch).call();
             git.pull().setCredentialsProvider(credentials()).call();
             return git;
@@ -56,12 +63,48 @@ public class GitOperationsService {
         log.info("Cloning {}/{} to {}", owner, name, localPath);
         dir.mkdirs();
         String url = String.format("https://github.com/%s/%s.git", owner, name);
-        return Git.cloneRepository()
+        Git git = Git.cloneRepository()
                 .setURI(url)
                 .setDirectory(dir)
                 .setBranch(branch)
                 .setCredentialsProvider(credentials())
                 .call();
+
+        if (isEmptyRepo(git)) {
+            log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
+            initializeEmptyRepo(git, dir, branch);
+        }
+
+        return git;
+    }
+
+    private boolean isEmptyRepo(Git git) throws IOException {
+        return git.getRepository().resolve("HEAD") == null;
+    }
+
+    private void initializeEmptyRepo(Git git, File dir, String branch) throws GitAPIException, IOException {
+        // Create a README so the repo has an initial commit
+        File readme = new File(dir, "README.md");
+        if (!readme.exists()) {
+            java.nio.file.Files.writeString(readme.toPath(),
+                    "# " + dir.getName() + "\n\nInitialized by IssueBot.\n");
+        }
+        git.add().addFilepattern(".").call();
+        git.commit().setMessage("Initial commit").call();
+
+        // Rename default branch to the expected branch name if needed
+        String currentBranch = git.getRepository().getBranch();
+        if (!branch.equals(currentBranch)) {
+            git.branchRename().setOldName(currentBranch).setNewName(branch).call();
+        }
+
+        // Push the initial commit so the remote has a branch
+        git.push()
+                .setCredentialsProvider(credentials())
+                .setRemote("origin")
+                .add(branch)
+                .call();
+        log.info("Pushed initial commit to origin/{}", branch);
     }
 
     /**
