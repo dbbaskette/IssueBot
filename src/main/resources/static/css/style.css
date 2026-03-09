@@ -1433,9 +1433,13 @@ details summary:hover {
 
     /* --- Live Terminal --- */
     .live-terminal {
-        font-size: 0.65rem;
+        font-size: 11px;
         padding: 0.75rem;
         overflow-x: auto;
+    }
+
+    .live-terminal .terminal-line {
+        font-size: inherit;
     }
 
     /* --- Config Editor --- */

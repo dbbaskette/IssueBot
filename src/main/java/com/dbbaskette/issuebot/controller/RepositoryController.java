@@ -64,6 +64,7 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "false") boolean securityReviewEnabled,
                                @RequestParam(defaultValue = "2") int maxReviewIterations,
                                @RequestParam(required = false, defaultValue = "true") boolean autoStart,
+                               @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
                                @RequestParam(required = false) String allowedPaths) {
         WatchedRepo repo;
         if (id != null) {
@@ -84,6 +85,7 @@ public class RepositoryController {
         repo.setSecurityReviewEnabled(securityReviewEnabled);
         repo.setMaxReviewIterations(maxReviewIterations);
         repo.setAutoStart(autoStart);
+        repo.setFollowUpEnabled(followUpEnabled);
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {
                 List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))

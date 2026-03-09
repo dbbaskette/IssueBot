@@ -896,6 +896,12 @@ public class IssueWorkflowService {
      */
     private void createFollowUpIssue(TrackedIssue trackedIssue, JsonNode issueDetails,
                                      CodeReviewResult reviewResult, int prNumber) {
+        if (!trackedIssue.getRepo().isFollowUpEnabled()) {
+            log.info("Skipping follow-up creation for {} #{} because follow-up issues are disabled",
+                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());
+            return;
+        }
+
         if (isFollowUpIssue(issueDetails)) {
             log.info("Skipping follow-up creation for {} #{} because it is already a follow-up issue",
                     trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());

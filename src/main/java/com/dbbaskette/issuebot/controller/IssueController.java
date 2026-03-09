@@ -1,14 +1,17 @@
 package com.dbbaskette.issuebot.controller;
 
+import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -35,6 +38,7 @@ public class IssueController {
     private final IssueWorkflowService workflowService;
     private final EventService eventService;
     private final GitHubApiClient gitHubApiClient;
+    private final IssueBotProperties properties;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -44,7 +48,8 @@ public class IssueController {
                             IssuePollingService pollingService,
                             IssueWorkflowService workflowService,
                             EventService eventService,
-                            GitHubApiClient gitHubApiClient) {
+                            GitHubApiClient gitHubApiClient,
+                            IssueBotProperties properties) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -54,6 +59,7 @@ public class IssueController {
         this.workflowService = workflowService;
         this.eventService = eventService;
         this.gitHubApiClient = gitHubApiClient;
+        this.properties = properties;
     }
 
     @GetMapping
@@ -136,6 +142,13 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
 
+        // Enforce the same gating as the polling service
+        String gateReason = checkGate(issue);
+        if (gateReason != null) {
+            redirectAttributes.addFlashAttribute("error", gateReason);
+            return "redirect:/issues/" + id;
+        }
+
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
@@ -180,15 +193,59 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
 
-        issue.setStatus(IssueStatus.PENDING);
+        // Enforce the same gating as the polling service
+        String gateReason = checkGate(issue);
+        if (gateReason != null) {
+            redirectAttributes.addFlashAttribute("error", gateReason);
+            return "redirect:/issues/" + id;
+        }
+
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase(null);
         issueRepository.save(issue);
 
         eventService.log("MANUAL_START",
                 "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
                 issue.getRepo(), issue);
 
-        redirectAttributes.addFlashAttribute("success", "Issue queued for processing");
+        workflowService.processIssueAsync(issue);
+
+        redirectAttributes.addFlashAttribute("success", "Issue started");
         return "redirect:/issues/" + id;
+    }
+
+    /**
+     * Check repo-level and global concurrency gates. Returns null if clear,
+     * or an error message explaining why the issue cannot start.
+     */
+    String checkGate(TrackedIssue issue) {
+        // Global concurrency cap
+        long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
+        if (activeCount >= properties.getMaxConcurrentIssues()) {
+            return "Global concurrency limit reached (" + activeCount + "/"
+                    + properties.getMaxConcurrentIssues() + "). Wait for an active issue to finish.";
+        }
+
+        // Per-repo gate: no two issues in-flight for the same repo
+        WatchedRepo repo = issue.getRepo();
+        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+        if (repoHasActiveIssue) {
+            return repo.fullName() + " already has an active issue. Wait for it to complete.";
+        }
+
+        // Per-repo gate: no open IssueBot PR
+        try {
+            List<JsonNode> openPRs = gitHubApiClient.listOpenPullRequests(
+                    repo.getOwner(), repo.getName(), "issuebot/");
+            if (openPRs != null && !openPRs.isEmpty()) {
+                return repo.fullName() + " has an open IssueBot PR. Merge or close it first.";
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check open PRs for {}: {}", repo.fullName(), e.getMessage());
+        }
+
+        return null;
     }
 
     private void populateDetailModel(Model model, TrackedIssue issue, Long id) {

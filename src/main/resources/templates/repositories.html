@@ -62,6 +62,11 @@
                                    style="width:auto;accent-color:var(--amber)">
                             <label for="auto-start" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Auto-start issues</label>
                         </div>
+                        <div style="display:flex;align-items:center;gap:0.5rem">
+                            <input type="checkbox" id="follow-up-enabled" name="followUpEnabled" value="true" checked
+                                   style="width:auto;accent-color:var(--amber)">
+                            <label for="follow-up-enabled" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Create follow-up issues</label>
+                        </div>
                     </div>
                     <div id="ci-timeout-group">
                         <label for="ci-timeout">CI Timeout (min)</label>
@@ -99,6 +104,7 @@
                 <th>Review</th>
                 <th>Merge</th>
                 <th>Auto</th>
+                <th>Follow-Up</th>
                 <th>Issues</th>
                 <th>Actions</th>
             </tr>
@@ -129,6 +135,10 @@
                     <span th:if="${repo.autoStart}" class="status status-completed">ON</span>
                     <span th:unless="${repo.autoStart}" class="status status-pending">OFF</span>
                 </td>
+                <td>
+                    <span th:if="${repo.followUpEnabled}" class="status status-completed">ON</span>
+                    <span th:unless="${repo.followUpEnabled}" class="status status-pending">OFF</span>
+                </td>
                 <td th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
                 <td style="display:flex;gap:0.3rem">
                     <button class="btn btn-outline btn-sm"
@@ -143,7 +153,8 @@
                                 + ${repo.autoMerge} + ', '
                                 + ${repo.securityReviewEnabled} + ', '
                                 + ${repo.maxReviewIterations} + ', '
-                                + ${repo.autoStart} + ')'">Edit</button>
+                                + ${repo.autoStart} + ', '
+                                + ${repo.followUpEnabled} + ')'">Edit</button>
                     <button class="btn btn-danger btn-sm"
                             th:attr="hx-delete='/repositories/' + ${repo.id}"
                             hx-target="#content"
@@ -151,7 +162,7 @@
                 </td>
             </tr>
             <tr th:if="${#lists.isEmpty(repos)}">
-                <td colspan="10" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
+                <td colspan="11" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
             </tr>
         </tbody>
     </table>
@@ -172,10 +183,11 @@
             document.getElementById('security-review').checked = false;
             document.getElementById('max-review-iterations').value = '2';
             document.getElementById('auto-start').checked = true;
+            document.getElementById('follow-up-enabled').checked = true;
             document.getElementById('add-repo-form').style.display = 'block';
         }
 
-        function editRepo(id, owner, name, branch, mode, maxIterations, ciEnabled, ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations, autoStart) {
+        function editRepo(id, owner, name, branch, mode, maxIterations, ciEnabled, ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations, autoStart, followUpEnabled) {
             document.getElementById('form-title').textContent = 'Edit Repository';
             document.getElementById('edit-id').value = id;
             document.getElementById('owner').value = owner;
@@ -190,6 +202,7 @@
             document.getElementById('security-review').checked = securityReviewEnabled;
             document.getElementById('max-review-iterations').value = maxReviewIterations;
             document.getElementById('auto-start').checked = autoStart;
+            document.getElementById('follow-up-enabled').checked = followUpEnabled;
             document.getElementById('add-repo-form').style.display = 'block';
         }
     </script>

@@ -45,6 +45,9 @@ public class WatchedRepo {
     @Column(name = "max_review_iterations", nullable = false)
     private int maxReviewIterations = 2;
 
+    @Column(name = "follow_up_enabled", nullable = false)
+    private boolean followUpEnabled = true;
+
     @Column(name = "allowed_paths")
     @Lob
     private String allowedPaths;
@@ -108,6 +111,9 @@ public class WatchedRepo {
 
     public boolean isAutoStart() { return autoStart; }
     public void setAutoStart(boolean autoStart) { this.autoStart = autoStart; }
+
+    public boolean isFollowUpEnabled() { return followUpEnabled; }
+    public void setFollowUpEnabled(boolean followUpEnabled) { this.followUpEnabled = followUpEnabled; }
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }
