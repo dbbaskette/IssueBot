@@ -110,15 +110,32 @@ public class GitOperationsService {
     /**
      * Create a feature branch for an issue: issuebot/issue-{number}-{slug}
      */
-    public String createBranch(Git git, int issueNumber, String issueTitle) throws GitAPIException {
+    public String createBranch(Git git, int issueNumber, String issueTitle) throws GitAPIException, IOException {
         String slug = slugify(issueTitle);
         String branchName = String.format("issuebot/issue-%d-%s", issueNumber, slug);
         log.info("Creating branch: {}", branchName);
 
-        // Delete existing local branch if it exists (e.g. from a previous run)
+        // Delete existing local branch if it exists (e.g. from a previous run).
+        // Must checkout a different branch first since you can't delete the checked-out branch.
+        String currentBranch = git.getRepository().getBranch();
         List<Ref> branches = git.branchList().call();
         for (Ref ref : branches) {
             if (ref.getName().equals("refs/heads/" + branchName)) {
+                if (branchName.equals(currentBranch)) {
+                    // Find any other branch to checkout (prefer main/master)
+                    String fallback = branches.stream()
+                            .map(r -> Repository.shortenRefName(r.getName()))
+                            .filter(n -> !n.equals(branchName))
+                            .min((a, b) -> {
+                                if ("main".equals(a) || "master".equals(a)) return -1;
+                                if ("main".equals(b) || "master".equals(b)) return 1;
+                                return a.compareTo(b);
+                            })
+                            .orElse(null);
+                    if (fallback != null) {
+                        git.checkout().setName(fallback).call();
+                    }
+                }
                 log.info("Branch {} already exists locally, deleting it first", branchName);
                 git.branchDelete().setBranchNames(branchName).setForce(true).call();
                 break;

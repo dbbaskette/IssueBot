@@ -515,15 +515,25 @@ public class IssueWorkflowService {
         BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
         String prBody = buildPrDescription(trackedIssue, issueDetails, iterationCount, totalCost);
 
-        JsonNode pr = gitHubApi.createPullRequest(
-                repo.getOwner(), repo.getName(),
-                prTitle, prBody, branchName, repo.getBranch(), draft);
+        try {
+            JsonNode pr = gitHubApi.createPullRequest(
+                    repo.getOwner(), repo.getName(),
+                    prTitle, prBody, branchName, repo.getBranch(), draft);
 
-        int prNumber = pr.path("number").asInt();
-        log.info("Created draft PR #{} for {} #{}", prNumber, repo.fullName(), trackedIssue.getIssueNumber());
-        eventService.log("PHASE_PR_CREATION_COMPLETE",
-                "Created draft PR #" + prNumber, repo, trackedIssue);
-        return prNumber;
+            int prNumber = pr.path("number").asInt();
+            log.info("Created {} PR #{} for {} #{}", draft ? "draft" : "",
+                    prNumber, repo.fullName(), trackedIssue.getIssueNumber());
+            eventService.log("PHASE_PR_CREATION_COMPLETE",
+                    "Created PR #" + prNumber, repo, trackedIssue);
+            return prNumber;
+        } catch (org.springframework.web.reactive.function.client.WebClientResponseException.UnprocessableEntity e) {
+            String responseBody = e.getResponseBodyAsString();
+            if (responseBody.contains("No commits between")) {
+                throw new IllegalStateException(
+                        "No changes to create PR — implementation produced no diff against " + repo.getBranch(), e);
+            }
+            throw e;
+        }
     }
 
     /**
