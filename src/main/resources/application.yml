@@ -7,7 +7,7 @@ spring:
   config:
     import: optional:file:${user.home}/.issuebot/config.yml
   datasource:
-    url: jdbc:h2:file:${user.home}/.issuebot/issuebot;AUTO_SERVER=TRUE
+    url: jdbc:h2:file:${user.home}/.issuebot/issuebot
     driver-class-name: org.h2.Driver
     username: sa
     password:
