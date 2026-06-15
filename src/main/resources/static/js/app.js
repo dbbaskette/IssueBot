@@ -84,6 +84,27 @@
     }
   });
 
+  // --- Keyboard-accessible navigable rows ---------------------------------
+  // Table rows are click-to-open; mirror that for keyboard users. Rows carry
+  // a [data-issue-href]; Enter or Space navigates to the issue detail.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') { return; }
+    var row = e.target.closest('[data-issue-href]');
+    if (!row) { return; }
+    // Don't hijack keys aimed at a control inside the row (e.g. Start button).
+    if (e.target !== row && e.target.closest('button, a, input, select, textarea')) {
+      return;
+    }
+    e.preventDefault();
+    var href = row.getAttribute('data-issue-href');
+    if (!href) { return; }
+    if (window.htmx && typeof window.htmx.ajax === 'function') {
+      window.htmx.ajax('GET', href, { target: '#content', pushUrl: true });
+    } else {
+      window.location.href = href;
+    }
+  });
+
   // Re-run toast handling after HTMX swaps in new content.
   document.body.addEventListener('htmx:afterSwap', function () {
     dismissToasts();

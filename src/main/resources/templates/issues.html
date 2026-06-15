@@ -5,24 +5,33 @@
     <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <h2>Issue Queue</h2>
-        <button class="btn btn-outline btn-sm"
-                hx-get="/issues/table"
-                hx-target="#issue-table-body"
-                hx-swap="innerHTML">Refresh</button>
+        <div style="display:flex;align-items:center;gap:0.6rem">
+            <span id="issue-refresh-indicator" class="glass-pill htmx-indicator" aria-hidden="true">
+                <i class="ti ti-loader spin-icon"></i> Updating…
+            </span>
+            <button class="btn btn-outline btn-sm"
+                    hx-get="/issues/table"
+                    hx-include="#filter-form"
+                    hx-target="#issue-table-body"
+                    hx-swap="innerHTML"
+                    hx-indicator="#issue-refresh-indicator">Refresh</button>
+        </div>
     </div>
 
-    <div class="filter-bar">
-        <select hx-get="/issues" hx-target="#content" name="status" hx-include="[name='repoId']">
+    <form id="filter-form" class="filter-bar" onsubmit="return false">
+        <select hx-get="/issues" hx-target="#content" name="status" hx-include="#filter-form"
+                hx-indicator="#issue-refresh-indicator">
             <option value="">All Statuses</option>
             <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}" th:selected="${s.name() == selectedStatus}">STATUS</option>
         </select>
-        <select hx-get="/issues" hx-target="#content" name="repoId" hx-include="[name='status']">
+        <select hx-get="/issues" hx-target="#content" name="repoId" hx-include="#filter-form"
+                hx-indicator="#issue-refresh-indicator">
             <option value="">All Repos</option>
             <option th:each="repo : ${repos}" th:value="${repo.id}" th:text="${repo.fullName()}" th:selected="${repo.id == selectedRepoId}">owner/repo</option>
         </select>
-    </div>
+    </form>
 
-    <div hx-ext="sse" sse-connect="/api/events/stream">
+    <div class="panel" hx-ext="sse" sse-connect="/api/events/stream">
         <table class="data-table">
             <thead>
                 <tr>
@@ -39,8 +48,10 @@
             <tbody id="issue-table-body"
                    hx-ext="morph"
                    hx-get="/issues/table"
+                   hx-include="#filter-form"
                    hx-trigger="sse:issue-update"
                    hx-swap="morph:innerHTML"
+                   hx-indicator="#issue-refresh-indicator"
                    hx-on::after-swap="htmx.process(this)">
                 <tr th:replace="~{issues :: table-rows}"></tr>
             </tbody>
@@ -52,7 +63,11 @@
 <th:block th:fragment="table-rows">
     <tr th:each="issue : ${issues}"
         style="cursor:pointer"
-        th:attr="hx-get='/issues/' + ${issue.id}"
+        tabindex="0"
+        role="link"
+        th:attr="hx-get='/issues/' + ${issue.id},
+                 data-issue-href='/issues/' + ${issue.id},
+                 aria-label='Open issue #' + ${issue.issueNumber} + ' ' + ${issue.issueTitle}"
         hx-target="#content"
         hx-push-url="true">
         <td th:text="${issue.repo.fullName()}">owner/repo</td>
@@ -65,9 +80,11 @@
         <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
         <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
         <td>
-            <button th:if="${issue.status.name() == 'QUEUED'}"
+            <button type="button"
+                    th:if="${issue.status.name() == 'QUEUED'}"
                     class="btn btn-primary btn-sm"
-                    th:attr="hx-post='/issues/' + ${issue.id} + '/start'"
+                    th:attr="hx-post='/issues/' + ${issue.id} + '/start',
+                             aria-label='Start issue #' + ${issue.issueNumber}"
                     hx-target="#content"
                     onclick="event.stopPropagation()">Start</button>
         </td>
