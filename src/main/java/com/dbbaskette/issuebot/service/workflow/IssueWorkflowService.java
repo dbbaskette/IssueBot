@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -1209,7 +1210,7 @@ public class IssueWorkflowService {
                 }
                 case "tool_result", "tool_use" -> {
                     // Show tool results for visibility
-                    String toolName = node.path("tool_name").asText(node.path("name").asText(""));
+                    String toolName = StreamJsonParser.toolName(node);
                     text = "[" + type + "] " + toolName;
                 }
                 case "result" -> {

@@ -76,8 +76,7 @@ public class StreamJsonParser {
                     }
                     case "tool_use", "tool_result" -> {
                         // Track file operations
-                        String toolName = node.path("tool").asText(
-                                node.path("name").asText(""));
+                        String toolName = toolName(node);
                         JsonNode input = node.path("input");
                         if (("Write".equals(toolName) || "Edit".equals(toolName))
                                 && input.has("file_path")) {
@@ -100,5 +99,16 @@ public class StreamJsonParser {
         result.setInputTokens(inputTokens);
         result.setOutputTokens(outputTokens);
         return result;
+    }
+
+    /**
+     * Extract the tool name from a tool_use block.
+     * Claude CLI stream-json uses "name"; older/variant payloads used "tool"/"tool_name".
+     */
+    public static String toolName(JsonNode block) {
+        String n = block.path("name").asText("");
+        if (n.isEmpty()) n = block.path("tool").asText("");
+        if (n.isEmpty()) n = block.path("tool_name").asText("");
+        return n;
     }
 }
