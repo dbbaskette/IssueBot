@@ -47,6 +47,36 @@
     return !!sb && sb.classList.contains('open');
   }
 
+  // --- Clipboard helper ---------------------------------------------------
+  // Copies `text` to the clipboard and, if `btn` is given, briefly flips its
+  // contents to a "Copied" confirmation before restoring the original markup.
+  function copyText(text, btn) {
+    var done = function () {
+      if (!btn) { return; }
+      if (btn.__copyResetTimer) { clearTimeout(btn.__copyResetTimer); }
+      else { btn.__copyOrig = btn.innerHTML; }
+      btn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Copied';
+      btn.__copyResetTimer = setTimeout(function () {
+        btn.innerHTML = btn.__copyOrig;
+        btn.__copyResetTimer = null;
+      }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {});
+    } else {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        done();
+      } catch (e) { /* ignore */ }
+    }
+  }
+  window.copyText = copyText;
+
   // --- Toast auto-dismiss -------------------------------------------------
   function dismissToasts() {
     var toasts = document.querySelectorAll('.toast');
@@ -263,26 +293,7 @@
       var terminal = document.getElementById('live-terminal');
       if (!terminal) { return; }
       var text = terminal.innerText || terminal.textContent || '';
-      var done = function () {
-        var btn = document.querySelector('[data-terminal-copy]');
-        if (!btn) { return; }
-        var orig = btn.innerHTML;
-        btn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Copied';
-        setTimeout(function () { btn.innerHTML = orig; }, 1500);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done).catch(function () {});
-      } else {
-        try {
-          var ta = document.createElement('textarea');
-          ta.value = text;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          done();
-        } catch (e) { /* ignore */ }
-      }
+      copyText(text, document.querySelector('[data-terminal-copy]'));
     }
   };
   window.IssueBotTerminal = IssueBotTerminal;
@@ -362,6 +373,15 @@
     if (e.target.closest('[data-terminal-copy]')) {
       e.preventDefault();
       IssueBotTerminal.copy();
+      return;
+    }
+    // Generic copy-to-clipboard: copies the textContent of the element
+    // referenced by the button's [data-copy-target] selector.
+    var copyBtn = e.target.closest('[data-copy-target]');
+    if (copyBtn) {
+      e.preventDefault();
+      var target = document.querySelector(copyBtn.getAttribute('data-copy-target'));
+      if (target) { copyText(target.innerText || target.textContent || '', copyBtn); }
       return;
     }
   });

@@ -2,14 +2,20 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
+
     <div class="page-header">
         <h2>Settings</h2>
         <div class="flex gap-1">
             <form th:if="${agentRunning}" hx-post="/settings/pause" hx-target="#content">
-                <button type="submit" class="btn btn-outline">Pause Agent</button>
+                <button type="submit" class="btn btn-outline">
+                    <i class="ti ti-player-pause" aria-hidden="true"></i> Pause Agent
+                </button>
             </form>
             <form th:if="${!agentRunning}" hx-post="/settings/resume" hx-target="#content">
-                <button type="submit" class="btn btn-success">Resume Agent</button>
+                <button type="submit" class="btn btn-success">
+                    <i class="ti ti-player-play" aria-hidden="true"></i> Resume Agent
+                </button>
             </form>
         </div>
     </div>
@@ -17,61 +23,94 @@
     <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
     <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
 
-    <!-- Quick Settings -->
-    <div class="panel mb-3">
-        <div class="panel-header">
-            <h3>Quick Settings</h3>
-        </div>
-        <div class="panel-body">
-            <form hx-post="/settings/quick" hx-target="#content">
-                <div class="form-grid">
-                    <div>
-                        <label for="poll-interval">Poll Interval (seconds)</label>
-                        <input type="number" id="poll-interval" name="pollIntervalSeconds"
-                               th:value="${config.pollIntervalSeconds}" min="10" max="3600">
-                    </div>
-                    <div>
-                        <label for="max-concurrent">Max Concurrent Issues</label>
-                        <input type="number" id="max-concurrent" name="maxConcurrentIssues"
-                               th:value="${config.maxConcurrentIssues}" min="1" max="10">
-                    </div>
-                    <div>
-                        <label for="desktop-notif">Desktop Notifications</label>
-                        <select id="desktop-notif" name="desktopNotifications">
-                            <option value="true" th:selected="${config.notifications.desktop}">Enabled</option>
-                            <option value="false" th:selected="${!config.notifications.desktop}">Disabled</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="dashboard-notif">Dashboard Notifications</label>
-                        <select id="dashboard-notif" name="dashboardNotifications">
-                            <option value="true" th:selected="${config.notifications.dashboard}">Enabled</option>
-                            <option value="false" th:selected="${!config.notifications.dashboard}">Disabled</option>
-                        </select>
-                    </div>
+    <!-- Agent control / status -->
+    <div class="glass-card mb-3">
+        <div class="flex-between">
+            <div>
+                <strong>Agent</strong>
+                <div class="text-sm text-muted">
+                    Polling is
+                    <span th:if="${agentRunning}" style="color:var(--ok);font-weight:600">running</span>
+                    <span th:unless="${agentRunning}" style="color:var(--text-tertiary);font-weight:600">paused</span>.
                 </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save Quick Settings</button>
-                </div>
-            </form>
+            </div>
+            <span class="status"
+                  th:classappend="${agentRunning ? 'status-completed' : 'status-queued'}"
+                  th:text="${agentRunning ? 'RUNNING' : 'PAUSED'}">RUNNING</span>
         </div>
     </div>
 
+    <!-- Quick Settings -->
+    <div class="glass-card mb-3">
+        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+            <h3>Quick Settings</h3>
+        </div>
+
+        <div class="alert alert-info" style="margin-bottom:1rem">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            These changes apply immediately to the running agent, but are <strong>not</strong>
+            written to the config file &mdash; they revert to the file's values on restart.
+            To persist them, edit the Configuration File below.
+        </div>
+
+        <form hx-post="/settings/quick" hx-target="#content">
+            <div class="form-grid">
+                <div class="field-group">
+                    <label for="poll-interval">Poll Interval (seconds)</label>
+                    <input type="number" id="poll-interval" name="pollIntervalSeconds"
+                           th:value="${config.pollIntervalSeconds}" min="10" max="3600">
+                </div>
+                <div class="field-group">
+                    <label for="max-concurrent">Max Concurrent Issues</label>
+                    <input type="number" id="max-concurrent" name="maxConcurrentIssues"
+                           th:value="${config.maxConcurrentIssues}" min="1" max="10">
+                </div>
+                <div class="field-group">
+                    <label for="desktop-notif">Desktop Notifications</label>
+                    <select id="desktop-notif" name="desktopNotifications">
+                        <option value="true" th:selected="${config.notifications.desktop}">Enabled</option>
+                        <option value="false" th:selected="${!config.notifications.desktop}">Disabled</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="dashboard-notif">Dashboard Notifications</label>
+                    <select id="dashboard-notif" name="dashboardNotifications">
+                        <option value="true" th:selected="${config.notifications.dashboard}">Enabled</option>
+                        <option value="false" th:selected="${!config.notifications.dashboard}">Disabled</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Apply Now (not saved to file)</button>
+            </div>
+        </form>
+    </div>
+
     <!-- YAML Config Editor -->
-    <div class="panel">
-        <div class="panel-header">
+    <div class="glass-card">
+        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
             <h3>Configuration File</h3>
             <span class="text-sm text-muted" th:text="${configPath}">~/.issuebot/config.yml</span>
         </div>
-        <div class="panel-body">
-            <form hx-post="/settings/config" hx-target="#content">
-                <textarea class="config-editor" name="configContent" th:text="${configContent}"></textarea>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save &amp; Reload</button>
-                    <button type="button" class="btn btn-outline" hx-get="/settings" hx-target="#content">Discard Changes</button>
-                </div>
-            </form>
+        <div class="alert alert-info" style="margin-bottom:1rem">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            Saving writes this file to disk. A <strong>restart is required</strong> for changes
+            to take effect &mdash; the running agent is not reloaded automatically.
         </div>
+        <form hx-post="/settings/config" hx-target="#content">
+            <textarea class="config-editor" name="configContent" th:text="${configContent}"
+                      spellcheck="false" aria-label="Configuration file (YAML)"></textarea>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save (restart required)
+                </button>
+                <button type="button" class="btn btn-outline"
+                        hx-get="/settings" hx-target="#content"
+                        hx-confirm="Discard unsaved edits and reload the config from disk?">
+                    Discard Changes
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 </body>
