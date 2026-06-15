@@ -620,8 +620,60 @@
     return (v && v.trim()) || fallback;
   }
 
+  function initCostTimeChart() {
+    var dataEl = document.getElementById('cost-series');
+    var canvas = document.getElementById('cost-over-time-chart');
+    if (!dataEl || !canvas) { return; }
+    if (canvas.__chart) { canvas.__chart.destroy(); }
+
+    var parsed;
+    try { parsed = JSON.parse(dataEl.textContent); } catch (e) { return; }
+    var series = (parsed && parsed.series) || [];
+    if (!series.length) { return; }
+
+    var accent = cssVar('--accent', '#7c63ff');
+    var grid = cssVar('--hairline', 'rgba(128,128,128,.15)');
+    var textColor = cssVar('--text-secondary', '#64748b');
+
+    canvas.__chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: series.map(function (p) { return p.label; }),
+        datasets: [{
+          label: 'Daily Cost ($)',
+          data: series.map(function (p) { return Math.round((Number(p.cost) || 0) * 10000) / 10000; }),
+          borderColor: accent,
+          backgroundColor: accent,
+          tension: 0.25,
+          fill: false,
+          pointRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: { label: function (ctx) { return '$' + Number(ctx.parsed.y).toFixed(4); } }
+          }
+        },
+        scales: {
+          x: { ticks: { color: textColor }, grid: { display: false } },
+          y: {
+            beginAtZero: true,
+            ticks: { color: textColor, callback: function (v) { return '$' + Number(v).toFixed(2); } },
+            grid: { color: grid }
+          }
+        }
+      }
+    });
+  }
+
   function initCostCharts() {
     if (typeof Chart === 'undefined') { return; }
+    initCostTimeChart();
+
     var dataEl = document.getElementById('cost-data');
     var canvas = document.getElementById('cost-by-repo-chart');
     if (!dataEl || !canvas) { return; }

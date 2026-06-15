@@ -13,9 +13,12 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,9 +47,11 @@ public class CostController {
 
     @GetMapping("/costs")
     public String costs(Model model,
-                        @RequestHeader(value = "HX-Request", required = false) String hx) {
+                        @RequestHeader(value = "HX-Request", required = false) String hx,
+                        @RequestParam(required = false, defaultValue = "all") String range) {
         model.addAttribute("activePage", "costs");
         model.addAttribute("contentTemplate", "costs");
+        model.addAttribute("selectedRange", range);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
 
@@ -91,8 +96,11 @@ public class CostController {
         }
         model.addAttribute("issueBreakdowns", issueBreakdowns);
 
-        // Chart data block (parsed client-side). Per-repo only: cost_tracking has
-        // no timestamp column, so a genuine cost-over-time series is not available.
+        // Cost-over-time series for the selected range (7d / 30d / all).
+        List<Map<String, Object>> costSeries = buildCostSeries(costRepository.sumCostByDay(rangeCutoff(range)));
+        model.addAttribute("costSeries", costSeries);
+
+        // Chart data block (parsed client-side): per-repo bar + cost-over-time line.
         List<Map<String, Object>> chartRepos = new ArrayList<>();
         for (RepoBreakdown rb : repoBreakdowns) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -102,14 +110,51 @@ public class CostController {
         }
         try {
             // Escape "</" so a repo name can't break out of the <script> tag (JSON-safe).
-            String json = objectMapper.writeValueAsString(Map.of("repos", chartRepos))
-                    .replace("</", "<\\/");
-            model.addAttribute("costDataJson", json);
+            model.addAttribute("costDataJson",
+                    objectMapper.writeValueAsString(Map.of("repos", chartRepos)).replace("</", "<\\/"));
+            model.addAttribute("costSeriesJson",
+                    objectMapper.writeValueAsString(Map.of("series", costSeries)).replace("</", "<\\/"));
         } catch (JsonProcessingException e) {
             model.addAttribute("costDataJson", "{\"repos\":[]}");
+            model.addAttribute("costSeriesJson", "{\"series\":[]}");
         }
 
         return ViewResolver.view("costs", hx != null);
+    }
+
+    /** Resolve the {@code range} pill to a cutoff timestamp; "all"/unknown → epoch. */
+    static LocalDateTime rangeCutoff(String range) {
+        LocalDateTime now = LocalDateTime.now();
+        return switch (range == null ? "all" : range) {
+            case "7d" -> now.minusDays(7);
+            case "30d" -> now.minusDays(30);
+            default -> LocalDateTime.of(1970, 1, 1, 0, 0);
+        };
+    }
+
+    /** Map per-day aggregation rows ({@code [date, cost]}) into chart-ready maps. */
+    static List<Map<String, Object>> buildCostSeries(List<Object[]> dayRows) {
+        List<Map<String, Object>> series = new ArrayList<>();
+        for (Object[] row : dayRows) {
+            LocalDate day = toLocalDate(row[0]);
+            BigDecimal cost = row[1] != null ? (BigDecimal) row[1] : BigDecimal.ZERO;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("date", day.toString());
+            m.put("label", day.toString());
+            m.put("cost", cost.setScale(4, RoundingMode.HALF_UP));
+            series.add(m);
+        }
+        return series;
+    }
+
+    /** Normalize the various temporal types a JPA {@code CAST(... AS date)} may yield. */
+    static LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDate d) return d;
+        if (value instanceof java.sql.Date d) return d.toLocalDate();
+        if (value instanceof LocalDateTime dt) return dt.toLocalDate();
+        if (value instanceof java.sql.Timestamp ts) return ts.toLocalDateTime().toLocalDate();
+        throw new IllegalArgumentException("Unexpected date type: "
+                + (value == null ? "null" : value.getClass()));
     }
 
     public record RepoBreakdown(String repoName, BigDecimal totalCost, long issueCount, BigDecimal avgCostPerIssue) {}

@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.model;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "cost_tracking")
@@ -32,6 +33,9 @@ public class CostTracking {
 
     @Column(name = "phase", length = 50)
     private String phase = "IMPLEMENTATION";
+
+    @Column(name = "created_at")
+    private LocalDateTime createdAt = LocalDateTime.now();
 
     public CostTracking() {}
 
@@ -70,4 +74,7 @@ public class CostTracking {
 
     public String getPhase() { return phase; }
     public void setPhase(String phase) { this.phase = phase; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }
