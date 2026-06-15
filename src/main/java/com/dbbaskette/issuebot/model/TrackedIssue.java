@@ -52,6 +52,9 @@ public class TrackedIssue {
     @Column(name = "blocked_by_issues", length = 500)
     private String blockedByIssues;
 
+    @Column(name = "pr_number")
+    private Integer prNumber;
+
     public TrackedIssue() {}
 
     public TrackedIssue(WatchedRepo repo, int issueNumber, String issueTitle) {
@@ -102,6 +105,9 @@ public class TrackedIssue {
 
     public String getBlockedByIssues() { return blockedByIssues; }
     public void setBlockedByIssues(String blockedByIssues) { this.blockedByIssues = blockedByIssues; }
+
+    public Integer getPrNumber() { return prNumber; }
+    public void setPrNumber(Integer prNumber) { this.prNumber = prNumber; }
 
     public List<Integer> getBlockerNumbers() {
         if (blockedByIssues == null || blockedByIssues.isBlank()) {

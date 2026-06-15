@@ -502,6 +502,12 @@ public class IssueWorkflowService {
      * If a PR already exists for this branch (review retry), reuse it.
      * Returns the PR number.
      */
+    /** Persist the PR number on the issue so the UI can deep-link to the exact PR. */
+    private void persistPrNumber(TrackedIssue trackedIssue, int prNumber) {
+        trackedIssue.setPrNumber(prNumber);
+        issueRepository.save(trackedIssue);
+    }
+
     int phasePrCreation(TrackedIssue trackedIssue, JsonNode issueDetails,
                           String branchName, int iterationCount) {
         WatchedRepo repo = trackedIssue.getRepo();
@@ -513,6 +519,7 @@ public class IssueWorkflowService {
         if (!existingPrs.isEmpty()) {
             int existingPrNumber = existingPrs.get(0).path("number").asInt();
             log.info("PR #{} already exists for branch {} — reusing", existingPrNumber, branchName);
+            persistPrNumber(trackedIssue, existingPrNumber);
             eventService.log("PHASE_PR_CREATION_COMPLETE",
                     "Reusing existing PR #" + existingPrNumber, repo, trackedIssue);
             return existingPrNumber;
@@ -533,6 +540,7 @@ public class IssueWorkflowService {
             int prNumber = pr.path("number").asInt();
             log.info("Created {} PR #{} for {} #{}", draft ? "draft" : "",
                     prNumber, repo.fullName(), trackedIssue.getIssueNumber());
+            persistPrNumber(trackedIssue, prNumber);
             eventService.log("PHASE_PR_CREATION_COMPLETE",
                     "Created PR #" + prNumber, repo, trackedIssue);
             return prNumber;
