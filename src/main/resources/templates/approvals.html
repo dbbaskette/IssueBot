@@ -43,7 +43,9 @@
         <div th:if="${prUrls.containsKey(issue.id)}" class="mb-2">
             <a th:href="${prUrls.get(issue.id)}" target="_blank" rel="noopener"
                class="btn btn-ghost btn-sm">
-                <i class="ti ti-external-link" aria-hidden="true"></i> View Pull Request on GitHub
+                <i class="ti ti-external-link" aria-hidden="true"></i>
+                <span th:if="${issue.prNumber != null}" th:text="'View PR #' + ${issue.prNumber} + ' on GitHub'">View PR on GitHub</span>
+                <span th:unless="${issue.prNumber != null}">View Pull Request on GitHub</span>
             </a>
         </div>
 

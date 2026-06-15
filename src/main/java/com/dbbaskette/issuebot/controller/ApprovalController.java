@@ -142,14 +142,18 @@ public class ApprovalController {
                 }
             }
 
-            // We do not persist the PR number anywhere, so we cannot deep-link to a
-            // specific PR. Link to GitHub's PR list filtered by the issue's head
-            // branch — this deterministically surfaces the open PR for this work.
-            if (issue.getBranchName() != null && !issue.getBranchName().isBlank()
-                    && issue.getRepo() != null) {
-                prUrls.put(issue.getId(),
-                        "https://github.com/" + issue.getRepo().fullName()
-                                + "/pulls?q=" + "is%3Apr+head%3A" + issue.getBranchName());
+            // Deep-link to the exact PR when we have its number; otherwise fall back to
+            // GitHub's PR list filtered by the issue's head branch.
+            if (issue.getRepo() != null) {
+                if (issue.getPrNumber() != null) {
+                    prUrls.put(issue.getId(),
+                            "https://github.com/" + issue.getRepo().fullName()
+                                    + "/pull/" + issue.getPrNumber());
+                } else if (issue.getBranchName() != null && !issue.getBranchName().isBlank()) {
+                    prUrls.put(issue.getId(),
+                            "https://github.com/" + issue.getRepo().fullName()
+                                    + "/pulls?q=" + "is%3Apr+head%3A" + issue.getBranchName());
+                }
             }
         }
 

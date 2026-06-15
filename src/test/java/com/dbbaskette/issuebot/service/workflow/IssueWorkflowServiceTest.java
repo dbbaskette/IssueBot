@@ -43,6 +43,7 @@ class IssueWorkflowServiceTest {
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
     private CodeReviewService codeReviewService;
+    private CostTrackingRepository costRepository;
 
     @BeforeEach
     void setUp() {
@@ -53,6 +54,7 @@ class IssueWorkflowServiceTest {
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
         codeReviewService = mock(CodeReviewService.class);
+        costRepository = mock(CostTrackingRepository.class);
         workflowService = new IssueWorkflowService(
                 mock(GitOperationsService.class),
                 gitHubApi,
@@ -61,7 +63,7 @@ class IssueWorkflowServiceTest {
                 mock(CiTemplateService.class),
                 issueRepository,
                 iterationRepository,
-                mock(CostTrackingRepository.class),
+                costRepository,
                 mock(EventService.class),
                 mock(SseService.class),
                 mock(NotificationService.class),
@@ -69,6 +71,49 @@ class IssueWorkflowServiceTest {
                 decompositionService,
                 objectMapper
         );
+    }
+
+    @Test
+    void phasePrCreation_createsPr_persistsPrNumber() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        when(gitHubApi.listOpenPullRequests(eq("owner"), eq("repo"), anyString()))
+                .thenReturn(List.of());
+        when(costRepository.totalCostForIssue(any())).thenReturn(java.math.BigDecimal.ZERO);
+        when(costRepository.totalCostForIssueByPhase(any(), anyString()))
+                .thenReturn(java.math.BigDecimal.ZERO);
+        ObjectNode createdPr = objectMapper.createObjectNode();
+        createdPr.put("number", 4242);
+        when(gitHubApi.createPullRequest(any(), any(), any(), any(), any(), any(), anyBoolean()))
+                .thenReturn(createdPr);
+
+        ObjectNode issueDetails = objectMapper.createObjectNode();
+        issueDetails.put("body", "Something is broken");
+
+        int result = workflowService.phasePrCreation(issue, issueDetails, "issuebot/42", 1);
+
+        assertEquals(4242, result);
+        assertEquals(4242, issue.getPrNumber());
+        verify(issueRepository).save(issue);
+    }
+
+    @Test
+    void phasePrCreation_reusesExistingPr_persistsPrNumber() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        ObjectNode existing = objectMapper.createObjectNode();
+        existing.put("number", 99);
+        when(gitHubApi.listOpenPullRequests(eq("owner"), eq("repo"), anyString()))
+                .thenReturn(List.of(existing));
+
+        ObjectNode issueDetails = objectMapper.createObjectNode();
+        issueDetails.put("body", "Something is broken");
+
+        int result = workflowService.phasePrCreation(issue, issueDetails, "issuebot/42", 1);
+
+        assertEquals(99, result);
+        assertEquals(99, issue.getPrNumber());
+        verify(issueRepository).save(issue);
     }
 
     @Test
