@@ -50,7 +50,8 @@ public class ApprovalController {
     }
 
     @PostMapping("/{id}/approve")
-    public String approve(Model model, @PathVariable Long id) {
+    public String approve(Model model, @PathVariable Long id,
+                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
         // Mark as completed
@@ -62,12 +63,13 @@ public class ApprovalController {
                 issue.getRepo(), issue);
 
         populateModel(model, "Approved: " + issue.getRepo().fullName() + " #" + issue.getIssueNumber());
-        return "layout";
+        return ViewResolver.view("approvals", hx != null);
     }
 
     @PostMapping("/{id}/reject")
     public String reject(Model model, @PathVariable Long id,
-                          @RequestParam String feedback) {
+                          @RequestParam String feedback,
+                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
         iterationManager.handleHumanRejection(issue, feedback);
@@ -77,7 +79,7 @@ public class ApprovalController {
                 issue.getRepo(), issue);
 
         populateModel(model, "Rejected with feedback: " + issue.getRepo().fullName() + " #" + issue.getIssueNumber());
-        return "layout";
+        return ViewResolver.view("approvals", hx != null);
     }
 
     private void populateModel(Model model, String message) {

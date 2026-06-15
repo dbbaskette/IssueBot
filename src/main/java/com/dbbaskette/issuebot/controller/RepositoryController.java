@@ -66,7 +66,8 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "2") int maxReviewIterations,
                                @RequestParam(required = false, defaultValue = "true") boolean autoStart,
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
-                               @RequestParam(required = false) String allowedPaths) {
+                               @RequestParam(required = false) String allowedPaths,
+                               @RequestHeader(value = "HX-Request", required = false) String hx) {
         WatchedRepo repo;
         if (id != null) {
             repo = repoRepository.findById(id).orElse(new WatchedRepo(owner, name));
@@ -100,12 +101,13 @@ public class RepositoryController {
 
         repoRepository.save(repo);
         populateModel(model, "Repository " + repo.fullName() + " saved.", null);
-        return "layout";
+        return ViewResolver.view("repositories", hx != null);
     }
 
     @DeleteMapping("/{id}")
     @Transactional
-    public String delete(Model model, @PathVariable Long id) {
+    public String delete(Model model, @PathVariable Long id,
+                         @RequestHeader(value = "HX-Request", required = false) String hx) {
         repoRepository.findById(id).ifPresent(repo -> {
             // Delete children in FK order: events, cost_tracking, iterations, tracked_issues, repo
             eventRepository.deleteByRepo(repo);
@@ -118,7 +120,7 @@ public class RepositoryController {
             repoRepository.delete(repo);
         });
         populateModel(model, "Repository removed.", null);
-        return "layout";
+        return ViewResolver.view("repositories", hx != null);
     }
 
     private void populateModel(Model model, String message, String error) {
