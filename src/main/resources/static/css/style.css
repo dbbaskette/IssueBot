@@ -1408,3 +1408,107 @@ details summary:hover { color: var(--text-primary); }
     top: 1rem;
     outline: 2px solid var(--info, #0284c7);
 }
+
+/* ============================================================
+   Accessible modal dialogs
+   ============================================================ */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 18, 40, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    animation: modal-fade 0.18s var(--ease-out);
+}
+.modal-backdrop[hidden] { display: none; }
+
+@keyframes modal-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal {
+    width: 100%;
+    max-width: 520px;
+    padding: 1.5rem;
+    animation: modal-pop 0.22s var(--ease-spring);
+}
+@keyframes modal-pop {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal h3 {
+    font-family: var(--font-sans);
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.modal-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--glass-bg-strong);
+    color: var(--text-primary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+    font-family: inherit;
+    font-size: 0.875rem;
+    resize: vertical;
+}
+.modal-textarea:focus {
+    outline: none;
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+
+/* ============================================================
+   Live terminal controls
+   ============================================================ */
+.terminal-jump-btn {
+    position: absolute;
+    right: 0.9rem;
+    bottom: 0.9rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(94, 234, 212, 0.4);
+    background: rgba(15, 18, 40, 0.9);
+    color: var(--term-accent);
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+    transition: all 0.15s var(--ease-out);
+}
+.terminal-jump-btn:hover { filter: brightness(1.12); transform: translateY(-1px); }
+.terminal-jump-btn[hidden] { display: none; }
+
+.terminal-trim-note {
+    font-style: italic;
+    opacity: 0.85;
+}
+.terminal-trim-note[hidden] { display: none; }
+
+/* Diff header lines (e.g. +++/---) rendered neutral, not added/removed colored */
+.diff-line.diff-header {
+    color: var(--text-tertiary);
+    opacity: 0.8;
+}

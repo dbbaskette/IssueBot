@@ -324,13 +324,42 @@ public class IssueController {
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
 
+        boolean completed = issue.getStatus() == IssueStatus.COMPLETED;
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
         model.addAttribute("iterations", iterations);
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
+        model.addAttribute("phaseIndex", phaseIndex(issue));
+        model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+    }
+
+    /**
+     * Maps the workflow's {@code currentPhase} to a 0..5 pipeline index used by the
+     * issue-detail phase pipeline. When the issue is COMPLETED, every step (including
+     * the final COMPLETION step) renders as done — callers detect that via the
+     * {@code phaseCompleted} flag. Returns -1 when no phase is set / unknown.
+     * Phase values are set in IssueWorkflowService#setCurrentPhase.
+     */
+    private int phaseIndex(TrackedIssue issue) {
+        if (issue.getStatus() == IssueStatus.COMPLETED) {
+            return 6; // all six steps (indices 0..5) are < phaseIndex => done
+        }
+        String phase = issue.getCurrentPhase();
+        if (phase == null) {
+            return -1;
+        }
+        return switch (phase) {
+            case "SETUP" -> 0;
+            case "IMPLEMENTATION" -> 1;
+            case "CI_VERIFICATION" -> 2;
+            case "PR_CREATION" -> 3;
+            case "INDEPENDENT_REVIEW" -> 4;
+            case "COMPLETION" -> 5;
+            default -> -1;
+        };
     }
 }
