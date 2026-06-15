@@ -10,6 +10,7 @@ import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -35,7 +36,8 @@ public class CostController {
     }
 
     @GetMapping("/costs")
-    public String costs(Model model) {
+    public String costs(Model model,
+                        @RequestHeader(value = "HX-Request", required = false) String hx) {
         model.addAttribute("activePage", "costs");
         model.addAttribute("contentTemplate", "costs");
         model.addAttribute("agentRunning", pollingService.isEnabled());
@@ -82,7 +84,7 @@ public class CostController {
         }
         model.addAttribute("issueBreakdowns", issueBreakdowns);
 
-        return "layout";
+        return ViewResolver.view("costs", hx != null);
     }
 
     public record RepoBreakdown(String repoName, BigDecimal totalCost, long issueCount, BigDecimal avgCostPerIssue) {}

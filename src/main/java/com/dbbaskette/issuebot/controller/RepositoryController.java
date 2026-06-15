@@ -45,9 +45,10 @@ public class RepositoryController {
     }
 
     @GetMapping
-    public String list(Model model, @RequestParam(required = false) String message) {
+    public String list(Model model, @RequestParam(required = false) String message,
+                       @RequestHeader(value = "HX-Request", required = false) String hx) {
         populateModel(model, message, null);
-        return "layout";
+        return ViewResolver.view("repositories", hx != null);
     }
 
     @PostMapping

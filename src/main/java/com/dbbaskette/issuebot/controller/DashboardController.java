@@ -9,6 +9,7 @@ import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.math.BigDecimal;
 
@@ -34,7 +35,8 @@ public class DashboardController {
     }
 
     @GetMapping("/")
-    public String dashboard(Model model) {
+    public String dashboard(Model model,
+                            @RequestHeader(value = "HX-Request", required = false) String hx) {
         model.addAttribute("activePage", "dashboard");
         model.addAttribute("contentTemplate", "dashboard");
         model.addAttribute("agentRunning", pollingService.isEnabled());
@@ -53,6 +55,6 @@ public class DashboardController {
 
         model.addAttribute("events", eventService.getRecentEvents(15));
 
-        return "layout";
+        return ViewResolver.view("dashboard", hx != null);
     }
 }

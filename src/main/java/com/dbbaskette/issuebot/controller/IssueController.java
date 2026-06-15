@@ -66,7 +66,8 @@ public class IssueController {
     @GetMapping
     public String list(Model model,
                        @RequestParam(required = false) String status,
-                       @RequestParam(required = false) Long repoId) {
+                       @RequestParam(required = false) Long repoId,
+                       @RequestHeader(value = "HX-Request", required = false) String hx) {
         List<TrackedIssue> issues;
 
         if (status != null && !status.isBlank() && repoId != null) {
@@ -101,7 +102,7 @@ public class IssueController {
         model.addAttribute("selectedRepoId", repoId);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        return "layout";
+        return ViewResolver.view("issues", hx != null);
     }
 
     /**
@@ -114,10 +115,11 @@ public class IssueController {
     }
 
     @GetMapping("/{id}")
-    public String detail(Model model, @PathVariable Long id) {
+    public String detail(Model model, @PathVariable Long id,
+                         @RequestHeader(value = "HX-Request", required = false) String hx) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id);
-        return "layout";
+        return ViewResolver.view("issue-detail", hx != null);
     }
 
     /**

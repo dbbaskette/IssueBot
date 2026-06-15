@@ -43,9 +43,10 @@ public class ApprovalController {
     }
 
     @GetMapping
-    public String list(Model model) {
+    public String list(Model model,
+                       @RequestHeader(value = "HX-Request", required = false) String hx) {
         populateModel(model, null);
-        return "layout";
+        return ViewResolver.view("approvals", hx != null);
     }
 
     @PostMapping("/{id}/approve")

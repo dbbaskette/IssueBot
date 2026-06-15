@@ -33,9 +33,10 @@ public class SettingsController {
     }
 
     @GetMapping
-    public String settings(Model model) {
+    public String settings(Model model,
+                           @RequestHeader(value = "HX-Request", required = false) String hx) {
         populateModel(model, null, null);
-        return "layout";
+        return ViewResolver.view("settings", hx != null);
     }
 
     @PostMapping("/pause")
