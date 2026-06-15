@@ -2,6 +2,8 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
+
     <div class="page-header">
         <h2>Approvals</h2>
     </div>
@@ -9,62 +11,133 @@
     <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
 
     <div th:if="${#lists.isEmpty(approvals)}">
-        <div class="panel">
-            <div class="panel-body text-muted" style="text-align:center;padding:3rem">
-                No pending approvals. Issues in approval-gated repos will appear here when ready for review.
-            </div>
+        <div class="glass-card text-muted" style="text-align:center;padding:3rem">
+            No pending approvals. Issues in approval-gated repos will appear here when ready for review.
         </div>
     </div>
 
-    <div th:each="issue : ${approvals}" class="panel mb-3">
-        <div class="panel-header">
+    <div th:each="issue : ${approvals}" class="glass-card mb-3">
+        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
             <div>
                 <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
                 <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
             </div>
             <span class="status status-awaiting_approval">AWAITING APPROVAL</span>
         </div>
-        <div class="panel-body">
-            <div class="metrics-grid mb-2">
-                <div class="metric-card">
-                    <div class="label">Iteration</div>
-                    <div class="value" th:text="${issue.currentIteration}">1</div>
+
+        <!-- Metrics + PR link -->
+        <div class="metrics-grid mb-2">
+            <div class="metric-card">
+                <div class="label">Iteration</div>
+                <div class="value" th:text="${issue.currentIteration}">1</div>
+            </div>
+            <div class="metric-card">
+                <div class="label">Branch</div>
+                <div class="value small" th:text="${issue.branchName}">branch</div>
+            </div>
+            <div class="metric-card" th:if="${changedFileCounts.containsKey(issue.id)}">
+                <div class="label">Files Changed</div>
+                <div class="value" th:text="${changedFileCounts.get(issue.id)}">0</div>
+            </div>
+        </div>
+
+        <!-- PR link -->
+        <div th:if="${prUrls.containsKey(issue.id)}" class="mb-2">
+            <a th:href="${prUrls.get(issue.id)}" target="_blank" rel="noopener"
+               class="btn btn-ghost btn-sm">
+                <i class="ti ti-external-link" aria-hidden="true"></i> View Pull Request on GitHub
+            </a>
+        </div>
+
+        <!-- Review score -->
+        <div th:if="${reviewScores.containsKey(issue.id)}" th:with="rev=${reviewScores.get(issue.id)}"
+             class="review-scores mb-2">
+            <div class="flex-between mb-1">
+                <span class="text-sm" style="font-weight:600">Independent Code Review</span>
+                <span class="status"
+                      th:classappend="${rev.passed ? 'status-completed' : 'status-failed'}"
+                      th:text="${rev.passed ? 'PASSED' : 'FAILED'}">RESULT</span>
+            </div>
+            <div th:if="${rev.overall > 0}" class="mb-1">
+                <span class="badge" th:text="${'Overall ' + #numbers.formatDecimal(rev.overall, 1, 1) + '/10'}">Overall 0/10</span>
+                <span class="badge" th:if="${rev.findingCount > 0}"
+                      th:text="${rev.findingCount + (rev.findingCount == 1 ? ' finding' : ' findings')}">0 findings</span>
+            </div>
+            <div th:if="${rev.overall > 0}" class="text-sm text-muted"
+                 style="display:flex;flex-wrap:wrap;gap:0.4rem 1rem">
+                <span th:text="${'Spec ' + #numbers.formatDecimal(rev.specCompliance, 1, 1)}">Spec</span>
+                <span th:text="${'Correctness ' + #numbers.formatDecimal(rev.correctness, 1, 1)}">Correctness</span>
+                <span th:text="${'Quality ' + #numbers.formatDecimal(rev.codeQuality, 1, 1)}">Quality</span>
+                <span th:text="${'Tests ' + #numbers.formatDecimal(rev.testCoverage, 1, 1)}">Tests</span>
+                <span th:text="${'Architecture ' + #numbers.formatDecimal(rev.architectureFit, 1, 1)}">Architecture</span>
+                <span th:text="${'Regressions ' + #numbers.formatDecimal(rev.regressions, 1, 1)}">Regressions</span>
+                <span th:text="${'Security ' + #numbers.formatDecimal(rev.security, 1, 1)}">Security</span>
+            </div>
+            <div th:if="${rev.summary != null and not #strings.isEmpty(rev.summary)}"
+                 class="text-sm mt-1" th:text="${rev.summary}">summary</div>
+            <div th:if="${rev.model != null}" class="text-sm text-muted mt-1"
+                 th:text="${'Reviewer: ' + rev.model}">model</div>
+        </div>
+
+        <!-- Diff + self-assessment -->
+        <div th:if="${lastIterations.containsKey(issue.id)}" th:with="iter=${lastIterations.get(issue.id)}">
+            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
+                <summary class="text-sm">View Diff</summary>
+                <div class="diff-viewer" data-diff th:text="${iter.diff}">diff</div>
+            </details>
+            <details th:if="${iter.selfAssessment != null}" class="mt-1">
+                <summary class="text-sm">Self-Assessment</summary>
+                <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
+            </details>
+        </div>
+
+        <!-- Actions -->
+        <div class="form-actions mt-2 flex gap-1" style="align-items:center">
+            <button type="button" class="btn btn-primary"
+                    th:attr="data-modal-open=${'approve-modal-' + issue.id}">
+                <i class="ti ti-check" aria-hidden="true"></i> Approve &amp; Merge
+            </button>
+            <button type="button" class="btn btn-danger"
+                    th:attr="data-reject-toggle=${issue.id}">
+                <i class="ti ti-x" aria-hidden="true"></i> Reject
+            </button>
+        </div>
+
+        <!-- Reject inline panel (less destructive: keeps feedback textarea) -->
+        <div th:id="${'reject-form-' + issue.id}" hidden class="mt-2 glass-card"
+             style="padding:1rem">
+            <form th:attr="hx-post='/approvals/' + ${issue.id} + '/reject'" hx-target="#content">
+                <label class="text-sm" style="font-weight:600;display:block;margin-bottom:0.4rem"
+                       th:for="${'feedback-' + issue.id}">Rejection Feedback</label>
+                <textarea th:id="${'feedback-' + issue.id}" name="feedback" rows="3"
+                          th:attr="data-reject-textarea=${issue.id}"
+                          class="modal-textarea"
+                          placeholder="Describe what needs to change..." required></textarea>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm"
+                            th:attr="data-reject-cancel=${issue.id}">Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Submit Rejection</button>
                 </div>
-                <div class="metric-card">
-                    <div class="label">Branch</div>
-                    <div class="value small" th:text="${issue.branchName}">branch</div>
-                </div>
-            </div>
+            </form>
+        </div>
 
-            <!-- Last iteration details -->
-            <div th:if="${lastIterations.containsKey(issue.id)}">
-                <details>
-                    <summary>View Diff</summary>
-                    <div class="diff-viewer" th:text="${lastIterations.get(issue.id).diff}">diff</div>
-                </details>
-                <details th:if="${lastIterations.get(issue.id).selfAssessment != null}" class="mt-1">
-                    <summary>Self-Assessment</summary>
-                    <pre class="text-sm" style="white-space:pre-wrap;background:#f8f9fa;padding:0.5rem;border-radius:4px"
-                         th:text="${lastIterations.get(issue.id).selfAssessment}">assessment</pre>
-                </details>
-            </div>
-
-            <div class="form-actions mt-2">
-                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/approve'" hx-target="#content" style="display:inline">
-                    <button type="submit" class="btn btn-success">Approve</button>
-                </form>
-                <button class="btn btn-danger" th:attr="onclick='toggleReject(' + ${issue.id} + ')'">Reject</button>
-            </div>
-
-            <div th:id="${'reject-form-' + issue.id}" style="display:none" class="mt-2">
-                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/reject'" hx-target="#content">
-                    <label th:for="${'feedback-' + issue.id}">Rejection Feedback</label>
-                    <textarea th:id="${'feedback-' + issue.id}" name="feedback" rows="3"
-                              placeholder="Describe what needs to change..." required
-                              style="width:100%;font-size:0.85rem"></textarea>
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-danger">Submit Rejection</button>
-                        <button type="button" class="btn btn-outline" th:attr="onclick='toggleReject(' + ${issue.id} + ')'">Cancel</button>
+        <!-- Approve confirmation modal -->
+        <div th:id="${'approve-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
+            <div class="modal glass-card" role="dialog" aria-modal="true"
+                 th:attr="aria-labelledby=${'approve-modal-' + issue.id + '-title'}">
+                <h3 th:id="${'approve-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve &amp; Merge</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">
+                    Approving marks
+                    <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                    as completed and ends automated processing. Make sure you have reviewed the
+                    pull request, the review score, and the diff above. This cannot be undone here.
+                </p>
+                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/approve'" hx-target="#content">
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="ti ti-check" aria-hidden="true"></i> Confirm Approve
+                        </button>
                     </div>
                 </form>
             </div>
@@ -72,10 +145,30 @@
     </div>
 
     <script>
-        function toggleReject(id) {
-            var el = document.getElementById('reject-form-' + id);
-            el.style.display = el.style.display === 'none' ? 'block' : 'none';
-        }
+        (function () {
+            function findCard(id) { return document.getElementById('reject-form-' + id); }
+            document.addEventListener('click', function (e) {
+                var toggle = e.target.closest('[data-reject-toggle]');
+                if (toggle) {
+                    var id = toggle.getAttribute('data-reject-toggle');
+                    var el = findCard(id);
+                    if (el) {
+                        el.hidden = !el.hidden;
+                        if (!el.hidden) {
+                            var ta = el.querySelector('[data-reject-textarea]');
+                            if (ta) { ta.focus(); }
+                        }
+                    }
+                    return;
+                }
+                var cancel = e.target.closest('[data-reject-cancel]');
+                if (cancel) {
+                    var cid = cancel.getAttribute('data-reject-cancel');
+                    var cel = findCard(cid);
+                    if (cel) { cel.hidden = true; }
+                }
+            });
+        })();
     </script>
 </div>
 </body>
