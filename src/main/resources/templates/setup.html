@@ -142,13 +142,11 @@
             <tr>
                 <td>GitHub Token</td>
                 <td>
-                    <span class="status" th:classappend="${githubTokenSet ? 'status-completed' : 'status-failed'}"
-                          th:text="${githubTokenSet ? 'OK' : 'MISSING'}">OK</span>
+                    <span class="status"
+                          th:classappend="${githubTokenValid ? 'status-completed' : (githubTokenSet ? 'status-failed' : 'status-failed')}"
+                          th:text="${githubTokenValid ? 'OK' : (githubTokenSet ? 'INVALID' : 'MISSING')}">OK</span>
                 </td>
-                <td th:if="${githubTokenSet}">GitHub token is configured.</td>
-                <td th:unless="${githubTokenSet}">
-                    Set <code>GITHUB_TOKEN</code> environment variable with <code>repo</code> scope.
-                </td>
+                <td th:text="${githubTokenMessage}">GitHub token status</td>
             </tr>
             <tr>
                 <td>Work Directory</td>

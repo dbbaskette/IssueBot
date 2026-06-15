@@ -17,11 +17,14 @@ import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.FileSystemUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Locale;
 
@@ -49,20 +52,30 @@ public class GitOperationsService {
         File dir = localPath.toFile();
 
         if (dir.exists() && new File(dir, ".git").exists()) {
-            log.info("Pulling latest for {}/{} on branch {}", owner, name, branch);
-            Git git = Git.open(dir);
-            ensureOriginRemote(git, owner, name);
-            git.fetch().setCredentialsProvider(credentials()).call();
+            try {
+                log.info("Pulling latest for {}/{} on branch {}", owner, name, branch);
+                Git git = Git.open(dir);
+                ensureOriginRemote(git, owner, name);
+                ensureClaudeWorktreeExcluded(dir);
+                git.fetch().setCredentialsProvider(credentials()).call();
 
-            if (isEmptyRepo(git)) {
-                log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
-                initializeEmptyRepo(git, dir, branch);
+                if (isEmptyRepo(git)) {
+                    log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
+                    initializeEmptyRepo(git, dir, branch);
+                    return git;
+                }
+
+                // Discard any leftover working-tree state (uncommitted changes, stray
+                // Claude Code worktrees) so the branch switch can't hit a checkout conflict.
+                resetAndClean(git);
+                git.checkout().setName(branch).call();
+                // Align the base branch to the freshly-fetched remote without a merge.
+                git.reset().setMode(ResetCommand.ResetType.HARD).setRef("origin/" + branch).call();
                 return git;
+            } catch (GitAPIException | IOException e) {
+                log.warn("Reusing existing clone at {} failed ({}); re-cloning fresh", dir, e.getMessage());
+                FileSystemUtils.deleteRecursively(dir);
             }
-
-            git.checkout().setName(branch).call();
-            git.pull().setCredentialsProvider(credentials()).call();
-            return git;
         }
 
         log.info("Cloning {}/{} to {}", owner, name, localPath);
@@ -74,6 +87,7 @@ public class GitOperationsService {
                 .setBranch(branch)
                 .setCredentialsProvider(credentials())
                 .call();
+        ensureClaudeWorktreeExcluded(dir);
 
         if (isEmptyRepo(git)) {
             log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
@@ -81,6 +95,35 @@ public class GitOperationsService {
         }
 
         return git;
+    }
+
+    /** Discard all local modifications and untracked files/dirs so a branch switch can't conflict. */
+    void resetAndClean(Git git) throws GitAPIException {
+        git.reset().setMode(ResetCommand.ResetType.HARD).call();
+        git.clean().setCleanDirectories(true).setForce(true).call();
+    }
+
+    /**
+     * Add {@code .claude/worktrees/} to the clone's local exclude file so Claude Code's
+     * transient worktrees never register as untracked files that conflict with checkouts.
+     */
+    void ensureClaudeWorktreeExcluded(File repoDir) {
+        Path exclude = repoDir.toPath().resolve(".git").resolve("info").resolve("exclude");
+        String entry = ".claude/worktrees/";
+        try {
+            if (Files.exists(exclude)) {
+                if (Files.readString(exclude).contains(entry)) {
+                    return;
+                }
+                Files.writeString(exclude, System.lineSeparator() + entry + System.lineSeparator(),
+                        StandardOpenOption.APPEND);
+            } else {
+                Files.createDirectories(exclude.getParent());
+                Files.writeString(exclude, entry + System.lineSeparator());
+            }
+        } catch (IOException e) {
+            log.warn("Could not update {} : {}", exclude, e.getMessage());
+        }
     }
 
     private boolean isEmptyRepo(Git git) throws IOException {
