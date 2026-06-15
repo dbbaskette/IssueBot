@@ -23,6 +23,9 @@ import java.util.Map;
 @RequestMapping("/repositories")
 public class RepositoryController {
 
+    private static final java.util.regex.Pattern GITHUB_SLUG =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9._-]+$");
+
     private final WatchedRepoRepository repoRepository;
     private final TrackedIssueRepository issueRepository;
     private final IterationRepository iterationRepository;
@@ -68,6 +71,11 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
                                @RequestParam(required = false) String allowedPaths,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
+        if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
+            populateModel(model, null,
+                    "Invalid repository owner/name. Use letters, numbers, '.', '_', '-' only.");
+            return ViewResolver.view("repositories", hx != null);
+        }
         WatchedRepo repo;
         if (id != null) {
             repo = repoRepository.findById(id).orElse(new WatchedRepo(owner, name));

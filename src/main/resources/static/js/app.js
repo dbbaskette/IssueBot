@@ -234,15 +234,6 @@
           self._appendLine(data.text || '');
         } catch (err) { /* ignore malformed payloads */ }
       });
-
-      // Close on navigation away from this page.
-      document.addEventListener('htmx:beforeSwap', function (evt) {
-        if (evt.detail.target && evt.detail.target.id === 'content') {
-          try { es.close(); } catch (e) { /* ignore */ }
-          window.__issueBotES = null;
-          self.es = null;
-        }
-      });
     },
 
     _wireControls: function (terminal) {
@@ -691,6 +682,15 @@
     colorizeDiffs();
     initSortableTables();
     initCostCharts();
+  });
+
+  // Close the live-terminal EventSource when navigating away (registered once).
+  document.addEventListener('htmx:beforeSwap', function (evt) {
+    if (evt.detail.target && evt.detail.target.id === 'content' && window.__issueBotES) {
+      try { window.__issueBotES.close(); } catch (e) { /* ignore */ }
+      window.__issueBotES = null;
+      if (window.IssueBotTerminal) { window.IssueBotTerminal.es = null; }
+    }
   });
 
   // --- Init ---------------------------------------------------------------

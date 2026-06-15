@@ -160,10 +160,10 @@
             </tr>
         </tbody>
     </table>
-    <p th:if="${allPassed}" class="mt-1" style="color: var(--color-completed); font-weight: 600;">
+    <p th:if="${allPassed}" class="mt-1" style="color: var(--ok); font-weight: 600;">
         All prerequisites are met. You're ready to go!
     </p>
-    <p th:unless="${allPassed}" class="mt-1" style="color: var(--color-failed); font-weight: 600;">
+    <p th:unless="${allPassed}" class="mt-1" style="color: var(--danger); font-weight: 600;">
         Some prerequisites are not met. Please resolve the issues above.
     </p>
 </div>

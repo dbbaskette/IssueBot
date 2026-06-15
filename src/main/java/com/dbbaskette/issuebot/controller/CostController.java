@@ -101,8 +101,10 @@ public class CostController {
             chartRepos.add(row);
         }
         try {
-            model.addAttribute("costDataJson",
-                    objectMapper.writeValueAsString(Map.of("repos", chartRepos)));
+            // Escape "</" so a repo name can't break out of the <script> tag (JSON-safe).
+            String json = objectMapper.writeValueAsString(Map.of("repos", chartRepos))
+                    .replace("</", "<\\/");
+            model.addAttribute("costDataJson", json);
         } catch (JsonProcessingException e) {
             model.addAttribute("costDataJson", "{\"repos\":[]}");
         }
