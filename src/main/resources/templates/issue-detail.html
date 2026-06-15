@@ -2,6 +2,7 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content" th:if="${issue}">
+    <div th:replace="~{layout :: toasts}"></div>
 
     <div class="page-header">
         <div>

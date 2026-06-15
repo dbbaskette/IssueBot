@@ -1,65 +1,67 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
+    <script>
+      (function(){var t=localStorage.getItem('theme')
+        ||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+        document.documentElement.setAttribute('data-theme',t);})();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title th:text="${pageTitle != null ? pageTitle + ' — IssueBot' : 'IssueBot'}">IssueBot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
     <link rel="stylesheet" th:href="@{/css/style.css}">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
     <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
 </head>
 <body>
+    <a href="#content" class="skip-link">Skip to content</a>
+
     <!-- Mobile menu toggle (hidden on desktop) -->
-    <button class="mobile-menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open'); document.querySelector('.sidebar-overlay').classList.toggle('open')" aria-label="Menu">
+    <button class="mobile-menu-btn" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar">
         <span></span><span></span><span></span>
     </button>
-    <div class="sidebar-overlay" onclick="document.querySelector('.sidebar').classList.remove('open'); this.classList.remove('open')"></div>
-    <nav class="sidebar">
+    <div class="sidebar-overlay"></div>
+    <nav class="sidebar" id="sidebar" aria-label="Main navigation">
         <header>
             <h1>IssueBot</h1>
         </header>
         <ul>
-            <li><a th:classappend="${activePage == 'dashboard' ? 'active' : ''}" href="/" hx-get="/" hx-target="#content" hx-push-url="true">Dashboard</a></li>
-            <li><a th:classappend="${activePage == 'repositories' ? 'active' : ''}" href="/repositories" hx-get="/repositories" hx-target="#content" hx-push-url="true">Repositories</a></li>
-            <li><a th:classappend="${activePage == 'issues' ? 'active' : ''}" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">Issue Queue</a></li>
+            <li><a th:classappend="${activePage == 'dashboard' ? 'active' : ''}" th:attr="aria-current=${activePage == 'dashboard'} ? 'page' : null" href="/" hx-get="/" hx-target="#content" hx-push-url="true">Dashboard</a></li>
+            <li><a th:classappend="${activePage == 'repositories' ? 'active' : ''}" th:attr="aria-current=${activePage == 'repositories'} ? 'page' : null" href="/repositories" hx-get="/repositories" hx-target="#content" hx-push-url="true">Repositories</a></li>
+            <li><a th:classappend="${activePage == 'issues' ? 'active' : ''}" th:attr="aria-current=${activePage == 'issues'} ? 'page' : null" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">Issue Queue</a></li>
             <li>
-                <a th:classappend="${activePage == 'approvals' ? 'active' : ''}" href="/approvals" hx-get="/approvals" hx-target="#content" hx-push-url="true">
+                <a th:classappend="${activePage == 'approvals' ? 'active' : ''}" th:attr="aria-current=${activePage == 'approvals'} ? 'page' : null" href="/approvals" hx-get="/approvals" hx-target="#content" hx-push-url="true">
                     Approvals
                     <span th:if="${pendingApprovals != null and pendingApprovals > 0}" class="badge" th:text="${pendingApprovals}">0</span>
                 </a>
             </li>
-            <li><a th:classappend="${activePage == 'costs' ? 'active' : ''}" href="/costs" hx-get="/costs" hx-target="#content" hx-push-url="true">Cost Report</a></li>
-            <li><a th:classappend="${activePage == 'settings' ? 'active' : ''}" href="/settings" hx-get="/settings" hx-target="#content" hx-push-url="true">Settings</a></li>
-            <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
+            <li><a th:classappend="${activePage == 'costs' ? 'active' : ''}" th:attr="aria-current=${activePage == 'costs'} ? 'page' : null" href="/costs" hx-get="/costs" hx-target="#content" hx-push-url="true">Cost Report</a></li>
+            <li><a th:classappend="${activePage == 'settings' ? 'active' : ''}" th:attr="aria-current=${activePage == 'settings'} ? 'page' : null" href="/settings" hx-get="/settings" hx-target="#content" hx-push-url="true">Settings</a></li>
+            <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" th:attr="aria-current=${activePage == 'setup'} ? 'page' : null" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
         </ul>
         <footer>
             <div class="agent-status">
                 <span class="status-dot" th:classappend="${agentRunning != null and agentRunning ? 'running' : 'paused'}"></span>
                 <span th:text="${agentRunning != null and agentRunning ? 'Agent Running' : 'Agent Paused'}">Agent Running</span>
             </div>
+            <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="Toggle light or dark theme">
+                <i class="ti ti-moon" aria-hidden="true"></i>
+            </button>
         </footer>
     </nav>
     <main id="content">
+        <!-- Reusable toast fragment, rendered on full page loads and re-included by content fragments for HTMX swaps -->
+        <div th:fragment="toasts" id="toast-region" aria-live="polite">
+            <div th:if="${success}" class="toast toast-ok" th:text="${success}"></div>
+            <div th:if="${message}" class="toast toast-ok" th:text="${message}"></div>
+            <div th:if="${error}" class="toast toast-danger" th:text="${error}"></div>
+        </div>
         <div th:replace="~{${contentTemplate} :: content}"></div>
     </main>
-    <script>
-        // Update sidebar active state on HTMX navigation
-        document.body.addEventListener('htmx:pushedIntoHistory', function(e) {
-            var path = window.location.pathname;
-            document.querySelectorAll('.sidebar ul li a').forEach(function(link) {
-                link.classList.remove('active');
-                var href = link.getAttribute('href');
-                if (path === href || (href !== '/' && path.startsWith(href))) {
-                    link.classList.add('active');
-                }
-            });
-            // Close mobile sidebar on navigation
-            document.querySelector('.sidebar').classList.remove('open');
-            document.querySelector('.sidebar-overlay').classList.remove('open');
-        });
-    </script>
+    <script th:src="@{/js/app.js}" defer></script>
 </body>
 </html>
