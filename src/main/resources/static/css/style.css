@@ -696,6 +696,66 @@ label {
 }
 .field-group label { margin-bottom: 0; }
 
+/* Grouped form section heading (Workflow / Safety / CI) */
+.form-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    margin: 1.4rem 0 0.8rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--hairline);
+}
+.form-section-title:first-of-type { margin-top: 0; }
+.form-section-title i { color: var(--accent); font-size: 1rem; }
+
+/* Inline checkbox + label (replaces the old margin-top alignment hacks) */
+.checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    align-self: end;
+    padding-bottom: 0.6rem;
+}
+.checkbox-field input[type="checkbox"] {
+    width: auto;
+    min-width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+.checkbox-field label {
+    margin: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+/* Repository name → external GitHub link */
+.repo-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+.repo-link:hover { color: var(--accent); }
+.repo-link .ti-external-link { font-size: 0.8rem; color: var(--text-tertiary); }
+.repo-link:hover .ti-external-link { color: var(--accent); }
+
+.repo-actions { white-space: nowrap; }
+.repo-actions .btn { margin-right: 0.3rem; }
+.repos-table th i { margin-right: 0.25rem; }
+
 input[type="text"],
 input[type="number"],
 input[type="email"],
@@ -1333,6 +1393,52 @@ details summary:hover { color: var(--text-primary); }
     .data-table td { padding: 0.5rem 0.6rem; font-size: 0.78rem; }
 
     .form-grid { grid-template-columns: 1fr; }
+
+    /* Repositories: 11-column table collapses to stacked cards.
+       Each row becomes a glass card; cells show their data-label. */
+    .repos-table,
+    .repos-table thead,
+    .repos-table tbody,
+    .repos-table tr,
+    .repos-table td { display: block; width: 100%; }
+    .repos-table { min-width: 0; }
+    .panel-body:has(.repos-table) { padding: 0.9rem; overflow-x: visible; }
+    .repos-table thead { display: none; }
+    .repos-table tbody tr {
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-md);
+        background: var(--glass-bg-strong);
+        margin-bottom: 0.8rem;
+        padding: 0.4rem 0.9rem;
+    }
+    .repos-table tbody tr:hover td { background: transparent; }
+    .repos-table td {
+        border-top: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.4rem 0;
+        font-size: 0.84rem;
+    }
+    .repos-table td::before {
+        content: attr(data-label);
+        font-family: var(--font-sans);
+        font-size: 0.66rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        flex: 0 0 auto;
+    }
+    .repos-table td[data-label="Repository"] { flex-direction: column; align-items: flex-start; }
+    .repos-table td[data-label="Repository"]::before { display: none; }
+    .repos-table td.repo-actions { justify-content: flex-start; flex-wrap: wrap; }
+    .repos-table td.repo-actions::before { display: none; }
+    /* Empty-state row should not look like a labelled card cell. */
+    .repos-table td[colspan]::before { display: none; }
+    .repos-table td[colspan] { display: table-cell; }
+    .checkbox-field { padding-bottom: 0; }
 
     input[type="text"],
     input[type="number"],

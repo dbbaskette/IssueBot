@@ -375,6 +375,116 @@
     }
   });
 
+  // --- Repositories add/edit form ----------------------------------------
+  // The Edit button carries every repo field as a data-* attribute (Thymeleaf
+  // HTML-escapes these, so no injection is possible — unlike the old inline
+  // onclick that string-concatenated owner/name/branch into a JS call). On
+  // click we read the dataset, populate the form by element id, then reveal +
+  // scroll + focus.
+  function setChecked(id, val) {
+    var el = document.getElementById(id);
+    if (el) { el.checked = (val === 'true' || val === true); }
+  }
+  function setValue(id, val) {
+    var el = document.getElementById(id);
+    if (el) { el.value = (val == null ? '' : val); }
+  }
+
+  // Stored allowedPaths is JSON (e.g. ["src/","test/"]); the form input is a
+  // comma-separated string. Convert back, tolerating non-JSON/blank values.
+  function allowedPathsToInput(raw) {
+    if (!raw) { return ''; }
+    try {
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) { return parsed.join(', '); }
+    } catch (e) { /* not JSON — fall through */ }
+    return raw;
+  }
+
+  function showRepoForm() {
+    var form = document.getElementById('add-repo-form');
+    if (!form) { return; }
+    form.hidden = false;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    var first = document.getElementById('owner');
+    if (first) { first.focus(); }
+  }
+
+  function resetRepoForm() {
+    var title = document.getElementById('form-title');
+    if (title) { title.textContent = 'Add Repository'; }
+    setValue('edit-id', '');
+    setValue('owner', '');
+    setValue('repo-name', '');
+    setValue('branch', 'main');
+    setValue('mode', 'AUTONOMOUS');
+    setValue('max-iterations', '5');
+    setValue('max-review-iterations', '2');
+    setChecked('auto-start', true);
+    setChecked('follow-up-enabled', true);
+    setChecked('auto-merge', false);
+    setChecked('security-review', false);
+    setValue('allowed-paths', '');
+    setChecked('ci-enabled', true);
+    setValue('ci-timeout', '15');
+    syncCiTimeout();
+  }
+
+  function editRepoFromDataset(ds) {
+    var title = document.getElementById('form-title');
+    if (title) { title.textContent = 'Edit Repository'; }
+    setValue('edit-id', ds.id);
+    setValue('owner', ds.owner);
+    setValue('repo-name', ds.name);
+    setValue('branch', ds.branch);
+    setValue('mode', ds.mode);
+    setValue('max-iterations', ds.maxIterations);
+    setValue('max-review-iterations', ds.maxReviewIterations);
+    setChecked('auto-start', ds.autoStart);
+    setChecked('follow-up-enabled', ds.followUpEnabled);
+    setChecked('auto-merge', ds.autoMerge);
+    setChecked('security-review', ds.securityReviewEnabled);
+    setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));
+    setChecked('ci-enabled', ds.ciEnabled);
+    setValue('ci-timeout', ds.ciTimeoutMinutes);
+    syncCiTimeout();
+  }
+
+  // Show/hide the CI timeout field based on the CI-enabled checkbox.
+  function syncCiTimeout() {
+    var cb = document.getElementById('ci-enabled');
+    var group = document.getElementById('ci-timeout-group');
+    if (cb && group) { group.style.display = cb.checked ? '' : 'none'; }
+  }
+
+  document.addEventListener('click', function (e) {
+    var addBtn = e.target.closest('[data-show-add-form]');
+    if (addBtn) {
+      resetRepoForm();
+      showRepoForm();
+      return;
+    }
+    var cancelBtn = e.target.closest('[data-cancel-form]');
+    if (cancelBtn) {
+      var form = document.getElementById('add-repo-form');
+      if (form) { form.hidden = true; }
+      return;
+    }
+    var editBtn = e.target.closest('[data-edit-repo]');
+    if (editBtn) {
+      editRepoFromDataset(editBtn.dataset);
+      showRepoForm();
+      return;
+    }
+  });
+
+  // Delegated change handler for the CI-enabled toggle.
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'ci-enabled') {
+      syncCiTimeout();
+    }
+  });
+
   // Re-run toast handling + diff coloring after HTMX swaps in new content.
   document.body.addEventListener('htmx:afterSwap', function () {
     dismissToasts();
