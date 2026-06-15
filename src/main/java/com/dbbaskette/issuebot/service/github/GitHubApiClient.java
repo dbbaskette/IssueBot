@@ -25,6 +25,40 @@ public class GitHubApiClient {
         this.webClient = gitHubWebClient;
     }
 
+    // --- Token validation ---
+
+    public enum TokenState { VALID, INVALID, UNKNOWN }
+
+    /** Result of probing the configured GitHub token against the API. */
+    public record TokenStatus(TokenState state, String message) {
+        public boolean valid() { return state == TokenState.VALID; }
+    }
+
+    /**
+     * Verify the configured token actually authenticates with GitHub by calling
+     * {@code GET /rate_limit} (any valid token succeeds; an invalid one returns 401).
+     * Distinguishes a rejected token (INVALID) from an unreachable API (UNKNOWN).
+     */
+    public TokenStatus validateToken() {
+        try {
+            webClient.get()
+                    .uri("/rate_limit")
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block(Duration.ofSeconds(10));
+            return new TokenStatus(TokenState.VALID, "Token authenticated with GitHub.");
+        } catch (WebClientResponseException.Unauthorized e) {
+            return new TokenStatus(TokenState.INVALID,
+                    "GitHub rejected the token (401). Generate a new token with 'repo' scope and restart.");
+        } catch (WebClientResponseException.Forbidden e) {
+            return new TokenStatus(TokenState.INVALID,
+                    "GitHub returned 403 — the token is blocked or lacks required scope.");
+        } catch (Exception e) {
+            return new TokenStatus(TokenState.UNKNOWN,
+                    "Could not reach GitHub to verify the token: " + e.getMessage());
+        }
+    }
+
     // --- Issues ---
 
     public List<JsonNode> listIssues(String owner, String repo, String label, String state) {

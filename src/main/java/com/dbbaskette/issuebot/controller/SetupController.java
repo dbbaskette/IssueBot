@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -19,15 +20,18 @@ public class SetupController {
     private final IssueBotProperties properties;
     private final IssuePollingService pollingService;
     private final TrackedIssueRepository issueRepository;
+    private final GitHubApiClient gitHubApiClient;
 
     public SetupController(ClaudeCodeService claudeCodeService,
                             IssueBotProperties properties,
                             IssuePollingService pollingService,
-                            TrackedIssueRepository issueRepository) {
+                            TrackedIssueRepository issueRepository,
+                            GitHubApiClient gitHubApiClient) {
         this.claudeCodeService = claudeCodeService;
         this.properties = properties;
         this.pollingService = pollingService;
         this.issueRepository = issueRepository;
+        this.gitHubApiClient = gitHubApiClient;
     }
 
     /**
@@ -66,6 +70,17 @@ public class SetupController {
         boolean githubTokenSet = token != null && !token.isBlank() && !"not-set".equals(token);
         model.addAttribute("githubTokenSet", githubTokenSet);
 
+        // Presence isn't enough — verify the token actually authenticates with GitHub.
+        boolean githubTokenValid = false;
+        String githubTokenMessage = "Set the GITHUB_TOKEN environment variable with 'repo' scope.";
+        if (githubTokenSet) {
+            GitHubApiClient.TokenStatus status = gitHubApiClient.validateToken();
+            githubTokenValid = status.valid();
+            githubTokenMessage = status.message();
+        }
+        model.addAttribute("githubTokenValid", githubTokenValid);
+        model.addAttribute("githubTokenMessage", githubTokenMessage);
+
         // Work directory check
         File workDir = new File(properties.getWorkDirectory());
         boolean workDirOk;
@@ -84,7 +99,7 @@ public class SetupController {
         model.addAttribute("workDirOk", workDirOk);
         model.addAttribute("workDirMessage", workDirMessage);
 
-        model.addAttribute("allPassed", cliAvailable && cliAuthenticated && githubTokenSet && workDirOk);
+        model.addAttribute("allPassed", cliAvailable && cliAuthenticated && githubTokenValid && workDirOk);
 
         return "setup :: prereqs";
     }

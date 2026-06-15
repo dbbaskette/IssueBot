@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.validation;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -15,10 +16,13 @@ public class StartupValidator {
 
     private final ClaudeCodeService claudeCodeService;
     private final IssueBotProperties properties;
+    private final GitHubApiClient gitHubApiClient;
 
-    public StartupValidator(ClaudeCodeService claudeCodeService, IssueBotProperties properties) {
+    public StartupValidator(ClaudeCodeService claudeCodeService, IssueBotProperties properties,
+                            GitHubApiClient gitHubApiClient) {
         this.claudeCodeService = claudeCodeService;
         this.properties = properties;
+        this.gitHubApiClient = gitHubApiClient;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -50,10 +54,17 @@ public class StartupValidator {
 
     private void validateGitHubToken() {
         String token = properties.getGithub().getToken();
-        if (token != null && !token.isBlank() && !"not-set".equals(token)) {
-            log.info("[OK] GitHub token configured");
-        } else {
+        if (token == null || token.isBlank() || "not-set".equals(token)) {
             log.warn("[WARN] GitHub token not configured. Set GITHUB_TOKEN environment variable.");
+            return;
+        }
+        // Presence isn't enough — a stale/revoked token silently breaks polling.
+        GitHubApiClient.TokenStatus status = gitHubApiClient.validateToken();
+        switch (status.state()) {
+            case VALID -> log.info("[OK] GitHub token valid");
+            case INVALID -> log.error("[ERROR] GitHub token REJECTED — issues will NOT be polled. {}",
+                    status.message());
+            case UNKNOWN -> log.warn("[WARN] Could not verify GitHub token. {}", status.message());
         }
     }
 }
