@@ -929,7 +929,7 @@ public class IssueWorkflowService {
         WatchedRepo repo = trackedIssue.getRepo();
         int originalIssueNumber = trackedIssue.getIssueNumber();
 
-        String title = "Follow-Up: Code Review Findings from #" + originalIssueNumber;
+        String title = FOLLOW_UP_TITLE_PREFIX + " Code Review Findings from #" + originalIssueNumber;
 
         StringBuilder body = new StringBuilder();
         body.append("The following non-blocking items were identified during the automated code review for #")
@@ -957,7 +957,7 @@ public class IssueWorkflowService {
 
         JsonNode newIssue = gitHubApi.createIssue(
                 repo.getOwner(), repo.getName(), title, body.toString(),
-                List.of("issuebot-followup"));
+                List.of(FOLLOW_UP_LABEL));
 
         int followUpNumber = newIssue.path("number").asInt();
         log.info("Created follow-up issue #{} for {} #{} with {} findings",
