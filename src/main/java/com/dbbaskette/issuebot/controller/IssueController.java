@@ -68,30 +68,7 @@ public class IssueController {
                        @RequestParam(required = false) String status,
                        @RequestParam(required = false) Long repoId,
                        @RequestHeader(value = "HX-Request", required = false) String hx) {
-        List<TrackedIssue> issues;
-
-        if (status != null && !status.isBlank() && repoId != null) {
-            try {
-                IssueStatus issueStatus = IssueStatus.valueOf(status);
-                issues = repoRepository.findById(repoId)
-                        .map(r -> issueRepository.findByRepoAndStatus(r, issueStatus))
-                        .orElseGet(List::of);
-            } catch (IllegalArgumentException e) {
-                issues = List.of();
-            }
-        } else if (status != null && !status.isBlank()) {
-            try {
-                issues = issueRepository.findByStatus(IssueStatus.valueOf(status));
-            } catch (IllegalArgumentException e) {
-                issues = List.of();
-            }
-        } else if (repoId != null) {
-            issues = repoRepository.findById(repoId)
-                    .map(issueRepository::findByRepo)
-                    .orElseGet(List::of);
-        } else {
-            issues = issueRepository.findAll();
-        }
+        List<TrackedIssue> issues = filterIssues(status, repoId);
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issues");
@@ -107,11 +84,30 @@ public class IssueController {
 
     /**
      * HTMX fragment endpoint — returns just the issue table body rows for SSE-triggered refresh.
+     * Accepts the same filter params as the list endpoint so active filters are honoured.
      */
     @GetMapping("/table")
-    public String table(Model model) {
-        model.addAttribute("issues", issueRepository.findAll());
+    public String table(Model model,
+                        @RequestParam(required = false) String status,
+                        @RequestParam(required = false) Long repoId) {
+        model.addAttribute("issues", filterIssues(status, repoId));
         return "issues :: table-rows";
+    }
+
+    private List<TrackedIssue> filterIssues(String status, Long repoId) {
+        if (status != null && !status.isBlank() && repoId != null) {
+            try {
+                IssueStatus s = IssueStatus.valueOf(status);
+                return repoRepository.findById(repoId)
+                        .map(r -> issueRepository.findByRepoAndStatus(r, s)).orElseGet(List::of);
+            } catch (IllegalArgumentException e) { return List.of(); }
+        } else if (status != null && !status.isBlank()) {
+            try { return issueRepository.findByStatus(IssueStatus.valueOf(status)); }
+            catch (IllegalArgumentException e) { return List.of(); }
+        } else if (repoId != null) {
+            return repoRepository.findById(repoId).map(issueRepository::findByRepo).orElseGet(List::of);
+        }
+        return issueRepository.findAll();
     }
 
     @GetMapping("/{id}")
