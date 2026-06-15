@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface CostTrackingRepository extends JpaRepository<CostTracking, Long> {
@@ -31,6 +32,15 @@ public interface CostTrackingRepository extends JpaRepository<CostTracking, Long
     long totalOutputTokens();
 
     List<CostTracking> findByIssueRepoOrderByIdDesc(WatchedRepo repo);
+
+    /**
+     * Sum estimated cost per calendar day for rows on/after {@code since}, oldest first.
+     * Each row is {@code [LocalDate day, BigDecimal totalCost]}.
+     */
+    @Query("SELECT CAST(c.createdAt AS date), COALESCE(SUM(c.estimatedCost), 0) " +
+           "FROM CostTracking c WHERE c.createdAt >= :since " +
+           "GROUP BY CAST(c.createdAt AS date) ORDER BY CAST(c.createdAt AS date)")
+    List<Object[]> sumCostByDay(LocalDateTime since);
 
     void deleteByIssue(TrackedIssue issue);
 }

@@ -5,12 +5,16 @@
     <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <h2>Cost Report</h2>
-        <div class="cost-range" role="group" aria-label="Date range (data is all-time only)">
-            <button type="button" class="glass-pill" data-cost-range="7" disabled
-                    title="No per-event timestamps recorded — only all-time totals are available">7d</button>
-            <button type="button" class="glass-pill" data-cost-range="30" disabled
-                    title="No per-event timestamps recorded — only all-time totals are available">30d</button>
-            <button type="button" class="glass-pill is-active" data-cost-range="all" aria-pressed="true">All time</button>
+        <div class="cost-range" role="group" aria-label="Date range">
+            <button type="button" class="glass-pill" th:classappend="${selectedRange == '7d'} ? 'is-active' : ''"
+                    th:attr="aria-pressed=${selectedRange == '7d'}"
+                    hx-get="/costs?range=7d" hx-target="#content" hx-push-url="true">7d</button>
+            <button type="button" class="glass-pill" th:classappend="${selectedRange == '30d'} ? 'is-active' : ''"
+                    th:attr="aria-pressed=${selectedRange == '30d'}"
+                    hx-get="/costs?range=30d" hx-target="#content" hx-push-url="true">30d</button>
+            <button type="button" class="glass-pill" th:classappend="${selectedRange == 'all' or selectedRange == null} ? 'is-active' : ''"
+                    th:attr="aria-pressed=${selectedRange == 'all' or selectedRange == null}"
+                    hx-get="/costs?range=all" hx-target="#content" hx-push-url="true">All time</button>
         </div>
     </div>
 
@@ -33,6 +37,18 @@
         </div>
     </div>
 
+    <!-- Cost-over-time line chart -->
+    <div class="panel glass-card mb-3" th:if="${not #lists.isEmpty(costSeries)}">
+        <div class="panel-header">
+            <h3>Cost Over Time</h3>
+        </div>
+        <div class="panel-body">
+            <div class="chart-wrap">
+                <canvas id="cost-over-time-chart" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+
     <!-- Cost-by-repo bar chart -->
     <div class="panel glass-card mb-3" th:if="${not #lists.isEmpty(repoBreakdowns)}">
         <div class="panel-header">
@@ -45,9 +61,9 @@
         </div>
     </div>
 
-    <!-- Chart data: serialized for JS. No per-event timestamps exist on cost_tracking,
-         so there is no cost-over-time series — only a per-repo breakdown. -->
+    <!-- Chart data serialized for JS: per-repo bar totals and the cost-over-time series. -->
     <script type="application/json" id="cost-data" th:utext="${costDataJson}">{"repos":[]}</script>
+    <script type="application/json" id="cost-series" th:utext="${costSeriesJson}">{"series":[]}</script>
 
     <!-- Per-repo breakdown table -->
     <div class="panel glass-card mb-3">
