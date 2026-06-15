@@ -2,58 +2,97 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <h2>Dashboard</h2>
     </div>
 
-    <div class="metrics-grid">
-        <div class="metric-card">
-            <div class="label">Completed</div>
-            <div class="value" th:text="${completed}">0</div>
+    <div th:fragment="live"
+         hx-get="/dashboard/live"
+         hx-trigger="every 10s"
+         hx-swap="outerHTML"
+         hx-target="this">
+        <div class="metrics-grid">
+            <a class="metric-tile is-link ok"
+               hx-get="/issues?status=COMPLETED" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-circle-check"></i> Completed</div>
+                <div class="value" th:text="${completed}">0</div>
+            </a>
+            <a class="metric-tile is-link accent"
+               hx-get="/issues?status=IN_PROGRESS" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-loader"></i> In Progress</div>
+                <div class="value" th:text="${inProgress}">0</div>
+            </a>
+            <a class="metric-tile is-link"
+               hx-get="/issues?status=PENDING" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-clock"></i> Pending</div>
+                <div class="value" th:text="${pending}">0</div>
+            </a>
+            <a class="metric-tile is-link"
+               hx-get="/issues?status=QUEUED" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-stack-2"></i> Queued</div>
+                <div class="value" th:text="${queued}">0</div>
+            </a>
+            <a class="metric-tile is-link danger"
+               hx-get="/issues?status=BLOCKED" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-ban"></i> Blocked</div>
+                <div class="value" th:text="${blocked}">0</div>
+            </a>
+            <a class="metric-tile is-link danger"
+               hx-get="/issues?status=FAILED" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-alert-triangle"></i> Failed</div>
+                <div class="value" th:text="${failed}">0</div>
+            </a>
+            <a class="metric-tile is-link"
+               hx-get="/repositories" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-folders"></i> Watched Repos</div>
+                <div class="value" th:text="${repoCount}">0</div>
+            </a>
+            <a class="metric-tile is-link"
+               hx-get="/costs" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-coin"></i> Total Cost</div>
+                <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
+            </a>
         </div>
-        <div class="metric-card">
-            <div class="label">In Progress</div>
-            <div class="value" th:text="${inProgress}">0</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Pending</div>
-            <div class="value" th:text="${pending}">0</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Queued</div>
-            <div class="value" th:text="${queued}">0</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Blocked</div>
-            <div class="value" th:text="${blocked}">0</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Failed</div>
-            <div class="value" th:text="${failed}">0</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Watched Repos</div>
-            <div class="value" th:text="${repoCount}">0</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Total Cost</div>
-            <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
-        </div>
-    </div>
 
-    <div class="panel">
-        <div class="panel-header">
-            <h3>Recent Events</h3>
-        </div>
-        <div class="panel-body">
-            <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
-                <li th:each="event : ${events}">
-                    <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm')}">12:00</span>
-                    <span class="type" th:text="${event.eventType}">EVENT</span>
-                    <span th:text="${event.message}">Event message</span>
-                </li>
-            </ul>
-            <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events yet. Configure a repository and label an issue <code>agent-ready</code> to get started.</p>
+        <div class="panel glass-card">
+            <div class="panel-header">
+                <h3>Recent Events</h3>
+            </div>
+            <div class="panel-body">
+                <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
+                    <li th:each="event : ${events}"
+                        th:with="hasIssue=${event.issue != null}"
+                        th:classappend="${hasIssue} ? 'is-link' : ''"
+                        th:attr="hx-get=${hasIssue} ? '/issues/' + ${event.issue.id} : null,
+                                 hx-target=${hasIssue} ? '#content' : null,
+                                 hx-push-url=${hasIssue} ? 'true' : null">
+                        <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm')}">12:00</span>
+                        <span class="type" th:switch="${event.eventType}">
+                            <span th:case="'WORKFLOW_STARTED'"><i class="ti ti-player-play"></i> Workflow started</span>
+                            <span th:case="'WORKFLOW_ERROR'"><i class="ti ti-alert-triangle"></i> Workflow error</span>
+                            <span th:case="'MANUAL_RETRY'"><i class="ti ti-refresh"></i> Manual retry</span>
+                            <span th:case="'MANUAL_START'"><i class="ti ti-player-play"></i> Manual start</span>
+                            <span th:case="'MANUAL_COMPLETE'"><i class="ti ti-circle-check"></i> Manually completed</span>
+                            <span th:case="'APPROVAL_APPROVED'"><i class="ti ti-thumb-up"></i> Approved</span>
+                            <span th:case="'APPROVAL_REJECTED'"><i class="ti ti-thumb-down"></i> Rejected</span>
+                            <span th:case="'PR_CREATED'"><i class="ti ti-git-pull-request"></i> PR created</span>
+                            <span th:case="'REVIEW_PASSED'"><i class="ti ti-eye-check"></i> Review passed</span>
+                            <span th:case="'REVIEW_FAILED'"><i class="ti ti-eye-exclamation"></i> Review failed</span>
+                            <span th:case="'CI_PASSED'"><i class="ti ti-checks"></i> CI passed</span>
+                            <span th:case="'CI_FAILED'"><i class="ti ti-x"></i> CI failed</span>
+                            <span th:case="'FOLLOW_UP_ISSUE_CREATED'"><i class="ti ti-git-branch"></i> Follow-up issue created</span>
+                            <span th:case="'STALE_PR_CLOSED'"><i class="ti ti-archive"></i> Stale PR closed</span>
+                            <span th:case="'PRE_SCREEN_TOO_LARGE'"><i class="ti ti-ruler-measure"></i> Issue too large</span>
+                            <span th:case="*"><i class="ti ti-point"></i>
+                                <span th:text="${#strings.capitalizeWords(#strings.replace(#strings.toLowerCase(event.eventType), '_', ' '))}">Event</span>
+                            </span>
+                        </span>
+                        <span th:text="${event.message}">Event message</span>
+                    </li>
+                </ul>
+                <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events yet. Configure a repository and label an issue <code>agent-ready</code> to get started.</p>
+            </div>
         </div>
     </div>
 </div>

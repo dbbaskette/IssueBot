@@ -42,6 +42,19 @@ public class DashboardController {
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
 
+        populateMetrics(model);
+
+        return ViewResolver.view("dashboard", hx != null);
+    }
+
+    /** Lightweight polling endpoint returning just the live metrics + events fragment. */
+    @GetMapping("/dashboard/live")
+    public String live(Model model) {
+        populateMetrics(model);
+        return "dashboard :: live";
+    }
+
+    private void populateMetrics(Model model) {
         model.addAttribute("completed", issueRepository.countByStatus(IssueStatus.COMPLETED));
         model.addAttribute("inProgress", issueRepository.countByStatus(IssueStatus.IN_PROGRESS));
         model.addAttribute("pending", issueRepository.countByStatus(IssueStatus.PENDING));
@@ -54,7 +67,5 @@ public class DashboardController {
         model.addAttribute("totalCost", totalCost);
 
         model.addAttribute("events", eventService.getRecentEvents(15));
-
-        return ViewResolver.view("dashboard", hx != null);
     }
 }
