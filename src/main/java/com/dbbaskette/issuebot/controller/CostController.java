@@ -7,6 +7,8 @@ import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,7 +17,9 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Controller
 public class CostController {
@@ -24,15 +28,18 @@ public class CostController {
     private final TrackedIssueRepository issueRepository;
     private final WatchedRepoRepository repoRepository;
     private final IssuePollingService pollingService;
+    private final ObjectMapper objectMapper;
 
     public CostController(CostTrackingRepository costRepository,
                            TrackedIssueRepository issueRepository,
                            WatchedRepoRepository repoRepository,
-                           IssuePollingService pollingService) {
+                           IssuePollingService pollingService,
+                           ObjectMapper objectMapper) {
         this.costRepository = costRepository;
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.pollingService = pollingService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/costs")
@@ -83,6 +90,22 @@ public class CostController {
                     issueCost));
         }
         model.addAttribute("issueBreakdowns", issueBreakdowns);
+
+        // Chart data block (parsed client-side). Per-repo only: cost_tracking has
+        // no timestamp column, so a genuine cost-over-time series is not available.
+        List<Map<String, Object>> chartRepos = new ArrayList<>();
+        for (RepoBreakdown rb : repoBreakdowns) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("repoName", rb.repoName());
+            row.put("totalCost", rb.totalCost().setScale(4, RoundingMode.HALF_UP));
+            chartRepos.add(row);
+        }
+        try {
+            model.addAttribute("costDataJson",
+                    objectMapper.writeValueAsString(Map.of("repos", chartRepos)));
+        } catch (JsonProcessingException e) {
+            model.addAttribute("costDataJson", "{\"repos\":[]}");
+        }
 
         return ViewResolver.view("costs", hx != null);
     }

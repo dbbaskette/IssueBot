@@ -505,10 +505,147 @@
     }
   });
 
+  // --- Sortable tables ----------------------------------------------------
+  // Generic helper: any <table data-sortable> whose <th data-sort="number|text">
+  // headers become click-to-sort. Cells may carry a data-value attribute that
+  // overrides their text for sort purposes (used for currency/number columns).
+  function cellSortValue(row, index, type) {
+    var cell = row.children[index];
+    if (!cell) { return type === 'number' ? 0 : ''; }
+    var raw = cell.hasAttribute('data-value')
+      ? cell.getAttribute('data-value')
+      : cell.textContent;
+    raw = (raw || '').trim();
+    if (type === 'number') {
+      var num = parseFloat(raw.replace(/[^0-9.eE+-]/g, ''));
+      return isNaN(num) ? 0 : num;
+    }
+    return raw.toLowerCase();
+  }
+
+  function sortTableBy(table, index, dir) {
+    var headers = table.tHead ? table.tHead.rows[0].cells : [];
+    var th = headers[index];
+    var type = (th && th.getAttribute('data-sort')) || 'text';
+    var tbody = table.tBodies[0];
+    if (!tbody) { return; }
+    var rows = Array.prototype.slice.call(tbody.rows);
+    var sign = dir === 'desc' ? -1 : 1;
+    rows.sort(function (a, b) {
+      var va = cellSortValue(a, index, type);
+      var vb = cellSortValue(b, index, type);
+      if (va < vb) { return -1 * sign; }
+      if (va > vb) { return 1 * sign; }
+      return 0;
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); });
+    for (var i = 0; i < headers.length; i++) {
+      headers[i].removeAttribute('aria-sort');
+      headers[i].classList.remove('sort-asc', 'sort-desc');
+    }
+    if (th) {
+      th.setAttribute('aria-sort', dir === 'desc' ? 'descending' : 'ascending');
+      th.classList.add(dir === 'desc' ? 'sort-desc' : 'sort-asc');
+    }
+  }
+
+  function initSortableTables() {
+    var tables = document.querySelectorAll('table[data-sortable]');
+    Array.prototype.forEach.call(tables, function (table) {
+      if (table.__sortInit) { return; }
+      table.__sortInit = true;
+      var headers = table.tHead ? table.tHead.rows[0].cells : [];
+      var defaultIndex = -1, defaultDir = 'desc';
+      Array.prototype.forEach.call(headers, function (th, index) {
+        if (!th.hasAttribute('data-sort')) { return; }
+        th.classList.add('is-sortable');
+        th.setAttribute('role', 'button');
+        th.setAttribute('tabindex', '0');
+        if (th.hasAttribute('data-sort-default')) {
+          defaultIndex = index;
+          defaultDir = th.getAttribute('data-sort-default') || 'desc';
+        }
+        function activate() {
+          var asc = th.classList.contains('sort-asc');
+          sortTableBy(table, index, asc ? 'desc' : 'asc');
+        }
+        th.addEventListener('click', activate);
+        th.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+        });
+      });
+      if (defaultIndex >= 0) { sortTableBy(table, defaultIndex, defaultDir); }
+    });
+  }
+
+  // --- Cost report charts -------------------------------------------------
+  function cssVar(name, fallback) {
+    var v = getComputedStyle(root).getPropertyValue(name);
+    return (v && v.trim()) || fallback;
+  }
+
+  function initCostCharts() {
+    if (typeof Chart === 'undefined') { return; }
+    var dataEl = document.getElementById('cost-data');
+    var canvas = document.getElementById('cost-by-repo-chart');
+    if (!dataEl || !canvas) { return; }
+    if (canvas.__chart) { canvas.__chart.destroy(); }
+
+    var data;
+    try { data = JSON.parse(dataEl.textContent); } catch (e) { return; }
+    var repos = (data && data.repos) || [];
+    if (!repos.length) { return; }
+
+    var accent = cssVar('--accent', '#7c63ff');
+    var grid = cssVar('--hairline', 'rgba(128,128,128,.15)');
+    var textColor = cssVar('--text-secondary', '#64748b');
+
+    var labels = repos.map(function (r) { return r.repoName; });
+    var values = repos.map(function (r) {
+      return Math.round((Number(r.totalCost) || 0) * 10000) / 10000;
+    });
+
+    canvas.__chart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Total Cost ($)',
+          data: values,
+          backgroundColor: accent,
+          borderRadius: 6,
+          maxBarThickness: 56
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) { return '$' + Number(ctx.parsed.y).toFixed(4); }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: textColor }, grid: { display: false } },
+          y: {
+            beginAtZero: true,
+            ticks: { color: textColor, callback: function (v) { return '$' + Number(v).toFixed(2); } },
+            grid: { color: grid }
+          }
+        }
+      }
+    });
+  }
+
   // Re-run toast handling + diff coloring after HTMX swaps in new content.
   document.body.addEventListener('htmx:afterSwap', function () {
     dismissToasts();
     colorizeDiffs();
+    initSortableTables();
+    initCostCharts();
   });
 
   // --- Init ---------------------------------------------------------------
@@ -516,6 +653,8 @@
     syncThemeIcon();
     dismissToasts();
     colorizeDiffs();
+    initSortableTables();
+    initCostCharts();
   }
 
   if (document.readyState === 'loading') {

@@ -2,50 +2,76 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <h2>Cost Report</h2>
+        <div class="cost-range" role="group" aria-label="Date range (data is all-time only)">
+            <button type="button" class="glass-pill" data-cost-range="7" disabled
+                    title="No per-event timestamps recorded — only all-time totals are available">7d</button>
+            <button type="button" class="glass-pill" data-cost-range="30" disabled
+                    title="No per-event timestamps recorded — only all-time totals are available">30d</button>
+            <button type="button" class="glass-pill is-active" data-cost-range="all" aria-pressed="true">All time</button>
+        </div>
     </div>
 
     <div class="metrics-grid">
-        <div class="metric-card">
-            <div class="label">Total Cost</div>
+        <div class="metric-tile accent">
+            <div class="label"><i class="ti ti-coin"></i> Total Cost</div>
             <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 4)}">$0.0000</div>
         </div>
-        <div class="metric-card">
-            <div class="label">Input Tokens</div>
+        <div class="metric-tile">
+            <div class="label"><i class="ti ti-arrow-down-circle"></i> Input Tokens</div>
             <div class="value" th:text="${#numbers.formatInteger(totalInputTokens, 1, 'COMMA')}">0</div>
         </div>
-        <div class="metric-card">
-            <div class="label">Output Tokens</div>
+        <div class="metric-tile">
+            <div class="label"><i class="ti ti-arrow-up-circle"></i> Output Tokens</div>
             <div class="value" th:text="${#numbers.formatInteger(totalOutputTokens, 1, 'COMMA')}">0</div>
         </div>
-        <div class="metric-card">
-            <div class="label">Total Tokens</div>
+        <div class="metric-tile">
+            <div class="label"><i class="ti ti-sum"></i> Total Tokens</div>
             <div class="value" th:text="${#numbers.formatInteger(totalTokens, 1, 'COMMA')}">0</div>
         </div>
     </div>
 
-    <!-- Per-repo breakdown -->
-    <div class="panel mb-3">
+    <!-- Cost-by-repo bar chart -->
+    <div class="panel glass-card mb-3" th:if="${not #lists.isEmpty(repoBreakdowns)}">
         <div class="panel-header">
             <h3>Cost by Repository</h3>
         </div>
         <div class="panel-body">
-            <table class="data-table" th:if="${not #lists.isEmpty(repoBreakdowns)}">
+            <div class="chart-wrap">
+                <canvas id="cost-by-repo-chart" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart data: serialized for JS. No per-event timestamps exist on cost_tracking,
+         so there is no cost-over-time series — only a per-repo breakdown. -->
+    <script type="application/json" id="cost-data" th:utext="${costDataJson}">{"repos":[]}</script>
+
+    <!-- Per-repo breakdown table -->
+    <div class="panel glass-card mb-3">
+        <div class="panel-header">
+            <h3>Cost by Repository</h3>
+        </div>
+        <div class="panel-body">
+            <table class="data-table" data-sortable th:if="${not #lists.isEmpty(repoBreakdowns)}">
                 <thead>
                     <tr>
-                        <th>Repository</th>
-                        <th>Issues Processed</th>
-                        <th>Total Cost</th>
-                        <th>Avg Cost / Issue</th>
+                        <th data-sort="text">Repository</th>
+                        <th data-sort="number">Issues Processed</th>
+                        <th data-sort="number" data-sort-default="desc">Total Cost</th>
+                        <th data-sort="number">Avg Cost / Issue</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr th:each="rb : ${repoBreakdowns}">
                         <td th:text="${rb.repoName()}">owner/repo</td>
-                        <td th:text="${rb.issueCount()}">0</td>
-                        <td th:text="'$' + ${#numbers.formatDecimal(rb.totalCost(), 1, 4)}">$0.0000</td>
-                        <td th:text="'$' + ${#numbers.formatDecimal(rb.avgCostPerIssue(), 1, 4)}">$0.0000</td>
+                        <td th:text="${rb.issueCount()}" th:attr="data-value=${rb.issueCount()}">0</td>
+                        <td th:text="'$' + ${#numbers.formatDecimal(rb.totalCost(), 1, 4)}"
+                            th:attr="data-value=${rb.totalCost()}">$0.0000</td>
+                        <td th:text="'$' + ${#numbers.formatDecimal(rb.avgCostPerIssue(), 1, 4)}"
+                            th:attr="data-value=${rb.avgCostPerIssue()}">$0.0000</td>
                     </tr>
                 </tbody>
             </table>
@@ -53,26 +79,26 @@
         </div>
     </div>
 
-    <!-- Per-issue breakdown -->
-    <div class="panel">
+    <!-- Per-issue breakdown table -->
+    <div class="panel glass-card">
         <div class="panel-header">
             <h3>Cost by Issue</h3>
         </div>
         <div class="panel-body">
-            <table class="data-table" th:if="${not #lists.isEmpty(issueBreakdowns)}">
+            <table class="data-table" data-sortable th:if="${not #lists.isEmpty(issueBreakdowns)}">
                 <thead>
                     <tr>
-                        <th>Repository</th>
-                        <th>Issue</th>
-                        <th>Status</th>
-                        <th>Iterations</th>
-                        <th>Cost</th>
+                        <th data-sort="text">Repository</th>
+                        <th data-sort="text">Issue</th>
+                        <th data-sort="text">Status</th>
+                        <th data-sort="number">Iterations</th>
+                        <th data-sort="number" data-sort-default="desc">Cost</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr th:each="ib : ${issueBreakdowns}">
                         <td th:text="${ib.repoName()}">owner/repo</td>
-                        <td>
+                        <td th:attr="data-value=${ib.issueNumber()}">
                             <a th:href="@{/issues/{id}(id=${ib.id()})}"
                                th:text="'#' + ${ib.issueNumber()} + ' ' + ${ib.title()}">
                                 #1 Title
@@ -83,8 +109,9 @@
                                   th:classappend="'status-' + ${ib.status().toLowerCase()}"
                                   th:text="${ib.status()}">STATUS</span>
                         </td>
-                        <td th:text="${ib.iterations()}">0</td>
-                        <td th:text="'$' + ${#numbers.formatDecimal(ib.cost(), 1, 4)}">$0.0000</td>
+                        <td th:text="${ib.iterations()}" th:attr="data-value=${ib.iterations()}">0</td>
+                        <td th:text="'$' + ${#numbers.formatDecimal(ib.cost(), 1, 4)}"
+                            th:attr="data-value=${ib.cost()}">$0.0000</td>
                     </tr>
                 </tbody>
             </table>
