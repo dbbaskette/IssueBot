@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,14 +64,14 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public String handleGeneral(Exception e, Model model, HttpServletResponse response) {
+    public String handleGeneral(Exception e, Model model, HttpServletRequest request, HttpServletResponse response) {
         if (response.isCommitted()) {
             log.debug("Exception on committed response (SSE): {}", e.getMessage());
             return null;
         }
-        log.error("Unhandled exception", e);
+        log.error("Unhandled exception serving {}", request.getRequestURI(), e);
         response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
-        return errorPage(model, "Error", "An unexpected error occurred: " + e.getMessage());
+        return errorPage(model, "Error", "Something went wrong. Check the server logs for details.");
     }
 
     private String errorPage(Model model, String title, String message) {
