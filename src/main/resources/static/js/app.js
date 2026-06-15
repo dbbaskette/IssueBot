@@ -397,6 +397,29 @@
       IssueBotTerminal.copy();
       return;
     }
+    // Approvals reject inline panel. The toggle button carries
+    // [data-reject-toggle]=<issueId>; the panel has id "reject-form-<issueId>"
+    // and contains a [data-reject-textarea]. Cancel carries [data-reject-cancel].
+    // Delegated here (loaded once) so it survives HTMX content swaps — the panel
+    // markup is re-rendered by the approvals fragment but this listener is not.
+    var rejectToggle = e.target.closest('[data-reject-toggle]');
+    if (rejectToggle) {
+      var panel = document.getElementById('reject-form-' + rejectToggle.getAttribute('data-reject-toggle'));
+      if (panel) {
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) {
+          var ta = panel.querySelector('[data-reject-textarea]');
+          if (ta) { ta.focus(); }
+        }
+      }
+      return;
+    }
+    var rejectCancel = e.target.closest('[data-reject-cancel]');
+    if (rejectCancel) {
+      var cancelPanel = document.getElementById('reject-form-' + rejectCancel.getAttribute('data-reject-cancel'));
+      if (cancelPanel) { cancelPanel.hidden = true; }
+      return;
+    }
     // Generic copy-to-clipboard: copies the textContent of the element
     // referenced by the button's [data-copy-target] selector.
     var copyBtn = e.target.closest('[data-copy-target]');

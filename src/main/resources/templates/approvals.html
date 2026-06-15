@@ -8,8 +8,6 @@
         <h2>Approvals</h2>
     </div>
 
-    <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
-
     <div th:if="${#lists.isEmpty(approvals)}">
         <div class="glass-card text-muted" style="text-align:center;padding:3rem">
             No pending approvals. Issues in approval-gated repos will appear here when ready for review.
@@ -145,33 +143,6 @@
             </div>
         </div>
     </div>
-
-    <script>
-        (function () {
-            function findCard(id) { return document.getElementById('reject-form-' + id); }
-            document.addEventListener('click', function (e) {
-                var toggle = e.target.closest('[data-reject-toggle]');
-                if (toggle) {
-                    var id = toggle.getAttribute('data-reject-toggle');
-                    var el = findCard(id);
-                    if (el) {
-                        el.hidden = !el.hidden;
-                        if (!el.hidden) {
-                            var ta = el.querySelector('[data-reject-textarea]');
-                            if (ta) { ta.focus(); }
-                        }
-                    }
-                    return;
-                }
-                var cancel = e.target.closest('[data-reject-cancel]');
-                if (cancel) {
-                    var cid = cancel.getAttribute('data-reject-cancel');
-                    var cel = findCard(cid);
-                    if (cel) { cel.hidden = true; }
-                }
-            });
-        })();
-    </script>
 </div>
 </body>
 </html>
