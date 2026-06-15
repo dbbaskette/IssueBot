@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,35 +52,35 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(NoSuchElementException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    public String handleNotFound(NoSuchElementException e, Model model) {
+    public String handleNotFound(NoSuchElementException e, Model model, HttpServletRequest request) {
         log.warn("Resource not found: {}", e.getMessage());
-        return errorPage(model, "Not Found", "The requested resource was not found.");
+        return errorPage(model, "Not Found", "The requested resource was not found.", request);
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    public String handleNoResource(NoResourceFoundException e, Model model) {
-        return errorPage(model, "Not Found", "Page not found.");
+    public String handleNoResource(NoResourceFoundException e, Model model, HttpServletRequest request) {
+        return errorPage(model, "Not Found", "Page not found.", request);
     }
 
     @ExceptionHandler(Exception.class)
-    public String handleGeneral(Exception e, Model model, HttpServletResponse response) {
+    public String handleGeneral(Exception e, Model model, HttpServletRequest request, HttpServletResponse response) {
         if (response.isCommitted()) {
             log.debug("Exception on committed response (SSE): {}", e.getMessage());
             return null;
         }
-        log.error("Unhandled exception", e);
+        log.error("Unhandled exception serving {}", request.getRequestURI(), e);
         response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
-        return errorPage(model, "Error", "An unexpected error occurred: " + e.getMessage());
+        return errorPage(model, "Error", "Something went wrong. Check the server logs for details.", request);
     }
 
-    private String errorPage(Model model, String title, String message) {
+    private String errorPage(Model model, String title, String message, HttpServletRequest request) {
         model.addAttribute("activePage", "");
         model.addAttribute("contentTemplate", "error");
         model.addAttribute("errorTitle", title);
         model.addAttribute("errorMessage", message);
         model.addAttribute("agentRunning", true);
         model.addAttribute("pendingApprovals", 0L);
-        return "layout";
+        return ViewResolver.view("error", request.getHeader("HX-Request") != null);
     }
 }

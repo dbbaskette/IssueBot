@@ -66,31 +66,9 @@ public class IssueController {
     @GetMapping
     public String list(Model model,
                        @RequestParam(required = false) String status,
-                       @RequestParam(required = false) Long repoId) {
-        List<TrackedIssue> issues;
-
-        if (status != null && !status.isBlank() && repoId != null) {
-            try {
-                IssueStatus issueStatus = IssueStatus.valueOf(status);
-                issues = repoRepository.findById(repoId)
-                        .map(r -> issueRepository.findByRepoAndStatus(r, issueStatus))
-                        .orElseGet(List::of);
-            } catch (IllegalArgumentException e) {
-                issues = List.of();
-            }
-        } else if (status != null && !status.isBlank()) {
-            try {
-                issues = issueRepository.findByStatus(IssueStatus.valueOf(status));
-            } catch (IllegalArgumentException e) {
-                issues = List.of();
-            }
-        } else if (repoId != null) {
-            issues = repoRepository.findById(repoId)
-                    .map(issueRepository::findByRepo)
-                    .orElseGet(List::of);
-        } else {
-            issues = issueRepository.findAll();
-        }
+                       @RequestParam(required = false) Long repoId,
+                       @RequestHeader(value = "HX-Request", required = false) String hx) {
+        List<TrackedIssue> issues = filterIssues(status, repoId);
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issues");
@@ -101,23 +79,43 @@ public class IssueController {
         model.addAttribute("selectedRepoId", repoId);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        return "layout";
+        return ViewResolver.view("issues", hx != null);
     }
 
     /**
      * HTMX fragment endpoint — returns just the issue table body rows for SSE-triggered refresh.
+     * Accepts the same filter params as the list endpoint so active filters are honoured.
      */
     @GetMapping("/table")
-    public String table(Model model) {
-        model.addAttribute("issues", issueRepository.findAll());
+    public String table(Model model,
+                        @RequestParam(required = false) String status,
+                        @RequestParam(required = false) Long repoId) {
+        model.addAttribute("issues", filterIssues(status, repoId));
         return "issues :: table-rows";
     }
 
+    private List<TrackedIssue> filterIssues(String status, Long repoId) {
+        if (status != null && !status.isBlank() && repoId != null) {
+            try {
+                IssueStatus s = IssueStatus.valueOf(status);
+                return repoRepository.findById(repoId)
+                        .map(r -> issueRepository.findByRepoAndStatus(r, s)).orElseGet(List::of);
+            } catch (IllegalArgumentException e) { return List.of(); }
+        } else if (status != null && !status.isBlank()) {
+            try { return issueRepository.findByStatus(IssueStatus.valueOf(status)); }
+            catch (IllegalArgumentException e) { return List.of(); }
+        } else if (repoId != null) {
+            return repoRepository.findById(repoId).map(issueRepository::findByRepo).orElseGet(List::of);
+        }
+        return issueRepository.findAll();
+    }
+
     @GetMapping("/{id}")
-    public String detail(Model model, @PathVariable Long id) {
+    public String detail(Model model, @PathVariable Long id,
+                         @RequestHeader(value = "HX-Request", required = false) String hx) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id);
-        return "layout";
+        return ViewResolver.view("issue-detail", hx != null);
     }
 
     /**
@@ -326,13 +324,42 @@ public class IssueController {
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
 
+        boolean completed = issue.getStatus() == IssueStatus.COMPLETED;
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
         model.addAttribute("iterations", iterations);
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
+        model.addAttribute("phaseIndex", phaseIndex(issue));
+        model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+    }
+
+    /**
+     * Maps the workflow's {@code currentPhase} to a 0..5 pipeline index used by the
+     * issue-detail phase pipeline. When the issue is COMPLETED, every step (including
+     * the final COMPLETION step) renders as done — callers detect that via the
+     * {@code phaseCompleted} flag. Returns -1 when no phase is set / unknown.
+     * Phase values are set in IssueWorkflowService#setCurrentPhase.
+     */
+    private int phaseIndex(TrackedIssue issue) {
+        if (issue.getStatus() == IssueStatus.COMPLETED) {
+            return 6; // all six steps (indices 0..5) are < phaseIndex => done
+        }
+        String phase = issue.getCurrentPhase();
+        if (phase == null) {
+            return -1;
+        }
+        return switch (phase) {
+            case "SETUP" -> 0;
+            case "IMPLEMENTATION" -> 1;
+            case "CI_VERIFICATION" -> 2;
+            case "PR_CREATION" -> 3;
+            case "INDEPENDENT_REVIEW" -> 4;
+            case "COMPLETION" -> 5;
+            default -> -1;
+        };
     }
 }

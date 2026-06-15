@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -177,6 +178,9 @@ public class IssueWorkflowService {
         String previousDiff = null;
         String previousFeedback = additionalInstructions != null && !additionalInstructions.isBlank()
                 ? "ADDITIONAL HUMAN INSTRUCTIONS:\n" + additionalInstructions : null;
+        // True only when previousFeedback originated from a failed code review.
+        // Human instructions and CI/impl errors must NOT trigger the implementation-response comment.
+        boolean reviewFeedback = false;
         String previousCiLogs = null;
         int prNumber = 0;
 
@@ -214,6 +218,7 @@ public class IssueWorkflowService {
                 eventService.log("PHASE_IMPL_FAILED",
                         "Implementation failed: " + e.getMessage(), repo, trackedIssue);
                 previousFeedback = "Implementation failed: " + e.getMessage();
+                reviewFeedback = false; // impl exception is not review feedback
                 continue;
             }
 
@@ -239,13 +244,16 @@ public class IssueWorkflowService {
                 }
 
                 previousFeedback = "Claude Code failed: " + implResult.getErrorMessage();
+                reviewFeedback = false; // Claude Code failure is not review feedback
                 continue;
             }
 
-            // Post implementation response to issue when addressing review feedback
-            if (previousFeedback != null) {
+            // Post implementation response to issue only when addressing code-review feedback
+            // (not for human instructions or CI/impl errors — those would be misleading)
+            if (reviewFeedback) {
                 postImplementationResponseToIssue(trackedIssue, implResult, previousFeedback, iterationNum);
             }
+            reviewFeedback = false; // reset for this iteration's fresh state
 
             // Get diff after implementation
             String diff;
@@ -305,6 +313,7 @@ public class IssueWorkflowService {
                 previousDiff = diff;
                 previousCiLogs = extractCiFailureLogs(trackedIssue, branchName);
                 previousFeedback = null;
+                reviewFeedback = false; // CI failure is not review feedback
                 continue;
             }
 
@@ -350,6 +359,7 @@ public class IssueWorkflowService {
 
                 // Feed findings back as feedback for next implementation iteration
                 previousFeedback = buildReviewFeedback(reviewResult);
+                reviewFeedback = true; // this is the only source that warrants the implementation-response comment
                 previousDiff = diff;
                 previousCiLogs = null;
                 log.info("Review failed — feeding findings back to Opus for iteration {}", iterationNum + 1);
@@ -661,10 +671,6 @@ public class IssueWorkflowService {
         Long issueId = trackedIssue.getId();
         sseService.broadcastClaudeLog(issueId, "[system] Launching Sonnet for independent review...");
 
-        int reviewIter = trackedIssue.getCurrentReviewIteration() + 1;
-        trackedIssue.setCurrentReviewIteration(reviewIter);
-        issueRepository.save(trackedIssue);
-
         CodeReviewResult reviewResult;
         try {
             reviewResult = codeReviewService.reviewCode(
@@ -680,6 +686,11 @@ public class IssueWorkflowService {
                     "Review invocation error: " + e.getMessage(), repo, trackedIssue);
             return null;
         }
+
+        // Consume a review-iteration slot only after the review completes successfully
+        int reviewIter = trackedIssue.getCurrentReviewIteration() + 1;
+        trackedIssue.setCurrentReviewIteration(reviewIter);
+        issueRepository.save(trackedIssue);
 
         // Track review cost
         trackCost(trackedIssue, trackedIssue.getCurrentIteration(),
@@ -929,7 +940,7 @@ public class IssueWorkflowService {
         WatchedRepo repo = trackedIssue.getRepo();
         int originalIssueNumber = trackedIssue.getIssueNumber();
 
-        String title = "Follow-Up: Code Review Findings from #" + originalIssueNumber;
+        String title = FOLLOW_UP_TITLE_PREFIX + " Code Review Findings from #" + originalIssueNumber;
 
         StringBuilder body = new StringBuilder();
         body.append("The following non-blocking items were identified during the automated code review for #")
@@ -957,7 +968,7 @@ public class IssueWorkflowService {
 
         JsonNode newIssue = gitHubApi.createIssue(
                 repo.getOwner(), repo.getName(), title, body.toString(),
-                List.of("issuebot-followup"));
+                List.of(FOLLOW_UP_LABEL));
 
         int followUpNumber = newIssue.path("number").asInt();
         log.info("Created follow-up issue #{} for {} #{} with {} findings",
@@ -1209,7 +1220,7 @@ public class IssueWorkflowService {
                 }
                 case "tool_result", "tool_use" -> {
                     // Show tool results for visibility
-                    String toolName = node.path("tool_name").asText(node.path("name").asText(""));
+                    String toolName = StreamJsonParser.toolName(node);
                     text = "[" + type + "] " + toolName;
                 }
                 case "result" -> {

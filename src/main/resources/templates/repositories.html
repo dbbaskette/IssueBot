@@ -2,210 +2,204 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
+
     <div class="page-header">
         <h2>Repositories</h2>
-        <button class="btn btn-primary" onclick="resetAndShowForm()">Add Repository</button>
+        <button class="btn btn-primary" type="button" data-show-add-form>
+            <i class="ti ti-plus" aria-hidden="true"></i> Add Repository
+        </button>
     </div>
 
     <!-- Add/Edit Form -->
-    <div id="add-repo-form" class="panel mb-3" style="display:none">
+    <div id="add-repo-form" class="panel mb-3" hidden>
         <div class="panel-header">
             <h3 id="form-title">Add Repository</h3>
-            <button class="btn btn-outline btn-sm" onclick="document.getElementById('add-repo-form').style.display='none'">Cancel</button>
+            <button class="btn btn-outline btn-sm" type="button" data-cancel-form>
+                <i class="ti ti-x" aria-hidden="true"></i> Cancel
+            </button>
         </div>
         <div class="panel-body">
-            <form hx-post="/repositories" hx-target="#content" hx-swap="innerHTML">
+            <form hx-post="/repositories" hx-target="#content" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']">
                 <input type="hidden" id="edit-id" name="id" value="">
+
+                <!-- Identity -->
+                <h4 class="form-section-title"><i class="ti ti-brand-github" aria-hidden="true"></i> Repository</h4>
                 <div class="form-grid">
-                    <div>
+                    <div class="field-group">
                         <label for="owner">Owner</label>
                         <input type="text" id="owner" name="owner" required placeholder="e.g. my-org">
                     </div>
-                    <div>
+                    <div class="field-group">
                         <label for="repo-name">Repository</label>
                         <input type="text" id="repo-name" name="name" required placeholder="e.g. my-app">
                     </div>
-                    <div>
+                    <div class="field-group">
                         <label for="branch">Branch</label>
                         <input type="text" id="branch" name="branch" value="main" required>
                     </div>
-                    <div>
+                </div>
+
+                <!-- Workflow -->
+                <h4 class="form-section-title"><i class="ti ti-route" aria-hidden="true"></i> Workflow</h4>
+                <div class="form-grid">
+                    <div class="field-group">
                         <label for="mode">Mode</label>
                         <select id="mode" name="mode">
                             <option value="AUTONOMOUS">Autonomous</option>
                             <option value="APPROVAL_GATED">Approval Gated</option>
                         </select>
                     </div>
-                    <div>
+                    <div class="field-group">
                         <label for="max-iterations">Max Iterations</label>
                         <input type="number" id="max-iterations" name="maxIterations" value="5" min="1" max="20">
                     </div>
-                    <div style="display:flex;flex-direction:column;gap:0.6rem">
-                        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:1.6rem">
-                            <input type="checkbox" id="ci-enabled" name="ciEnabled" value="true" checked
-                                   style="width:auto;accent-color:var(--amber)"
-                                   onchange="document.getElementById('ci-timeout-group').style.display = this.checked ? '' : 'none'">
-                            <label for="ci-enabled" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">CI / GitHub Actions enabled</label>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:0.5rem">
-                            <input type="checkbox" id="auto-merge" name="autoMerge" value="true"
-                                   style="width:auto;accent-color:var(--amber)">
-                            <label for="auto-merge" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Auto-merge PRs (squash)</label>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:0.5rem">
-                            <input type="checkbox" id="security-review" name="securityReviewEnabled" value="true"
-                                   style="width:auto;accent-color:var(--amber)">
-                            <label for="security-review" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Security review (OWASP)</label>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:0.5rem">
-                            <input type="checkbox" id="auto-start" name="autoStart" value="true" checked
-                                   style="width:auto;accent-color:var(--amber)">
-                            <label for="auto-start" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Auto-start issues</label>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:0.5rem">
-                            <input type="checkbox" id="follow-up-enabled" name="followUpEnabled" value="true" checked
-                                   style="width:auto;accent-color:var(--amber)">
-                            <label for="follow-up-enabled" style="margin:0;text-transform:none;font-size:0.82rem;color:var(--text-secondary)">Create follow-up issues</label>
-                        </div>
-                    </div>
-                    <div id="ci-timeout-group">
-                        <label for="ci-timeout">CI Timeout (min)</label>
-                        <input type="number" id="ci-timeout" name="ciTimeoutMinutes" value="15" min="1" max="60">
-                    </div>
-                    <div>
+                    <div class="field-group">
                         <label for="max-review-iterations">Max Review Iterations</label>
                         <input type="number" id="max-review-iterations" name="maxReviewIterations" value="2" min="1" max="10">
                     </div>
-                    <div class="full-width">
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
+                        <label for="auto-start">Auto-start issues</label>
+                    </div>
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="follow-up-enabled" name="followUpEnabled" value="true" checked>
+                        <label for="follow-up-enabled">Create follow-up issues</label>
+                    </div>
+                </div>
+
+                <!-- Safety -->
+                <h4 class="form-section-title"><i class="ti ti-shield-lock" aria-hidden="true"></i> Safety</h4>
+                <div class="form-grid">
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="auto-merge" name="autoMerge" value="true">
+                        <label for="auto-merge">Auto-merge PRs (squash)</label>
+                    </div>
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="security-review" name="securityReviewEnabled" value="true">
+                        <label for="security-review">Security review (OWASP)</label>
+                    </div>
+                    <div class="field-group full-width">
                         <label for="allowed-paths">Allowed Paths (comma-separated)</label>
                         <input type="text" id="allowed-paths" name="allowedPaths" placeholder="src/, test/">
                     </div>
                 </div>
+
+                <!-- CI -->
+                <h4 class="form-section-title"><i class="ti ti-rocket" aria-hidden="true"></i> CI</h4>
+                <div class="form-grid">
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="ci-enabled" name="ciEnabled" value="true" checked
+                               data-toggle-target="ci-timeout-group">
+                        <label for="ci-enabled">CI / GitHub Actions enabled</label>
+                    </div>
+                    <div class="field-group" id="ci-timeout-group">
+                        <label for="ci-timeout">CI Timeout (min)</label>
+                        <input type="number" id="ci-timeout" name="ciTimeoutMinutes" value="15" min="1" max="60">
+                    </div>
+                </div>
+
                 <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="ti ti-device-floppy" aria-hidden="true"></i> Save
+                    </button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Success/Error messages -->
-    <div th:if="${message}" class="alert alert-success" th:text="${message}"></div>
-    <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
-
     <!-- Repository table -->
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Repository</th>
-                <th>Branch</th>
-                <th>Mode</th>
-                <th>Max Iter.</th>
-                <th>CI</th>
-                <th>Review</th>
-                <th>Merge</th>
-                <th>Auto</th>
-                <th>Follow-Up</th>
-                <th>Issues</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr th:each="repo : ${repos}">
-                <td>
-                    <strong th:text="${repo.owner + '/' + repo.name}">owner/repo</strong>
-                </td>
-                <td th:text="${repo.branch}">main</td>
-                <td>
-                    <span class="status" th:classappend="${repo.mode.name() == 'AUTONOMOUS' ? 'status-completed' : 'status-awaiting_approval'}" th:text="${repo.mode}">AUTONOMOUS</span>
-                </td>
-                <td th:text="${repo.maxIterations}">5</td>
-                <td>
-                    <span th:if="${repo.ciEnabled}" class="status status-completed">ON</span>
-                    <span th:unless="${repo.ciEnabled}" class="status status-pending">OFF</span>
-                </td>
-                <td>
-                    <span th:if="${repo.securityReviewEnabled}" class="status status-awaiting_approval" title="Security review enabled">SEC</span>
-                    <span th:text="${repo.maxReviewIterations}" class="text-sm text-muted" th:title="'Max ' + ${repo.maxReviewIterations} + ' review iterations'"></span>
-                </td>
-                <td>
-                    <span th:if="${repo.autoMerge}" class="status status-completed">AUTO</span>
-                    <span th:unless="${repo.autoMerge}" class="status status-pending">MANUAL</span>
-                </td>
-                <td>
-                    <span th:if="${repo.autoStart}" class="status status-completed">ON</span>
-                    <span th:unless="${repo.autoStart}" class="status status-pending">OFF</span>
-                </td>
-                <td>
-                    <span th:if="${repo.followUpEnabled}" class="status status-completed">ON</span>
-                    <span th:unless="${repo.followUpEnabled}" class="status status-pending">OFF</span>
-                </td>
-                <td th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
-                <td style="display:flex;gap:0.3rem">
-                    <button class="btn btn-outline btn-sm"
-                            th:attr="onclick='editRepo(' + ${repo.id} + ', '
-                                + '\'' + ${repo.owner} + '\', '
-                                + '\'' + ${repo.name} + '\', '
-                                + '\'' + ${repo.branch} + '\', '
-                                + '\'' + ${repo.mode.name()} + '\', '
-                                + ${repo.maxIterations} + ', '
-                                + ${repo.ciEnabled} + ', '
-                                + ${repo.ciTimeoutMinutes} + ', '
-                                + ${repo.autoMerge} + ', '
-                                + ${repo.securityReviewEnabled} + ', '
-                                + ${repo.maxReviewIterations} + ', '
-                                + ${repo.autoStart} + ', '
-                                + ${repo.followUpEnabled} + ')'">Edit</button>
-                    <button class="btn btn-danger btn-sm"
-                            th:attr="hx-delete='/repositories/' + ${repo.id}"
-                            hx-target="#content"
-                            hx-confirm="Remove this repository? Local clones will not be deleted.">Remove</button>
-                </td>
-            </tr>
-            <tr th:if="${#lists.isEmpty(repos)}">
-                <td colspan="11" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <script>
-        function resetAndShowForm() {
-            document.getElementById('form-title').textContent = 'Add Repository';
-            document.getElementById('edit-id').value = '';
-            document.getElementById('owner').value = '';
-            document.getElementById('repo-name').value = '';
-            document.getElementById('branch').value = 'main';
-            document.getElementById('mode').value = 'AUTONOMOUS';
-            document.getElementById('max-iterations').value = '5';
-            document.getElementById('ci-enabled').checked = true;
-            document.getElementById('ci-timeout').value = '15';
-            document.getElementById('ci-timeout-group').style.display = '';
-            document.getElementById('auto-merge').checked = false;
-            document.getElementById('security-review').checked = false;
-            document.getElementById('max-review-iterations').value = '2';
-            document.getElementById('auto-start').checked = true;
-            document.getElementById('follow-up-enabled').checked = true;
-            document.getElementById('add-repo-form').style.display = 'block';
-        }
-
-        function editRepo(id, owner, name, branch, mode, maxIterations, ciEnabled, ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations, autoStart, followUpEnabled) {
-            document.getElementById('form-title').textContent = 'Edit Repository';
-            document.getElementById('edit-id').value = id;
-            document.getElementById('owner').value = owner;
-            document.getElementById('repo-name').value = name;
-            document.getElementById('branch').value = branch;
-            document.getElementById('mode').value = mode;
-            document.getElementById('max-iterations').value = maxIterations;
-            document.getElementById('ci-enabled').checked = ciEnabled;
-            document.getElementById('ci-timeout').value = ciTimeoutMinutes;
-            document.getElementById('ci-timeout-group').style.display = ciEnabled ? '' : 'none';
-            document.getElementById('auto-merge').checked = autoMerge;
-            document.getElementById('security-review').checked = securityReviewEnabled;
-            document.getElementById('max-review-iterations').value = maxReviewIterations;
-            document.getElementById('auto-start').checked = autoStart;
-            document.getElementById('follow-up-enabled').checked = followUpEnabled;
-            document.getElementById('add-repo-form').style.display = 'block';
-        }
-    </script>
+    <div class="panel">
+        <div class="panel-body">
+            <table class="data-table repos-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Repository</th>
+                        <th scope="col">Branch</th>
+                        <th scope="col">Mode</th>
+                        <th scope="col" title="Max iterations"><i class="ti ti-repeat" aria-hidden="true"></i> Iter</th>
+                        <th scope="col" title="CI / GitHub Actions"><i class="ti ti-rocket" aria-hidden="true"></i> CI</th>
+                        <th scope="col" title="Security review"><i class="ti ti-shield-lock" aria-hidden="true"></i> Review</th>
+                        <th scope="col" title="Auto-merge PRs"><i class="ti ti-git-merge" aria-hidden="true"></i> Merge</th>
+                        <th scope="col" title="Auto-start issues"><i class="ti ti-player-play" aria-hidden="true"></i> Auto</th>
+                        <th scope="col" title="Create follow-up issues"><i class="ti ti-arrow-forward-up" aria-hidden="true"></i> Follow-Up</th>
+                        <th scope="col" title="Open issues"><i class="ti ti-bug" aria-hidden="true"></i> Issues</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="repo : ${repos}">
+                        <td data-label="Repository">
+                            <a class="repo-link" target="_blank" rel="noopener"
+                               th:href="${'https://github.com/' + repo.owner + '/' + repo.name}"
+                               th:title="${'Open ' + repo.owner + '/' + repo.name + ' on GitHub'}">
+                                <i class="ti ti-brand-github" aria-hidden="true"></i>
+                                <strong th:text="${repo.owner + '/' + repo.name}">owner/repo</strong>
+                                <i class="ti ti-external-link" aria-hidden="true"></i>
+                            </a>
+                        </td>
+                        <td data-label="Branch" th:text="${repo.branch}">main</td>
+                        <td data-label="Mode">
+                            <span class="status" th:classappend="${repo.mode.name() == 'AUTONOMOUS' ? 'status-completed' : 'status-awaiting_approval'}" th:text="${repo.mode}">AUTONOMOUS</span>
+                        </td>
+                        <td data-label="Iter" th:text="${repo.maxIterations}">5</td>
+                        <td data-label="CI">
+                            <span th:if="${repo.ciEnabled}" class="status status-completed">ON</span>
+                            <span th:unless="${repo.ciEnabled}" class="status status-pending">OFF</span>
+                        </td>
+                        <td data-label="Review">
+                            <span th:if="${repo.securityReviewEnabled}" class="status status-awaiting_approval" title="Security review enabled">SEC</span>
+                            <span th:text="${repo.maxReviewIterations}" class="text-sm text-muted" th:title="'Max ' + ${repo.maxReviewIterations} + ' review iterations'"></span>
+                        </td>
+                        <td data-label="Merge">
+                            <span th:if="${repo.autoMerge}" class="status status-completed">AUTO</span>
+                            <span th:unless="${repo.autoMerge}" class="status status-pending">MANUAL</span>
+                        </td>
+                        <td data-label="Auto">
+                            <span th:if="${repo.autoStart}" class="status status-completed">ON</span>
+                            <span th:unless="${repo.autoStart}" class="status status-pending">OFF</span>
+                        </td>
+                        <td data-label="Follow-Up">
+                            <span th:if="${repo.followUpEnabled}" class="status status-completed">ON</span>
+                            <span th:unless="${repo.followUpEnabled}" class="status status-pending">OFF</span>
+                        </td>
+                        <td data-label="Issues" th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
+                        <td data-label="Actions" class="repo-actions">
+                            <button class="btn btn-outline btn-sm" type="button"
+                                    data-edit-repo
+                                    th:attr="data-id=${repo.id},
+                                             data-owner=${repo.owner},
+                                             data-name=${repo.name},
+                                             data-branch=${repo.branch},
+                                             data-mode=${repo.mode.name()},
+                                             data-max-iterations=${repo.maxIterations},
+                                             data-ci-enabled=${repo.ciEnabled},
+                                             data-ci-timeout-minutes=${repo.ciTimeoutMinutes},
+                                             data-auto-merge=${repo.autoMerge},
+                                             data-security-review-enabled=${repo.securityReviewEnabled},
+                                             data-max-review-iterations=${repo.maxReviewIterations},
+                                             data-auto-start=${repo.autoStart},
+                                             data-follow-up-enabled=${repo.followUpEnabled},
+                                             data-allowed-paths=${repo.allowedPaths}">
+                                <i class="ti ti-edit" aria-hidden="true"></i> Edit
+                            </button>
+                            <button class="btn btn-danger btn-sm"
+                                    th:attr="hx-delete='/repositories/' + ${repo.id}"
+                                    hx-target="#content"
+                                    hx-disabled-elt="this"
+                                    hx-confirm="Remove this repository? Local clones will not be deleted.">
+                                <i class="ti ti-trash" aria-hidden="true"></i> Remove
+                            </button>
+                        </td>
+                    </tr>
+                    <tr th:if="${#lists.isEmpty(repos)}">
+                        <td colspan="11" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 </body>
 </html>

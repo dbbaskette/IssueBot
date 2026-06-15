@@ -2,6 +2,7 @@
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
 <div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <h2 th:text="${errorTitle}">Error</h2>
     </div>

@@ -23,6 +23,9 @@ import java.util.Map;
 @RequestMapping("/repositories")
 public class RepositoryController {
 
+    private static final java.util.regex.Pattern GITHUB_SLUG =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9._-]+$");
+
     private final WatchedRepoRepository repoRepository;
     private final TrackedIssueRepository issueRepository;
     private final IterationRepository iterationRepository;
@@ -45,9 +48,10 @@ public class RepositoryController {
     }
 
     @GetMapping
-    public String list(Model model, @RequestParam(required = false) String message) {
+    public String list(Model model, @RequestParam(required = false) String message,
+                       @RequestHeader(value = "HX-Request", required = false) String hx) {
         populateModel(model, message, null);
-        return "layout";
+        return ViewResolver.view("repositories", hx != null);
     }
 
     @PostMapping
@@ -65,7 +69,13 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "2") int maxReviewIterations,
                                @RequestParam(required = false, defaultValue = "true") boolean autoStart,
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
-                               @RequestParam(required = false) String allowedPaths) {
+                               @RequestParam(required = false) String allowedPaths,
+                               @RequestHeader(value = "HX-Request", required = false) String hx) {
+        if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
+            populateModel(model, null,
+                    "Invalid repository owner/name. Use letters, numbers, '.', '_', '-' only.");
+            return ViewResolver.view("repositories", hx != null);
+        }
         WatchedRepo repo;
         if (id != null) {
             repo = repoRepository.findById(id).orElse(new WatchedRepo(owner, name));
@@ -99,12 +109,13 @@ public class RepositoryController {
 
         repoRepository.save(repo);
         populateModel(model, "Repository " + repo.fullName() + " saved.", null);
-        return "layout";
+        return ViewResolver.view("repositories", hx != null);
     }
 
     @DeleteMapping("/{id}")
     @Transactional
-    public String delete(Model model, @PathVariable Long id) {
+    public String delete(Model model, @PathVariable Long id,
+                         @RequestHeader(value = "HX-Request", required = false) String hx) {
         repoRepository.findById(id).ifPresent(repo -> {
             // Delete children in FK order: events, cost_tracking, iterations, tracked_issues, repo
             eventRepository.deleteByRepo(repo);
@@ -117,7 +128,7 @@ public class RepositoryController {
             repoRepository.delete(repo);
         });
         populateModel(model, "Repository removed.", null);
-        return "layout";
+        return ViewResolver.view("repositories", hx != null);
     }
 
     private void populateModel(Model model, String message, String error) {

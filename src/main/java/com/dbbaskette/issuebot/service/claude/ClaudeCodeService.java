@@ -100,6 +100,7 @@ public class ClaudeCodeService {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workingDirectory.toFile());
             pb.redirectErrorStream(false);
+            stripNestedSessionEnv(pb);
 
             Process process = pb.start();
             process.getOutputStream().close(); // Close stdin — headless, no interactive input
@@ -184,8 +185,14 @@ public class ClaudeCodeService {
 
             if (exitCode != 0) {
                 result.setSuccess(false);
+                String errorDetail = stderr.length() > 0 ? stderr.toString().trim() : "";
+                if (errorDetail.isEmpty() && stdout.length() > 0) {
+                    // CLI may report errors on stdout (e.g. nested session detection)
+                    errorDetail = stdout.substring(0, Math.min(500, stdout.length())).trim();
+                }
                 result.setErrorMessage("Claude Code exited with code " + exitCode
-                        + (stderr.length() > 0 ? ": " + stderr : ""));
+                        + (errorDetail.isEmpty() ? "" : ": " + errorDetail));
+                log.warn("Claude Code failed (exit {}): {}", exitCode, errorDetail);
             }
 
             log.info("Claude Code completed: {}", result);
@@ -211,12 +218,21 @@ public class ClaudeCodeService {
     }
 
     /**
+     * Remove the CLAUDECODE env var so nested invocations work when IssueBot
+     * itself is launched from within a Claude Code session.
+     */
+    private static void stripNestedSessionEnv(ProcessBuilder pb) {
+        pb.environment().remove("CLAUDECODE");
+    }
+
+    /**
      * Check if the Claude Code CLI is installed and accessible.
      */
     public boolean checkCliAvailable() {
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "--version");
             pb.redirectErrorStream(true);
+            stripNestedSessionEnv(pb);
             Process process = pb.start();
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (finished && process.exitValue() == 0) {
@@ -246,6 +262,7 @@ public class ClaudeCodeService {
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "auth", "status");
             pb.redirectErrorStream(true);
+            stripNestedSessionEnv(pb);
             Process process = pb.start();
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {

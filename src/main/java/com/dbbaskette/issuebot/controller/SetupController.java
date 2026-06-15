@@ -8,6 +8,7 @@ import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.io.File;
 
@@ -34,12 +35,13 @@ public class SetupController {
      * Actual prereq checks are loaded async via /setup/prereqs.
      */
     @GetMapping("/setup")
-    public String setup(Model model) {
+    public String setup(Model model,
+                        @RequestHeader(value = "HX-Request", required = false) String hx) {
         model.addAttribute("activePage", "setup");
         model.addAttribute("contentTemplate", "setup");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        return "layout";
+        return ViewResolver.view("setup", hx != null);
     }
 
     /**

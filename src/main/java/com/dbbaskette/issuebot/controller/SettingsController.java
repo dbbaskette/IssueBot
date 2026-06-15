@@ -33,23 +33,26 @@ public class SettingsController {
     }
 
     @GetMapping
-    public String settings(Model model) {
+    public String settings(Model model,
+                           @RequestHeader(value = "HX-Request", required = false) String hx) {
         populateModel(model, null, null);
-        return "layout";
+        return ViewResolver.view("settings", hx != null);
     }
 
     @PostMapping("/pause")
-    public String pause(Model model) {
+    public String pause(Model model,
+                        @RequestHeader(value = "HX-Request", required = false) String hx) {
         pollingService.setEnabled(false);
         populateModel(model, "Agent paused.", null);
-        return "layout";
+        return ViewResolver.view("settings", hx != null);
     }
 
     @PostMapping("/resume")
-    public String resume(Model model) {
+    public String resume(Model model,
+                         @RequestHeader(value = "HX-Request", required = false) String hx) {
         pollingService.setEnabled(true);
         populateModel(model, "Agent resumed.", null);
-        return "layout";
+        return ViewResolver.view("settings", hx != null);
     }
 
     @PostMapping("/quick")
@@ -57,29 +60,31 @@ public class SettingsController {
                                  @RequestParam int pollIntervalSeconds,
                                  @RequestParam int maxConcurrentIssues,
                                  @RequestParam boolean desktopNotifications,
-                                 @RequestParam boolean dashboardNotifications) {
+                                 @RequestParam boolean dashboardNotifications,
+                                 @RequestHeader(value = "HX-Request", required = false) String hx) {
         properties.setPollIntervalSeconds(pollIntervalSeconds);
         properties.setMaxConcurrentIssues(maxConcurrentIssues);
         properties.getNotifications().setDesktop(desktopNotifications);
         properties.getNotifications().setDashboard(dashboardNotifications);
 
         populateModel(model, "Settings updated.", null);
-        return "layout";
+        return ViewResolver.view("settings", hx != null);
     }
 
     @PostMapping("/config")
-    public String saveConfig(Model model, @RequestParam String configContent) {
+    public String saveConfig(Model model, @RequestParam String configContent,
+                             @RequestHeader(value = "HX-Request", required = false) String hx) {
         Path configPath = getConfigPath();
         try {
             // Basic YAML validation: check it's not empty and has some structure
             if (configContent == null || configContent.isBlank()) {
                 populateModel(model, null, "Configuration cannot be empty.");
-                return "layout";
+                return ViewResolver.view("settings", hx != null);
             }
 
             if (!configContent.contains("issuebot:")) {
                 populateModel(model, null, "Invalid configuration: missing 'issuebot:' root key.");
-                return "layout";
+                return ViewResolver.view("settings", hx != null);
             }
 
             Files.writeString(configPath, configContent);
@@ -89,7 +94,7 @@ public class SettingsController {
             log.error("Failed to save configuration", e);
             populateModel(model, null, "Failed to save: " + e.getMessage());
         }
-        return "layout";
+        return ViewResolver.view("settings", hx != null);
     }
 
     private void populateModel(Model model, String message, String error) {
