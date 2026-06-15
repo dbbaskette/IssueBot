@@ -56,8 +56,8 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 - **CI Template Generation** - Auto-generates GitHub Actions workflows (Maven, Gradle, Node, Go) for repos without CI
 - **Dual Mode** - Fully autonomous (auto-merge) or approval-gated (draft PRs with human review)
 - **Dashboard Authentication** - Optional username/password login via environment variables
-- **Web Dashboard** - Real-time monitoring with live terminal streaming, phase pipeline, iteration history, review scores — mobile-responsive with hamburger menu
-- **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns
+- **Web Dashboard** - Liquid-glass UI with a light/dark theme toggle, real-time monitoring (live terminal streaming with scroll-lock/copy, phase pipeline, iteration history with colorized diffs, review scores), drill-through metric tiles, and keyboard-accessible navigation — mobile-responsive with hamburger menu
+- **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns, a per-repo cost chart, and sortable cost tables
 - **Local-First** - Runs on your machine with an embedded H2 database; no external infrastructure required
 
 ## Built With
