@@ -32,38 +32,36 @@
 /* --- Light theme tokens (default) --- */
 :root[data-theme="light"],
 :root:not([data-theme="dark"]) {
-    --page-bg: #eef1f8;
-    --aurora: radial-gradient(55% 45% at 12% 8%, rgba(139,123,255,.30), transparent 70%),
-              radial-gradient(50% 45% at 92% 16%, rgba(56,189,248,.26), transparent 72%),
-              radial-gradient(60% 55% at 75% 100%, rgba(244,114,182,.20), transparent 72%);
-    --glass-bg: rgba(255,255,255,.60);
-    --glass-bg-strong: rgba(255,255,255,.78);
-    --glass-border: rgba(255,255,255,.85);
-    --glass-shadow: 0 8px 26px -14px rgba(80,70,160,.40);
-    --text-primary: #1e1b35;
-    --text-secondary: #4b5563;
+    --page-bg: #f4f5f8;
+    --aurora: radial-gradient(60% 50% at 100% 0%, rgba(37,99,235,.12), transparent 70%),
+              radial-gradient(55% 55% at 0% 100%, rgba(71,85,105,.07), transparent 72%);
+    --glass-bg: rgba(255,255,255,.72);
+    --glass-bg-strong: rgba(255,255,255,.88);
+    --glass-border: rgba(255,255,255,.95);
+    --glass-shadow: 0 8px 26px -14px rgba(71,85,105,.40);
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
     --text-tertiary: #94a3b8;
-    --accent: #7c63ff;
-    --accent-soft: rgba(124,99,255,.14);
-    --accent-border: rgba(124,99,255,.40);
+    --accent: #2563eb;
+    --accent-soft: rgba(37,99,235,.12);
+    --accent-border: rgba(37,99,235,.50);
     --ok: #0f766e;
-    --ok-soft: rgba(20,184,166,.14);
+    --ok-soft: rgba(15,118,110,.12);
     --danger: #be123c;
-    --danger-soft: rgba(244,63,94,.10);
-    --info: #0284c7;
-    --info-soft: rgba(2,132,199,.12);
+    --danger-soft: rgba(225,29,72,.10);
+    --info: #2563eb;
+    --info-soft: rgba(37,99,235,.12);
     --warn: #b45309;
     --warn-soft: rgba(180,83,9,.12);
-    --hairline: rgba(30,27,53,.10);
-    --row-hover: rgba(124,99,255,.06);
+    --hairline: rgba(30,41,59,.10);
+    --row-hover: rgba(37,99,235,.06);
 }
 
 /* --- Dark theme tokens --- */
 :root[data-theme="dark"] {
-    --page-bg: #0a0a14;
-    --aurora: radial-gradient(60% 50% at 15% 10%, rgba(124,99,255,.40), transparent 70%),
-              radial-gradient(55% 50% at 90% 20%, rgba(34,211,238,.28), transparent 70%),
-              radial-gradient(70% 60% at 70% 100%, rgba(236,72,153,.22), transparent 70%);
+    --page-bg: #0b0f1a;
+    --aurora: radial-gradient(58% 50% at 88% 8%, rgba(37,99,235,.34), transparent 70%),
+              radial-gradient(55% 50% at 8% 100%, rgba(56,189,248,.16), transparent 72%);
     --glass-bg: rgba(255,255,255,.06);
     --glass-bg-strong: rgba(255,255,255,.10);
     --glass-border: rgba(255,255,255,.12);
@@ -71,9 +69,9 @@
     --text-primary: #f8fafc;
     --text-secondary: #cbd5e1;
     --text-tertiary: #94a3b8;
-    --accent: #a78bfa;
-    --accent-soft: rgba(124,99,255,.16);
-    --accent-border: rgba(124,99,255,.40);
+    --accent: #60a5fa;
+    --accent-soft: rgba(37,99,235,.22);
+    --accent-border: rgba(96,165,250,.45);
     --ok: #5eead4;
     --ok-soft: rgba(45,212,191,.14);
     --danger: #fda4af;

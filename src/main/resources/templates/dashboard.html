@@ -10,7 +10,8 @@
     <div th:fragment="live"
          hx-get="/dashboard/live"
          hx-trigger="every 10s"
-         hx-swap="outerHTML"
+         hx-ext="morph"
+         hx-swap="morph:outerHTML"
          hx-target="this">
         <div class="metrics-grid">
             <a class="metric-tile is-link ok"
