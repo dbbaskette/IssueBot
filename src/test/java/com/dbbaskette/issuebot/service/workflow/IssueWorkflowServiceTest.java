@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.workflow;
 
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
@@ -41,6 +42,7 @@ class IssueWorkflowServiceTest {
     private IterationRepository iterationRepository;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private CodeReviewService codeReviewService;
 
     @BeforeEach
     void setUp() {
@@ -50,11 +52,12 @@ class IssueWorkflowServiceTest {
         iterationRepository = mock(IterationRepository.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        codeReviewService = mock(CodeReviewService.class);
         workflowService = new IssueWorkflowService(
                 mock(GitOperationsService.class),
                 gitHubApi,
                 mock(ClaudeCodeService.class),
-                mock(CodeReviewService.class),
+                codeReviewService,
                 mock(CiTemplateService.class),
                 issueRepository,
                 iterationRepository,
@@ -211,5 +214,43 @@ class IssueWorkflowServiceTest {
         // comes from human instructions rather than a code review
         verify(gitHubApi, never()).addComment(anyString(), anyString(), anyInt(),
                 argThat(text -> text != null && text.contains("Addressed the review findings")));
+    }
+
+    /**
+     * When reviewCode() throws, currentReviewIteration must remain unchanged
+     * and the issue must NOT be saved with an incremented review iteration.
+     */
+    @Test
+    void phaseIndependentReview_reviewCodeThrows_doesNotIncrementReviewIteration() throws Exception {
+        // --- Arrange ---
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setId(1L);
+
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Add caching");
+        issue.setId(10L);
+        // baseline: 0 review iterations consumed
+        issue.setCurrentReviewIteration(0);
+
+        ObjectNode issueDetails = objectMapper.createObjectNode();
+        issueDetails.put("title", "Add caching");
+        issueDetails.put("body", "Cache the responses");
+
+        Iteration iteration = new Iteration(issue, 1);
+
+        // Make reviewCode blow up
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), anyBoolean(), any()))
+                .thenThrow(new RuntimeException("review service unavailable"));
+
+        // --- Act ---
+        CodeReviewResult result = workflowService.phaseIndependentReview(
+                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration);
+
+        // --- Assert ---
+        assertNull(result, "Should return null on review invocation error");
+        assertEquals(0, issue.getCurrentReviewIteration(),
+                "currentReviewIteration must not be incremented when reviewCode throws");
+        // The issue must NOT have been saved with an incremented counter
+        verify(issueRepository, never()).save(argThat(
+                i -> i instanceof TrackedIssue ti && ti.getCurrentReviewIteration() > 0));
     }
 }

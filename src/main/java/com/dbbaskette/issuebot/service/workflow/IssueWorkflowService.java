@@ -671,10 +671,6 @@ public class IssueWorkflowService {
         Long issueId = trackedIssue.getId();
         sseService.broadcastClaudeLog(issueId, "[system] Launching Sonnet for independent review...");
 
-        int reviewIter = trackedIssue.getCurrentReviewIteration() + 1;
-        trackedIssue.setCurrentReviewIteration(reviewIter);
-        issueRepository.save(trackedIssue);
-
         CodeReviewResult reviewResult;
         try {
             reviewResult = codeReviewService.reviewCode(
@@ -690,6 +686,11 @@ public class IssueWorkflowService {
                     "Review invocation error: " + e.getMessage(), repo, trackedIssue);
             return null;
         }
+
+        // Consume a review-iteration slot only after the review completes successfully
+        int reviewIter = trackedIssue.getCurrentReviewIteration() + 1;
+        trackedIssue.setCurrentReviewIteration(reviewIter);
+        issueRepository.save(trackedIssue);
 
         // Track review cost
         trackCost(trackedIssue, trackedIssue.getCurrentIteration(),
