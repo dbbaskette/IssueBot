@@ -178,6 +178,9 @@ public class IssueWorkflowService {
         String previousDiff = null;
         String previousFeedback = additionalInstructions != null && !additionalInstructions.isBlank()
                 ? "ADDITIONAL HUMAN INSTRUCTIONS:\n" + additionalInstructions : null;
+        // True only when previousFeedback originated from a failed code review.
+        // Human instructions and CI/impl errors must NOT trigger the implementation-response comment.
+        boolean reviewFeedback = false;
         String previousCiLogs = null;
         int prNumber = 0;
 
@@ -215,6 +218,7 @@ public class IssueWorkflowService {
                 eventService.log("PHASE_IMPL_FAILED",
                         "Implementation failed: " + e.getMessage(), repo, trackedIssue);
                 previousFeedback = "Implementation failed: " + e.getMessage();
+                reviewFeedback = false; // impl exception is not review feedback
                 continue;
             }
 
@@ -240,13 +244,16 @@ public class IssueWorkflowService {
                 }
 
                 previousFeedback = "Claude Code failed: " + implResult.getErrorMessage();
+                reviewFeedback = false; // Claude Code failure is not review feedback
                 continue;
             }
 
-            // Post implementation response to issue when addressing review feedback
-            if (previousFeedback != null) {
+            // Post implementation response to issue only when addressing code-review feedback
+            // (not for human instructions or CI/impl errors — those would be misleading)
+            if (reviewFeedback) {
                 postImplementationResponseToIssue(trackedIssue, implResult, previousFeedback, iterationNum);
             }
+            reviewFeedback = false; // reset for this iteration's fresh state
 
             // Get diff after implementation
             String diff;
@@ -306,6 +313,7 @@ public class IssueWorkflowService {
                 previousDiff = diff;
                 previousCiLogs = extractCiFailureLogs(trackedIssue, branchName);
                 previousFeedback = null;
+                reviewFeedback = false; // CI failure is not review feedback
                 continue;
             }
 
@@ -351,6 +359,7 @@ public class IssueWorkflowService {
 
                 // Feed findings back as feedback for next implementation iteration
                 previousFeedback = buildReviewFeedback(reviewResult);
+                reviewFeedback = true; // this is the only source that warrants the implementation-response comment
                 previousDiff = diff;
                 previousCiLogs = null;
                 log.info("Review failed — feeding findings back to Opus for iteration {}", iterationNum + 1);
