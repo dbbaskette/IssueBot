@@ -106,7 +106,8 @@
         <!-- Reject inline panel (less destructive: keeps feedback textarea) -->
         <div th:id="${'reject-form-' + issue.id}" hidden class="mt-2 glass-card"
              style="padding:1rem">
-            <form th:attr="hx-post='/approvals/' + ${issue.id} + '/reject'" hx-target="#content">
+            <form th:attr="hx-post='/approvals/' + ${issue.id} + '/reject'" hx-target="#content"
+                  hx-disabled-elt="find button[type='submit']">
                 <label class="text-sm" style="font-weight:600;display:block;margin-bottom:0.4rem"
                        th:for="${'feedback-' + issue.id}">Rejection Feedback</label>
                 <textarea th:id="${'feedback-' + issue.id}" name="feedback" rows="3"
@@ -132,7 +133,8 @@
                     as completed and ends automated processing. Make sure you have reviewed the
                     pull request, the review score, and the diff above. This cannot be undone here.
                 </p>
-                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/approve'" hx-target="#content">
+                <form th:attr="hx-post='/approvals/' + ${issue.id} + '/approve'" hx-target="#content"
+                      hx-disabled-elt="find button[type='submit']">
                     <div class="modal-actions">
                         <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
                         <button type="submit" class="btn btn-primary btn-sm">

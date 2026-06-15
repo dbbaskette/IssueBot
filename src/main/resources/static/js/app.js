@@ -114,6 +114,28 @@
     }
   });
 
+  // --- Double-submit guard for plain (non-HTMX) form submits --------------
+  // HTMX-driven mutations are guarded with hx-disabled-elt. Plain forms that
+  // POST a full page navigation (e.g. the Retry / Mark Complete modals) are not,
+  // so disable their submit button on first submit to prevent a double-fire.
+  // We do NOT touch forms that htmx owns (they carry hx-post/hx-get/etc.) — htmx
+  // handles those and disabling here could interfere with its lifecycle.
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || form.nodeName !== 'FORM') { return; }
+    // Skip htmx-managed forms — identified by any hx-* request attribute.
+    if (form.hasAttribute('hx-post') || form.hasAttribute('hx-get') ||
+        form.hasAttribute('hx-put') || form.hasAttribute('hx-delete') ||
+        form.hasAttribute('hx-patch') || form.hasAttribute('data-hx-post')) {
+      return;
+    }
+    var btn = form.querySelector('button[type="submit"], input[type="submit"]');
+    if (!btn || btn.disabled) { return; }
+    // Let the browser collect the value/submit first, then disable on next tick
+    // so the button's name/value is still included in the POST body.
+    setTimeout(function () { btn.disabled = true; }, 0);
+  });
+
   // --- Keyboard-accessible navigable rows ---------------------------------
   // Table rows are click-to-open; mirror that for keyboard users. Rows carry
   // a [data-issue-href]; Enter or Space navigates to the issue detail.

@@ -20,7 +20,8 @@
             </button>
         </div>
         <div class="panel-body">
-            <form hx-post="/repositories" hx-target="#content" hx-swap="innerHTML">
+            <form hx-post="/repositories" hx-target="#content" hx-swap="innerHTML"
+                  hx-disabled-elt="find button[type='submit']">
                 <input type="hidden" id="edit-id" name="id" value="">
 
                 <!-- Identity -->
@@ -186,6 +187,7 @@
                             <button class="btn btn-danger btn-sm"
                                     th:attr="hx-delete='/repositories/' + ${repo.id}"
                                     hx-target="#content"
+                                    hx-disabled-elt="this"
                                     hx-confirm="Remove this repository? Local clones will not be deleted.">
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>

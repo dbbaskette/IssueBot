@@ -193,6 +193,23 @@ code {
     to { transform: rotate(360deg); }
 }
 
+/* Any button that triggers an htmx request gets a leading spinner for free
+   while the request is in flight (htmx adds .htmx-request to the trigger).
+   Paired with hx-disabled-elt="this" this both signals progress and prevents
+   a double-fire. No per-button markup needed. The reduced-motion query above
+   (* { animation: none }) disables the spin for users who opt out. */
+.btn.htmx-request::before {
+    content: "";
+    width: 0.85em;
+    height: 0.85em;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    display: inline-block;
+    animation: spin 0.7s linear infinite;
+    flex: 0 0 auto;
+}
+
 /* ============================================================
    Sidebar — glass command rail
    ============================================================ */
@@ -809,6 +826,19 @@ select {
     text-decoration: none;
     transition: all 0.2s var(--ease-out);
     white-space: nowrap;
+}
+
+/* In-flight / disabled buttons (hx-disabled-elt sets [disabled] during a
+   request; the JS form guard sets it for plain submits). Show a dimmed,
+   not-allowed state and suppress hover lift so double-fire is visibly blocked. */
+.btn:disabled,
+.btn[disabled],
+.btn[aria-disabled="true"] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 .btn-primary {

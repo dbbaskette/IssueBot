@@ -86,6 +86,7 @@
                     th:attr="hx-post='/issues/' + ${issue.id} + '/start',
                              aria-label='Start issue #' + ${issue.issueNumber}"
                     hx-target="#content"
+                    hx-disabled-elt="this"
                     onclick="event.stopPropagation()">Start</button>
         </td>
     </tr>

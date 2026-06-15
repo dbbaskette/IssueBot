@@ -7,12 +7,14 @@
     <div class="page-header">
         <h2>Settings</h2>
         <div class="flex gap-1">
-            <form th:if="${agentRunning}" hx-post="/settings/pause" hx-target="#content">
+            <form th:if="${agentRunning}" hx-post="/settings/pause" hx-target="#content"
+                  hx-disabled-elt="find button[type='submit']">
                 <button type="submit" class="btn btn-outline">
                     <i class="ti ti-player-pause" aria-hidden="true"></i> Pause Agent
                 </button>
             </form>
-            <form th:if="${!agentRunning}" hx-post="/settings/resume" hx-target="#content">
+            <form th:if="${!agentRunning}" hx-post="/settings/resume" hx-target="#content"
+                  hx-disabled-elt="find button[type='submit']">
                 <button type="submit" class="btn btn-success">
                     <i class="ti ti-player-play" aria-hidden="true"></i> Resume Agent
                 </button>
@@ -53,7 +55,8 @@
             To persist them, edit the Configuration File below.
         </div>
 
-        <form hx-post="/settings/quick" hx-target="#content">
+        <form hx-post="/settings/quick" hx-target="#content"
+              hx-disabled-elt="find button[type='submit']">
             <div class="form-grid">
                 <div class="field-group">
                     <label for="poll-interval">Poll Interval (seconds)</label>
@@ -97,7 +100,8 @@
             Saving writes this file to disk. A <strong>restart is required</strong> for changes
             to take effect &mdash; the running agent is not reloaded automatically.
         </div>
-        <form hx-post="/settings/config" hx-target="#content">
+        <form hx-post="/settings/config" hx-target="#content"
+              hx-disabled-elt="find button[type='submit']">
             <textarea class="config-editor" name="configContent" th:text="${configContent}"
                       spellcheck="false" aria-label="Configuration file (YAML)"></textarea>
             <div class="form-actions">

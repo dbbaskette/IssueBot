@@ -55,14 +55,25 @@
         </footer>
     </nav>
     <main id="content">
-        <!-- Reusable toast fragment, rendered on full page loads and re-included by content fragments for HTMX swaps -->
+        <div th:replace="~{${contentTemplate} :: content}"></div>
+    </main>
+    <script th:src="@{/js/app.js}" defer></script>
+
+    <!--
+      Toast region — the SINGLE source of truth is the content fragments, each of
+      which includes ~{layout :: toasts} as their first child (on both full page
+      loads and HTMX content swaps). The fragment is DEFINED here (so the include
+      resolves) but is wrapped in a th:block that is never rendered on its own:
+      the th:if="false" on the wrapper suppresses the wrapper's output on a full
+      page load, while the th:fragment="toasts" element inside it remains
+      addressable by ~{layout :: toasts} for the content-fragment includes.
+    -->
+    <th:block th:if="${false}">
         <div th:fragment="toasts" id="toast-region" aria-live="polite">
             <div th:if="${success}" class="toast toast-ok" th:text="${success}"></div>
             <div th:if="${message}" class="toast toast-ok" th:text="${message}"></div>
             <div th:if="${error}" class="toast toast-danger" th:text="${error}"></div>
         </div>
-        <div th:replace="~{${contentTemplate} :: content}"></div>
-    </main>
-    <script th:src="@{/js/app.js}" defer></script>
+    </th:block>
 </body>
 </html>
