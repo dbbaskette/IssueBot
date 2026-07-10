@@ -781,7 +781,7 @@ public class IssueWorkflowService {
      * Format the review result into a markdown summary for the PR review body.
      */
     private String formatReviewSummary(CodeReviewResult r) {
-        String model = r.modelUsed() != null ? r.modelUsed() : "Sonnet";
+        String model = r.modelUsed() != null ? r.modelUsed() : "review model";
         String verdict = r.passed() ? "**PASSED**" : "**CHANGES REQUESTED**";
 
         StringBuilder sb = new StringBuilder();
