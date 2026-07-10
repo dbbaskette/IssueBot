@@ -63,8 +63,10 @@ public class IssueBotProperties {
         private int timeoutMinutes = 10;
 
         // Dual-model support: Opus for implementation, Sonnet for review
-        private String implementationModel = "claude-opus-4-6";
-        private String reviewModel = "claude-sonnet-4-6";
+        private String implementationModel = "claude-opus-4-8";
+        private String reviewModel = "claude-sonnet-5";
+        // Cheap model for pre-screen / decomposition analysis
+        private String utilityModel = "claude-haiku-4-5";
         @Min(1)
         private int reviewMaxTurns = 15;
         @Min(1)
@@ -81,6 +83,8 @@ public class IssueBotProperties {
         public void setImplementationModel(String implementationModel) { this.implementationModel = implementationModel; }
         public String getReviewModel() { return reviewModel; }
         public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
+        public String getUtilityModel() { return utilityModel; }
+        public void setUtilityModel(String utilityModel) { this.utilityModel = utilityModel; }
         public int getReviewMaxTurns() { return reviewMaxTurns; }
         public void setReviewMaxTurns(int v) { this.reviewMaxTurns = v; }
         public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
