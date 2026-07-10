@@ -45,7 +45,7 @@ public class IssueController {
     private final GitHubApiClient gitHubApiClient;
     private final IssueBotProperties properties;
     private final IssueDecompositionService decompositionService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -57,7 +57,8 @@ public class IssueController {
                             EventService eventService,
                             GitHubApiClient gitHubApiClient,
                             IssueBotProperties properties,
-                            IssueDecompositionService decompositionService) {
+                            IssueDecompositionService decompositionService,
+                            ObjectMapper objectMapper) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -69,6 +70,7 @@ public class IssueController {
         this.gitHubApiClient = gitHubApiClient;
         this.properties = properties;
         this.decompositionService = decompositionService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping
@@ -262,6 +264,7 @@ public class IssueController {
         issue.setStatus(IssueStatus.COMPLETED);
         issue.setCurrentPhase(null);
         issue.setCooldownUntil(null);
+        issue.setDecompositionProposal(null);
         issueRepository.save(issue);
 
         eventService.log("MANUAL_COMPLETE",

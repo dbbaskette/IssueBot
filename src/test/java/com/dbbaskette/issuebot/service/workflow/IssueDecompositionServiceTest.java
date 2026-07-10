@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -308,6 +309,7 @@ class IssueDecompositionServiceTest {
                 ]
                 """;
         issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
 
         ObjectNode sub1 = objectMapper.createObjectNode();
         sub1.put("number", 101);
@@ -330,23 +332,75 @@ class IssueDecompositionServiceTest {
     }
 
     @Test
+    void approveWithAllCreationsFailingKeepsProposalAndStatus() {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+        when(gitHubApi.createIssue(anyString(), anyString(), anyString(), anyString(), anyList()))
+                .thenThrow(new RuntimeException("API error"));
+
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        assertEquals(IssueStatus.AWAITING_DECOMPOSITION, issue.getStatus());
+        assertNotNull(issue.getDecompositionProposal());
+        verify(gitHubApi, never()).addLabels(anyString(), anyString(), anyInt(), anyList());
+        verify(gitHubApi, never()).removeLabel(anyString(), anyString(), anyInt(), anyString());
+        verify(gitHubApi, never()).closeIssue(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void secondApproveIsRejectedByGuard() throws Exception {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+
+        ObjectNode sub1 = objectMapper.createObjectNode();
+        sub1.put("number", 101);
+        ObjectNode sub2 = objectMapper.createObjectNode();
+        sub2.put("number", 102);
+        when(gitHubApi.createIssue(eq("owner"), eq("repo"), anyString(), anyString(), anyList()))
+                .thenReturn(sub1, sub2);
+
+        decompositionService.approveProposal(issue);
+
+        // Second submit re-reads the (now DECOMPOSED, proposal-cleared) issue and must hit the guard
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        verify(gitHubApi, times(2)).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+    }
+
+    @Test
     void rejectDelegatesToEscalation() {
         TrackedIssue issue = createIssue();
         issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
         issue.setDecompositionProposal("[{\"title\":\"x\",\"description\":\"y\",\"acceptance_criteria\":\"z\",\"hints\":\"\"}]");
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
 
         decompositionService.rejectProposal(issue);
 
         assertNull(issue.getDecompositionProposal());
-        org.mockito.ArgumentCaptor<String> reasonCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(iterationManager).handleRetrySkipped(eq(issue), reasonCaptor.capture());
-        assertTrue(reasonCaptor.getValue().contains("rejected"));
+        verify(iterationManager).handleProposalRejected(issue);
     }
 
     @Test
     void approveGuardsWrongStatus() {
         TrackedIssue issue = createIssue();
         issue.setStatus(IssueStatus.IN_PROGRESS);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
 
         assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
 

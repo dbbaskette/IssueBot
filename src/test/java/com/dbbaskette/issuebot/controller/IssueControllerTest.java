@@ -11,6 +11,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -33,7 +34,7 @@ class IssueControllerTest {
                 mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                 mock(IssueWorkflowService.class), mock(EventService.class),
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
-                mock(IssueDecompositionService.class));
+                mock(IssueDecompositionService.class), new ObjectMapper());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null);
@@ -75,7 +76,7 @@ class IssueControllerTest {
                     mock(IterationRepository.class), mock(EventRepository.class),
                     mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), mock(EventService.class),
-                    gitHubApiClient, properties, decompositionService);
+                    gitHubApiClient, properties, decompositionService, new ObjectMapper());
         }
     }
 

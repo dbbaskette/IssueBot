@@ -236,24 +236,39 @@ public class IssueDecompositionService {
      * decomposition comment, convert the parent into a tracking issue, and mark the
      * tracked issue DECOMPOSED.
      *
-     * @throws IllegalStateException if the issue is not awaiting decomposition or has no proposal
+     * Synchronized (single-JVM app) and re-reads the issue from the database so a
+     * second rapid submit hits the status guard instead of duplicating sub-issues.
+     *
+     * @throws IllegalStateException if the issue is not awaiting decomposition, has no
+     *                               proposal, or no sub-issue could be created on GitHub
      */
-    public void approveProposal(TrackedIssue trackedIssue) throws Exception {
-        if (trackedIssue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
-                || trackedIssue.getDecompositionProposal() == null) {
+    public synchronized void approveProposal(TrackedIssue trackedIssue) throws Exception {
+        TrackedIssue issue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
+        if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
+                || issue.getDecompositionProposal() == null) {
             throw new IllegalStateException(
-                    "Issue is not awaiting decomposition approval: " + trackedIssue.getStatus());
+                    "Issue is not awaiting decomposition approval: " + issue.getStatus());
         }
 
-        WatchedRepo repo = trackedIssue.getRepo();
-        int issueNumber = trackedIssue.getIssueNumber();
+        WatchedRepo repo = issue.getRepo();
+        int issueNumber = issue.getIssueNumber();
 
         List<SubIssue> subIssues = objectMapper.readValue(
-                trackedIssue.getDecompositionProposal(), new TypeReference<List<SubIssue>>() {});
+                issue.getDecompositionProposal(), new TypeReference<List<SubIssue>>() {});
 
         List<Integer> createdNumbers = createSubIssues(repo, subIssues, issueNumber);
 
-        String comment = buildDecompositionComment(trackedIssue, createdNumbers, null);
+        if (createdNumbers.isEmpty()) {
+            log.warn("No sub-issues could be created for {} #{} — keeping proposal for retry",
+                    repo.fullName(), issueNumber);
+            eventService.log("DECOMPOSITION_FAILED",
+                    "All sub-issue creations failed — proposal retained, try again",
+                    repo, issue);
+            throw new IllegalStateException(
+                    "Could not create any sub-issues on GitHub — try approving again");
+        }
+
+        String comment = buildDecompositionComment(issue, createdNumbers, null);
         try {
             gitHubApi.addComment(repo.getOwner(), repo.getName(), issueNumber, comment);
         } catch (Exception e) {
@@ -263,14 +278,14 @@ public class IssueDecompositionService {
 
         convertToTrackingIssue(repo, issueNumber);
 
-        trackedIssue.setStatus(IssueStatus.DECOMPOSED);
-        trackedIssue.setCurrentPhase(null);
-        trackedIssue.setDecompositionProposal(null);
-        issueRepository.save(trackedIssue);
+        issue.setStatus(IssueStatus.DECOMPOSED);
+        issue.setCurrentPhase(null);
+        issue.setDecompositionProposal(null);
+        issueRepository.save(issue);
 
         eventService.log("DECOMPOSITION_COMPLETED",
                 "Decomposed into " + createdNumbers.size() + " sub-issues: " + createdNumbers,
-                repo, trackedIssue);
+                repo, issue);
 
         notificationService.info("Issue Decomposed",
                 repo.fullName() + " #" + issueNumber + " split into "
@@ -279,21 +294,25 @@ public class IssueDecompositionService {
 
     /**
      * Reject a previously proposed decomposition: clear the proposal and escalate
-     * the issue to needs-human via the standard retry-skipped flow.
+     * the issue to needs-human via the operator-rejection flow.
+     *
+     * Synchronized (single-JVM app) and re-reads the issue from the database so a
+     * second rapid submit hits the status guard instead of escalating twice.
      *
      * @throws IllegalStateException if the issue is not awaiting decomposition or has no proposal
      */
-    public void rejectProposal(TrackedIssue trackedIssue) {
-        if (trackedIssue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
-                || trackedIssue.getDecompositionProposal() == null) {
+    public synchronized void rejectProposal(TrackedIssue trackedIssue) {
+        TrackedIssue issue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
+        if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
+                || issue.getDecompositionProposal() == null) {
             throw new IllegalStateException(
-                    "Issue is not awaiting decomposition approval: " + trackedIssue.getStatus());
+                    "Issue is not awaiting decomposition approval: " + issue.getStatus());
         }
 
-        trackedIssue.setDecompositionProposal(null);
-        issueRepository.save(trackedIssue);
+        issue.setDecompositionProposal(null);
+        issueRepository.save(issue);
 
-        iterationManager.handleRetrySkipped(trackedIssue, "Decomposition proposal rejected by operator");
+        iterationManager.handleProposalRejected(issue);
     }
 
     /**
