@@ -254,6 +254,11 @@
             <div class="label">Branch</div>
             <div class="value small" th:text="${issue.branchName != null ? issue.branchName : '—'}">—</div>
         </div>
+        <div class="metric-card" th:if="${issue.resolvedImplModel != null or issue.resolvedReviewModel != null}">
+            <div class="label">Models</div>
+            <div class="value small"
+                 th:text="${(issue.resolvedImplModel != null ? issue.resolvedImplModel : '—') + ' / ' + (issue.resolvedReviewModel != null ? issue.resolvedReviewModel : '—')}">claude-opus-4-8 / claude-sonnet-5</div>
+        </div>
         <div class="metric-card">
             <div class="label">Review Iter</div>
             <div class="value" th:text="${issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">0/2</div>
@@ -289,7 +294,8 @@
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Implementation</div>
-                        <div class="phase-desc">Opus writing code</div>
+                        <div class="phase-desc"
+                             th:text="${issue.resolvedImplModel != null ? (issue.resolvedImplModel + ' writing code') : 'Implementation model writing code'}">Implementation model writing code</div>
                     </div>
                 </div>
                 <!-- 2: CI Checks -->
@@ -316,7 +322,8 @@
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Code Review</div>
-                        <div class="phase-desc">Sonnet 4.6 review</div>
+                        <div class="phase-desc"
+                             th:text="${issue.resolvedReviewModel != null ? (issue.resolvedReviewModel + ' review') : 'Independent review'}">Independent review</div>
                     </div>
                 </div>
                 <!-- 5: Completion -->

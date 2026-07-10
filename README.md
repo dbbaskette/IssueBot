@@ -4,11 +4,11 @@
 ![Java](https://img.shields.io/badge/java-21-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)
 
-An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI (Opus), runs independent code review (Sonnet), and delivers pull requests.
+An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI, runs an independent code review with a separate model, and delivers pull requests.
 
 ## How It Works
 
-IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: **Opus** writes the code, **Sonnet** reviews it independently.
+IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. Both roles are configurable from the dashboard at the global, per-repo, and per-issue level (defaults: Opus 4.8 for implementation, Sonnet 5 for review).
 
 ```mermaid
 flowchart LR
@@ -32,17 +32,17 @@ flowchart LR
 | Phase | What Happens | Model |
 |-------|-------------|-------|
 | **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
-| **2. Implementation** | Claude Code CLI writes code based on issue spec | Opus |
+| **2. Implementation** | Claude Code CLI writes code based on issue spec | Implementation model (default Opus 4.8) |
 | **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
 | **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
-| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Sonnet |
+| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (default Sonnet 5) |
 | **6. Completion** | Post review to PR, create follow-up issue for non-blocking findings (max one follow-up level), auto-merge if configured | - |
 
 If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
 
 ## Key Features
 
-- **Dual-Model Architecture** - Opus (implementation) + Sonnet (independent review) for checks and balances
+- **Dual-Model Architecture** - Implementation and review use independently configurable models (default: Opus 4.8 for implementation, Sonnet 5 for review), settable at the global, per-repo, and per-issue level for checks and balances
 - **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
 - **Independent Code Review** - Sonnet evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
 - **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
@@ -137,8 +137,9 @@ issuebot:
   max-concurrent-issues: 3
 
   claude-code:
-    implementation-model: claude-opus-4-6
-    review-model: claude-sonnet-4-6
+    implementation-model: claude-opus-4-8
+    review-model: claude-sonnet-5
+    utility-model: claude-haiku-4-5
     max-turns-per-invocation: 30
     timeout-minutes: 10
     review-max-turns: 15

@@ -295,7 +295,7 @@ public class IterationManager {
     private String buildMaxReviewIterationsComment(TrackedIssue trackedIssue, int maxReviewIterations) {
         StringBuilder sb = new StringBuilder();
         sb.append("## IssueBot: Review Budget Exhausted\n\n");
-        sb.append("The independent code review (Sonnet 4.6) could not be satisfied after **")
+        sb.append("The independent code review could not be satisfied after **")
                 .append(maxReviewIterations).append(" review iterations**.\n\n");
 
         // Add last review details

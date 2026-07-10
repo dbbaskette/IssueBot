@@ -684,7 +684,10 @@ public class IssueWorkflowService {
                                              Path repoPath, String branchName,
                                              int prNumber, Iteration iteration) {
         WatchedRepo repo = trackedIssue.getRepo();
-        eventService.log("PHASE_INDEPENDENT_REVIEW", "Starting independent code review (Sonnet)",
+        String reviewModelLabel = trackedIssue.getResolvedReviewModel() != null
+                ? trackedIssue.getResolvedReviewModel() : "the review model";
+        eventService.log("PHASE_INDEPENDENT_REVIEW",
+                "Starting independent code review (" + reviewModelLabel + ")",
                 repo, trackedIssue);
 
         Long issueId = trackedIssue.getId();
@@ -877,7 +880,8 @@ public class IssueWorkflowService {
     private void postReviewToIssue(TrackedIssue trackedIssue, CodeReviewResult review, int iterationNum) {
         WatchedRepo repo = trackedIssue.getRepo();
         try {
-            String model = review.modelUsed() != null ? review.modelUsed() : "Sonnet 4.6";
+            String model = review.modelUsed() != null ? review.modelUsed()
+                    : (trackedIssue.getResolvedReviewModel() != null ? trackedIssue.getResolvedReviewModel() : "the review model");
             String verdict = review.passed() ? "PASSED" : "CHANGES REQUESTED";
 
             StringBuilder sb = new StringBuilder();
@@ -1033,7 +1037,8 @@ public class IssueWorkflowService {
                                                     String previousFeedback, int iterationNum) {
         WatchedRepo repo = trackedIssue.getRepo();
         try {
-            String model = implResult.getModel() != null ? implResult.getModel() : "Opus 4.6";
+            String model = implResult.getModel() != null ? implResult.getModel()
+                    : (trackedIssue.getResolvedImplModel() != null ? trackedIssue.getResolvedImplModel() : "the implementation model");
 
             StringBuilder sb = new StringBuilder();
             sb.append("### Implementation Response — Iteration ").append(iterationNum)

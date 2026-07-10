@@ -67,8 +67,10 @@ public class ConfigInitializer implements ApplicationRunner {
                   work-directory: ${user.home}/.issuebot/repos
 
                   claude-code:
+                    implementation-model: claude-opus-4-8
+                    review-model: claude-sonnet-5
+                    utility-model: claude-haiku-4-5
                     max-turns-per-invocation: 30
-                    model: claude-sonnet-4-5-20250929
                     timeout-minutes: 10
 
                   github:
