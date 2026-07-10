@@ -16,6 +16,11 @@
                     data-modal-open="retry-modal">
                 <i class="ti ti-refresh" aria-hidden="true"></i> Retry
             </button>
+            <button th:if="${issue.status.name() == 'QUEUED'}"
+                    type="button" class="btn btn-primary btn-sm"
+                    data-modal-open="start-modal">
+                <i class="ti ti-player-play" aria-hidden="true"></i> Start
+            </button>
             <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL'}"
                     type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
                 <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
@@ -49,6 +54,35 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Start Retry</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Start Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'QUEUED'}"
+         id="start-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="start-modal-title">
+            <h3 id="start-modal-title" style="margin:0 0 0.5rem">Start Issue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Start processing this issue now?</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/start'}" method="post">
+                <div class="field-group">
+                    <label for="startImplModel">Implementation model for this run (optional)</label>
+                    <select id="startImplModel" name="implModelOverride" data-modal-autofocus>
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="startReviewModel">Review model for this run (optional)</label>
+                    <select id="startReviewModel" name="reviewModelOverride">
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Start Issue</button>
                 </div>
             </form>
         </div>
