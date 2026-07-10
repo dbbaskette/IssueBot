@@ -141,6 +141,28 @@ public class GitHubApiClient {
                 .block(Duration.ofSeconds(15));
     }
 
+    public void updateIssueBody(String owner, String repo, int issueNumber, String body) {
+        log.debug("Updating body of {}/{} #{}", owner, repo, issueNumber);
+        webClient.patch()
+                .uri("/repos/{owner}/{repo}/issues/{number}", owner, repo, issueNumber)
+                .bodyValue(Map.of("body", body))
+                .retrieve()
+                .toBodilessEntity()
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(15));
+    }
+
+    public void reopenIssue(String owner, String repo, int issueNumber) {
+        log.debug("Reopening issue {}/{} #{}", owner, repo, issueNumber);
+        webClient.patch()
+                .uri("/repos/{owner}/{repo}/issues/{number}", owner, repo, issueNumber)
+                .bodyValue(Map.of("state", "open"))
+                .retrieve()
+                .toBodilessEntity()
+                .retryWhen(retryOnServerError())
+                .block(Duration.ofSeconds(15));
+    }
+
     public JsonNode createIssue(String owner, String repo, String title, String body, List<String> labels) {
         log.debug("Creating issue in {}/{}: {}", owner, repo, title);
         Map<String, Object> payload = new HashMap<>();
