@@ -100,7 +100,10 @@ public class BacklogService {
                 .filter(l -> l.startsWith("- [")).toList());
         String header = existingBody.lines()
                 .takeWhile(l -> !l.startsWith("- [") && !l.startsWith(KEYS_PREFIX))
-                .reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b);
+                .reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b)
+                // Trim surrounding blank lines so repeated merges don't grow the header:
+                // the builder below always inserts exactly one blank line after it.
+                .strip();
 
         int added = 0;
         for (ReviewFinding f : findings) {

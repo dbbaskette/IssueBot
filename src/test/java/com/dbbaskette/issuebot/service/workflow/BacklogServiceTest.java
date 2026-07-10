@@ -44,6 +44,27 @@ class BacklogServiceTest {
     }
 
     @Test
+    void mergeIsIdempotentOnHeaderAcrossRepeatedCalls() {
+        String initialBody = """
+                Findings from automated reviews.
+
+                <!-- issuebot-keys: -->
+                """;
+        ReviewFinding finding = new ReviewFinding("medium", "code_quality", "src/Foo.java", 42, "Magic number 7", null);
+
+        String first = BacklogService.merge(initialBody, List.of(finding), 10, 11).body();
+
+        BacklogService.MergeResult second = BacklogService.merge(first, List.of(finding), 12, 13);
+        assertThat(second.added()).isZero();
+
+        BacklogService.MergeResult third = BacklogService.merge(second.body(), List.of(finding), 14, 15);
+        assertThat(third.added()).isZero();
+
+        assertThat(third.body()).isEqualTo(second.body());
+        assertThat(third.body()).doesNotContain("\n\n\n");
+    }
+
+    @Test
     void mergePrunesOldestCheckedItemsBeyondCap() {
         StringBuilder body = new StringBuilder("Findings.\n\n");
         for (int i = 0; i < 55; i++) {
