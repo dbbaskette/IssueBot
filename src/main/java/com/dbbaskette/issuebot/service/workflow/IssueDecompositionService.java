@@ -36,6 +36,8 @@ public class IssueDecompositionService {
     private static final Logger log = LoggerFactory.getLogger(IssueDecompositionService.class);
     private static final int MAX_SUB_ISSUES = 5;
     private static final int MIN_SUB_ISSUES = 2;
+    static final String DECOMPOSED_LABEL = "issuebot-decomposed";
+    static final int MAX_OPEN_SUB_ISSUES = 10;
 
     private final ClaudeCodeService claudeCode;
     private final GitHubApiClient gitHubApi;
@@ -72,6 +74,23 @@ public class IssueDecompositionService {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 
+        if (hasLabel(issueDetails, DECOMPOSED_LABEL)) {
+            log.info("Refusing to decompose {} #{} — already a decomposed sub-issue", repo.fullName(), issueNumber);
+            eventService.log("DECOMPOSITION_REFUSED",
+                    "Sub-issues are never decomposed further", repo, trackedIssue);
+            return false;
+        }
+
+        List<JsonNode> openSubs = gitHubApi.listIssues(repo.getOwner(), repo.getName(), DECOMPOSED_LABEL, "open");
+        if (openSubs != null && openSubs.size() >= MAX_OPEN_SUB_ISSUES) {
+            log.warn("Refusing to decompose {} #{} — {} open sub-issues (cap {})",
+                    repo.fullName(), issueNumber, openSubs.size(), MAX_OPEN_SUB_ISSUES);
+            eventService.log("DECOMPOSITION_REFUSED",
+                    "Open sub-issue cap reached (" + openSubs.size() + "/" + MAX_OPEN_SUB_ISSUES + ")",
+                    repo, trackedIssue);
+            return false;
+        }
+
         log.info("Attempting to decompose {} #{} into sub-issues", repo.fullName(), issueNumber);
         eventService.log("DECOMPOSITION_STARTED",
                 "Attempting to decompose issue into sub-tasks", repo, trackedIssue);
@@ -104,7 +123,7 @@ public class IssueDecompositionService {
                 String body = buildSubIssueBody(sub, issueNumber);
                 JsonNode created = gitHubApi.createIssue(
                         repo.getOwner(), repo.getName(), sub.title(), body,
-                        List.of("agent-ready", "issuebot-decomposed"));
+                        List.of("agent-ready", DECOMPOSED_LABEL));
                 int subNumber = created.path("number").asInt();
                 createdNumbers.add(subNumber);
                 log.info("Created sub-issue #{}: {}", subNumber, sub.title());
@@ -164,6 +183,10 @@ public class IssueDecompositionService {
      * @return a PreScreenResult with the verdict and optional reason
      */
     public PreScreenResult preScreen(JsonNode issueDetails, Path repoPath) {
+        if (hasLabel(issueDetails, DECOMPOSED_LABEL)) {
+            return new PreScreenResult(false, null); // sub-issues are never re-screened
+        }
+
         String prompt = buildPreScreenPrompt(issueDetails);
 
         try {
@@ -412,6 +435,20 @@ public class IssueDecompositionService {
         return skipReason.contains("timed out")
                 || skipReason.contains("too complex")
                 || skipReason.contains("too large");
+    }
+
+    /**
+     * Check whether the issue's GitHub labels include the given label name (case-insensitive).
+     * Used to detect sub-issues previously created by decomposition, so they are never
+     * decomposed further (one level only) and never re-screened.
+     */
+    static boolean hasLabel(JsonNode issueDetails, String labelName) {
+        JsonNode labels = issueDetails.path("labels");
+        if (!labels.isArray()) return false;
+        for (JsonNode label : labels) {
+            if (labelName.equalsIgnoreCase(label.path("name").asText())) return true;
+        }
+        return false;
     }
 
     record SubIssue(String title, String description, String acceptanceCriteria, String hints) {}

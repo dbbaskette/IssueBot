@@ -162,23 +162,25 @@ public class IssueWorkflowService {
         }
 
         // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
-        try {
-            IssueDecompositionService.PreScreenResult screenResult =
-                    decompositionService.preScreen(issueDetails, repoPath);
-            if (screenResult.tooLarge()) {
-                log.info("Pre-screen flagged {} #{} as too large: {}",
-                        repo.fullName(), issueNumber, screenResult.reason());
-                eventService.log("PRE_SCREEN_TOO_LARGE",
-                        "Pre-screen: " + screenResult.reason(), repo, trackedIssue);
-                if (decompositionService.decompose(trackedIssue, issueDetails,
-                        repoPath, "Pre-screen: " + screenResult.reason())) {
-                    return;
+        if (repo.isPreScreenEnabled() && repo.getDecompositionMode() != DecompositionMode.OFF) {
+            try {
+                IssueDecompositionService.PreScreenResult screenResult =
+                        decompositionService.preScreen(issueDetails, repoPath);
+                if (screenResult.tooLarge()) {
+                    log.info("Pre-screen flagged {} #{} as too large: {}",
+                            repo.fullName(), issueNumber, screenResult.reason());
+                    eventService.log("PRE_SCREEN_TOO_LARGE",
+                            "Pre-screen: " + screenResult.reason(), repo, trackedIssue);
+                    if (decompositionService.decompose(trackedIssue, issueDetails,
+                            repoPath, "Pre-screen: " + screenResult.reason())) {
+                        return;
+                    }
+                    log.info("Decomposition failed after pre-screen, proceeding with implementation");
                 }
-                log.info("Decomposition failed after pre-screen, proceeding with implementation");
+            } catch (Exception e) {
+                log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
+                        repo.fullName(), issueNumber, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
-                    repo.fullName(), issueNumber, e.getMessage());
         }
 
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
@@ -245,7 +247,8 @@ public class IssueWorkflowService {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
                     // Attempt decomposition for timeout/complexity issues
-                    if (decompositionService.isDecomposable(skipReason)
+                    if (repo.getDecompositionMode() != DecompositionMode.OFF
+                            && decompositionService.isDecomposable(skipReason)
                             && decompositionService.decompose(trackedIssue, issueDetails,
                                     repoPath, skipReason)) {
                         return;
@@ -312,7 +315,8 @@ public class IssueWorkflowService {
                 if (skipReason != null) {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
-                    if (decompositionService.isDecomposable(skipReason)
+                    if (repo.getDecompositionMode() != DecompositionMode.OFF
+                            && decompositionService.isDecomposable(skipReason)
                             && decompositionService.decompose(trackedIssue, issueDetails,
                                     repoPath, skipReason)) {
                         return;
@@ -407,7 +411,8 @@ public class IssueWorkflowService {
         // Max iterations reached — attempt decomposition before escalating
         String maxIterReason = "Failed after " + repo.getMaxIterations()
                 + " iterations — task is likely too large for automated resolution";
-        if (decompositionService.isDecomposable(maxIterReason)
+        if (repo.getDecompositionMode() != DecompositionMode.OFF
+                && decompositionService.isDecomposable(maxIterReason)
                 && decompositionService.decompose(trackedIssue, issueDetails,
                         repoPath, maxIterReason)) {
             return;

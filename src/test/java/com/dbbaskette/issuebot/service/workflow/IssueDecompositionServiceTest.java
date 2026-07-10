@@ -9,12 +9,14 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -364,6 +366,71 @@ class IssueDecompositionServiceTest {
         assertTrue(prompt.contains("too_large"));
     }
 
+    // === Decomposition guard tests ===
+
+    @Test
+    void neverDecomposesAnAlreadyDecomposedIssue() {
+        TrackedIssue issue = createIssue();
+        ObjectNode issueDetails = createIssueDetailsWithLabel("issuebot-decomposed");
+
+        boolean result = decompositionService.decompose(issue, issueDetails,
+                Path.of("/tmp/repo"), "timed out");
+
+        assertFalse(result);
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+    }
+
+    @Test
+    void preScreenSkipsDecomposedIssues() {
+        ObjectNode issueDetails = createIssueDetailsWithLabel("issuebot-decomposed");
+
+        IssueDecompositionService.PreScreenResult result =
+                decompositionService.preScreen(issueDetails, Path.of("/tmp/repo"));
+
+        assertFalse(result.tooLarge());
+        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+    }
+
+    @Test
+    void refusesDecompositionBeyondOpenSubIssueCap() {
+        TrackedIssue issue = createIssue();
+        ObjectNode issueDetails = createIssueDetails();
+
+        // Stub Claude + GitHub so decomposition WOULD succeed if the cap didn't stop it first —
+        // this ensures the cap guard itself is what causes the false return, not an unrelated failure.
+        String claudeOutput = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        claudeResult.setSuccess(true);
+        claudeResult.setOutput(claudeOutput);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+
+        when(gitHubApi.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(createOpenSubIssueNodes(10));
+
+        boolean result = decompositionService.decompose(issue, issueDetails,
+                Path.of("/tmp/repo"), "timed out");
+
+        assertFalse(result);
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+    }
+
+    private List<JsonNode> createOpenSubIssueNodes(int count) {
+        List<JsonNode> nodes = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("number", 200 + i);
+            nodes.add(node);
+        }
+        return nodes;
+    }
+
     private TrackedIssue createIssue() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
@@ -380,6 +447,16 @@ class IssueDecompositionServiceTest {
         details.put("title", "Fix the login bug");
         details.put("body", "Users can't log in when password contains special characters");
         details.putArray("labels");
+        return details;
+    }
+
+    private ObjectNode createIssueDetailsWithLabel(String labelName) {
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the login bug");
+        details.put("body", "Users can't log in when password contains special characters");
+        ObjectNode label = objectMapper.createObjectNode();
+        label.put("name", labelName);
+        details.putArray("labels").add(label);
         return details;
     }
 }
