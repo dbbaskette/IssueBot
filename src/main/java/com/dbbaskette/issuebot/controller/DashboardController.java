@@ -61,6 +61,9 @@ public class DashboardController {
         model.addAttribute("queued", issueRepository.countByStatus(IssueStatus.QUEUED));
         model.addAttribute("failed", issueRepository.countByStatus(IssueStatus.FAILED));
         model.addAttribute("blocked", issueRepository.countByStatus(IssueStatus.BLOCKED));
+        model.addAttribute("decomposed", issueRepository.countByStatus(IssueStatus.DECOMPOSED));
+        model.addAttribute("awaitingDecomposition",
+                issueRepository.countByStatus(IssueStatus.AWAITING_DECOMPOSITION));
         model.addAttribute("repoCount", repoRepository.count());
 
         BigDecimal totalCost = costRepository.totalCost();

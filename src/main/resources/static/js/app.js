@@ -479,7 +479,9 @@
     setValue('implementation-model', '');
     setValue('review-model', '');
     setChecked('auto-start', true);
-    setChecked('follow-up-enabled', true);
+    setValue('follow-up-mode', 'ROLLING_BACKLOG');
+    setValue('decomposition-mode', 'PROPOSE');
+    setChecked('pre-screen-enabled', true);
     setChecked('auto-merge', false);
     setChecked('security-review', false);
     setValue('allowed-paths', '');
@@ -501,7 +503,9 @@
     setValue('implementation-model', ds.implementationModel);
     setValue('review-model', ds.reviewModel);
     setChecked('auto-start', ds.autoStart);
-    setChecked('follow-up-enabled', ds.followUpEnabled);
+    setValue('follow-up-mode', ds.followUpMode);
+    setValue('decomposition-mode', ds.decompositionMode);
+    setChecked('pre-screen-enabled', ds.preScreenEnabled);
     setChecked('auto-merge', ds.autoMerge);
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));

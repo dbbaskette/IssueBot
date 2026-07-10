@@ -1,11 +1,15 @@
 package com.dbbaskette.issuebot.controller;
 
+import com.dbbaskette.issuebot.model.DecompositionMode;
+import com.dbbaskette.issuebot.model.FollowUpMode;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.RepoMode;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
@@ -22,6 +26,8 @@ import java.util.Map;
 @Controller
 @RequestMapping("/repositories")
 public class RepositoryController {
+
+    private static final Logger log = LoggerFactory.getLogger(RepositoryController.class);
 
     private static final java.util.regex.Pattern GITHUB_SLUG =
             java.util.regex.Pattern.compile("^[A-Za-z0-9._-]+$");
@@ -72,6 +78,9 @@ public class RepositoryController {
                                @RequestParam(required = false) String allowedPaths,
                                @RequestParam(required = false) String implementationModel,
                                @RequestParam(required = false) String reviewModel,
+                               @RequestParam(defaultValue = "ROLLING_BACKLOG") String followUpMode,
+                               @RequestParam(defaultValue = "PROPOSE") String decompositionMode,
+                               @RequestParam(defaultValue = "false") boolean preScreenEnabled,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
@@ -100,6 +109,17 @@ public class RepositoryController {
         repo.setFollowUpEnabled(followUpEnabled);
         repo.setImplementationModel(normalize(implementationModel));
         repo.setReviewModel(normalize(reviewModel));
+        try {
+            repo.setFollowUpMode(FollowUpMode.valueOf(followUpMode));
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid followUpMode '{}' for {} — keeping existing value", followUpMode, repo.fullName());
+        }
+        try {
+            repo.setDecompositionMode(DecompositionMode.valueOf(decompositionMode));
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid decompositionMode '{}' for {} — keeping existing value", decompositionMode, repo.fullName());
+        }
+        repo.setPreScreenEnabled(preScreenEnabled);
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {
                 List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))

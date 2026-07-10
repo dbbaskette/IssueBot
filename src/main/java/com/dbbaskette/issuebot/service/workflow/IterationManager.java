@@ -209,6 +209,8 @@ public class IterationManager {
     private void escalateFailure(TrackedIssue trackedIssue, String notificationTitle,
                                    String notificationDetail, String eventType,
                                    String eventMessage, String issueComment) {
+        trackedIssue.setLastFailureReason(notificationDetail);
+
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 

@@ -192,6 +192,20 @@ class IterationManagerTest {
     }
 
     @Test
+    void escalationPersistsFailureReason() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setBranchName("issuebot/issue-1-test");
+
+        String reason = "Implementation timed out on iteration 2";
+        iterationManager.handleRetrySkipped(issue, reason);
+
+        // For handleRetrySkipped, the notificationDetail passed through to
+        // escalateFailure IS the reason string itself.
+        assertEquals(reason, issue.getLastFailureReason());
+    }
+
+    @Test
     void enterCooldown_setsCooldownStatus() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         TrackedIssue issue = new TrackedIssue(repo, 1, "Test");

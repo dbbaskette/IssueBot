@@ -14,7 +14,8 @@
             <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                     type="button" class="btn btn-ghost btn-sm"
                     data-modal-open="retry-modal">
-                <i class="ti ti-refresh" aria-hidden="true"></i> Retry
+                <i class="ti ti-refresh" aria-hidden="true"></i>
+                <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
             </button>
             <button th:if="${issue.status.name() == 'QUEUED'}"
                     type="button" class="btn btn-primary btn-sm"
@@ -26,6 +27,14 @@
                 <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
             </button>
         </div>
+    </div>
+
+    <!-- === LAST FAILURE BANNER === -->
+    <div class="alert alert-danger" role="alert"
+         th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
+        <strong>Last failure:</strong> <span th:text="${issue.lastFailureReason}"></span>
+        <span th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
+              th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
     </div>
 
     <!-- === Retry Modal (accessible dialog) === -->

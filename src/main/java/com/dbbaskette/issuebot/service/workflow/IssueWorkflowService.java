@@ -113,6 +113,7 @@ public class IssueWorkflowService {
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
+            trackedIssue.setLastFailureReason("Unhandled error: " + e.getMessage());
             issueRepository.save(trackedIssue);
             eventService.log("WORKFLOW_ERROR", "Unhandled error: " + e.getMessage(),
                     trackedIssue.getRepo(), trackedIssue);
@@ -132,6 +133,7 @@ public class IssueWorkflowService {
 
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
+        trackedIssue.setLastFailureReason(null);
         trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
         trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
         issueRepository.save(trackedIssue);
@@ -156,6 +158,7 @@ public class IssueWorkflowService {
             log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
+            trackedIssue.setLastFailureReason("Setup failed: " + e.getMessage());
             issueRepository.save(trackedIssue);
             eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
             return;
@@ -341,6 +344,7 @@ public class IssueWorkflowService {
                 log.error("Phase 4 (PR Creation) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
+                trackedIssue.setLastFailureReason("PR creation failed: " + e.getMessage());
                 issueRepository.save(trackedIssue);
                 eventService.log("PHASE_PR_CREATION_FAILED",
                         "PR creation failed: " + e.getMessage(), repo, trackedIssue);
@@ -401,6 +405,7 @@ public class IssueWorkflowService {
                 log.error("Phase 6 (Completion) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
+                trackedIssue.setLastFailureReason("Completion failed: " + e.getMessage());
                 issueRepository.save(trackedIssue);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);

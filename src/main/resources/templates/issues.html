@@ -74,7 +74,9 @@
         <td th:text="${'#' + issue.issueNumber}">#1</td>
         <td th:text="${issue.issueTitle}">Issue title</td>
         <td>
-            <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">PENDING</span>
+            <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
+                  th:title="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN') ? issue.lastFailureReason : null}"
+                  th:text="${issue.status}">PENDING</span>
         </td>
         <td class="text-sm" th:text="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null ? 'Waiting on #' + issue.blockedByIssues.replace(',', ', #') : (issue.currentPhase != null ? issue.currentPhase : '—')}">—</td>
         <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
