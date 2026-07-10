@@ -541,6 +541,44 @@
     }
   });
 
+  // --- Models card (custom model select) -----------------------------------
+  // The Implementation/Review selects on the Settings page offer a
+  // "Custom…" option; picking it reveals a sibling .custom-model-input text
+  // field (scoped to the select's .field-group container). On submit, any
+  // .model-select still set to "__custom__" gets a new <option> appended
+  // whose value is the custom input's text, so the posted <select> param
+  // carries the real model ID. (The Utility select has no custom option and
+  // is untouched by either handler.)
+  function customModelInputFor(select) {
+    var group = select.closest('.field-group');
+    return group ? group.querySelector('.custom-model-input') : null;
+  }
+
+  document.addEventListener('change', function (e) {
+    var select = e.target;
+    if (!select.classList || !select.classList.contains('model-select')) { return; }
+    var input = customModelInputFor(select);
+    if (input) { input.hidden = (select.value !== '__custom__'); }
+  });
+
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || form.nodeName !== 'FORM') { return; }
+    var selects = form.querySelectorAll('.model-select');
+    Array.prototype.forEach.call(selects, function (select) {
+      if (select.value !== '__custom__') { return; }
+      var input = customModelInputFor(select);
+      var value = input ? input.value.trim() : '';
+      if (!value) { return; }
+      var opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      opt.selected = true;
+      select.appendChild(opt);
+      select.value = value;
+    });
+  });
+
   // --- Sortable tables ----------------------------------------------------
   // Generic helper: any <table data-sortable> whose <th data-sort="number|text">
   // headers become click-to-sort. Cells may carry a data-value attribute that

@@ -39,6 +39,65 @@
         </div>
     </div>
 
+    <!-- Models -->
+    <div class="glass-card mb-3">
+        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+            <h3>Models</h3>
+        </div>
+
+        <div class="alert alert-info" style="margin-bottom:1rem">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            Applies immediately to newly started issues. Per-repo and per-issue overrides win over these defaults.
+        </div>
+
+        <form th:action="@{/settings/models}" method="post">
+            <div class="form-grid">
+                <div class="field-group">
+                    <label for="implementation-model">Implementation Model</label>
+                    <select id="implementation-model" name="implementationModel" class="model-select">
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}"
+                                th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
+                                th:selected="${m.id == implementationModel}">Model</option>
+                        <option value="__custom__" th:selected="${implementationModelCustom}">Custom&hellip;</option>
+                    </select>
+                    <input type="text" id="implementation-model-custom" name="implementationModelCustom"
+                           class="custom-model-input" placeholder="Custom model ID"
+                           th:value="${implementationModelCustom ? implementationModel : ''}"
+                           th:hidden="${!implementationModelCustom}">
+                </div>
+                <div class="field-group">
+                    <label for="review-model">Review Model</label>
+                    <select id="review-model" name="reviewModel" class="model-select">
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}"
+                                th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
+                                th:selected="${m.id == reviewModel}">Model</option>
+                        <option value="__custom__" th:selected="${reviewModelCustom}">Custom&hellip;</option>
+                    </select>
+                    <input type="text" id="review-model-custom" name="reviewModelCustom"
+                           class="custom-model-input" placeholder="Custom model ID"
+                           th:value="${reviewModelCustom ? reviewModel : ''}"
+                           th:hidden="${!reviewModelCustom}">
+                </div>
+                <div class="field-group">
+                    <label for="utility-model">Utility Model</label>
+                    <select id="utility-model" name="utilityModel">
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}"
+                                th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
+                                th:selected="${m.id == utilityModel}">Model</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Models
+                </button>
+            </div>
+            <div class="text-sm text-muted" style="margin-top:0.5rem">
+                Saving rewrites config.yml (comments are not preserved).
+            </div>
+        </form>
+    </div>
+
     <!-- Quick Settings -->
     <div class="glass-card mb-3">
         <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
