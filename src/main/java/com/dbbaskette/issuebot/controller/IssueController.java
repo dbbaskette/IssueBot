@@ -115,6 +115,7 @@ public class IssueController {
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id);
+        model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
         return ViewResolver.view("issue-detail", hx != null);
     }
 
@@ -132,6 +133,8 @@ public class IssueController {
     @PostMapping("/{id}/retry")
     public String retry(@PathVariable Long id,
                         @RequestParam(required = false) String instructions,
+                        @RequestParam(required = false) String implModelOverride,
+                        @RequestParam(required = false) String reviewModelOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -167,6 +170,8 @@ public class IssueController {
         issue.setCurrentReviewIteration(0);
         issue.setCurrentPhase(null);
         issue.setCooldownUntil(null);
+        issue.setImplModelOverride(normalize(implModelOverride));
+        issue.setReviewModelOverride(normalize(reviewModelOverride));
         issueRepository.save(issue);
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
@@ -195,7 +200,10 @@ public class IssueController {
     }
 
     @PostMapping("/{id}/start")
-    public String start(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+    public String start(@PathVariable Long id,
+                        @RequestParam(required = false) String implModelOverride,
+                        @RequestParam(required = false) String reviewModelOverride,
+                        RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
         if (issue.getStatus() != IssueStatus.QUEUED) {
@@ -213,6 +221,8 @@ public class IssueController {
 
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setCurrentPhase(null);
+        issue.setImplModelOverride(normalize(implModelOverride));
+        issue.setReviewModelOverride(normalize(reviewModelOverride));
         issueRepository.save(issue);
 
         eventService.log("MANUAL_START",
@@ -252,6 +262,10 @@ public class IssueController {
 
         redirectAttributes.addFlashAttribute("success", "Issue marked as completed");
         return "redirect:/issues/" + id;
+    }
+
+    private static String normalize(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     /**

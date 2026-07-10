@@ -59,6 +59,20 @@
                         <label for="max-review-iterations">Max Review Iterations</label>
                         <input type="number" id="max-review-iterations" name="maxReviewIterations" value="2" min="1" max="10">
                     </div>
+                    <div class="field-group">
+                        <label for="implementation-model">Implementation model (blank = inherit global)</label>
+                        <select id="implementation-model" name="implementationModel">
+                            <option value="">Inherit global</option>
+                            <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="review-model">Review model (blank = inherit global)</label>
+                        <select id="review-model" name="reviewModel">
+                            <option value="">Inherit global</option>
+                            <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                        </select>
+                    </div>
                     <div class="checkbox-field">
                         <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
                         <label for="auto-start">Auto-start issues</label>
@@ -181,7 +195,9 @@
                                              data-max-review-iterations=${repo.maxReviewIterations},
                                              data-auto-start=${repo.autoStart},
                                              data-follow-up-enabled=${repo.followUpEnabled},
-                                             data-allowed-paths=${repo.allowedPaths}">
+                                             data-allowed-paths=${repo.allowedPaths},
+                                             data-implementation-model=${repo.implementationModel},
+                                             data-review-model=${repo.reviewModel}">
                                 <i class="ti ti-edit" aria-hidden="true"></i> Edit
                             </button>
                             <button class="btn btn-danger btn-sm"

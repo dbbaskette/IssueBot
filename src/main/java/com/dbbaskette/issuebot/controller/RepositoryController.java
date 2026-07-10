@@ -70,6 +70,8 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "true") boolean autoStart,
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
                                @RequestParam(required = false) String allowedPaths,
+                               @RequestParam(required = false) String implementationModel,
+                               @RequestParam(required = false) String reviewModel,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
@@ -96,6 +98,8 @@ public class RepositoryController {
         repo.setMaxReviewIterations(maxReviewIterations);
         repo.setAutoStart(autoStart);
         repo.setFollowUpEnabled(followUpEnabled);
+        repo.setImplementationModel(normalize(implementationModel));
+        repo.setReviewModel(normalize(reviewModel));
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {
                 List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))
@@ -131,6 +135,10 @@ public class RepositoryController {
         return ViewResolver.view("repositories", hx != null);
     }
 
+    private static String normalize(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
     private void populateModel(Model model, String message, String error) {
         List<WatchedRepo> repos = repoRepository.findAll();
         Map<Long, Long> issueCounts = new HashMap<>();
@@ -143,6 +151,7 @@ public class RepositoryController {
         model.addAttribute("contentTemplate", "repositories");
         model.addAttribute("repos", repos);
         model.addAttribute("issueCounts", issueCounts);
+        model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         if (message != null) model.addAttribute("message", message);

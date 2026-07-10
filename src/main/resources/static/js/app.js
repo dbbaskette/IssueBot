@@ -476,6 +476,8 @@
     setValue('mode', 'AUTONOMOUS');
     setValue('max-iterations', '5');
     setValue('max-review-iterations', '2');
+    setValue('implementation-model', '');
+    setValue('review-model', '');
     setChecked('auto-start', true);
     setChecked('follow-up-enabled', true);
     setChecked('auto-merge', false);
@@ -496,6 +498,8 @@
     setValue('mode', ds.mode);
     setValue('max-iterations', ds.maxIterations);
     setValue('max-review-iterations', ds.maxReviewIterations);
+    setValue('implementation-model', ds.implementationModel);
+    setValue('review-model', ds.reviewModel);
     setChecked('auto-start', ds.autoStart);
     setChecked('follow-up-enabled', ds.followUpEnabled);
     setChecked('auto-merge', ds.autoMerge);

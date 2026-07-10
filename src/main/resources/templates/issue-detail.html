@@ -32,6 +32,20 @@
             <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post">
                 <textarea name="instructions" rows="4" class="modal-textarea" data-modal-autofocus
                           placeholder="e.g. Break this into smaller changes, focus on the API layer first..."></textarea>
+                <div class="field-group">
+                    <label for="retryImplModel">Implementation model for this retry (optional)</label>
+                    <select id="retryImplModel" name="implModelOverride">
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="retryReviewModel">Review model for this retry (optional)</label>
+                    <select id="retryReviewModel" name="reviewModelOverride">
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Start Retry</button>
