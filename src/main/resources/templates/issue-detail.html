@@ -119,6 +119,59 @@
         </div>
     </div>
 
+    <!-- === DECOMPOSITION PROPOSAL CARD === -->
+    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}" class="panel mb-3">
+        <div class="panel-header">
+            <h3>Proposed Split</h3>
+            <div class="flex gap-1">
+                <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-decomposition-modal">
+                    <i class="ti ti-check" aria-hidden="true"></i> Approve split
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-decomposition-modal">
+                    <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
+                </button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <ol class="decomposition-proposal-list">
+                <li th:each="sub : ${decompositionProposal}">
+                    <strong th:text="${sub['title']}">Sub-issue title</strong>
+                    <div class="text-sm text-muted" th:text="${sub['description']}">Sub-issue description</div>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- === Approve Decomposition Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}"
+         id="approve-decomposition-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="approve-decomposition-modal-title">
+            <h3 id="approve-decomposition-modal-title" style="margin:0 0 0.5rem">Approve Split</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Creates the sub-issues labeled agent-ready; this issue stays open as a tracker.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/approve'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Approve split</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Reject Decomposition Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}"
+         id="reject-decomposition-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="reject-decomposition-modal-title">
+            <h3 id="reject-decomposition-modal-title" style="margin:0 0 0.5rem">Reject Split</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Escalates to needs-human; no sub-issues are created.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/reject'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Reject &amp; escalate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- === LIVE-REFRESHED STATUS SECTION === -->
     <div th:replace="~{issue-detail :: live-status}"></div>
 

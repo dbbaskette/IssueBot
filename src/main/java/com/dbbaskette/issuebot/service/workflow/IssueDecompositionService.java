@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.workflow;
 
+import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -9,8 +10,10 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -45,19 +48,22 @@ public class IssueDecompositionService {
     private final EventService eventService;
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
+    private final IterationManager iterationManager;
 
     public IssueDecompositionService(ClaudeCodeService claudeCode,
                                       GitHubApiClient gitHubApi,
                                       TrackedIssueRepository issueRepository,
                                       EventService eventService,
                                       NotificationService notificationService,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      IterationManager iterationManager) {
         this.claudeCode = claudeCode;
         this.gitHubApi = gitHubApi;
         this.issueRepository = issueRepository;
         this.eventService = eventService;
         this.notificationService = notificationService;
         this.objectMapper = objectMapper;
+        this.iterationManager = iterationManager;
     }
 
     /**
@@ -116,21 +122,34 @@ public class IssueDecompositionService {
             return false;
         }
 
-        // Create sub-issues on GitHub
-        List<Integer> createdNumbers = new ArrayList<>();
-        for (SubIssue sub : subIssues) {
+        if (repo.getDecompositionMode() == DecompositionMode.PROPOSE) {
             try {
-                String body = buildSubIssueBody(sub, issueNumber);
-                JsonNode created = gitHubApi.createIssue(
-                        repo.getOwner(), repo.getName(), sub.title(), body,
-                        List.of("agent-ready", DECOMPOSED_LABEL));
-                int subNumber = created.path("number").asInt();
-                createdNumbers.add(subNumber);
-                log.info("Created sub-issue #{}: {}", subNumber, sub.title());
+                trackedIssue.setDecompositionProposal(objectMapper.writeValueAsString(subIssues));
             } catch (Exception e) {
-                log.warn("Failed to create sub-issue '{}': {}", sub.title(), e.getMessage());
+                log.warn("Failed to serialize proposal for {} #{}: {}", repo.fullName(), issueNumber, e.getMessage());
+                return false;
             }
+            trackedIssue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+            trackedIssue.setCurrentPhase(null);
+            issueRepository.save(trackedIssue);
+
+            try {
+                gitHubApi.addComment(repo.getOwner(), repo.getName(), issueNumber,
+                        buildProposalComment(subIssues, skipReason));
+            } catch (Exception e) {
+                log.warn("Failed to post proposal comment: {}", e.getMessage());
+            }
+
+            eventService.log("DECOMPOSITION_PROPOSED",
+                    "Proposed split into " + subIssues.size() + " sub-issues — awaiting approval",
+                    repo, trackedIssue);
+            notificationService.info("Decomposition Proposed",
+                    repo.fullName() + " #" + issueNumber + " — approve or reject in the dashboard");
+            return true;
         }
+
+        // AUTO mode: create sub-issues immediately
+        List<Integer> createdNumbers = createSubIssues(repo, subIssues, issueNumber);
 
         if (createdNumbers.isEmpty()) {
             log.warn("No sub-issues could be created for {} #{}", repo.fullName(), issueNumber);
@@ -148,13 +167,7 @@ public class IssueDecompositionService {
                     repo.fullName(), issueNumber, e.getMessage());
         }
 
-        // Close original issue
-        try {
-            gitHubApi.closeIssue(repo.getOwner(), repo.getName(), issueNumber);
-        } catch (Exception e) {
-            log.warn("Failed to close original issue {} #{}: {}",
-                    repo.fullName(), issueNumber, e.getMessage());
-        }
+        convertToTrackingIssue(repo, issueNumber);
 
         // Mark tracked issue as DECOMPOSED
         trackedIssue.setStatus(IssueStatus.DECOMPOSED);
@@ -172,6 +185,115 @@ public class IssueDecompositionService {
         log.info("Successfully decomposed {} #{} into {} sub-issues: {}",
                 repo.fullName(), issueNumber, createdNumbers.size(), createdNumbers);
         return true;
+    }
+
+    /**
+     * Create sub-issues on GitHub from the given decomposition, labeling each
+     * {@code agent-ready} + {@code issuebot-decomposed}. Failures creating an
+     * individual sub-issue are logged and skipped; the caller checks whether
+     * the returned list is empty.
+     */
+    private List<Integer> createSubIssues(WatchedRepo repo, List<SubIssue> subIssues, int parentIssueNumber) {
+        List<Integer> createdNumbers = new ArrayList<>();
+        for (SubIssue sub : subIssues) {
+            try {
+                String body = buildSubIssueBody(sub, parentIssueNumber);
+                JsonNode created = gitHubApi.createIssue(
+                        repo.getOwner(), repo.getName(), sub.title(), body,
+                        List.of("agent-ready", DECOMPOSED_LABEL));
+                int subNumber = created.path("number").asInt();
+                createdNumbers.add(subNumber);
+                log.info("Created sub-issue #{}: {}", subNumber, sub.title());
+            } catch (Exception e) {
+                log.warn("Failed to create sub-issue '{}': {}", sub.title(), e.getMessage());
+            }
+        }
+        return createdNumbers;
+    }
+
+    /**
+     * Converts the parent issue into a tracking issue: label it {@code issuebot-parent}
+     * and remove {@code agent-ready} so it stays open (instead of being closed) until
+     * all its sub-issues are closed.
+     */
+    private void convertToTrackingIssue(WatchedRepo repo, int issueNumber) {
+        try {
+            gitHubApi.addLabels(repo.getOwner(), repo.getName(), issueNumber, List.of("issuebot-parent"));
+        } catch (Exception e) {
+            log.warn("Failed to add issuebot-parent label to {} #{}: {}",
+                    repo.fullName(), issueNumber, e.getMessage());
+        }
+        try {
+            gitHubApi.removeLabel(repo.getOwner(), repo.getName(), issueNumber, "agent-ready");
+        } catch (Exception e) {
+            log.warn("Failed to remove agent-ready label from {} #{}: {}",
+                    repo.fullName(), issueNumber, e.getMessage());
+        }
+    }
+
+    /**
+     * Approve a previously proposed decomposition: create the sub-issues, post the
+     * decomposition comment, convert the parent into a tracking issue, and mark the
+     * tracked issue DECOMPOSED.
+     *
+     * @throws IllegalStateException if the issue is not awaiting decomposition or has no proposal
+     */
+    public void approveProposal(TrackedIssue trackedIssue) throws Exception {
+        if (trackedIssue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
+                || trackedIssue.getDecompositionProposal() == null) {
+            throw new IllegalStateException(
+                    "Issue is not awaiting decomposition approval: " + trackedIssue.getStatus());
+        }
+
+        WatchedRepo repo = trackedIssue.getRepo();
+        int issueNumber = trackedIssue.getIssueNumber();
+
+        List<SubIssue> subIssues = objectMapper.readValue(
+                trackedIssue.getDecompositionProposal(), new TypeReference<List<SubIssue>>() {});
+
+        List<Integer> createdNumbers = createSubIssues(repo, subIssues, issueNumber);
+
+        String comment = buildDecompositionComment(trackedIssue, createdNumbers, null);
+        try {
+            gitHubApi.addComment(repo.getOwner(), repo.getName(), issueNumber, comment);
+        } catch (Exception e) {
+            log.warn("Failed to post decomposition comment to {} #{}: {}",
+                    repo.fullName(), issueNumber, e.getMessage());
+        }
+
+        convertToTrackingIssue(repo, issueNumber);
+
+        trackedIssue.setStatus(IssueStatus.DECOMPOSED);
+        trackedIssue.setCurrentPhase(null);
+        trackedIssue.setDecompositionProposal(null);
+        issueRepository.save(trackedIssue);
+
+        eventService.log("DECOMPOSITION_COMPLETED",
+                "Decomposed into " + createdNumbers.size() + " sub-issues: " + createdNumbers,
+                repo, trackedIssue);
+
+        notificationService.info("Issue Decomposed",
+                repo.fullName() + " #" + issueNumber + " split into "
+                        + createdNumbers.size() + " sub-issues");
+    }
+
+    /**
+     * Reject a previously proposed decomposition: clear the proposal and escalate
+     * the issue to needs-human via the standard retry-skipped flow.
+     *
+     * @throws IllegalStateException if the issue is not awaiting decomposition or has no proposal
+     */
+    public void rejectProposal(TrackedIssue trackedIssue) {
+        if (trackedIssue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
+                || trackedIssue.getDecompositionProposal() == null) {
+            throw new IllegalStateException(
+                    "Issue is not awaiting decomposition approval: " + trackedIssue.getStatus());
+        }
+
+        trackedIssue.setDecompositionProposal(null);
+        issueRepository.save(trackedIssue);
+
+        iterationManager.handleRetrySkipped(trackedIssue, "Decomposition proposal rejected by operator");
     }
 
     /**
@@ -415,13 +537,34 @@ public class IssueDecompositionService {
             sb.append("- #").append(num).append("\n");
         }
 
-        sb.append("\nThis issue will be closed. Progress will continue on the sub-issues above.\n\n");
+        sb.append("\nThis issue stays open as a tracking issue and will close automatically ")
+          .append("when all sub-issues are done.\n\n");
 
         if (trackedIssue.getBranchName() != null) {
             sb.append("Any partial progress is available on branch `")
               .append(trackedIssue.getBranchName()).append("`.\n\n");
         }
 
+        sb.append("---\n*Generated by [IssueBot](https://github.com/dbbaskette/IssueBot)*");
+        return sb.toString();
+    }
+
+    private String buildProposalComment(List<SubIssue> subIssues, String skipReason) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## IssueBot: Proposed Split\n\n");
+        if (skipReason != null) {
+            sb.append("> ").append(skipReason).append("\n\n");
+        }
+        sb.append("IssueBot proposes splitting this issue into **")
+          .append(subIssues.size()).append("** smaller sub-issues:\n\n");
+
+        int i = 1;
+        for (SubIssue sub : subIssues) {
+            sb.append(i++).append(". **").append(sub.title()).append("**\n")
+              .append("   ").append(sub.description()).append("\n\n");
+        }
+
+        sb.append("Approve or reject this split from the IssueBot dashboard.\n\n");
         sb.append("---\n*Generated by [IssueBot](https://github.com/dbbaskette/IssueBot)*");
         return sb.toString();
     }
@@ -451,7 +594,11 @@ public class IssueDecompositionService {
         return false;
     }
 
-    record SubIssue(String title, String description, String acceptanceCriteria, String hints) {}
+    record SubIssue(
+            @JsonProperty("title") String title,
+            @JsonProperty("description") String description,
+            @JsonProperty("acceptance_criteria") String acceptanceCriteria,
+            @JsonProperty("hints") String hints) {}
 
     record PreScreenResult(boolean tooLarge, String reason) {}
 }

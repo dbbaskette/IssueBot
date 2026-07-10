@@ -549,6 +549,11 @@ main {
     color: var(--info);
     border-color: rgba(2,132,199,0.3);
 }
+.status-awaiting_decomposition {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: rgba(180,83,9,0.3);
+}
 
 /* ============================================================
    Data tables — glass operations log

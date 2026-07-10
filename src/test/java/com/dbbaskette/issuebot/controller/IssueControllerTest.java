@@ -9,6 +9,7 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,7 +32,8 @@ class IssueControllerTest {
                 mock(IterationRepository.class), mock(EventRepository.class),
                 mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                 mock(IssueWorkflowService.class), mock(EventService.class),
-                mock(GitHubApiClient.class), mock(IssueBotProperties.class));
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class),
+                mock(IssueDecompositionService.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null);
@@ -50,6 +52,7 @@ class IssueControllerTest {
         final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
         final GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
         final IssueBotProperties properties = mock(IssueBotProperties.class);
+        final IssueDecompositionService decompositionService = mock(IssueDecompositionService.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -72,7 +75,7 @@ class IssueControllerTest {
                     mock(IterationRepository.class), mock(EventRepository.class),
                     mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), mock(EventService.class),
-                    gitHubApiClient, properties);
+                    gitHubApiClient, properties, decompositionService);
         }
     }
 
@@ -124,5 +127,25 @@ class IssueControllerTest {
         verify(f.issues).save(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getImplModelOverride()).isNull();
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getReviewModelOverride()).isNull();
+    }
+
+    @Test
+    void approveEndpointGuardsStatus() throws Exception {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        f.controller.approveDecomposition(1L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        verify(f.decompositionService, never()).approveProposal(any());
+    }
+
+    @Test
+    void approveEndpointCallsService() throws Exception {
+        Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
+
+        String view = f.controller.approveDecomposition(1L, f.redirectAttributes);
+
+        verify(f.decompositionService).approveProposal(f.issue);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
     }
 }
