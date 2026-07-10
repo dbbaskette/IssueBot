@@ -48,6 +48,7 @@ class IntegrationWorkflowTest {
     private NotificationService notificationService;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private FollowUpService followUpService;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -65,6 +66,7 @@ class IntegrationWorkflowTest {
         notificationService = mock(NotificationService.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        followUpService = mock(FollowUpService.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
@@ -72,6 +74,7 @@ class IntegrationWorkflowTest {
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
                 decompositionService,
+                followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 objectMapper);
@@ -176,6 +179,9 @@ class IntegrationWorkflowTest {
         assertNull(issue.getCurrentPhase());
         verify(gitHubApi, never()).markPrReady(anyString(), anyString(), anyInt());
         verify(notificationService).info(eq("Issue Completed"), anyString());
+        // Passing review delegates non-blocking findings routing to FollowUpService
+        verify(followUpService).handleNonBlockingFindings(
+                eq(issue), any(), any(CodeReviewResult.class), eq(99));
     }
 
     // === Test 2: Review failure triggers re-implementation ===
@@ -328,6 +334,8 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
+        verify(followUpService).handleNonBlockingFindings(
+                eq(issue), any(), any(CodeReviewResult.class), eq(102));
     }
 
     // === Test 8: Cost tracking records for both implementation and review ===

@@ -44,8 +44,6 @@ import java.util.List;
 public class IssueWorkflowService {
 
     private static final Logger log = LoggerFactory.getLogger(IssueWorkflowService.class);
-    private static final String FOLLOW_UP_LABEL = "issuebot-followup";
-    private static final String FOLLOW_UP_TITLE_PREFIX = "Follow-Up:";
 
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
@@ -60,6 +58,7 @@ public class IssueWorkflowService {
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
     private final IssueDecompositionService decompositionService;
+    private final FollowUpService followUpService;
     private final ModelResolver modelResolver;
     private final ObjectMapper objectMapper;
 
@@ -76,6 +75,7 @@ public class IssueWorkflowService {
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
                                  IssueDecompositionService decompositionService,
+                                 FollowUpService followUpService,
                                  ModelResolver modelResolver,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
@@ -91,6 +91,7 @@ public class IssueWorkflowService {
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
         this.decompositionService = decompositionService;
+        this.followUpService = followUpService;
         this.modelResolver = modelResolver;
         this.objectMapper = objectMapper;
     }
@@ -376,12 +377,12 @@ public class IssueWorkflowService {
                 continue;
             }
 
-            // Create follow-up issue for non-blocking review findings
+            // Route non-blocking review findings per the repo's follow-up mode
             if (reviewResult != null && reviewResult.passed()) {
                 try {
-                    createFollowUpIssue(trackedIssue, issueDetails, reviewResult, prNumber);
+                    followUpService.handleNonBlockingFindings(trackedIssue, issueDetails, reviewResult, prNumber);
                 } catch (Exception e) {
-                    log.warn("Failed to create follow-up issue for {} #{}: {}",
+                    log.warn("Follow-up handling failed for {} #{}: {}",
                             repo.fullName(), trackedIssue.getIssueNumber(), e.getMessage());
                 }
             }
@@ -934,99 +935,6 @@ public class IssueWorkflowService {
             log.warn("Failed to post review comment to issue #{}: {}",
                     trackedIssue.getIssueNumber(), e.getMessage());
         }
-    }
-
-    /**
-     * Create a follow-up GitHub issue for non-blocking (medium/low severity) review findings.
-     * Posts a comment on the original issue linking to the follow-up.
-     */
-    private void createFollowUpIssue(TrackedIssue trackedIssue, JsonNode issueDetails,
-                                     CodeReviewResult reviewResult, int prNumber) {
-        if (!trackedIssue.getRepo().isFollowUpEnabled()) {
-            log.info("Skipping follow-up creation for {} #{} because follow-up issues are disabled",
-                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());
-            return;
-        }
-
-        if (isFollowUpIssue(issueDetails)) {
-            log.info("Skipping follow-up creation for {} #{} because it is already a follow-up issue",
-                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());
-            return;
-        }
-
-        List<CodeReviewResult.ReviewFinding> nonBlocking = reviewResult.findings().stream()
-                .filter(f -> "medium".equalsIgnoreCase(f.severity()) || "low".equalsIgnoreCase(f.severity()))
-                .toList();
-
-        if (nonBlocking.isEmpty()) {
-            return;
-        }
-
-        WatchedRepo repo = trackedIssue.getRepo();
-        int originalIssueNumber = trackedIssue.getIssueNumber();
-
-        String title = FOLLOW_UP_TITLE_PREFIX + " Code Review Findings from #" + originalIssueNumber;
-
-        StringBuilder body = new StringBuilder();
-        body.append("The following non-blocking items were identified during the automated code review for #")
-            .append(originalIssueNumber).append(" (PR #").append(prNumber)
-            .append(") and should be addressed in a future iteration.\n\n");
-        body.append("#### Findings\n\n");
-
-        for (CodeReviewResult.ReviewFinding f : nonBlocking) {
-            body.append("**[").append(f.severity().toUpperCase()).append(" — ").append(f.category()).append("]");
-            if (f.file() != null && !f.file().isBlank()) {
-                body.append(" `").append(f.file());
-                if (f.line() != null) body.append(":").append(f.line());
-                body.append("`");
-            }
-            body.append("**\n");
-            body.append(f.finding()).append("\n");
-            if (f.suggestion() != null && !f.suggestion().isBlank()) {
-                body.append("> **Suggestion:** ").append(f.suggestion()).append("\n");
-            }
-            body.append("\n");
-        }
-
-        body.append("---\n*Auto-created by [IssueBot](https://github.com/dbbaskette/IssueBot) from review of #")
-            .append(originalIssueNumber).append("*");
-
-        JsonNode newIssue = gitHubApi.createIssue(
-                repo.getOwner(), repo.getName(), title, body.toString(),
-                List.of(FOLLOW_UP_LABEL));
-
-        int followUpNumber = newIssue.path("number").asInt();
-        log.info("Created follow-up issue #{} for {} #{} with {} findings",
-                followUpNumber, repo.fullName(), originalIssueNumber, nonBlocking.size());
-
-        gitHubApi.addComment(repo.getOwner(), repo.getName(), originalIssueNumber,
-                "Non-blocking review findings have been captured in follow-up issue #" + followUpNumber);
-
-        eventService.log("FOLLOW_UP_ISSUE_CREATED",
-                "Created follow-up issue #" + followUpNumber + " with " + nonBlocking.size() + " findings",
-                repo, trackedIssue);
-    }
-
-    boolean isFollowUpIssue(JsonNode issueDetails) {
-        if (issueDetails == null || issueDetails.isMissingNode()) {
-            return false;
-        }
-
-        String title = issueDetails.path("title").asText("");
-        if (title.startsWith(FOLLOW_UP_TITLE_PREFIX)) {
-            return true;
-        }
-
-        JsonNode labels = issueDetails.path("labels");
-        if (labels.isArray()) {
-            for (JsonNode label : labels) {
-                if (FOLLOW_UP_LABEL.equalsIgnoreCase(label.path("name").asText())) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     /**

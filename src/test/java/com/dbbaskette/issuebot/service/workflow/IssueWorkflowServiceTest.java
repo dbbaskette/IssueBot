@@ -19,7 +19,6 @@ import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +41,7 @@ class IssueWorkflowServiceTest {
     private IterationRepository iterationRepository;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private FollowUpService followUpService;
     private CodeReviewService codeReviewService;
     private CostTrackingRepository costRepository;
 
@@ -53,6 +53,7 @@ class IssueWorkflowServiceTest {
         iterationRepository = mock(IterationRepository.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        followUpService = mock(FollowUpService.class);
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
         workflowService = new IssueWorkflowService(
@@ -69,6 +70,7 @@ class IssueWorkflowServiceTest {
                 mock(NotificationService.class),
                 iterationManager,
                 decompositionService,
+                followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 objectMapper
@@ -194,36 +196,6 @@ class IssueWorkflowServiceTest {
         java.math.BigDecimal cost = workflowService.resolveCost(
                 null, "my-custom-model", 1_000_000, 1_000_000, "REVIEW");
         assertEquals(0, cost.compareTo(new java.math.BigDecimal("18")));
-    }
-
-    @Test
-    void isFollowUpIssue_trueWhenIssueHasFollowUpLabel() {
-        ObjectNode issue = objectMapper.createObjectNode();
-        issue.put("title", "Tighten null handling");
-        ArrayNode labels = issue.putArray("labels");
-        labels.addObject().put("name", "bug");
-        labels.addObject().put("name", "issuebot-followup");
-
-        assertTrue(workflowService.isFollowUpIssue(issue));
-    }
-
-    @Test
-    void isFollowUpIssue_trueWhenTitleHasFollowUpPrefix() {
-        ObjectNode issue = objectMapper.createObjectNode();
-        issue.put("title", "Follow-Up: Code Review Findings from #42");
-        issue.putArray("labels");
-
-        assertTrue(workflowService.isFollowUpIssue(issue));
-    }
-
-    @Test
-    void isFollowUpIssue_falseForRegularIssue() {
-        ObjectNode issue = objectMapper.createObjectNode();
-        issue.put("title", "Fix retry modal z-index");
-        ArrayNode labels = issue.putArray("labels");
-        labels.addObject().put("name", "bug");
-
-        assertFalse(workflowService.isFollowUpIssue(issue));
     }
 
     /**
