@@ -63,7 +63,8 @@
                     <input type="text" id="implementation-model-custom" name="implementationModelCustom"
                            class="custom-model-input" placeholder="Custom model ID"
                            th:value="${implementationModelCustom ? implementationModel : ''}"
-                           th:hidden="${!implementationModelCustom}">
+                           th:hidden="${!implementationModelCustom}"
+                           th:required="${implementationModelCustom}">
                 </div>
                 <div class="field-group">
                     <label for="review-model">Review Model</label>
@@ -76,11 +77,16 @@
                     <input type="text" id="review-model-custom" name="reviewModelCustom"
                            class="custom-model-input" placeholder="Custom model ID"
                            th:value="${reviewModelCustom ? reviewModel : ''}"
-                           th:hidden="${!reviewModelCustom}">
+                           th:hidden="${!reviewModelCustom}"
+                           th:required="${reviewModelCustom}">
                 </div>
                 <div class="field-group">
                     <label for="utility-model">Utility Model</label>
                     <select id="utility-model" name="utilityModel">
+                        <!-- Preserve a configured value that isn't in the catalog rather than
+                             silently swapping it to the first catalog entry on render/save. -->
+                        <option th:if="${utilityModelCustom}" th:value="${utilityModel}"
+                                th:text="${utilityModel + ' (custom)'}" selected>current (custom)</option>
                         <option th:each="m : ${modelCatalog}" th:value="${m.id}"
                                 th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
                                 th:selected="${m.id == utilityModel}">Model</option>

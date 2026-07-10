@@ -558,7 +558,12 @@
     var select = e.target;
     if (!select.classList || !select.classList.contains('model-select')) { return; }
     var input = customModelInputFor(select);
-    if (input) { input.hidden = (select.value !== '__custom__'); }
+    if (!input) { return; }
+    var custom = (select.value === '__custom__');
+    input.hidden = !custom;
+    // Required only while visible: blocks submitting an empty custom ID, but a
+    // hidden required input would invisibly wedge the form.
+    input.required = custom;
   });
 
   document.addEventListener('submit', function (e) {

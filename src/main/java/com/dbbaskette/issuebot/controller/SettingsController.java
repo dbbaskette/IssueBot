@@ -15,8 +15,10 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -78,15 +80,21 @@ public class SettingsController {
         return ViewResolver.view("settings", hx != null);
     }
 
+    /** Sentinel posted by the "Custom…" option when the custom text input never got a value (e.g. JS off). */
+    static final String CUSTOM_SENTINEL = "__custom__";
+
     @PostMapping("/models")
     public String saveModels(@RequestParam String implementationModel,
                               @RequestParam String reviewModel,
                               @RequestParam String utilityModel,
                               RedirectAttributes redirectAttributes) {
-        if (implementationModel == null || implementationModel.isBlank()
-                || reviewModel == null || reviewModel.isBlank()
-                || utilityModel == null || utilityModel.isBlank()) {
-            redirectAttributes.addFlashAttribute("error", "Model selections cannot be blank.");
+        implementationModel = implementationModel == null ? null : implementationModel.trim();
+        reviewModel = reviewModel == null ? null : reviewModel.trim();
+        utilityModel = utilityModel == null ? null : utilityModel.trim();
+
+        if (isInvalidModelId(implementationModel) || isInvalidModelId(reviewModel)
+                || isInvalidModelId(utilityModel)) {
+            redirectAttributes.addFlashAttribute("error", "Choose a model or enter a custom model ID.");
             return "redirect:/settings";
         }
 
@@ -105,11 +113,17 @@ public class SettingsController {
         return "redirect:/settings";
     }
 
+    private static boolean isInvalidModelId(String modelId) {
+        return modelId == null || modelId.isBlank() || CUSTOM_SENTINEL.equals(modelId);
+    }
+
     /**
      * Loads config.yml into a Map, navigates/creates the issuebot.claude-code
      * maps, sets the three model keys, and dumps the whole structure back in
-     * block flow style. Returns false (without writing) if the existing file
-     * fails to parse as YAML.
+     * block flow style. The dump is written to a sibling temp file and moved
+     * into place (atomically where the filesystem supports it) so a mid-write
+     * failure can never truncate the user's config. Returns false (without
+     * writing) if the existing file fails to parse as YAML.
      */
     @SuppressWarnings("unchecked")
     private boolean writeModelsToConfig(String implementationModel, String reviewModel, String utilityModel) {
@@ -158,13 +172,28 @@ public class SettingsController {
 
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        String yamlOut = new Yaml(options).dump(root);
+
+        // Write-to-temp + move so an IOException mid-write never truncates config.yml.
+        Path tmp = configPath.resolveSibling(configPath.getFileName() + ".tmp");
         try {
             if (configPath.getParent() != null) {
                 Files.createDirectories(configPath.getParent());
             }
-            Files.writeString(configPath, new Yaml(options).dump(root));
+            Files.writeString(tmp, yamlOut);
+            try {
+                Files.move(tmp, configPath,
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, configPath, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             log.error("Failed to write {}: {}", configPath, e.getMessage());
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException cleanup) {
+                log.warn("Could not remove temp file {}: {}", tmp, cleanup.getMessage());
+            }
             return false;
         }
         return true;
@@ -205,13 +234,16 @@ public class SettingsController {
 
         String implementationModel = properties.getClaudeCode().getImplementationModel();
         String reviewModel = properties.getClaudeCode().getReviewModel();
+        String utilityModel = properties.getClaudeCode().getUtilityModel();
         model.addAttribute("modelCatalog", ModelCatalog.MODELS);
         model.addAttribute("implementationModel", implementationModel);
         model.addAttribute("reviewModel", reviewModel);
-        model.addAttribute("utilityModel", properties.getClaudeCode().getUtilityModel());
-        // Whether the current value isn't in the catalog — drives the "Custom…" option/input in the template.
+        model.addAttribute("utilityModel", utilityModel);
+        // Whether the current value isn't in the catalog — drives the "Custom…" option/input
+        // (implementation/review) and the synthetic preserve-current option (utility).
         model.addAttribute("implementationModelCustom", ModelCatalog.find(implementationModel).isEmpty());
         model.addAttribute("reviewModelCustom", ModelCatalog.find(reviewModel).isEmpty());
+        model.addAttribute("utilityModelCustom", ModelCatalog.find(utilityModel).isEmpty());
 
         Path configPath = getConfigPath();
         model.addAttribute("configPath", configPath.toString());
