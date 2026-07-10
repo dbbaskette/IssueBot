@@ -167,7 +167,7 @@ public class IssueDecompositionService {
         String prompt = buildPreScreenPrompt(issueDetails);
 
         try {
-            ClaudeCodeResult result = claudeCode.executeReview(prompt, repoPath, null);
+            ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
 
             if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
                 log.warn("Pre-screen returned empty response, allowing implementation");
@@ -187,7 +187,7 @@ public class IssueDecompositionService {
     List<SubIssue> analyzeAndDecompose(JsonNode issueDetails, Path repoPath) {
         String prompt = buildDecompositionPrompt(issueDetails);
 
-        ClaudeCodeResult result = claudeCode.executeReview(prompt, repoPath, null);
+        ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
 
         if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
             throw new RuntimeException("Claude returned empty response for decomposition");

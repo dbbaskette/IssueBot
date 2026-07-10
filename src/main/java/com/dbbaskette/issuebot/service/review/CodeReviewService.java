@@ -40,10 +40,10 @@ public class CodeReviewService {
     }
 
     /**
-     * Execute an independent code review using Sonnet 4.6.
+     * Execute an independent code review with the resolved review model.
      */
     public CodeReviewResult reviewCode(Path repoPath, String issueTitle, String issueBody,
-                                         String baseBranch, boolean securityReview,
+                                         String baseBranch, String model, boolean securityReview,
                                          Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
 
@@ -69,8 +69,8 @@ public class CodeReviewService {
         String prompt = reviewPromptBuilder.buildReviewPrompt(
                 issueTitle, issueBody, changedFiles, diff, securityReview);
 
-        // 3. Invoke Sonnet via CLI
-        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, lineCallback);
+        // 3. Invoke the review model via CLI
+        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, lineCallback);
 
         if (!result.isSuccess()) {
             log.error("Sonnet review invocation failed: {}", result.getErrorMessage());
@@ -165,7 +165,8 @@ public class CodeReviewService {
                     specCompliance, correctness, codeQuality, testCoverage,
                     architectureFit, regressions, security,
                     findings, advice, json,
-                    result.getInputTokens(), result.getOutputTokens(), result.getModel()
+                    result.getInputTokens(), result.getOutputTokens(), result.getModel(),
+                    result.getCostUsd()
             );
         } catch (Exception e) {
             log.warn("Failed to parse review JSON: {}", e.getMessage());

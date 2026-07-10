@@ -73,6 +73,10 @@ public class StreamJsonParser {
                             outputTokens = usage.path("output_tokens").asLong(outputTokens);
                         }
                         result.setModel(node.path("model").asText(""));
+                        JsonNode cost = node.path("total_cost_usd");
+                        if (cost.isNumber()) {
+                            result.setCostUsd(java.math.BigDecimal.valueOf(cost.asDouble()));
+                        }
                     }
                     case "tool_use", "tool_result" -> {
                         // Track file operations

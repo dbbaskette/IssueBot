@@ -69,6 +69,8 @@ class IssueWorkflowServiceTest {
                 mock(NotificationService.class),
                 iterationManager,
                 decompositionService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(
+                        new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 objectMapper
         );
     }
@@ -158,7 +160,7 @@ class IssueWorkflowServiceTest {
                                 "Method too long", "Extract helper method")
                 ),
                 "Focus on test coverage",
-                null, 1000, 500, "claude-sonnet-4-6"
+                null, 1000, 500, "claude-sonnet-4-6", null
         );
 
         String feedback = workflowService.buildReviewFeedback(review);
@@ -168,6 +170,30 @@ class IssueWorkflowServiceTest {
         assertTrue(feedback.contains("No tests for edge case"));
         assertTrue(feedback.contains("Focus on test coverage"));
         assertTrue(feedback.contains("tests=40%"));
+    }
+
+    @Test
+    void trackCostPrefersCliReportedCost() {
+        java.math.BigDecimal cost = workflowService.resolveCost(
+                new java.math.BigDecimal("0.50"), "claude-opus-4-8",
+                1_000_000, 1_000_000, "IMPLEMENTATION");
+        assertEquals(0, cost.compareTo(new java.math.BigDecimal("0.50")));
+    }
+
+    @Test
+    void trackCostFallsBackToCatalogPricing() {
+        // Opus 4.8 catalog pricing: $5/MTok in + $25/MTok out
+        java.math.BigDecimal cost = workflowService.resolveCost(
+                null, "claude-opus-4-8", 1_000_000, 1_000_000, "IMPLEMENTATION");
+        assertEquals(0, cost.compareTo(new java.math.BigDecimal("30")));
+    }
+
+    @Test
+    void trackCostFallsBackToLegacyEstimateForUnknownModel() {
+        // Unknown model on REVIEW phase → legacy review rates $3/$15
+        java.math.BigDecimal cost = workflowService.resolveCost(
+                null, "my-custom-model", 1_000_000, 1_000_000, "REVIEW");
+        assertEquals(0, cost.compareTo(new java.math.BigDecimal("18")));
     }
 
     @Test
@@ -283,7 +309,7 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), anyBoolean(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---

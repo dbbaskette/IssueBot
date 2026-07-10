@@ -43,23 +43,34 @@ public class ClaudeCodeService {
     }
 
     /**
-     * Execute implementation using Opus model from config.
+     * Execute implementation with the resolved model.
      */
     public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
-                                                    Consumer<String> lineCallback) {
+                                                    String model, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getImplementationModel(),
+        return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
                 null, lineCallback);
     }
 
     /**
-     * Execute independent review using Sonnet model from config.
+     * Execute independent review with the resolved model.
      */
     public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
-                                            Consumer<String> lineCallback) {
+                                            String model, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getReviewModel(),
+        return executeTask(prompt, workingDirectory, model,
+                config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
+                null, lineCallback);
+    }
+
+    /**
+     * Pre-screen / decomposition analysis on the cheap utility model (review budgets).
+     */
+    public ClaudeCodeResult executeUtility(String prompt, Path workingDirectory,
+                                             Consumer<String> lineCallback) {
+        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
+        return executeTask(prompt, workingDirectory, config.getUtilityModel(),
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
                 null, lineCallback);
     }

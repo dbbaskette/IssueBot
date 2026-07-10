@@ -3,7 +3,7 @@ package com.dbbaskette.issuebot.service.review;
 import java.util.List;
 
 /**
- * Structured result of an independent code review by Sonnet 4.6.
+ * Structured result of an independent code review by the configured review model.
  */
 public record CodeReviewResult(
         boolean passed,
@@ -20,7 +20,8 @@ public record CodeReviewResult(
         String rawJson,
         long inputTokens,
         long outputTokens,
-        String modelUsed
+        String modelUsed,
+        java.math.BigDecimal costUsd
 ) {
     public record ReviewFinding(
             String severity,
@@ -39,7 +40,7 @@ public record CodeReviewResult(
                 false, reason,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 List.of(), reason,
-                null, inputTokens, outputTokens, model
+                null, inputTokens, outputTokens, model, null
         );
     }
 }

@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.claude.ModelCatalog;
+import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
@@ -58,6 +60,7 @@ public class IssueWorkflowService {
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
     private final IssueDecompositionService decompositionService;
+    private final ModelResolver modelResolver;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -73,6 +76,7 @@ public class IssueWorkflowService {
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
                                  IssueDecompositionService decompositionService,
+                                 ModelResolver modelResolver,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -87,6 +91,7 @@ public class IssueWorkflowService {
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
         this.decompositionService = decompositionService;
+        this.modelResolver = modelResolver;
         this.objectMapper = objectMapper;
     }
 
@@ -126,8 +131,12 @@ public class IssueWorkflowService {
 
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
+        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
+        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
         issueRepository.save(trackedIssue);
-        eventService.log("WORKFLOW_STARTED", "Starting issue workflow", repo, trackedIssue);
+        eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
+                + trackedIssue.getResolvedImplModel() + " / "
+                + trackedIssue.getResolvedReviewModel() + ")", repo, trackedIssue);
 
         // === Phase 1: Setup ===
         String branchName;
@@ -195,6 +204,7 @@ public class IssueWorkflowService {
             issueRepository.save(trackedIssue);
 
             Iteration iteration = new Iteration(trackedIssue, iterationNum);
+            iteration.setImplModel(trackedIssue.getResolvedImplModel());
             iterationRepository.save(iteration);
 
             log.info("Iteration counter updated: {}/{} for {} #{}",
@@ -451,9 +461,10 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs);
 
         Long issueId = trackedIssue.getId();
-        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code (Opus) for implementation...");
+        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
+                + trackedIssue.getResolvedImplModel() + ") for implementation...");
         ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
-                line -> streamClaudeLog(issueId, line));
+                trackedIssue.getResolvedImplModel(), line -> streamClaudeLog(issueId, line));
 
         eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
                 "Implementation complete: " + result, repo, trackedIssue);
@@ -677,7 +688,8 @@ public class IssueWorkflowService {
                 repo, trackedIssue);
 
         Long issueId = trackedIssue.getId();
-        sseService.broadcastClaudeLog(issueId, "[system] Launching Sonnet for independent review...");
+        sseService.broadcastClaudeLog(issueId, "[system] Launching "
+                + trackedIssue.getResolvedReviewModel() + " for independent review...");
 
         CodeReviewResult reviewResult;
         try {
@@ -686,6 +698,7 @@ public class IssueWorkflowService {
                     issueDetails.path("title").asText(),
                     issueDetails.path("body").asText(""),
                     repo.getBranch(),
+                    trackedIssue.getResolvedReviewModel(),
                     repo.isSecurityReviewEnabled(),
                     line -> streamClaudeLog(issueId, line));
         } catch (Exception e) {
@@ -701,7 +714,7 @@ public class IssueWorkflowService {
         issueRepository.save(trackedIssue);
 
         // Track review cost
-        trackCost(trackedIssue, trackedIssue.getCurrentIteration(),
+        trackCost(trackedIssue, trackedIssue.getCurrentIteration(), reviewResult.costUsd(),
                 reviewResult.inputTokens(), reviewResult.outputTokens(),
                 reviewResult.modelUsed(), "REVIEW");
 
@@ -1141,31 +1154,34 @@ public class IssueWorkflowService {
 
     private void trackCost(TrackedIssue trackedIssue, int iterationNum,
                             ClaudeCodeResult result, String phase) {
-        trackCost(trackedIssue, iterationNum, result.getInputTokens(),
+        trackCost(trackedIssue, iterationNum, result.getCostUsd(), result.getInputTokens(),
                 result.getOutputTokens(), result.getModel(), phase);
     }
 
-    private void trackCost(TrackedIssue trackedIssue, int iterationNum,
+    private void trackCost(TrackedIssue trackedIssue, int iterationNum, BigDecimal cliCost,
                             long inputTokens, long outputTokens, String model, String phase) {
-        BigDecimal cost = estimateCost(inputTokens, outputTokens, phase);
+        BigDecimal cost = resolveCost(cliCost, model, inputTokens, outputTokens, phase);
         CostTracking ct = new CostTracking(trackedIssue, iterationNum,
                 inputTokens, outputTokens, cost, model);
         ct.setPhase(phase);
         costRepository.save(ct);
     }
 
-    private BigDecimal estimateCost(long inputTokens, long outputTokens, String phase) {
-        // Opus pricing: $15/1M input, $75/1M output
-        // Sonnet pricing: $3/1M input, $15/1M output
-        double inputRate;
-        double outputRate;
-        if ("REVIEW".equals(phase)) {
-            inputRate = 3.0;
-            outputRate = 15.0;
-        } else {
-            inputRate = 15.0;
-            outputRate = 75.0;
-        }
+    /**
+     * Cost priority: CLI-reported total_cost_usd (authoritative — reflects caching)
+     * → catalog pricing by model → legacy per-phase estimate for unknown models.
+     */
+    BigDecimal resolveCost(BigDecimal cliCost, String model,
+                            long inputTokens, long outputTokens, String phase) {
+        if (cliCost != null) return cliCost;
+        return ModelCatalog.estimateCost(model, inputTokens, outputTokens)
+                .orElseGet(() -> legacyEstimate(inputTokens, outputTokens, phase));
+    }
+
+    /** Last-resort estimate when the model is unknown to the catalog (current-tier pricing). */
+    private BigDecimal legacyEstimate(long inputTokens, long outputTokens, String phase) {
+        double inputRate = "REVIEW".equals(phase) ? 3.0 : 5.0;
+        double outputRate = "REVIEW".equals(phase) ? 15.0 : 25.0;
         BigDecimal inputCost = BigDecimal.valueOf(inputTokens)
                 .multiply(BigDecimal.valueOf(inputRate))
                 .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);

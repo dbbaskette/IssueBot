@@ -171,7 +171,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         ObjectNode sub1 = objectMapper.createObjectNode();
         sub1.put("number", 100);
@@ -204,7 +204,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -222,7 +222,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(false);
         claudeResult.setOutput(null);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -244,7 +244,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         when(gitHubApi.createIssue(anyString(), anyString(), anyString(), anyString(), anyList()))
                 .thenThrow(new RuntimeException("API error"));
@@ -277,7 +277,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -294,7 +294,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -304,7 +304,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void preScreen_claudeFailure_defaultsToFalse() {
-        when(claudeCode.executeReview(anyString(), any(Path.class), any()))
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any()))
                 .thenThrow(new RuntimeException("API error"));
 
         IssueDecompositionService.PreScreenResult result =
@@ -317,7 +317,7 @@ class IssueDecompositionServiceTest {
     void preScreen_emptyResponse_defaultsToFalse() {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setOutput("");
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -329,7 +329,7 @@ class IssueDecompositionServiceTest {
     void preScreen_invalidJson_defaultsToFalse() {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setOutput("Not JSON at all");
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));

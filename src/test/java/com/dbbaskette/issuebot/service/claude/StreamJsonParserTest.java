@@ -42,6 +42,22 @@ class StreamJsonParserTest {
         assertEquals("", result.getOutput());
     }
 
+    @Test
+    void capturesTotalCostUsdFromResultEvent() {
+        String output = """
+                {"type":"result","result":"done","model":"claude-opus-4-8","total_cost_usd":0.4321,"usage":{"input_tokens":100,"output_tokens":50}}
+                """;
+        ClaudeCodeResult result = parser.parse(output);
+        assertNotNull(result.getCostUsd());
+        assertEquals(0, result.getCostUsd().compareTo(new java.math.BigDecimal("0.4321")));
+    }
+
+    @Test
+    void costUsdIsNullWhenAbsent() {
+        ClaudeCodeResult result = parser.parse("{\"type\":\"result\",\"result\":\"done\"}");
+        assertNull(result.getCostUsd());
+    }
+
     /**
      * Claude CLI stream-json uses "name" for the tool name in tool_use blocks.
      * When a block has both "name" and a legacy "tool" key, "name" must take precedence.
