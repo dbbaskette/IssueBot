@@ -43,6 +43,9 @@ public class Iteration {
     @Column(name = "review_model", length = 100)
     private String reviewModel;
 
+    @Column(name = "impl_model")
+    private String implModel;
+
     @Column(name = "started_at", nullable = false, updatable = false)
     private LocalDateTime startedAt = LocalDateTime.now();
 
@@ -91,4 +94,7 @@ public class Iteration {
 
     public String getReviewModel() { return reviewModel; }
     public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
+
+    public String getImplModel() { return implModel; }
+    public void setImplModel(String implModel) { this.implModel = implModel; }
 }

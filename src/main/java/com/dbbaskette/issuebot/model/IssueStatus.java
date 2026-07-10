@@ -9,5 +9,6 @@ public enum IssueStatus {
     COMPLETED,
     FAILED,
     COOLDOWN,
-    DECOMPOSED
+    DECOMPOSED,
+    AWAITING_DECOMPOSITION
 }
