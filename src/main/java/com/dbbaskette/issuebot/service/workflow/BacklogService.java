@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Maintains one rolling "IssueBot Backlog" issue per repo. Findings are
@@ -25,6 +27,8 @@ public class BacklogService {
     static final String BACKLOG_TITLE = "IssueBot Backlog";
     static final int MAX_ITEMS = 50;
     private static final String KEYS_PREFIX = "<!-- issuebot-keys:";
+    /** Trailing per-item key annotation, e.g. "... (from #1 / PR #2) <!-- k:ab12cd34 -->". */
+    private static final Pattern ITEM_KEY = Pattern.compile("<!-- k:(\\S+) -->\\s*$");
 
     private final GitHubApiClient gitHubApi;
     private final EventService eventService;
@@ -34,7 +38,11 @@ public class BacklogService {
         this.eventService = eventService;
     }
 
-    /** Append findings to the repo's backlog issue, creating/reopening it as needed. */
+    /**
+     * Append findings to the repo's backlog issue, creating/reopening it as needed.
+     * Safety invariant: the workflow processes at most one issue per repo at a time,
+     * so backlog body read-merge-write cycles are never concurrent for a given repo.
+     */
     public void addFindings(WatchedRepo repo, List<ReviewFinding> findings,
                             int sourceIssueNumber, int prNumber) {
         if (findings.isEmpty()) return;
@@ -61,6 +69,8 @@ public class BacklogService {
                     + result.added() + " findings (" + (findings.size() - result.added()) + " duplicates skipped)", repo);
         } catch (Exception e) {
             log.warn("Failed to update backlog for {}: {}", repo.fullName(), e.getMessage());
+            eventService.log("BACKLOG_UPDATE_FAILED",
+                    "Failed to update backlog: " + e.getMessage(), repo);
         }
     }
 
@@ -109,19 +119,26 @@ public class BacklogService {
         for (ReviewFinding f : findings) {
             String key = dedupKey(f);
             if (!keys.add(key)) continue;
+            // oneLine() prevents newline injection: finding/file text containing "\n- [ ]"
+            // or "\n<!-- issuebot-keys:" must not create phantom items or hijack the key store.
+            // The trailing "<!-- k:... -->" comment (invisible in rendered markdown) ties the
+            // item to its dedup key so pruning can retire the key with the item.
             items.add("- [ ] **[" + f.severity().toUpperCase() + " — " + f.category() + "]** `"
-                    + f.file() + (f.line() != null ? ":" + f.line() : "") + "` — " + f.finding()
-                    + " (from #" + sourceIssueNumber + " / PR #" + prNumber + ")");
+                    + oneLine(f.file()) + (f.line() != null ? ":" + f.line() : "") + "` — " + oneLine(f.finding())
+                    + " (from #" + sourceIssueNumber + " / PR #" + prNumber + ") <!-- k:" + key + " -->");
             added++;
         }
 
-        // Prune: drop oldest checked items first, then oldest unchecked, down to MAX_ITEMS
+        // Prune: drop oldest checked items first, then oldest unchecked, down to MAX_ITEMS.
+        // Pruned items surrender their dedup key so the finding can resurface later.
         while (items.size() > MAX_ITEMS) {
             int checkedIdx = -1;
             for (int i = 0; i < items.size(); i++) {
                 if (items.get(i).startsWith("- [x]")) { checkedIdx = i; break; }
             }
-            items.remove(checkedIdx >= 0 ? checkedIdx : 0);
+            String removed = items.remove(checkedIdx >= 0 ? checkedIdx : 0);
+            Matcher m = ITEM_KEY.matcher(removed);
+            if (m.find()) keys.remove(m.group(1));
         }
 
         StringBuilder body = new StringBuilder(header).append("\n\n");
@@ -129,6 +146,11 @@ public class BacklogService {
         body.append("\n").append(KEYS_PREFIX).append(" ")
             .append(String.join(",", keys)).append(" -->\n");
         return new MergeResult(body.toString(), added);
+    }
+
+    /** Collapse all line breaks to single spaces so untrusted text cannot span checklist lines. */
+    private static String oneLine(String s) {
+        return s == null ? "" : s.replaceAll("\\R+", " ").strip();
     }
 
     private static Set<String> parseKeys(String body) {
