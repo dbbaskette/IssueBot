@@ -77,6 +77,19 @@ public class StreamJsonParser {
                         if (cost.isNumber()) {
                             result.setCostUsd(java.math.BigDecimal.valueOf(cost.asDouble()));
                         }
+                        // Last-write-wins: the result event is the canonical end-of-session value,
+                        // overriding whatever the system/init event captured (issue #67).
+                        String resultSessionId = node.path("session_id").asText(null);
+                        if (resultSessionId != null && !resultSessionId.isBlank()) {
+                            result.setSessionId(resultSessionId);
+                        }
+                    }
+                    case "system" -> {
+                        // Only session_id capture here — output handling is unaffected (issue #67).
+                        String systemSessionId = node.path("session_id").asText(null);
+                        if (systemSessionId != null && !systemSessionId.isBlank()) {
+                            result.setSessionId(systemSessionId);
+                        }
                     }
                     case "tool_use", "tool_result" -> {
                         // Track file operations

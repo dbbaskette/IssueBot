@@ -154,6 +154,7 @@ public class IssueController {
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
                         @RequestParam(required = false) BigDecimal budgetOverrideUsd,
+                        @RequestParam(required = false, defaultValue = "false") boolean continueSession,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -192,6 +193,11 @@ public class IssueController {
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
         issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+        // Manual retry defaults to a fresh Claude session; the operator must explicitly
+        // opt in via the "Continue previous session" checkbox to keep it (issue #67).
+        if (!continueSession) {
+            issue.setClaudeSessionId(null);
+        }
         issueRepository.save(issue);
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())

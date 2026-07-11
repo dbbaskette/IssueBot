@@ -35,66 +35,59 @@ public class ClaudeCodeService {
     }
 
     /**
-     * Execute implementation with the resolved model.
+     * Execute implementation with the resolved model. {@code resumeSessionId}, when non-blank,
+     * resumes the given Claude session instead of starting cold (issue #67 — session
+     * continuity). Pass null for a fresh session.
      */
     public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
-                                                    String model, Long issueId, Consumer<String> lineCallback) {
+                                                    String model, String resumeSessionId,
+                                                    Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
-                null, issueId, lineCallback);
+                null, resumeSessionId, issueId, lineCallback);
     }
 
     /**
-     * Execute independent review with the resolved model.
+     * Execute independent review with the resolved model. Never resumes a session —
+     * the reviewer must stay independent of the implementer's context by design.
      */
     public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
                                             String model, Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
-                null, issueId, lineCallback);
+                null, null, issueId, lineCallback);
     }
 
     /**
      * Pre-screen / decomposition analysis on the cheap utility model (review budgets).
+     * Never resumes a session.
      */
     public ClaudeCodeResult executeUtility(String prompt, Path workingDirectory,
                                              Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, config.getUtilityModel(),
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
-                null, null, lineCallback);
+                null, null, null, lineCallback);
     }
 
     /**
-     * Execute a Claude Code task with explicit model configuration.
+     * Execute a Claude Code task with explicit model configuration. {@code resumeSessionId}
+     * is optional (null/blank means a fresh session) — see {@link #buildCommand}.
      */
     public ClaudeCodeResult executeTask(String prompt, Path workingDirectory,
                                          String model, int maxTurns, int timeoutMinutes,
-                                         String systemPrompt, Long issueId, Consumer<String> lineCallback) {
-        List<String> command = new ArrayList<>();
-        command.add("claude");
-        command.add("-p");
-        command.add(prompt);
-        command.add("--output-format");
-        command.add("stream-json");
-        command.add("--max-turns");
-        command.add(String.valueOf(maxTurns));
-        command.add("--model");
-        command.add(model);
-        command.add("--verbose");
-        command.add("--dangerously-skip-permissions");
+                                         String systemPrompt, String resumeSessionId,
+                                         Long issueId, Consumer<String> lineCallback) {
+        List<String> command = buildCommand(prompt, model, maxTurns, systemPrompt, resumeSessionId);
 
-        if (systemPrompt != null && !systemPrompt.isBlank()) {
-            command.add("--append-system-prompt");
-            command.add(systemPrompt);
-        }
-
-        log.info("Executing Claude Code in {}: model={}, maxTurns={}, timeout={}min",
-                workingDirectory, model, maxTurns, timeoutMinutes);
-        log.info("Command: claude -p <prompt> --output-format stream-json --max-turns {} --model {} --verbose --dangerously-skip-permissions",
-                maxTurns, model);
+        log.info("Executing Claude Code in {}: model={}, maxTurns={}, timeout={}min, resume={}",
+                workingDirectory, model, maxTurns, timeoutMinutes,
+                (resumeSessionId != null && !resumeSessionId.isBlank()) ? resumeSessionId : "(none)");
+        log.info("Command: claude -p <prompt> --output-format stream-json --max-turns {} --model {}{} --verbose --dangerously-skip-permissions",
+                maxTurns, model,
+                (resumeSessionId != null && !resumeSessionId.isBlank()) ? " --resume " + resumeSessionId : "");
         log.info("Prompt length: {} chars, first 200: {}", prompt.length(),
                 prompt.substring(0, Math.min(200, prompt.length())));
 
@@ -215,6 +208,40 @@ public class ClaudeCodeService {
             return failedResult(System.currentTimeMillis() - startTime,
                     "Claude Code execution interrupted");
         }
+    }
+
+    /**
+     * Assemble the Claude Code CLI command line. Extracted from {@link #executeTask} so
+     * command construction — in particular the conditional {@code --resume} flag (issue #67)
+     * — is unit-testable without spawning a real process. {@code resumeSessionId} is
+     * appended right after the model flags when non-blank; null/blank means a fresh session.
+     */
+    List<String> buildCommand(String prompt, String model, int maxTurns,
+                               String systemPrompt, String resumeSessionId) {
+        List<String> command = new ArrayList<>();
+        command.add("claude");
+        command.add("-p");
+        command.add(prompt);
+        command.add("--output-format");
+        command.add("stream-json");
+        command.add("--max-turns");
+        command.add(String.valueOf(maxTurns));
+        command.add("--model");
+        command.add(model);
+
+        if (resumeSessionId != null && !resumeSessionId.isBlank()) {
+            command.add("--resume");
+            command.add(resumeSessionId);
+        }
+
+        command.add("--verbose");
+        command.add("--dangerously-skip-permissions");
+
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            command.add("--append-system-prompt");
+            command.add(systemPrompt);
+        }
+        return command;
     }
 
     private ClaudeCodeResult failedResult(long durationMs, String errorMessage) {

@@ -166,7 +166,7 @@ class IntegrationWorkflowTest {
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
         // Implementation succeeds
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         // CI passes (CI disabled to skip polling)
@@ -213,7 +213,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -249,7 +249,7 @@ class IntegrationWorkflowTest {
         when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
         // Implementation succeeds both times
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         // PR creation (non-draft for autonomous mode)
@@ -283,7 +283,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -314,7 +314,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         // CI fails
@@ -371,7 +371,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -400,7 +400,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -449,7 +449,7 @@ class IntegrationWorkflowTest {
 
         // Verify decomposition was called but implementation was NOT
         verify(decompositionService).decompose(eq(issue), any(), any(), contains("Pre-screen"));
-        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
+        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
     }
 
@@ -467,7 +467,7 @@ class IntegrationWorkflowTest {
         when(decompositionService.decompose(eq(issue), any(), any(), anyString())).thenReturn(false);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -481,7 +481,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         // Implementation still ran after decomposition failed
-        verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
+        verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
@@ -494,7 +494,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -524,7 +524,7 @@ class IntegrationWorkflowTest {
         // Two iterations: first local-check fails, second local-check passes (then CI runs)
         when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
@@ -555,7 +555,7 @@ class IntegrationWorkflowTest {
         // under the source-neutral verification-failure header.
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(claudeCode, times(2)).executeImplementation(
-                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String secondPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(secondPrompt.contains("### Verification Failure Logs"));
         assertTrue(secondPrompt.contains("./mvnw -q verify"));
@@ -588,7 +588,7 @@ class IntegrationWorkflowTest {
                 .thenReturn(List.of(queued))
                 .thenReturn(List.of());
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -606,7 +606,7 @@ class IntegrationWorkflowTest {
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(claudeCode, times(2)).executeImplementation(
-                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String firstPrompt = promptCaptor.getAllValues().get(0);
         String secondPrompt = promptCaptor.getAllValues().get(1);
 
@@ -649,7 +649,7 @@ class IntegrationWorkflowTest {
                 .thenReturn(List.of(queued))
                 .thenReturn(List.of());
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -667,7 +667,7 @@ class IntegrationWorkflowTest {
         // ...and could not touch the queued guidance: it reached the prompt and was consumed.
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(claudeCode).executeImplementation(
-                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(promptCaptor.getValue().contains("Focus on the token refresh path"));
         verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
@@ -696,7 +696,7 @@ class IntegrationWorkflowTest {
                 .thenReturn(List.of(queued))
                 .thenReturn(List.of());
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -714,7 +714,7 @@ class IntegrationWorkflowTest {
         // Iteration 2's prompt carries BOTH the review feedback and the guidance
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(claudeCode, times(2)).executeImplementation(
-                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String secondPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(secondPrompt.contains("The independent code review found issues"),
                 "review feedback must still drive iteration 2");
@@ -747,13 +747,13 @@ class IntegrationWorkflowTest {
         when(costRepository.totalCostForIssue(issue))
                 .thenReturn(new BigDecimal("0.005"), new BigDecimal("0.50"));
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         workflowService.processIssue(issue);
 
         verify(claudeCode, times(1)).executeImplementation(
-                anyString(), any(Path.class), anyString(), any(), any());
+                anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
         verify(gitHubApi, never()).createPullRequest(any(), any(), any(), any(), any(), any(), anyBoolean());
     }
@@ -777,7 +777,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
-        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
+        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
     // === Test 14: An exception thrown by local verification is treated as a failed
@@ -791,7 +791,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
@@ -803,5 +803,210 @@ class IntegrationWorkflowTest {
         // CI never reached for the failed iteration; loop exhausts and escalates normally
         verify(gitHubApi, never()).waitForChecks(anyString(), anyString(), anyString(), anyInt());
         verify(iterationManager).handleMaxIterationsReached(issue);
+    }
+
+    // === Session continuity (#67) ===
+
+    // === Test 20: Iteration 2 resumes the session captured from iteration 1's result ===
+    @Test
+    void sessionContinuity_iteration2ResumesSessionStoredFromIteration1() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        ClaudeCodeResult iter1Result = successResult();
+        iter1Result.setSessionId("sess-iter1");
+        ClaudeCodeResult iter2Result = successResult();
+        iter2Result.setSessionId("sess-iter2");
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(iter1Result, iter2Result);
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 900);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // First review fails (forces iteration 2), second passes
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        ArgumentCaptor<String> resumeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(2)).executeImplementation(
+                anyString(), any(Path.class), anyString(), resumeCaptor.capture(), any(), any());
+        assertNull(resumeCaptor.getAllValues().get(0), "iteration 1 must start cold — no stored session yet");
+        assertEquals("sess-iter1", resumeCaptor.getAllValues().get(1),
+                "iteration 2 must resume the session captured from iteration 1's result");
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals("sess-iter2", issue.getClaudeSessionId());
+    }
+
+    // === Test 21: A resumed invocation that fails falls back to a cold retry within the
+    //     SAME iteration — no extra iteration is consumed from the budget ===
+    @Test
+    void sessionContinuity_resumedFailureRetriesColdWithoutConsumingExtraIteration() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Two iterations total: iteration 1 succeeds; iteration 2's resumed impl call fails
+        // and is retried cold once within that same iteration.
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        ClaudeCodeResult iter1Success = successResult();
+        iter1Success.setSessionId("sess-iter1");
+
+        ClaudeCodeResult resumedFailure = new ClaudeCodeResult();
+        resumedFailure.setSuccess(false);
+        resumedFailure.setErrorMessage("No conversation found with session ID: sess-iter1");
+
+        ClaudeCodeResult coldRetrySuccess = successResult();
+        coldRetrySuccess.setSessionId("sess-iter2-cold");
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+                .thenReturn(iter1Success, coldRetrySuccess);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
+                .thenReturn(resumedFailure);
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 901);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Iteration 1 (cold) + iteration 2 resumed (fail) + iteration 2 cold retry (success) = 3 calls
+        verify(claudeCode, times(3)).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+        // Only 2 iterations were actually consumed from the budget — the cold retry
+        // did not bump currentIteration.
+        assertEquals(2, issue.getCurrentIteration());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals("sess-iter2-cold", issue.getClaudeSessionId());
+    }
+
+    // === Test 22 (#67 review fix 2): tokens burned by a discarded resumed attempt must
+    //     land in CostTracking alongside the cold retry's own row — budget enforcement
+    //     reads CostTracking, so an unrecorded failed attempt would undercount spend. ===
+    @Test
+    void sessionContinuity_discardedResumedAttemptCost_isTrackedAlongsideColdRetry() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        ClaudeCodeResult iter1Success = successResult(); // 1000/500 tokens
+        iter1Success.setSessionId("sess-iter1");
+
+        ClaudeCodeResult resumedFailure = new ClaudeCodeResult();
+        resumedFailure.setSuccess(false);
+        resumedFailure.setErrorMessage("session crashed mid-run");
+        resumedFailure.setInputTokens(5000);
+        resumedFailure.setOutputTokens(2000);
+        resumedFailure.setModel("claude-opus-4-6");
+
+        ClaudeCodeResult coldRetrySuccess = successResult(); // 1000/500 tokens
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+                .thenReturn(iter1Success, coldRetrySuccess);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
+                .thenReturn(resumedFailure);
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 902);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Both iteration-2 invocations produced a CostTracking row: the discarded resumed
+        // attempt (5000/2000, recorded inside phaseImplementation) AND the cold retry
+        // (1000/500, recorded by processIssue on the returned result) — plus iteration 1.
+        ArgumentCaptor<CostTracking> costCaptor = ArgumentCaptor.forClass(CostTracking.class);
+        verify(costRepository, atLeast(3)).save(costCaptor.capture());
+        List<CostTracking> implRows = costCaptor.getAllValues().stream()
+                .filter(ct -> "IMPLEMENTATION".equals(ct.getPhase()))
+                .toList();
+        assertEquals(3, implRows.size(),
+                "three IMPLEMENTATION rows: iter1 + iter2 discarded attempt + iter2 cold retry");
+        assertEquals(1, implRows.stream()
+                        .filter(ct -> ct.getInputTokens() == 5000 && ct.getOutputTokens() == 2000)
+                        .count(),
+                "the discarded resumed attempt's burned tokens must be recorded");
+        assertEquals(2, implRows.stream()
+                        .filter(ct -> ct.getInputTokens() == 1000 && ct.getOutputTokens() == 500)
+                        .count(),
+                "both successful invocations keep their own rows");
+        // The discarded row belongs to the same iteration that was retried (iteration 2)
+        assertEquals(2, implRows.stream()
+                .filter(ct -> ct.getInputTokens() == 5000)
+                .findFirst().orElseThrow().getIterationNum());
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Test 23 (#67 review fix 3): a continue-session manual retry with no operator
+    //     instructions must carry the previous run's failure reason into the resumed
+    //     prompt — processIssue clears lastFailureReason at start, so this exercises the
+    //     capture-before-clear plumbing end-to-end. ===
+    @Test
+    void sessionContinuity_continueSessionRetry_carriesLastFailureReasonIntoResumedPrompt() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        // State after a failed run whose retry opted into continuation:
+        issue.setClaudeSessionId("sess-kept");
+        issue.setLastFailureReason("CI timed out after 15 minutes on iteration 3");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 903);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue); // manual retry without instructions
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), eq("sess-kept"), any(), any());
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("Continuing the same task"));
+        assertTrue(prompt.contains("### Previous outcome"),
+                "with nothing new from the operator, the resumed prompt must carry the previous outcome");
+        assertTrue(prompt.contains("CI timed out after 15 minutes on iteration 3"));
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 }
