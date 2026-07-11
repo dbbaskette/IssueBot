@@ -229,10 +229,15 @@ public class RepositoryController {
     private void populateModel(Model model, String message, String error) {
         List<WatchedRepo> repos = repoRepository.findAll();
         Map<Long, Long> issueCounts = new HashMap<>();
+        Map<Long, Long> totalIssueCounts = new HashMap<>();
         Map<Long, List<RepoLesson>> lessonsByRepo = new HashMap<>();
         for (WatchedRepo repo : repos) {
             long count = issueRepository.countByRepoAndStatusNot(repo, IssueStatus.COMPLETED);
             issueCounts.put(repo.getId(), count);
+            // Total tracked issues (all statuses) — what the Remove-repository confirmation
+            // modal states will be cascade-deleted, matching what #delete actually removes
+            // (findByRepo, unfiltered by status), unlike the open-issue count above.
+            totalIssueCounts.put(repo.getId(), issueRepository.countByRepo(repo));
             // One query per repo is acceptable at this scale (small number of watched repos).
             lessonsByRepo.put(repo.getId(), lessonRepository.findByRepoIdOrderByCreatedAtAsc(repo.getId()));
         }
@@ -241,6 +246,7 @@ public class RepositoryController {
         model.addAttribute("contentTemplate", "repositories");
         model.addAttribute("repos", repos);
         model.addAttribute("issueCounts", issueCounts);
+        model.addAttribute("totalIssueCounts", totalIssueCounts);
         model.addAttribute("lessonsByRepo", lessonsByRepo);
         model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
         model.addAttribute("agentRunning", pollingService.isEnabled());

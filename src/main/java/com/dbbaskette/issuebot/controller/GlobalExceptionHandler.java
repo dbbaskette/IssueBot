@@ -57,6 +57,17 @@ public class GlobalExceptionHandler {
         return errorPage(model, "Not Found", "The requested resource was not found.", request);
     }
 
+    /**
+     * Friendly 404 for URL-reachable lookups (e.g. a stale/bookmarked issue link) — carries a
+     * contextual message and "back to X" link/label instead of the generic not-found copy (#81).
+     */
+    @ExceptionHandler(NotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public String handleNotFoundException(NotFoundException e, Model model, HttpServletRequest request) {
+        log.warn("Not found: {}", e.getMessage());
+        return errorPage(model, "Not Found", e.getMessage(), e.getBackLink(), e.getBackLabel(), request);
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public String handleNoResource(NoResourceFoundException e, Model model, HttpServletRequest request) {
@@ -75,10 +86,21 @@ public class GlobalExceptionHandler {
     }
 
     private String errorPage(Model model, String title, String message, HttpServletRequest request) {
+        return errorPage(model, title, message, null, null, request);
+    }
+
+    /**
+     * @param backLink  where the "back" button on error.html should go; defaults to "/" when null
+     * @param backLabel the button's label; defaults to "Back to Dashboard" when null
+     */
+    private String errorPage(Model model, String title, String message,
+                              String backLink, String backLabel, HttpServletRequest request) {
         model.addAttribute("activePage", "");
         model.addAttribute("contentTemplate", "error");
         model.addAttribute("errorTitle", title);
         model.addAttribute("errorMessage", message);
+        model.addAttribute("backLink", backLink != null ? backLink : "/");
+        model.addAttribute("backLabel", backLabel != null ? backLabel : "Back to Dashboard");
         model.addAttribute("agentRunning", true);
         model.addAttribute("pendingApprovals", 0L);
         return ViewResolver.view("error", request.getHeader("HX-Request") != null);

@@ -272,11 +272,12 @@
                                              data-lessons-enabled=${repo.lessonsEnabled}">
                                 <i class="ti ti-edit" aria-hidden="true"></i> Edit
                             </button>
-                            <button class="btn btn-danger btn-sm"
-                                    th:attr="hx-delete='/repositories/' + ${repo.id}"
-                                    hx-target="#content"
-                                    hx-disabled-elt="this"
-                                    hx-confirm="Remove this repository? Local clones will not be deleted.">
+                            <button class="btn btn-danger btn-sm" type="button"
+                                    data-modal-open="remove-repo-modal"
+                                    data-remove-repo
+                                    th:attr="data-repo-name=${repo.owner + '/' + repo.name},
+                                             data-issue-count=${totalIssueCounts.containsKey(repo.id) ? totalIssueCounts.get(repo.id) : 0},
+                                             data-delete-url=@{'/repositories/' + ${repo.id}}">
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>
                             <details class="lessons-details">
@@ -303,6 +304,30 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- === Remove Repository Modal (accessible dialog, shared across rows) ===
+         One modal, populated by JS from the clicked Remove button's data-* attributes
+         (data-repo-name / data-issue-count / data-delete-url) — mirrors the edit-form's
+         data-attribute mechanism rather than rendering a modal per row (#81). -->
+    <div id="remove-repo-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="remove-repo-modal-title">
+            <h3 id="remove-repo-modal-title" style="margin:0 0 0.5rem">Remove repository?</h3>
+            <p class="text-sm" style="margin:0 0 0.5rem">
+                All IssueBot data for <strong id="remove-repo-name">this repository</strong> will be
+                permanently deleted: <strong id="remove-repo-issue-count">0</strong> tracked issues,
+                their iteration history, events, and cost records.
+            </p>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">
+                Kept: the local clone on disk and everything on GitHub.
+            </p>
+            <form id="remove-repo-form" hx-target="#content" hx-disabled-elt="find button[type='submit']">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Delete repository data</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

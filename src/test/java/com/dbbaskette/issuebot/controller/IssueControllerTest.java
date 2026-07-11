@@ -513,6 +513,28 @@ class IssueControllerTest {
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isNull();
     }
 
+    // === Friendly not-found (#81) ===
+
+    /**
+     * The detail page is URL-reachable (a clicked or bookmarked link) — a missing id must throw
+     * the contextual {@link NotFoundException}, not a bare {@code NoSuchElementException}, so
+     * {@link GlobalExceptionHandler} can render the friendly copy with a link back to the queue.
+     */
+    @Test
+    void detailForUnknownIssueThrowsNotFoundExceptionWithQueueBackLink() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+        when(f.issues.findById(999L)).thenReturn(Optional.empty());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        NotFoundException ex = org.junit.jupiter.api.Assertions.assertThrows(NotFoundException.class,
+                () -> f.controller.detail(model, 999L, null));
+
+        org.assertj.core.api.Assertions.assertThat(ex.getMessage())
+                .isEqualTo("Issue not found — it may have been removed with its repository.");
+        org.assertj.core.api.Assertions.assertThat(ex.getBackLink()).isEqualTo("/issues");
+        org.assertj.core.api.Assertions.assertThat(ex.getBackLabel()).isEqualTo("Back to the queue");
+    }
+
     @Test
     void guideQueuesGuidanceForRunningIssue() {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
