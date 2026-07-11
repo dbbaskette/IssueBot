@@ -45,9 +45,17 @@ class RepositoryControllerTest {
         WatchedRepo addOrUpdate(String implementationModel, String reviewModel,
                                  String followUpMode, String decompositionMode, boolean preScreenEnabled,
                                  BigDecimal reviewPassThreshold) {
+            return addOrUpdate(implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, reviewPassThreshold, null);
+        }
+
+        WatchedRepo addOrUpdate(String implementationModel, String reviewModel,
+                                 String followUpMode, String decompositionMode, boolean preScreenEnabled,
+                                 BigDecimal reviewPassThreshold, String verificationCommands) {
             org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
             controller.addOrUpdate(model, null, "acme", "widgets", "main", "AUTONOMOUS",
                     5, false, 15, false, false, 2, reviewPassThreshold, true, true, null,
+                    verificationCommands,
                     implementationModel, reviewModel,
                     followUpMode, decompositionMode, preScreenEnabled, null);
             ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
@@ -108,6 +116,32 @@ class RepositoryControllerTest {
         WatchedRepo savedMid = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
                 false, new BigDecimal("0.80"));
         assertThat(savedMid.getReviewPassThreshold()).isEqualByComparingTo(new BigDecimal("0.80"));
+    }
+
+    @Test
+    void addOrUpdateStoresVerificationCommands() {
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), "./mvnw -q verify\nnpm run lint");
+
+        assertThat(saved.getVerificationCommands()).isEqualTo("./mvnw -q verify\nnpm run lint");
+    }
+
+    @Test
+    void addOrUpdateWithBlankVerificationCommandsStoresNull() {
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), "   ");
+
+        assertThat(saved.getVerificationCommands()).isNull();
+    }
+
+    @Test
+    void addOrUpdateWithCommentsOnlyVerificationCommandsStoresNull() {
+        // A list with no effective commands (comments/blank lines only) must be stored
+        // as null so the UI's "configured" conditionals agree with the workflow.
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), "# just a comment\n\n   \n# another\n");
+
+        assertThat(saved.getVerificationCommands()).isNull();
     }
 
     @Test

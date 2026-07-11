@@ -120,6 +120,11 @@
                         <label for="allowed-paths">Allowed Paths (comma-separated)</label>
                         <input type="text" id="allowed-paths" name="allowedPaths" placeholder="src/, test/">
                     </div>
+                    <div class="field-group full-width">
+                        <label for="verification-commands">Verification commands (one per line, run before CI/push)</label>
+                        <textarea id="verification-commands" name="verificationCommands" rows="3"
+                                  placeholder="./mvnw -q verify&#10;npm run lint"></textarea>
+                    </div>
                 </div>
 
                 <!-- CI -->
@@ -221,6 +226,7 @@
                                              data-decomposition-mode=${repo.decompositionMode.name()},
                                              data-pre-screen-enabled=${repo.preScreenEnabled},
                                              data-allowed-paths=${repo.allowedPaths},
+                                             data-verification-commands=${repo.verificationCommands},
                                              data-implementation-model=${repo.implementationModel},
                                              data-review-model=${repo.reviewModel}">
                                 <i class="ti ti-edit" aria-hidden="true"></i> Edit

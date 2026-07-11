@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -40,6 +41,7 @@ class IntegrationWorkflowTest {
     private ClaudeCodeService claudeCode;
     private CodeReviewService codeReviewService;
     private CiTemplateService ciTemplateService;
+    private LocalVerificationService localVerificationService;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
     private CostTrackingRepository costRepository;
@@ -58,6 +60,7 @@ class IntegrationWorkflowTest {
         claudeCode = mock(ClaudeCodeService.class);
         codeReviewService = mock(CodeReviewService.class);
         ciTemplateService = mock(CiTemplateService.class);
+        localVerificationService = mock(LocalVerificationService.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
         costRepository = mock(CostTrackingRepository.class);
@@ -71,6 +74,7 @@ class IntegrationWorkflowTest {
 
         workflowService = new IssueWorkflowService(
                 gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService,
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
                 decompositionService,
@@ -432,5 +436,112 @@ class IntegrationWorkflowTest {
         // Implementation still ran after decomposition failed
         verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Test 12: Repo without verification commands never invokes LocalVerificationService ===
+    @Test
+    void repoWithoutVerificationCommands_neverInvokesLocalVerificationService() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 200);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        verify(localVerificationService, never()).run(any(), any(), anyInt(), any());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Test 13: Local verification failure skips CI for that iteration and feeds
+    //     the failure into the next iteration's implementation prompt via previousCiLogs ===
+    @Test
+    void localVerificationFailure_skipsCiForThatIteration_feedsFailureToNextIteration() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(true);
+        issue.getRepo().setVerificationCommands("./mvnw -q verify");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Two iterations: first local-check fails, second local-check passes (then CI runs)
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
+                .thenReturn(new LocalVerificationService.Result(false, "./mvnw -q verify",
+                        "BUILD FAILED: compile error in Foo.java"))
+                .thenReturn(new LocalVerificationService.Result(true, null, ""));
+
+        when(gitHubApi.getCheckRuns(anyString(), anyString(), anyString()))
+                .thenReturn(objectMapper.createObjectNode());
+
+        // Iteration 2's local check passes, CI passes, and the run completes —
+        // exercising the local-check-pass → CI-pass → COMPLETED path for real.
+        when(gitHubApi.waitForChecks(anyString(), anyString(), anyString(), anyInt())).thenReturn(true);
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 201);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyBoolean())).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        // CI (waitForChecks) must only be invoked once — the iteration whose local
+        // check failed must never have reached the CI phase.
+        verify(gitHubApi, times(1)).waitForChecks(anyString(), anyString(), anyString(), anyInt());
+
+        // The failing command's output must be fed into the next iteration's prompt,
+        // under the source-neutral verification-failure header.
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(2)).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+        String secondPrompt = promptCaptor.getAllValues().get(1);
+        assertTrue(secondPrompt.contains("### Verification Failure Logs"));
+        assertTrue(secondPrompt.contains("./mvnw -q verify"));
+        assertTrue(secondPrompt.contains("BUILD FAILED: compile error in Foo.java"));
+
+        // The run completed on iteration 2 instead of exhausting the budget.
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals(2, issue.getCurrentIteration());
+        verify(iterationManager, never()).handleMaxIterationsReached(issue);
+    }
+
+    // === Test 14: An exception thrown by local verification is treated as a failed
+    //     check and routes through the retry path instead of escaping the workflow ===
+    @Test
+    void localVerificationException_routesThroughRetryPath() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(true);
+        issue.getRepo().setVerificationCommands("./mvnw -q verify");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
+                .thenThrow(new RuntimeException("sandbox exploded"));
+
+        // Must not throw — the exception is converted into a failed check
+        workflowService.processIssue(issue);
+
+        // CI never reached for the failed iteration; loop exhausts and escalates normally
+        verify(gitHubApi, never()).waitForChecks(anyString(), anyString(), anyString(), anyInt());
+        verify(iterationManager).handleMaxIterationsReached(issue);
     }
 }

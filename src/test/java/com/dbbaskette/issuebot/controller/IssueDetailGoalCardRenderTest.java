@@ -170,6 +170,38 @@ class IssueDetailGoalCardRenderTest {
     }
 
     @Test
+    void repoWithoutVerificationCommandsHidesLocalChecksRow() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Seventh issue");
+        issue.setId(7L);
+        issue.setStatus(IssueStatus.QUEUED);
+
+        String html = render(baseContext(issue, null));
+
+        assertThat(html).doesNotContain("Local checks pass");
+    }
+
+    @Test
+    void repoWithVerificationCommandsShowsLocalChecksRowWithBadge() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setVerificationCommands("./mvnw -q verify");
+        TrackedIssue issue = new TrackedIssue(repo, 8, "Eighth issue");
+        issue.setId(8L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setLocalCheckResult("FAILED");
+
+        String html = render(baseContext(issue, iteration));
+
+        assertThat(html).contains("Local checks pass");
+        int start = html.indexOf("Local checks pass");
+        int end = html.indexOf("Independent review passes");
+        String localChecksRow = html.substring(start, end);
+        assertThat(localChecksRow).contains("FAILED");
+    }
+
+    @Test
     void failedStatusShowsCurrentStatusInFooter() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 6, "Sixth issue");

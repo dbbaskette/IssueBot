@@ -73,6 +73,10 @@ public class WatchedRepo {
     @Lob
     private String allowedPaths;
 
+    @Column(name = "verification_commands")
+    @Lob
+    private String verificationCommands;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -156,6 +160,9 @@ public class WatchedRepo {
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }
+
+    public String getVerificationCommands() { return verificationCommands; }
+    public void setVerificationCommands(String verificationCommands) { this.verificationCommands = verificationCommands; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

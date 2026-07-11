@@ -486,6 +486,7 @@
     setChecked('auto-merge', false);
     setChecked('security-review', false);
     setValue('allowed-paths', '');
+    setValue('verification-commands', '');
     setChecked('ci-enabled', true);
     setValue('ci-timeout', '15');
     syncCiTimeout();
@@ -511,6 +512,7 @@
     setChecked('auto-merge', ds.autoMerge);
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));
+    setValue('verification-commands', ds.verificationCommands);
     setChecked('ci-enabled', ds.ciEnabled);
     setValue('ci-timeout', ds.ciTimeoutMinutes);
     syncCiTimeout();

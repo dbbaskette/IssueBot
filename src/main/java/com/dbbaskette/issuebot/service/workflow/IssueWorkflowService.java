@@ -50,6 +50,7 @@ public class IssueWorkflowService {
     private final ClaudeCodeService claudeCode;
     private final CodeReviewService codeReviewService;
     private final CiTemplateService ciTemplateService;
+    private final LocalVerificationService localVerificationService;
     private final TrackedIssueRepository issueRepository;
     private final IterationRepository iterationRepository;
     private final CostTrackingRepository costRepository;
@@ -68,6 +69,7 @@ public class IssueWorkflowService {
                                  ClaudeCodeService claudeCode,
                                  CodeReviewService codeReviewService,
                                  CiTemplateService ciTemplateService,
+                                 LocalVerificationService localVerificationService,
                                  TrackedIssueRepository issueRepository,
                                  IterationRepository iterationRepository,
                                  CostTrackingRepository costRepository,
@@ -85,6 +87,7 @@ public class IssueWorkflowService {
         this.claudeCode = claudeCode;
         this.codeReviewService = codeReviewService;
         this.ciTemplateService = ciTemplateService;
+        this.localVerificationService = localVerificationService;
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
         this.costRepository = costRepository;
@@ -288,6 +291,63 @@ public class IssueWorkflowService {
             } catch (Exception e) {
                 diff = "";
                 log.warn("Failed to get diff after implementation", e);
+            }
+
+            // === Phase 2.5: Local Verification Commands (operator-defined, before CI) ===
+            List<String> verificationCommands = LocalVerificationService.parseCommands(repo.getVerificationCommands());
+            if (!verificationCommands.isEmpty()) {
+                trackedIssue.setCurrentPhase("LOCAL_CHECKS");
+                issueRepository.save(trackedIssue);
+                eventService.log("PHASE_LOCAL_CHECKS", "Starting local verification commands", repo, trackedIssue);
+
+                Long issueIdForLog = trackedIssue.getId();
+                LocalVerificationService.Result localResult;
+                try {
+                    localResult = localVerificationService.run(
+                            repoPath, verificationCommands, LocalVerificationService.TIMEOUT_MINUTES_PER_COMMAND,
+                            line -> sseService.broadcastClaudeLog(issueIdForLog, "[local-check] " + line));
+                } catch (Exception e) {
+                    // An unexpected error must route through the normal retry path,
+                    // not escape and fail the whole issue.
+                    log.warn("Local verification threw for iteration {}: {}", iterationNum, e.getMessage());
+                    localResult = LocalVerificationService.Result.failure(
+                            "(local verification error)", "Local verification error: " + e.getMessage());
+                }
+
+                if (!localResult.success()) {
+                    log.info("Local verification failed for iteration {}: {}",
+                            iterationNum, localResult.failedCommand());
+                    iteration.setLocalCheckResult("FAILED");
+                    iteration.setCompletedAt(LocalDateTime.now());
+                    iterationRepository.save(iteration);
+                    eventService.log("PHASE_LOCAL_CHECKS_FAILED",
+                            "Local check failed: " + localResult.failedCommand(), repo, trackedIssue);
+
+                    String skipReason = iterationManager.shouldSkipRetry(
+                            trackedIssue, implResult, "FAILED", previousFeedback);
+                    if (skipReason != null) {
+                        log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
+                                trackedIssue.getIssueNumber(), skipReason);
+                        if (repo.getDecompositionMode() != DecompositionMode.OFF
+                                && decompositionService.isDecomposable(skipReason)
+                                && decompositionService.decompose(trackedIssue, issueDetails,
+                                        repoPath, skipReason)) {
+                            return;
+                        }
+                        iterationManager.handleRetrySkipped(trackedIssue, skipReason);
+                        return;
+                    }
+
+                    previousDiff = diff;
+                    previousCiLogs = "Local verification command failed: " + localResult.failedCommand()
+                            + "\n\n" + truncate(localResult.output(), 5000);
+                    previousFeedback = null;
+                    reviewFeedback = false; // local check failure is not review feedback
+                    continue;
+                }
+
+                iteration.setLocalCheckResult("PASSED");
+                eventService.log("PHASE_LOCAL_CHECKS_COMPLETE", "Local checks passed", repo, trackedIssue);
             }
 
             // === Phase 3: CI Verification ===
@@ -1054,7 +1114,7 @@ public class IssueWorkflowService {
                 prompt.append("### Assessment Feedback\n").append(previousAssessment).append("\n\n");
             }
             if (previousCiLogs != null) {
-                prompt.append("### CI Failure Logs\n").append(previousCiLogs).append("\n\n");
+                prompt.append("### Verification Failure Logs\n").append(previousCiLogs).append("\n\n");
             }
             if (previousDiff != null) {
                 prompt.append("### Previous Diff\n```\n")

@@ -444,15 +444,20 @@ public class IssueController {
     }
 
     /**
-     * Maps the workflow's {@code currentPhase} to a 0..5 pipeline index used by the
+     * Maps the workflow's {@code currentPhase} to a 0..6 pipeline index used by the
      * issue-detail phase pipeline. When the issue is COMPLETED, every step (including
      * the final COMPLETION step) renders as done — callers detect that via the
      * {@code phaseCompleted} flag. Returns -1 when no phase is set / unknown.
      * Phase values are set in IssueWorkflowService#setCurrentPhase.
+     *
+     * Index 2 (LOCAL_CHECKS) is always reserved for the "Local Checks" step, whether or
+     * not the repo has verification commands configured — the template simply omits that
+     * step's markup when it isn't configured, so CI/PR/Review/Completion keep stable
+     * indices (3/4/5/6) either way.
      */
     private int phaseIndex(TrackedIssue issue) {
         if (issue.getStatus() == IssueStatus.COMPLETED) {
-            return 6; // all six steps (indices 0..5) are < phaseIndex => done
+            return 7; // all seven steps (indices 0..6) are < phaseIndex => done
         }
         String phase = issue.getCurrentPhase();
         if (phase == null) {
@@ -461,10 +466,11 @@ public class IssueController {
         return switch (phase) {
             case "SETUP" -> 0;
             case "IMPLEMENTATION" -> 1;
-            case "CI_VERIFICATION" -> 2;
-            case "PR_CREATION" -> 3;
-            case "INDEPENDENT_REVIEW" -> 4;
-            case "COMPLETION" -> 5;
+            case "LOCAL_CHECKS" -> 2;
+            case "CI_VERIFICATION" -> 3;
+            case "PR_CREATION" -> 4;
+            case "INDEPENDENT_REVIEW" -> 5;
+            case "COMPLETION" -> 6;
             default -> -1;
         };
     }
