@@ -86,6 +86,8 @@ class IssueWorkflowServiceTest {
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 cancellationService,
                 mock(com.dbbaskette.issuebot.repository.IssueGuidanceRepository.class),
+                mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class),
+                mock(LessonsService.class),
                 objectMapper
         );
     }
@@ -205,6 +207,122 @@ class IssueWorkflowServiceTest {
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null);
 
         assertFalse(prompt.contains("## Approved Plan"));
+    }
+
+    // === Repository custom instructions + cross-issue lessons (#69) ===
+
+    @Test
+    void buildImplementationPrompt_withRepoInstructions_coldIncludesSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                false, null, null, "Always use constructor injection", null);
+
+        assertTrue(prompt.contains("## Repository Instructions"));
+        assertTrue(prompt.contains("Always use constructor injection"));
+    }
+
+    @Test
+    void buildImplementationPrompt_withRepoInstructions_resumedIncludesSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Description");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                true, null, null, "Never touch the legacy/ directory", null);
+
+        assertTrue(prompt.contains("Continuing the same task"));
+        assertTrue(prompt.contains("## Repository Instructions"));
+        assertTrue(prompt.contains("Never touch the legacy/ directory"));
+    }
+
+    @Test
+    void buildImplementationPrompt_withoutRepoInstructions_omitsSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Description");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                false, null, null, null, null);
+
+        assertFalse(prompt.contains("## Repository Instructions"));
+    }
+
+    @Test
+    void buildImplementationPrompt_blankRepoInstructionsAndNoLessons_byteIdenticalToUnset() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+
+        String unset = workflowService.buildImplementationPrompt(issue, null, null, null);
+        String blank = workflowService.buildImplementationPrompt(issue, null, null, null,
+                false, null, null, "   ", List.of());
+
+        assertEquals(unset, blank);
+    }
+
+    @Test
+    void buildImplementationPrompt_withLessons_includesLessonsSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Description");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                false, null, null, null,
+                List.of("Run tests with ./mvnw not mvn", "Never touch the legacy/ directory"));
+
+        assertTrue(prompt.contains("## Lessons from previous issues in this repo"));
+        assertTrue(prompt.contains("- Run tests with ./mvnw not mvn"));
+        assertTrue(prompt.contains("- Never touch the legacy/ directory"));
+    }
+
+    @Test
+    void buildImplementationPrompt_withoutLessons_omitsLessonsSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Description");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                false, null, null, null, List.of());
+
+        assertFalse(prompt.contains("## Lessons from previous issues in this repo"));
+    }
+
+    /**
+     * Section order is pinned: Issue, Approved Plan, Repository Instructions, Lessons,
+     * then Previous Iteration Context (retry context) — verified via indexOf ordering.
+     */
+    @Test
+    void buildImplementationPrompt_sectionOrder_issueThenPlanThenInstructionsThenLessonsThenRetryContext() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Description");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue,
+                "diff content", "Tests failed", "CI broke",
+                false, null, "1. Do the thing",
+                "Always use constructor injection",
+                List.of("Run tests with ./mvnw not mvn"));
+
+        int issueIdx = prompt.indexOf("## Issue");
+        int planIdx = prompt.indexOf("## Approved Plan");
+        int instructionsIdx = prompt.indexOf("## Repository Instructions");
+        int lessonsIdx = prompt.indexOf("## Lessons from previous issues in this repo");
+        int retryIdx = prompt.indexOf("## Previous Iteration Context");
+
+        assertTrue(issueIdx >= 0 && planIdx > issueIdx, "Issue must precede Approved Plan");
+        assertTrue(instructionsIdx > planIdx, "Approved Plan must precede Repository Instructions");
+        assertTrue(lessonsIdx > instructionsIdx, "Repository Instructions must precede Lessons");
+        assertTrue(retryIdx > lessonsIdx, "Lessons must precede Previous Iteration Context");
     }
 
     // === Session continuity (#67) ===
@@ -760,7 +878,7 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---

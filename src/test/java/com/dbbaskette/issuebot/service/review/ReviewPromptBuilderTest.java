@@ -91,4 +91,35 @@ class ReviewPromptBuilderTest {
         String rules = rulesSection(prompt);
         assertThat(rules).contains("Set \"passed\" to false if ANY acceptance criterion verdict is \"unmet\"");
     }
+
+    // === Repository custom instructions (issue #69) ===
+
+    @Test
+    void promptWithoutRepoInstructions_omitsRequirementsSection() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70);
+
+        assertThat(prompt).doesNotContain("Repository Owner Requirements");
+    }
+
+    @Test
+    void promptWithBlankRepoInstructions_isByteIdenticalToUnset() {
+        String unset = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70);
+        String blank = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70, "   ");
+
+        assertThat(blank).isEqualTo(unset);
+    }
+
+    @Test
+    void promptWithRepoInstructions_includesRequirementsSectionAndFindingsNote() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                "Never modify files under /legacy");
+
+        assertThat(prompt).contains("## Repository Owner Requirements");
+        assertThat(prompt).contains("Never modify files under /legacy");
+        assertThat(prompt).contains("Treat violations of these requirements as findings.");
+    }
 }

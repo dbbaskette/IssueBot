@@ -152,6 +152,15 @@
                             <textarea id="verification-commands" name="verificationCommands" rows="3"
                                       placeholder="./mvnw -q verify&#10;npm run lint"></textarea>
                         </div>
+                        <div class="field-group full-width">
+                            <label for="custom-instructions">Custom instructions (injected into every implementation and review prompt)</label>
+                            <textarea id="custom-instructions" name="customInstructions" rows="4"
+                                      placeholder="Use constructor injection. Never touch /legacy. Run scripts with ./gradlew not gradle."></textarea>
+                        </div>
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="lessons-enabled" name="lessonsEnabled" value="true">
+                            <label for="lessons-enabled">Collect lessons from completed issues</label>
+                        </div>
                     </div>
 
                     <!-- CI -->
@@ -258,7 +267,9 @@
                                              data-allowed-paths=${repo.allowedPaths},
                                              data-verification-commands=${repo.verificationCommands},
                                              data-implementation-model=${repo.implementationModel},
-                                             data-review-model=${repo.reviewModel}">
+                                             data-review-model=${repo.reviewModel},
+                                             data-custom-instructions=${repo.customInstructions},
+                                             data-lessons-enabled=${repo.lessonsEnabled}">
                                 <i class="ti ti-edit" aria-hidden="true"></i> Edit
                             </button>
                             <button class="btn btn-danger btn-sm"
@@ -268,6 +279,23 @@
                                     hx-confirm="Remove this repository? Local clones will not be deleted.">
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>
+                            <details class="lessons-details">
+                                <summary th:text="'Lessons (' + ${lessonsByRepo.containsKey(repo.id) ? #lists.size(lessonsByRepo.get(repo.id)) : 0} + ')'">Lessons (0)</summary>
+                                <ul class="lessons-list">
+                                    <li th:each="lesson : ${lessonsByRepo.get(repo.id)}">
+                                        <span th:text="${lesson.lesson}">lesson text</span>
+                                        <form th:action="@{'/repositories/' + ${repo.id} + '/lessons/' + ${lesson.id} + '/delete'}"
+                                              method="post" class="lesson-delete-form">
+                                            <button type="submit" class="btn btn-outline btn-sm" title="Delete lesson">
+                                                <i class="ti ti-trash" aria-hidden="true"></i>
+                                            </button>
+                                        </form>
+                                    </li>
+                                    <li th:if="${!lessonsByRepo.containsKey(repo.id) or #lists.isEmpty(lessonsByRepo.get(repo.id))}" class="text-muted">
+                                        No lessons captured yet.
+                                    </li>
+                                </ul>
+                            </details>
                         </td>
                     </tr>
                     <tr th:if="${#lists.isEmpty(repos)}">

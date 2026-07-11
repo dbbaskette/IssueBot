@@ -587,6 +587,8 @@
     setChecked('security-review', false);
     setValue('allowed-paths', '');
     setValue('verification-commands', '');
+    setValue('custom-instructions', '');
+    setChecked('lessons-enabled', false);
     setChecked('ci-enabled', true);
     setValue('ci-timeout', '15');
     syncCiTimeout();
@@ -622,6 +624,8 @@
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));
     setValue('verification-commands', ds.verificationCommands);
+    setValue('custom-instructions', ds.customInstructions);
+    setChecked('lessons-enabled', ds.lessonsEnabled);
     setChecked('ci-enabled', ds.ciEnabled);
     setValue('ci-timeout', ds.ciTimeoutMinutes);
     syncCiTimeout();

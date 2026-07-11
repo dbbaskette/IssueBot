@@ -806,6 +806,21 @@ label {
 .repo-actions .btn { margin-right: 0.3rem; }
 .repos-table th i { margin-right: 0.25rem; }
 
+.lessons-details { white-space: normal; margin-top: 0.5rem; }
+.lessons-details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; }
+.lessons-list { list-style: none; margin: 0.4rem 0 0; padding: 0; }
+.lessons-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid var(--glass-border);
+    font-size: 0.85rem;
+}
+.lessons-list li:last-child { border-bottom: none; }
+.lesson-delete-form { margin: 0; }
+
 input[type="text"],
 input[type="number"],
 input[type="email"],
