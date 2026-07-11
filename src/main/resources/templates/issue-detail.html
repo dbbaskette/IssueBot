@@ -311,6 +311,28 @@
     })();
     </script>
 
+    <!-- === GUIDE CARD (mid-loop steering, #63) === -->
+    <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3">
+        <div class="panel-header">
+            <h3>Guide</h3>
+            <span class="text-sm text-muted">Steer this run without stopping it</span>
+        </div>
+        <div class="panel-body">
+            <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post">
+                <textarea name="guidance" rows="3" class="modal-textarea" required
+                          placeholder="e.g. Check the retry logic in FooService — the bug is probably there"></textarea>
+                <p class="text-sm text-muted" style="margin:0.5rem 0 0">
+                    Queued guidance is injected at the next iteration boundary; it won't interrupt the current Claude run.
+                </p>
+                <div class="modal-actions">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="ti ti-send" aria-hidden="true"></i> Send guidance
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- === ITERATION HISTORY === -->
     <div class="panel mb-3">
         <div class="panel-header">

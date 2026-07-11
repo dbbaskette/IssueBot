@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
@@ -30,6 +31,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
@@ -45,6 +47,8 @@ import java.util.List;
 public class IssueWorkflowService {
 
     private static final Logger log = LoggerFactory.getLogger(IssueWorkflowService.class);
+
+    private static final DateTimeFormatter GUIDANCE_TIME = DateTimeFormatter.ofPattern("HH:mm");
 
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
@@ -63,6 +67,7 @@ public class IssueWorkflowService {
     private final FollowUpService followUpService;
     private final ModelResolver modelResolver;
     private final WorkflowCancellationService cancellationService;
+    private final IssueGuidanceRepository guidanceRepository;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -82,6 +87,7 @@ public class IssueWorkflowService {
                                  FollowUpService followUpService,
                                  ModelResolver modelResolver,
                                  WorkflowCancellationService cancellationService,
+                                 IssueGuidanceRepository guidanceRepository,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -100,6 +106,7 @@ public class IssueWorkflowService {
         this.followUpService = followUpService;
         this.modelResolver = modelResolver;
         this.cancellationService = cancellationService;
+        this.guidanceRepository = guidanceRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -139,6 +146,9 @@ public class IssueWorkflowService {
                 trackedIssue.getIssueTitle());
 
         cancellationService.clear(trackedIssue.getId());
+        // Retire guidance rows left over from a previous run — they were aimed at that
+        // run's context and must not leak into this one's prompts (issue #63).
+        guidanceRepository.markConsumed(trackedIssue.getId(), LocalDateTime.now());
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
@@ -216,6 +226,27 @@ public class IssueWorkflowService {
             repo = trackedIssue.getRepo();
 
             if (cancelled(trackedIssue)) return;
+
+            // Consume any operator guidance queued since the last checkpoint (issue #63).
+            // Guidance lives in its own insert-only table — never on TrackedIssue, whose
+            // frequent full-entity saves from this thread would clobber a column written
+            // by the controller mid-iteration. Note reviewFeedback is deliberately left
+            // untouched: guidance augments whatever feedback drives this iteration, it
+            // must not reclassify a review-feedback iteration as something else.
+            List<IssueGuidance> pendingGuidance =
+                    guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(trackedIssue.getId());
+            if (!pendingGuidance.isEmpty()) {
+                StringBuilder gb = new StringBuilder("ADDITIONAL HUMAN GUIDANCE (mid-run):");
+                for (IssueGuidance g : pendingGuidance) {
+                    gb.append("\n[").append(g.getCreatedAt().format(GUIDANCE_TIME)).append("] ")
+                      .append(g.getGuidance());
+                }
+                previousFeedback = previousFeedback == null
+                        ? gb.toString() : previousFeedback + "\n\n" + gb;
+                guidanceRepository.markConsumed(trackedIssue.getId(), LocalDateTime.now());
+                eventService.log("GUIDANCE_APPLIED", "Applying operator guidance to this iteration",
+                        repo, trackedIssue);
+            }
 
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
             int maxIterations = repo.getMaxIterations();

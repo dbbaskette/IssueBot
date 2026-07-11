@@ -75,6 +75,7 @@ class IssueWorkflowServiceTest {
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 new WorkflowCancellationService(),
+                mock(com.dbbaskette.issuebot.repository.IssueGuidanceRepository.class),
                 objectMapper
         );
     }

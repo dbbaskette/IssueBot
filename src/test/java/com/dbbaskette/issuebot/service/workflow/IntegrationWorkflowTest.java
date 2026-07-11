@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
@@ -23,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -51,6 +53,7 @@ class IntegrationWorkflowTest {
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
     private FollowUpService followUpService;
+    private IssueGuidanceRepository guidanceRepository;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -70,6 +73,7 @@ class IntegrationWorkflowTest {
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
         followUpService = mock(FollowUpService.class);
+        guidanceRepository = mock(IssueGuidanceRepository.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
@@ -82,6 +86,7 @@ class IntegrationWorkflowTest {
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 new WorkflowCancellationService(),
+                guidanceRepository,
                 objectMapper);
     }
 
@@ -560,6 +565,168 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertEquals(2, issue.getCurrentIteration());
         verify(iterationManager, never()).handleMaxIterationsReached(issue);
+    }
+
+    // === Test 15 (#63): Guidance rows unconsumed at the loop-top checkpoint for
+    //     iteration 1 must be injected into iteration 1's implementation prompt
+    //     (with an [HH:mm] ordering prefix from created_at), marked consumed, and
+    //     must NOT reappear in iteration 2 since no new guidance was queued. ===
+    @Test
+    void pendingGuidance_appliedAtLoopTop_thenConsumedAndNotReappliedNextIteration() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        // One unconsumed guidance row at iteration 1's loop-top; none afterwards.
+        IssueGuidance queued = new IssueGuidance(1L, "Check the retry logic in FooService");
+        queued.setCreatedAt(LocalDateTime.of(2026, 7, 10, 9, 15));
+        when(guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(1L))
+                .thenReturn(List.of(queued))
+                .thenReturn(List.of());
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 500);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // First review fails (forces iteration 2), second passes (completes)
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(2)).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+        String firstPrompt = promptCaptor.getAllValues().get(0);
+        String secondPrompt = promptCaptor.getAllValues().get(1);
+
+        assertTrue(firstPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
+                "guidance unconsumed at loop-top must appear in iteration 1's prompt");
+        assertTrue(firstPrompt.contains("[09:15] Check the retry logic in FooService"),
+                "each guidance line carries an [HH:mm] prefix from created_at so the model sees ordering");
+        assertFalse(secondPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
+                "guidance must not re-appear in iteration 2 — it was consumed and no new guidance was queued");
+
+        // markConsumed fires twice: once at workflow start (retiring stale rows from a
+        // previous run) and once at the checkpoint that consumed this run's guidance.
+        verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
+        verify(eventService).log(eq("GUIDANCE_APPLIED"), anyString(), any(), eq(issue));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Test 16 (#63 regression pin): guidance must be immune to workflow entity saves.
+    //     The original design stored guidance as a CLOB column on TrackedIssue; the workflow
+    //     holds a long-lived in-memory TrackedIssue and performs many full-entity save()
+    //     calls per iteration, so a pendingGuidance value written by the controller between
+    //     those saves was silently reverted before the checkpoint could read it. Guidance now
+    //     lives in its own insert-only table, so no issueRepository.save() can touch it —
+    //     this test documents that: entity saves demonstrably happen between queueing and
+    //     the checkpoint, and the guidance still reaches the prompt and gets consumed. ===
+    @Test
+    void guidanceSurvivesWorkflowEntitySavesBetweenQueueingAndCheckpoint() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+
+        // Guidance queued before the run's first checkpoint (e.g. while SETUP was running —
+        // a window in which the old design already had multiple full-entity saves in flight).
+        IssueGuidance queued = new IssueGuidance(1L, "Focus on the token refresh path");
+        queued.setCreatedAt(LocalDateTime.of(2026, 7, 10, 11, 42));
+        when(guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(1L))
+                .thenReturn(List.of(queued))
+                .thenReturn(List.of());
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 501);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        // The stale-entity saves the old design was vulnerable to really happened...
+        verify(issueRepository, atLeast(2)).save(any(TrackedIssue.class));
+        // ...and could not touch the queued guidance: it reached the prompt and was consumed.
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("Focus on the token refresh path"));
+        verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Test 17 (#63): guidance must NOT reclassify a review-feedback iteration.
+    //     When iteration 2 exists because review failed (reviewFeedback=true) AND the
+    //     operator queued guidance before iteration 2's checkpoint, the guidance is
+    //     appended to the review feedback but the "Implementation Response" comment —
+    //     reserved for iterations that address review findings — must still be posted. ===
+    @Test
+    void guidanceDoesNotSuppressImplementationResponseCommentOnReviewFeedbackIteration() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        // No guidance at iteration 1's checkpoint; guidance queued before iteration 2's.
+        IssueGuidance queued = new IssueGuidance(1L, "Also look at SessionCache");
+        queued.setCreatedAt(LocalDateTime.of(2026, 7, 10, 14, 5));
+        when(guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(1L))
+                .thenReturn(List.of())
+                .thenReturn(List.of(queued))
+                .thenReturn(List.of());
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 502);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // Iteration 1's review fails → iteration 2 is a review-feedback iteration
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Iteration 2's prompt carries BOTH the review feedback and the guidance
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(2)).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+        String secondPrompt = promptCaptor.getAllValues().get(1);
+        assertTrue(secondPrompt.contains("The independent code review found issues"),
+                "review feedback must still drive iteration 2");
+        assertTrue(secondPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
+                "operator guidance must be appended alongside the review feedback");
+        assertTrue(secondPrompt.contains("Also look at SessionCache"));
+
+        // reviewFeedback stayed true through the guidance injection, so the
+        // implementation-response comment for addressing review findings still fires.
+        verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(42),
+                contains("Implementation Response"));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
     // === Test 14: An exception thrown by local verification is treated as a failed

@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.Event;
+import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
@@ -47,6 +48,7 @@ public class IssueController {
     private final IssueBotProperties properties;
     private final IssueDecompositionService decompositionService;
     private final WorkflowCancellationService cancellationService;
+    private final IssueGuidanceRepository guidanceRepository;
     private final ObjectMapper objectMapper;
 
     public IssueController(TrackedIssueRepository issueRepository,
@@ -61,6 +63,7 @@ public class IssueController {
                             IssueBotProperties properties,
                             IssueDecompositionService decompositionService,
                             WorkflowCancellationService cancellationService,
+                            IssueGuidanceRepository guidanceRepository,
                             ObjectMapper objectMapper) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
@@ -74,6 +77,7 @@ public class IssueController {
         this.properties = properties;
         this.decompositionService = decompositionService;
         this.cancellationService = cancellationService;
+        this.guidanceRepository = guidanceRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -290,6 +294,53 @@ public class IssueController {
         eventService.log("CANCEL_REQUESTED", "Operator requested stop", issue.getRepo(), issue);
         redirectAttributes.addFlashAttribute("success",
                 "Stop requested — the workflow halts at the next checkpoint");
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/guide")
+    public String guide(@PathVariable Long id,
+                        @RequestParam String guidance,
+                        RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null) {
+            redirectAttributes.addFlashAttribute("error", "Issue not found");
+            return "redirect:/issues";
+        }
+
+        if (guidance == null || guidance.isBlank()) {
+            redirectAttributes.addFlashAttribute("error", "Guidance cannot be empty");
+            return "redirect:/issues/" + id;
+        }
+
+        if (issue.getStatus() != IssueStatus.IN_PROGRESS) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Guidance can only be sent to a running issue");
+            return "redirect:/issues/" + id;
+        }
+
+        String text = guidance.trim();
+        if (text.length() > 4000) {
+            text = text.substring(0, 4000); // column limit on issue_guidance.guidance
+        }
+
+        // Guidance is inserted as its own row, never written onto TrackedIssue —
+        // the workflow's frequent full-entity saves from its in-memory copy would
+        // silently revert any column the controller wrote mid-iteration.
+        guidanceRepository.save(new IssueGuidance(issue.getId(), text));
+
+        try {
+            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
+                    issue.getIssueNumber(), "**Operator guidance (mid-run):** " + text);
+        } catch (Exception e) {
+            log.warn("Failed to post guidance comment on #{}: {}",
+                    issue.getIssueNumber(), e.getMessage());
+        }
+
+        eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + text,
+                issue.getRepo(), issue);
+
+        redirectAttributes.addFlashAttribute("success",
+                "Guidance queued — applied at the next iteration boundary while the run is active");
         return "redirect:/issues/" + id;
     }
 
