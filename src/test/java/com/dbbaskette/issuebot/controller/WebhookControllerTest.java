@@ -4,10 +4,12 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.security.WebhookSignatureVerifier;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -66,104 +68,112 @@ class WebhookControllerTest {
         return json.getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Wraps raw body bytes in a servlet request the way the container would deliver them. */
+    private static HttpServletRequest request(byte[] body) {
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", "/webhooks/github");
+        req.setContentType("application/json");
+        req.setContent(body);
+        return req;
+    }
+
     @Test
-    void returns503WhenSecretBlank() {
+    void returns503WhenSecretBlank() throws Exception {
         WebhookController controller = controllerWithSecret("");
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, "sha256=irrelevant", "issues");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), "sha256=irrelevant", "issues");
 
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
         verifyNoInteractions(pollingService);
     }
 
     @Test
-    void returns401ForBadSignature() {
+    void returns401ForBadSignature() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, "sha256=deadbeef", "issues");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), "sha256=deadbeef", "issues");
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         verifyNoInteractions(pollingService);
     }
 
     @Test
-    void returns401WhenSignatureHeaderMissing() {
+    void returns401WhenSignatureHeaderMissing() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, null, "issues");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), null, "issues");
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         verifyNoInteractions(pollingService);
     }
 
     @Test
-    void agentReadyLabeledOnWatchedRepoTriggersEvaluation() {
+    void agentReadyLabeledOnWatchedRepoTriggersEvaluation() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
         String sig = sign(body, SECRET);
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, sig, "issues");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), sig, "issues");
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verify(pollingService).evaluateSingleIssueFromWebhook(eq(testRepo), any());
     }
 
     @Test
-    void unwatchedRepoIgnored() {
+    void unwatchedRepoIgnored() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "stranger/repo", "agent-ready");
         String sig = sign(body, SECRET);
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, sig, "issues");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), sig, "issues");
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verifyNoInteractions(pollingService);
     }
 
     @Test
-    void nonAgentReadyLabelIgnored() {
+    void nonAgentReadyLabelIgnored() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "acme/widgets", "bug");
         String sig = sign(body, SECRET);
 
-        controller.handleWebhook(body, sig, "issues");
+        controller.handleWebhook(request(body), sig, "issues");
 
         verifyNoInteractions(pollingService);
     }
 
     @Test
-    void otherActionsIgnored() {
+    void otherActionsIgnored() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("assigned", "acme/widgets", null);
         String sig = sign(body, SECRET);
 
-        controller.handleWebhook(body, sig, "issues");
+        controller.handleWebhook(request(body), sig, "issues");
 
         verifyNoInteractions(pollingService);
     }
 
     @Test
-    void closedEventTriggersRecheck() {
+    void closedEventTriggersRecheck() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("closed", "acme/widgets", null);
         String sig = sign(body, SECRET);
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, sig, "issues");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), sig, "issues");
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verify(pollingService).recheckRepo(testRepo);
     }
 
     @Test
-    void nonIssuesEventTypeIgnored() {
+    void nonIssuesEventTypeIgnored() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
         String sig = sign(body, SECRET);
 
-        ResponseEntity<Void> response = controller.handleWebhook(body, sig, "ping");
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), sig, "ping");
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verifyNoInteractions(pollingService);
@@ -175,7 +185,7 @@ class WebhookControllerTest {
         byte[] body = "{not valid json".getBytes(StandardCharsets.UTF_8);
         String sig = sign(body, SECRET);
 
-        ResponseEntity<Void> response = assertDoesNotThrow(() -> controller.handleWebhook(body, sig, "issues"));
+        ResponseEntity<Void> response = assertDoesNotThrow(() -> controller.handleWebhook(request(body), sig, "issues"));
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
     }
@@ -187,18 +197,18 @@ class WebhookControllerTest {
         String sig = sign(body, SECRET);
         doThrow(new RuntimeException("boom")).when(pollingService).evaluateSingleIssueFromWebhook(any(), any());
 
-        ResponseEntity<Void> response = assertDoesNotThrow(() -> controller.handleWebhook(body, sig, "issues"));
+        ResponseEntity<Void> response = assertDoesNotThrow(() -> controller.handleWebhook(request(body), sig, "issues"));
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
     }
 
     @Test
-    void lastEventTimestampRecordedForWatchedRepo() {
+    void lastEventTimestampRecordedForWatchedRepo() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
         String sig = sign(body, SECRET);
 
-        controller.handleWebhook(body, sig, "issues");
+        controller.handleWebhook(request(body), sig, "issues");
 
         assertEquals(1, controller.getLastEventTimestamps().size());
         org.junit.jupiter.api.Assertions.assertTrue(controller.getLastEventTimestamps().containsKey("acme/widgets"));
@@ -211,8 +221,55 @@ class WebhookControllerTest {
         assertEquals(true, controllerWithSecret(SECRET).isSecretConfigured());
     }
 
+    // === Body size limit ===
+
+    @Test
+    void oversizedPayload_returns413_withoutVerificationOrEvaluation() throws Exception {
+        WebhookSignatureVerifier verifier = mock(WebhookSignatureVerifier.class);
+        WebhookController controller = new WebhookController(verifier, repoRepository, pollingService, SECRET);
+        byte[] body = new byte[WebhookController.MAX_BODY_BYTES + 1];
+
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), "sha256=whatever", "issues");
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        verifyNoInteractions(verifier);
+        verifyNoInteractions(pollingService);
+    }
+
+    @Test
+    void oversizedChunkedPayload_noContentLength_returns413() throws Exception {
+        // Chunked transfer: no Content-Length header — the bounded read must
+        // still cap the body instead of materializing it all.
+        WebhookController controller = controllerWithSecret(SECRET);
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", "/webhooks/github") {
+            @Override
+            public long getContentLengthLong() {
+                return -1L;
+            }
+        };
+        req.setContentType("application/json");
+        req.setContent(new byte[WebhookController.MAX_BODY_BYTES + 1]);
+
+        ResponseEntity<Void> response = controller.handleWebhook(req, "sha256=whatever", "issues");
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        verifyNoInteractions(pollingService);
+    }
+
+    @Test
+    void payloadExactlyAtLimit_isAccepted() throws Exception {
+        // Boundary: exactly MAX_BODY_BYTES must pass the size gate (and then fail
+        // signature verification with 401, proving it got past the 413 check).
+        WebhookController controller = controllerWithSecret(SECRET);
+        byte[] body = new byte[WebhookController.MAX_BODY_BYTES];
+
+        ResponseEntity<Void> response = controller.handleWebhook(request(body), "sha256=deadbeef", "issues");
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+    }
+
     /**
-     * End-to-end through Spring's dispatcher: verifies the {@code @RequestBody byte[]}
+     * End-to-end through Spring's dispatcher: verifies the HttpServletRequest
      * + {@code @RequestHeader} annotations actually bind a real "application/json"
      * POST correctly, which the direct method-call tests above can't catch.
      */
@@ -245,5 +302,21 @@ class WebhookControllerTest {
                         .header("X-GitHub-Event", "issues")
                         .content(body))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void realHttpPost_oversizedBody_returns413() throws Exception {
+        WebhookController controller = controllerWithSecret(SECRET);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        byte[] body = new byte[WebhookController.MAX_BODY_BYTES + 1];
+
+        mockMvc.perform(post("/webhooks/github")
+                        .contentType("application/json")
+                        .header("X-Hub-Signature-256", "sha256=whatever")
+                        .header("X-GitHub-Event", "issues")
+                        .content(body))
+                .andExpect(status().isPayloadTooLarge());
+
+        verifyNoInteractions(pollingService);
     }
 }

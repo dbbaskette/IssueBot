@@ -275,48 +275,7 @@ public class IssuePollingService {
 
         if (!qualifiesForProcessing(repo, issueNumber)) return false;
 
-        // Check dependencies before creating tracked issue
-        DependencyResult deps = dependencyResolver.resolve(repo, issueNumber);
-
-        if (!deps.unresolvedBlockers().isEmpty()) {
-            // Auto-label all blocker issues with agent-ready
-            for (int blockerNum : deps.unresolvedBlockers()) {
-                try {
-                    gitHubApiClient.addLabels(repo.getOwner(), repo.getName(),
-                            blockerNum, List.of(AGENT_READY_LABEL));
-                    log.info("Auto-labeled blocker #{} with '{}' in {}",
-                            blockerNum, AGENT_READY_LABEL, repo.fullName());
-                } catch (Exception e) {
-                    log.warn("Failed to auto-label blocker #{}: {}", blockerNum, e.getMessage());
-                }
-            }
-
-            // Save as BLOCKED with blocker list
-            TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
-            tracked.setStatus(IssueStatus.BLOCKED);
-            tracked.setBlockedByIssues(deps.unresolvedBlockers().stream()
-                    .map(String::valueOf)
-                    .collect(Collectors.joining(",")));
-            issueRepository.save(tracked);
-
-            // Post dependency chain comment
-            try {
-                gitHubApiClient.addComment(repo.getOwner(), repo.getName(),
-                        issueNumber, deps.chainDescription());
-            } catch (Exception e) {
-                log.warn("Failed to post dependency comment on #{}: {}", issueNumber, e.getMessage());
-            }
-
-            eventService.log("ISSUE_BLOCKED",
-                    "Issue #" + issueNumber + " blocked by " +
-                            deps.unresolvedBlockers().stream()
-                                    .map(n -> "#" + n)
-                                    .collect(Collectors.joining(", ")),
-                    repo, tracked);
-            notificationService.info("Issue Blocked",
-                    repo.fullName() + " #" + issueNumber + " waiting on dependencies");
-            return false;
-        }
+        if (blockIfUnresolvedDependencies(repo, issueNumber, title)) return false;
 
         // No blockers — existing flow
         TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
@@ -393,6 +352,12 @@ public class IssuePollingService {
 
         if (!qualifiesForProcessing(repo, issueNumber)) return;
 
+        // Dependency state wins over capacity queueing: an issue with unresolved
+        // blockers must be tracked as BLOCKED (so the recheck loop can promote it
+        // when its blockers close), not QUEUED (which would let drainQueuedIssues
+        // start it while its dependencies are still open).
+        if (blockIfUnresolvedDependencies(repo, issueNumber, title)) return;
+
         TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
         tracked.setStatus(IssueStatus.QUEUED);
         issueRepository.save(tracked);
@@ -402,6 +367,60 @@ public class IssuePollingService {
                 repo, tracked);
         notificationService.info("Issue Queued",
                 repo.fullName() + " #" + issueNumber + ": " + title + " (at capacity, waiting for a slot)");
+    }
+
+    /**
+     * Resolves the issue's dependencies and, when unresolved blockers exist,
+     * auto-labels the blockers, saves the issue as BLOCKED with its blocker list,
+     * posts the dependency-chain comment, and emits the event/notification.
+     * Shared by {@link #evaluateIssue} and {@link #queueAtCapacity} so both the
+     * normal and at-capacity webhook paths respect dependency ordering.
+     *
+     * @return true if the issue was saved as BLOCKED (callers must stop processing it)
+     */
+    private boolean blockIfUnresolvedDependencies(WatchedRepo repo, int issueNumber, String title) {
+        DependencyResult deps = dependencyResolver.resolve(repo, issueNumber);
+        if (deps.unresolvedBlockers().isEmpty()) {
+            return false;
+        }
+
+        // Auto-label all blocker issues with agent-ready
+        for (int blockerNum : deps.unresolvedBlockers()) {
+            try {
+                gitHubApiClient.addLabels(repo.getOwner(), repo.getName(),
+                        blockerNum, List.of(AGENT_READY_LABEL));
+                log.info("Auto-labeled blocker #{} with '{}' in {}",
+                        blockerNum, AGENT_READY_LABEL, repo.fullName());
+            } catch (Exception e) {
+                log.warn("Failed to auto-label blocker #{}: {}", blockerNum, e.getMessage());
+            }
+        }
+
+        // Save as BLOCKED with blocker list
+        TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
+        tracked.setStatus(IssueStatus.BLOCKED);
+        tracked.setBlockedByIssues(deps.unresolvedBlockers().stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(",")));
+        issueRepository.save(tracked);
+
+        // Post dependency chain comment
+        try {
+            gitHubApiClient.addComment(repo.getOwner(), repo.getName(),
+                    issueNumber, deps.chainDescription());
+        } catch (Exception e) {
+            log.warn("Failed to post dependency comment on #{}: {}", issueNumber, e.getMessage());
+        }
+
+        eventService.log("ISSUE_BLOCKED",
+                "Issue #" + issueNumber + " blocked by " +
+                        deps.unresolvedBlockers().stream()
+                                .map(n -> "#" + n)
+                                .collect(Collectors.joining(", ")),
+                repo, tracked);
+        notificationService.info("Issue Blocked",
+                repo.fullName() + " #" + issueNumber + " waiting on dependencies");
+        return true;
     }
 
     /**

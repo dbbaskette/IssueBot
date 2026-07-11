@@ -190,6 +190,8 @@ class IssuePollingServiceTest {
         properties.setMaxConcurrentIssues(1);
         when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(1L);
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 99)).thenReturn(Optional.empty());
+        when(dependencyResolver.resolve(testRepo, 99))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
 
         ObjectNode issueNode = objectMapper.createObjectNode();
         issueNode.put("number", 99);
@@ -200,6 +202,30 @@ class IssuePollingServiceTest {
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(issueRepository).save(captor.capture());
         assertEquals(IssueStatus.QUEUED, captor.getValue().getStatus());
+        verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_atCapacityWithUnresolvedBlockers_blocksNotQueues() {
+        properties.setMaxConcurrentIssues(1);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(1L);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 101)).thenReturn(Optional.empty());
+        when(dependencyResolver.resolve(testRepo, 101))
+                .thenReturn(new DependencyResolverService.DependencyResult(
+                        List.of(5, 6), List.of(5, 6), "blocked chain", false));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 101);
+        issueNode.put("title", "Blocked at capacity");
+
+        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        // Dependency state wins over capacity queueing: the issue must be saved
+        // BLOCKED with its blocker list, never QUEUED, and never started.
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertEquals(IssueStatus.BLOCKED, captor.getValue().getStatus());
+        assertEquals("5,6", captor.getValue().getBlockedByIssues());
         verify(workflowService, never()).processIssueAsync(any());
     }
 
