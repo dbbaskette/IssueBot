@@ -550,24 +550,19 @@ public class IssueWorkflowService {
 
     /**
      * Checkpoint: true (and escalates via {@link IterationManager#handleBudgetExceeded})
-     * when the issue's effective budget (issue override, else repo default, else
-     * unlimited) has been exhausted by cumulative spend. Callers must return
-     * immediately when this returns true — same contract as {@link #cancelled}.
-     * A manual retry does NOT reset spend; raising the budget is the escape hatch.
+     * when the issue's effective budget ({@link TrackedIssue#effectiveBudgetUsd()}:
+     * issue override, else repo default, else unlimited) has been exhausted by
+     * cumulative spend. Callers must return immediately when this returns true —
+     * same contract as {@link #cancelled}. A manual retry does NOT reset spend;
+     * raising the budget is the escape hatch.
      */
     boolean overBudget(TrackedIssue trackedIssue) {
-        BigDecimal budget = effectiveBudget(trackedIssue);
+        BigDecimal budget = trackedIssue.effectiveBudgetUsd();
         if (budget == null) return false;
         BigDecimal spent = costRepository.totalCostForIssue(trackedIssue);
         if (spent == null || spent.compareTo(budget) <= 0) return false;
         iterationManager.handleBudgetExceeded(trackedIssue, spent, budget);
         return true;
-    }
-
-    /** Issue override wins over the repo default; null means unlimited. */
-    BigDecimal effectiveBudget(TrackedIssue trackedIssue) {
-        if (trackedIssue.getBudgetOverrideUsd() != null) return trackedIssue.getBudgetOverrideUsd();
-        return trackedIssue.getRepo().getIssueBudgetUsd();
     }
 
     // =====================================================

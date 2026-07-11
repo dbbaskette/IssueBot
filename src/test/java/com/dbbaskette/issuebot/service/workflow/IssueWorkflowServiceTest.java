@@ -338,33 +338,8 @@ class IssueWorkflowServiceTest {
     }
 
     // === Cost budgets (#66) ===
-
-    @Test
-    void effectiveBudget_nullWhenNeitherSet() {
-        WatchedRepo repo = new WatchedRepo("owner", "repo");
-        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
-
-        assertNull(workflowService.effectiveBudget(issue));
-    }
-
-    @Test
-    void effectiveBudget_usesRepoWhenNoOverride() {
-        WatchedRepo repo = new WatchedRepo("owner", "repo");
-        repo.setIssueBudgetUsd(new java.math.BigDecimal("5.00"));
-        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
-
-        assertEquals(0, new java.math.BigDecimal("5.00").compareTo(workflowService.effectiveBudget(issue)));
-    }
-
-    @Test
-    void effectiveBudget_issueOverrideWinsOverRepo() {
-        WatchedRepo repo = new WatchedRepo("owner", "repo");
-        repo.setIssueBudgetUsd(new java.math.BigDecimal("5.00"));
-        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
-        issue.setBudgetOverrideUsd(new java.math.BigDecimal("1.00"));
-
-        assertEquals(0, new java.math.BigDecimal("1.00").compareTo(workflowService.effectiveBudget(issue)));
-    }
+    // Budget-precedence tests live in TrackedIssueTest — effectiveBudgetUsd() is the
+    // entity's own derivation, shared by this service's overBudget and IssueController.
 
     @Test
     void overBudget_falseWhenNoBudgetConfigured() {

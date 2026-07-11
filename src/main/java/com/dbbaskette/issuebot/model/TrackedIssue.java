@@ -153,6 +153,15 @@ public class TrackedIssue {
     public String getDecompositionProposal() { return decompositionProposal; }
     public void setDecompositionProposal(String decompositionProposal) { this.decompositionProposal = decompositionProposal; }
 
+    /**
+     * Effective spend ceiling for this issue (#66): the per-issue override wins over
+     * the repo default; null means unlimited. Single source of truth for budget
+     * precedence — used by both the workflow checkpoint and the detail view.
+     */
+    public BigDecimal effectiveBudgetUsd() {
+        return budgetOverrideUsd != null ? budgetOverrideUsd : repo.getIssueBudgetUsd();
+    }
+
     public List<Integer> getBlockerNumbers() {
         if (blockedByIssues == null || blockedByIssues.isBlank()) {
             return Collections.emptyList();

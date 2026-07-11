@@ -103,11 +103,13 @@
                       th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
             </div>
 
-            <!-- Cost budget progress bar — only shown when an effective budget (issue
-                 override, else repo default) is configured; unlimited issues show nothing here. -->
-            <div class="mb-1" th:if="${effectiveBudget != null}"
-                 th:with="pct=${issueSpent.doubleValue() / effectiveBudget.doubleValue() * 100.0},
-                          barPct=${pct > 100.0 ? 100.0 : pct}">
+            <!--/* Cost budget progress bar — only shown when an effective budget (issue
+                   override, else repo default) is configured; unlimited issues show nothing here.
+                   budgetPct is a clamped 0–100 integer computed in IssueController#budgetPct so
+                   the template never divides (a $0.00 budget would render width:NaN%).
+                   Parser-level comment: stripped from output so the render tests can assert
+                   on the absence of these words. */-->
+            <div class="mb-1" th:if="${effectiveBudget != null}">
                 <div class="flex-between mb-1">
                     <span class="text-sm">Cost budget</span>
                     <span class="text-sm"
@@ -115,8 +117,8 @@
                 </div>
                 <div class="budget-bar-track">
                     <div class="budget-bar-fill"
-                         th:classappend="${pct >= 100.0 ? 'over' : (pct >= 80.0 ? 'warning' : '')}"
-                         th:style="'width:' + ${barPct} + '%'"></div>
+                         th:classappend="${budgetPct >= 100 ? 'over' : (budgetPct >= 80 ? 'warning' : '')}"
+                         th:style="'width:' + ${budgetPct} + '%'"></div>
                 </div>
             </div>
 

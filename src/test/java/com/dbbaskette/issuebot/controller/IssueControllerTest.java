@@ -60,6 +60,7 @@ class IssueControllerTest {
         final IssueDecompositionService decompositionService = mock(IssueDecompositionService.class);
         final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
         final IterationRepository iterationRepository = mock(IterationRepository.class);
+        final CostTrackingRepository costRepository = mock(CostTrackingRepository.class);
         final EventService eventService = mock(EventService.class);
         final IssueGuidanceRepository guidanceRepository = mock(IssueGuidanceRepository.class);
         final IssueController controller;
@@ -83,7 +84,7 @@ class IssueControllerTest {
 
             controller = new IssueController(issues, repos,
                     iterationRepository, mock(EventRepository.class),
-                    mock(CostTrackingRepository.class), mock(IssuePollingService.class),
+                    costRepository, mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), eventService,
                     gitHubApiClient, properties, decompositionService, cancellationService,
                     guidanceRepository, new ObjectMapper());
@@ -232,17 +233,21 @@ class IssueControllerTest {
     }
 
     @Test
-    void detailExposesEffectiveBudgetAndSpend_issueOverrideWinsOverRepo() {
+    void detailExposesEffectiveBudgetSpendAndClampedPct_issueOverrideWinsOverRepo() {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
         f.issue.getRepo().setIssueBudgetUsd(new java.math.BigDecimal("10.00"));
         f.issue.setBudgetOverrideUsd(new java.math.BigDecimal("2.00"));
+        when(f.costRepository.totalCostForIssue(f.issue)).thenReturn(new java.math.BigDecimal("0.50"));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         f.controller.detail(model, 1L, null);
 
         org.assertj.core.api.Assertions.assertThat((java.math.BigDecimal) model.getAttribute("effectiveBudget"))
                 .isEqualByComparingTo(new java.math.BigDecimal("2.00"));
-        org.assertj.core.api.Assertions.assertThat(model.asMap()).containsKey("issueSpent");
+        org.assertj.core.api.Assertions.assertThat((java.math.BigDecimal) model.getAttribute("issueSpent"))
+                .isEqualByComparingTo(new java.math.BigDecimal("0.50"));
+        // 0.50 of the 2.00 override (not the 10.00 repo default) = 25%
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(25);
     }
 
     @Test
@@ -253,6 +258,21 @@ class IssueControllerTest {
         f.controller.detail(model, 1L, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("effectiveBudget")).isNull();
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(0);
+    }
+
+    @Test
+    void detailClampsBudgetPctToHundred_zeroBudgetWithSpend() {
+        // $0.00 budget is reachable (form min=0; only negatives normalize to null) —
+        // the server-side pct must clamp to 100, never produce NaN for the template.
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        f.issue.setBudgetOverrideUsd(new java.math.BigDecimal("0.00"));
+        when(f.costRepository.totalCostForIssue(f.issue)).thenReturn(new java.math.BigDecimal("0.44"));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(100);
     }
 
     @Test

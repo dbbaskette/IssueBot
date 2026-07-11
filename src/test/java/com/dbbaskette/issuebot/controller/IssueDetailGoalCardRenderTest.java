@@ -201,6 +201,82 @@ class IssueDetailGoalCardRenderTest {
         assertThat(localChecksRow).contains("FAILED");
     }
 
+    // === Cost budget bar (#66) — budgetPct is computed by IssueController.budgetPct,
+    //     so these tests route through the real helper to exercise controller math and
+    //     template rendering together (the zero-budget NaN regression lived across both).
+
+    private WebContext budgetContext(TrackedIssue issue, BigDecimal spent, BigDecimal budget) {
+        WebContext context = baseContext(issue, null);
+        context.setVariable("issueSpent", spent);
+        context.setVariable("effectiveBudget", budget);
+        context.setVariable("budgetPct", IssueController.budgetPct(spent, budget));
+        return context;
+    }
+
+    private TrackedIssue budgetIssue() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 9, "Budgeted issue");
+        issue.setId(9L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        return issue;
+    }
+
+    @Test
+    void budgetBar_zeroBudgetWithSpend_rendersFullBarInOverState_neverNaN() {
+        // A $0.00 budget is reachable (form allows min=0; only negatives are normalized
+        // to null) — with any spend the bar must show fully exhausted, not width:NaN%.
+        String html = render(budgetContext(budgetIssue(),
+                new BigDecimal("0.44"), new BigDecimal("0.00")));
+
+        assertThat(html).contains("Cost budget");
+        assertThat(html).contains("width:100%");
+        assertThat(html).contains("budget-bar-fill over");
+        assertThat(html).doesNotContain("NaN");
+    }
+
+    @Test
+    void budgetBar_zeroBudgetZeroSpend_rendersEmptyBar_neverNaN() {
+        String html = render(budgetContext(budgetIssue(),
+                new BigDecimal("0.00"), new BigDecimal("0.00")));
+
+        assertThat(html).contains("width:0%");
+        assertThat(html).doesNotContain("NaN");
+        assertThat(html).doesNotContain("budget-bar-fill over");
+        assertThat(html).doesNotContain("budget-bar-fill warning");
+    }
+
+    @Test
+    void budgetBar_normalSpend_rendersIntegerWidthAndAmounts() {
+        // 1.84 / 5.00 = 36.8% → rounds down to the clamped integer 36
+        String html = render(budgetContext(budgetIssue(),
+                new BigDecimal("1.84"), new BigDecimal("5.00")));
+
+        assertThat(html).contains("$1.84 of $5.00");
+        assertThat(html).contains("width:36%");
+        assertThat(html).doesNotContain("budget-bar-fill over");
+        assertThat(html).doesNotContain("budget-bar-fill warning");
+    }
+
+    @Test
+    void budgetBar_atWarningThreshold_rendersWarningState() {
+        // 4.00 / 5.00 = exactly 80% → warning fires at the threshold, not before
+        String html = render(budgetContext(budgetIssue(),
+                new BigDecimal("4.00"), new BigDecimal("5.00")));
+
+        assertThat(html).contains("width:80%");
+        assertThat(html).contains("budget-bar-fill warning");
+        assertThat(html).doesNotContain("budget-bar-fill over");
+    }
+
+    @Test
+    void budgetBar_noEffectiveBudget_hidesCostBudgetRow() {
+        // Unlimited issues (no override, no repo default) show no cost-budget row at all.
+        String html = render(baseContext(budgetIssue(), null));
+
+        assertThat(html).doesNotContain("Cost budget");
+        assertThat(html).doesNotContain("budget-bar-track");
+    }
+
     @Test
     void failedStatusShowsCurrentStatusInFooter() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
