@@ -900,4 +900,113 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertEquals("sess-iter2-cold", issue.getClaudeSessionId());
     }
+
+    // === Test 22 (#67 review fix 2): tokens burned by a discarded resumed attempt must
+    //     land in CostTracking alongside the cold retry's own row — budget enforcement
+    //     reads CostTracking, so an unrecorded failed attempt would undercount spend. ===
+    @Test
+    void sessionContinuity_discardedResumedAttemptCost_isTrackedAlongsideColdRetry() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        ClaudeCodeResult iter1Success = successResult(); // 1000/500 tokens
+        iter1Success.setSessionId("sess-iter1");
+
+        ClaudeCodeResult resumedFailure = new ClaudeCodeResult();
+        resumedFailure.setSuccess(false);
+        resumedFailure.setErrorMessage("session crashed mid-run");
+        resumedFailure.setInputTokens(5000);
+        resumedFailure.setOutputTokens(2000);
+        resumedFailure.setModel("claude-opus-4-6");
+
+        ClaudeCodeResult coldRetrySuccess = successResult(); // 1000/500 tokens
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+                .thenReturn(iter1Success, coldRetrySuccess);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
+                .thenReturn(resumedFailure);
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 902);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Both iteration-2 invocations produced a CostTracking row: the discarded resumed
+        // attempt (5000/2000, recorded inside phaseImplementation) AND the cold retry
+        // (1000/500, recorded by processIssue on the returned result) — plus iteration 1.
+        ArgumentCaptor<CostTracking> costCaptor = ArgumentCaptor.forClass(CostTracking.class);
+        verify(costRepository, atLeast(3)).save(costCaptor.capture());
+        List<CostTracking> implRows = costCaptor.getAllValues().stream()
+                .filter(ct -> "IMPLEMENTATION".equals(ct.getPhase()))
+                .toList();
+        assertEquals(3, implRows.size(),
+                "three IMPLEMENTATION rows: iter1 + iter2 discarded attempt + iter2 cold retry");
+        assertEquals(1, implRows.stream()
+                        .filter(ct -> ct.getInputTokens() == 5000 && ct.getOutputTokens() == 2000)
+                        .count(),
+                "the discarded resumed attempt's burned tokens must be recorded");
+        assertEquals(2, implRows.stream()
+                        .filter(ct -> ct.getInputTokens() == 1000 && ct.getOutputTokens() == 500)
+                        .count(),
+                "both successful invocations keep their own rows");
+        // The discarded row belongs to the same iteration that was retried (iteration 2)
+        assertEquals(2, implRows.stream()
+                .filter(ct -> ct.getInputTokens() == 5000)
+                .findFirst().orElseThrow().getIterationNum());
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Test 23 (#67 review fix 3): a continue-session manual retry with no operator
+    //     instructions must carry the previous run's failure reason into the resumed
+    //     prompt — processIssue clears lastFailureReason at start, so this exercises the
+    //     capture-before-clear plumbing end-to-end. ===
+    @Test
+    void sessionContinuity_continueSessionRetry_carriesLastFailureReasonIntoResumedPrompt() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        // State after a failed run whose retry opted into continuation:
+        issue.setClaudeSessionId("sess-kept");
+        issue.setLastFailureReason("CI timed out after 15 minutes on iteration 3");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 903);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue); // manual retry without instructions
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), eq("sess-kept"), any(), any());
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("Continuing the same task"));
+        assertTrue(prompt.contains("### Previous outcome"),
+                "with nothing new from the operator, the resumed prompt must carry the previous outcome");
+        assertTrue(prompt.contains("CI timed out after 15 minutes on iteration 3"));
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
 }

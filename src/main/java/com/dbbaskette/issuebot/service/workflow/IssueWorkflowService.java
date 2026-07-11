@@ -149,6 +149,9 @@ public class IssueWorkflowService {
         // Retire guidance rows left over from a previous run — they were aimed at that
         // run's context and must not leak into this one's prompts (issue #63).
         guidanceRepository.markConsumed(trackedIssue.getId(), LocalDateTime.now());
+        // Captured before it is cleared just below: a continue-session retry's first
+        // resumed prompt surfaces this when the operator supplied nothing new (#67).
+        String lastRunFailureReason = trackedIssue.getLastFailureReason();
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
@@ -268,7 +271,7 @@ public class IssueWorkflowService {
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
                 issueRepository.save(trackedIssue);
                 implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
-                        previousDiff, previousFeedback, previousCiLogs);
+                        previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason);
                 iteration.setClaudeOutput(implResult.getOutput());
                 if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
                     iteration.setClaudeSessionId(implResult.getSessionId());
@@ -612,10 +615,18 @@ public class IssueWorkflowService {
      * If a resumed invocation fails, the same iteration is retried exactly once
      * cold (with the full, un-abbreviated prompt) and the stored session id is
      * discarded — a stale/bogus session must never consume an extra iteration.
+     * Exception: when the failure was caused by an operator cancellation (which
+     * kills the CLI process), the failed result is returned untouched — no cold
+     * fallback, no session clear; processIssue's checkpoint finalizes the issue.
+     *
+     * @param lastRunFailureReason the previous run's failure reason, captured before
+     *        processIssue cleared it — surfaced in a continue-session retry's first
+     *        resumed prompt when no other retry context exists (#67 review).
      */
     ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
                                           Path repoPath, String previousDiff,
-                                          String previousAssessment, String previousCiLogs) {
+                                          String previousAssessment, String previousCiLogs,
+                                          String lastRunFailureReason) {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_IMPLEMENTATION", "Starting implementation phase", repo, trackedIssue);
 
@@ -624,7 +635,7 @@ public class IssueWorkflowService {
         boolean resumed = resumeId != null && !resumeId.isBlank();
 
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
-                previousAssessment, previousCiLogs, resumed);
+                previousAssessment, previousCiLogs, resumed, lastRunFailureReason);
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -633,15 +644,33 @@ public class IssueWorkflowService {
                 trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
 
         if (!result.isSuccess() && resumed) {
+            // An operator cancellation kills the CLI process, which surfaces here as a
+            // failed invocation — that must NOT trigger the cold fallback (it would spawn
+            // a brand-new process the operator just asked to stop). Return the failed
+            // result untouched: no session clear, no resume-failed event; the caller's
+            // cancellation checkpoint finalizes the issue and tracks the result's cost.
+            if (cancellationService.isCancelled(trackedIssue.getId())) {
+                log.info("Resumed invocation failed after a cancellation request — skipping cold fallback");
+                return result;
+            }
+
             log.warn("Resumed invocation failed — retrying cold (session {} discarded): {}",
                     resumeId, result.getErrorMessage());
             eventService.log("SESSION_RESUME_FAILED",
                     "Resume failed — falling back to a fresh session", repo, trackedIssue);
+
+            // Tokens burned by the discarded attempt still count against the issue's
+            // budget — enforcement reads CostTracking, so record them before the result
+            // is overwritten by the cold retry (whose cost processIssue tracks as usual).
+            if (result.getInputTokens() > 0 || result.getOutputTokens() > 0) {
+                trackCost(trackedIssue, trackedIssue.getCurrentIteration(), result, "IMPLEMENTATION");
+            }
+
             trackedIssue.setClaudeSessionId(null);
             issueRepository.save(trackedIssue);
 
             String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
-                    previousAssessment, previousCiLogs, false);
+                    previousAssessment, previousCiLogs, false, null);
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
@@ -1239,7 +1268,13 @@ public class IssueWorkflowService {
 
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs) {
-        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs, false);
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs, false, null);
+    }
+
+    String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
+                                      String previousAssessment, String previousCiLogs,
+                                      boolean resumed) {
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs, resumed, null);
     }
 
     /**
@@ -1247,13 +1282,25 @@ public class IssueWorkflowService {
      *                the "## Issue" section is skipped (the session already has it) and the
      *                prompt opens with a continuation cue instead. Cold prompts (resumed=false)
      *                are byte-for-byte unchanged from before session continuity existed.
+     * @param lastFailureReason the previous run's failure reason. Only consulted for resumed
+     *                prompts that carry no other retry context (a continue-session manual retry
+     *                with no operator instructions) — a resumed session must never open with a
+     *                dangling "New information:" header followed by nothing.
      */
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
-                                      boolean resumed) {
+                                      boolean resumed, String lastFailureReason) {
         StringBuilder prompt = new StringBuilder();
         if (resumed) {
             prompt.append("Continuing the same task. New information since your last attempt:\n\n");
+            if (previousDiff == null && previousAssessment == null && previousCiLogs == null) {
+                if (lastFailureReason != null && !lastFailureReason.isBlank()) {
+                    prompt.append("### Previous outcome\n").append(lastFailureReason).append("\n\n");
+                } else {
+                    prompt.append("No additional operator input — re-attempt the task, "
+                            + "addressing whatever prevented success last time.\n\n");
+                }
+            }
         } else {
             prompt.append("You are implementing a GitHub issue. Here are the details:\n\n");
             prompt.append("## Issue\n");
