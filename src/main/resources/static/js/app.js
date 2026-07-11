@@ -476,6 +476,7 @@
     setValue('mode', 'AUTONOMOUS');
     setValue('max-iterations', '5');
     setValue('max-review-iterations', '2');
+    setValue('review-pass-threshold', '0.70');
     setValue('implementation-model', '');
     setValue('review-model', '');
     setChecked('auto-start', true);
@@ -500,6 +501,7 @@
     setValue('mode', ds.mode);
     setValue('max-iterations', ds.maxIterations);
     setValue('max-review-iterations', ds.maxReviewIterations);
+    setValue('review-pass-threshold', ds.reviewPassThreshold);
     setValue('implementation-model', ds.implementationModel);
     setValue('review-model', ds.reviewModel);
     setChecked('auto-start', ds.autoStart);

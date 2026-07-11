@@ -282,7 +282,7 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---

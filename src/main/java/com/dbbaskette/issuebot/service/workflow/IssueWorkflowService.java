@@ -743,6 +743,7 @@ public class IssueWorkflowService {
                     trackedIssue.getResolvedReviewModel(),
                     issueId,
                     repo.isSecurityReviewEnabled(),
+                    repo.getReviewPassThreshold().doubleValue(),
                     line -> streamClaudeLog(issueId, line));
         } catch (Exception e) {
             log.error("Independent review failed", e);

@@ -424,6 +424,7 @@ public class IssueController {
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
         model.addAttribute("iterations", iterations);
+        model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
         model.addAttribute("phaseIndex", phaseIndex(issue));

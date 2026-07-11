@@ -19,11 +19,13 @@ public class ReviewPromptBuilder {
      * @param changedFiles    List of files changed in the implementation
      * @param diff            Full diff vs. base branch
      * @param securityReview  Whether to include security review dimension
+     * @param threshold       Minimum score (0.0-1.0) each dimension must meet for the review to pass
      * @return The complete review prompt string
      */
     public String buildReviewPrompt(String issueTitle, String issueBody,
                                       List<String> changedFiles, String diff,
-                                      boolean securityReview) {
+                                      boolean securityReview, double threshold) {
+        String thresholdText = String.format("%.2f", threshold);
         StringBuilder prompt = new StringBuilder();
 
         prompt.append("""
@@ -98,13 +100,13 @@ public class ReviewPromptBuilder {
                 "advice": "Overall advice for the implementing agent"}
 
                 **Rules for pass/fail:**
-                - Set "passed" to true ONLY if ALL scores are >= 0.7 AND there are no high-severity findings
-                - Set "passed" to false if ANY score is below 0.7 OR there are high-severity findings
+                - Set "passed" to true ONLY if ALL scores are >= %s AND there are no high-severity findings
+                - Set "passed" to false if ANY score is below %s OR there are high-severity findings
 
                 **Valid categories:** spec_compliance, correctness, code_quality, test_coverage, \
                 architecture_fit, regressions, security
                 **Valid severities:** high, medium, low
-                """);
+                """.formatted(thresholdText, thresholdText));
 
         if (!securityReview) {
             prompt.append("\nOmit securityScore from the response (set to 1.0) since security review is not enabled.\n");

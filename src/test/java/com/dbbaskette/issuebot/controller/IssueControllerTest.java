@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
@@ -57,6 +58,7 @@ class IssueControllerTest {
         final IssueBotProperties properties = mock(IssueBotProperties.class);
         final IssueDecompositionService decompositionService = mock(IssueDecompositionService.class);
         final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
+        final IterationRepository iterationRepository = mock(IterationRepository.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -68,6 +70,7 @@ class IssueControllerTest {
             issue.setId(1L);
             issue.setStatus(initialStatus);
             when(issues.findById(1L)).thenReturn(Optional.of(issue));
+            when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
             try {
                 when(gitHubApiClient.listOpenPullRequests("acme", "widgets", GitOperationsService.BRANCH_PREFIX))
                         .thenReturn(List.of());
@@ -76,7 +79,7 @@ class IssueControllerTest {
             }
 
             controller = new IssueController(issues, repos,
-                    mock(IterationRepository.class), mock(EventRepository.class),
+                    iterationRepository, mock(EventRepository.class),
                     mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), mock(EventService.class),
                     gitHubApiClient, properties, decompositionService, cancellationService,
@@ -174,5 +177,29 @@ class IssueControllerTest {
 
         verify(f.decompositionService).approveProposal(f.issue);
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void detailExposesNullLatestIterationWhenNoIterations() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isNull();
+    }
+
+    @Test
+    void detailExposesLatestIterationAsLastElement() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        Iteration first = new Iteration(f.issue, 1);
+        Iteration second = new Iteration(f.issue, 2);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(first, second));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isSameAs(second);
     }
 }
