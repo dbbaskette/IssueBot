@@ -1581,8 +1581,11 @@ public class IssueWorkflowService {
 
     /**
      * Parse a stream-json line from Claude Code and broadcast readable text via SSE.
+     * Package-private (rather than private) so it can be exercised directly in
+     * IssueWorkflowServiceTest, matching this class's existing test-seam convention
+     * for the phase methods (#84).
      */
-    private void streamClaudeLog(Long issueId, String line) {
+    void streamClaudeLog(Long issueId, String line) {
         if (line == null || line.isBlank()) return;
         try {
             JsonNode node = objectMapper.readTree(line);
@@ -1629,8 +1632,11 @@ public class IssueWorkflowService {
             }
 
             if (text != null && !text.isBlank()) {
-                if (text.length() > 500) {
-                    text = text.substring(0, 500) + "...";
+                // Cap raised from 500 to 10,000 (#84) — the client now renders long
+                // lines collapsed with a "show more" expander instead of relying on
+                // the server to truncate for display; this cap only bounds memory.
+                if (text.length() > 10_000) {
+                    text = text.substring(0, 10_000) + "...";
                 }
                 sseService.broadcastClaudeLog(issueId, text);
             }

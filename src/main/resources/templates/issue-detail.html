@@ -388,8 +388,20 @@
     <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3 live-terminal-panel" id="live-terminal-panel">
         <div class="panel-header">
             <h3>Claude Code Session</h3>
-            <div class="flex gap-1" style="align-items:center">
+            <div class="flex gap-1 terminal-toolbar" style="align-items:center;flex-wrap:wrap">
                 <span class="terminal-trim-note text-sm text-muted" id="terminal-trim-note" hidden></span>
+                <!--/* Filter box (#84): substring-hides non-matching lines live, both existing
+                       and future ones — see IssueBotTerminal.applyFilter/_appendLine in app.js. */-->
+                <div class="terminal-filter-group">
+                    <i class="ti ti-filter" aria-hidden="true"></i>
+                    <input type="text" id="terminal-filter" class="terminal-filter-input"
+                           data-terminal-filter placeholder="Filter output…"
+                           aria-label="Filter terminal output">
+                    <button type="button" class="terminal-filter-clear" id="terminal-filter-clear"
+                            data-terminal-filter-clear title="Clear filter" aria-label="Clear filter">
+                        <i class="ti ti-x" aria-hidden="true"></i>
+                    </button>
+                </div>
                 <button type="button" class="btn btn-ghost btn-sm" id="terminal-scroll-lock"
                         data-terminal-scroll-lock aria-pressed="false" title="Follow new output">
                     <i class="ti ti-arrow-down-circle" aria-hidden="true"></i> Following
@@ -398,13 +410,19 @@
                         data-terminal-copy title="Copy terminal output">
                     <i class="ti ti-copy" aria-hidden="true"></i> Copy
                 </button>
+                <!--/* Download (#84): client-side Blob of every buffered line's dataset.raw —
+                       see IssueBotTerminal.download in app.js. */-->
+                <button type="button" class="btn btn-ghost btn-sm" id="terminal-download"
+                        data-terminal-download th:title="${'Download issue-' + issue.id + '-terminal.txt'}">
+                    <i class="ti ti-download" aria-hidden="true"></i> Download
+                </button>
                 <span class="status-dot running"></span>
                 <span class="text-sm text-muted">Streaming</span>
             </div>
         </div>
         <div class="panel-body terminal-well" style="padding:0;position:relative">
             <div id="live-terminal" class="live-terminal" aria-live="polite" role="log">
-                <div class="terminal-line terminal-system">Waiting for Claude Code output...</div>
+                <div class="terminal-line term-system" data-raw="Waiting for Claude Code output...">Waiting for Claude Code output...</div>
             </div>
             <button type="button" class="terminal-jump-btn" id="terminal-jump" data-terminal-jump hidden>
                 <i class="ti ti-arrow-down" aria-hidden="true"></i> Jump to bottom
