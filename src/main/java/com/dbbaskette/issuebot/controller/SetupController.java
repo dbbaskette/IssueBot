@@ -25,6 +25,8 @@ public class SetupController {
 
     private static final DateTimeFormatter LAST_EVENT_FORMAT =
             DateTimeFormatter.ofPattern("MMM d, HH:mm:ss").withZone(ZoneId.systemDefault());
+    private static final DateTimeFormatter DELIVERY_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
 
     private final ClaudeCodeService claudeCodeService;
     private final IssueBotProperties properties;
@@ -33,6 +35,7 @@ public class SetupController {
     private final GitHubApiClient gitHubApiClient;
     private final WatchedRepoRepository repoRepository;
     private final WebhookController webhookController;
+    private final WebhookDeliveryLog webhookDeliveryLog;
 
     public SetupController(ClaudeCodeService claudeCodeService,
                             IssueBotProperties properties,
@@ -40,7 +43,8 @@ public class SetupController {
                             TrackedIssueRepository issueRepository,
                             GitHubApiClient gitHubApiClient,
                             WatchedRepoRepository repoRepository,
-                            WebhookController webhookController) {
+                            WebhookController webhookController,
+                            WebhookDeliveryLog webhookDeliveryLog) {
         this.claudeCodeService = claudeCodeService;
         this.properties = properties;
         this.pollingService = pollingService;
@@ -48,10 +52,15 @@ public class SetupController {
         this.gitHubApiClient = gitHubApiClient;
         this.repoRepository = repoRepository;
         this.webhookController = webhookController;
+        this.webhookDeliveryLog = webhookDeliveryLog;
     }
 
     /** Row of the Webhooks table on the setup page: a watched repo and when it last sent a webhook event. */
     public record WebhookRepoStatus(String fullName, String lastEventDisplay) {}
+
+    /** Row of the recent-deliveries table on the setup page's Webhooks card. */
+    public record WebhookDeliveryRow(String time, String eventAction, String repo,
+                                      String outcome, String badgeClass, String detail) {}
 
     /**
      * Main setup page — loads instantly with "Checking..." placeholders.
@@ -69,6 +78,11 @@ public class SetupController {
         model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());
         model.addAttribute("webhookRepoStatuses", webhookRepoStatuses());
 
+        model.addAttribute("webhookTotalReceived", webhookDeliveryLog.totalReceived());
+        model.addAttribute("webhookSignatureFailures", webhookDeliveryLog.signatureFailures());
+        model.addAttribute("webhookActionsTaken", webhookDeliveryLog.actionsTaken());
+        model.addAttribute("webhookDeliveries", webhookDeliveryRows());
+
         return ViewResolver.view("setup", hx != null);
     }
 
@@ -81,6 +95,35 @@ public class SetupController {
                                 .map(LAST_EVENT_FORMAT::format)
                                 .orElse("never")))
                 .toList();
+    }
+
+    private List<WebhookDeliveryRow> webhookDeliveryRows() {
+        return webhookDeliveryLog.recentDeliveries().stream()
+                .map(d -> new WebhookDeliveryRow(
+                        DELIVERY_TIME_FORMAT.format(d.at()),
+                        eventActionLabel(d.event(), d.action()),
+                        d.repo() == null ? "—" : d.repo(),
+                        d.outcome(),
+                        outcomeBadgeClass(d.outcome()),
+                        d.detail() == null ? "—" : d.detail()))
+                .toList();
+    }
+
+    private static String eventActionLabel(String event, String action) {
+        if (event == null || event.isBlank()) return "—";
+        if (action == null || action.isBlank()) return event;
+        return event + "." + action;
+    }
+
+    /** Maps a delivery outcome to an existing status-badge CSS class (ok/warn/danger/neutral). */
+    private static String outcomeBadgeClass(String outcome) {
+        return switch (outcome) {
+            case "started", "recheck" -> "status-completed";
+            case "queued" -> "status-queued";
+            case "blocked" -> "status-blocked";
+            case "bad-signature", "oversized", "error" -> "status-failed";
+            default -> "status-pending"; // already_tracked, ignored
+        };
     }
 
     /**

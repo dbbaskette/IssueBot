@@ -251,7 +251,7 @@ public class IssuePollingService {
         long slotsUsed = 0;
         for (JsonNode issueNode : issues) {
             if (slotsUsed >= availableSlots) break;
-            if (evaluateIssue(repo, issueNode)) {
+            if (evaluateIssue(repo, issueNode) == WebhookOutcome.STARTED) {
                 slotsUsed++;
             }
         }
@@ -263,19 +263,19 @@ public class IssuePollingService {
      * gating, and IN_PROGRESS start. Shared by the polling loop ({@link #pollRepo})
      * and the webhook path ({@link #evaluateSingleIssueFromWebhook}).
      *
-     * @return true if the issue was actually started (workflow kicked off); false if
-     *         it was skipped, blocked, or queued for later.
+     * @return the outcome of the evaluation — {@link WebhookOutcome#STARTED} if the
+     *         workflow was actually kicked off, otherwise the reason it wasn't.
      */
-    public boolean evaluateIssue(WatchedRepo repo, JsonNode issueNode) {
+    public WebhookOutcome evaluateIssue(WatchedRepo repo, JsonNode issueNode) {
         // Skip pull requests (GitHub API returns PRs in issues endpoint)
-        if (issueNode.has("pull_request")) return false;
+        if (issueNode.has("pull_request")) return WebhookOutcome.IGNORED;
 
         int issueNumber = issueNode.get("number").asInt();
         String title = issueNode.path("title").asText("Untitled");
 
-        if (!qualifiesForProcessing(repo, issueNumber)) return false;
+        if (!qualifiesForProcessing(repo, issueNumber)) return WebhookOutcome.ALREADY_TRACKED;
 
-        if (blockIfUnresolvedDependencies(repo, issueNumber, title)) return false;
+        if (blockIfUnresolvedDependencies(repo, issueNumber, title)) return WebhookOutcome.BLOCKED;
 
         // No blockers — existing flow
         TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
@@ -292,7 +292,7 @@ public class IssuePollingService {
             notificationService.info("Issue Queued",
                     repo.fullName() + " #" + issueNumber + ": " + title
                             + " (waiting for open PR to merge)");
-            return false;
+            return WebhookOutcome.QUEUED;
         }
 
         // Auto-start OFF: discover and queue but don't start
@@ -305,7 +305,7 @@ public class IssuePollingService {
             notificationService.info("Issue Discovered",
                     repo.fullName() + " #" + issueNumber + ": " + title
                             + " (queued — manual start required)");
-            return false;
+            return WebhookOutcome.QUEUED;
         }
 
         // Set IN_PROGRESS before saving so the per-repo gate sees it
@@ -322,7 +322,7 @@ public class IssuePollingService {
 
         // Start workflow
         workflowService.processIssueAsync(tracked);
-        return true;
+        return WebhookOutcome.STARTED;
     }
 
     /**
@@ -333,30 +333,31 @@ public class IssuePollingService {
      * iterating repos — if the fleet is already at max concurrent issues, the issue
      * is queued (not started) so it will be picked up later by {@link #drainQueuedIssues}
      * or the next poll cycle.
+     *
+     * @return the outcome of the evaluation, for the webhook delivery log on the setup page.
      */
-    public void evaluateSingleIssueFromWebhook(WatchedRepo repo, JsonNode issueNode) {
+    public WebhookOutcome evaluateSingleIssueFromWebhook(WatchedRepo repo, JsonNode issueNode) {
         long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
         int maxConcurrent = properties.getMaxConcurrentIssues();
         if (activeCount >= maxConcurrent) {
-            queueAtCapacity(repo, issueNode, maxConcurrent);
-            return;
+            return queueAtCapacity(repo, issueNode, maxConcurrent);
         }
-        evaluateIssue(repo, issueNode);
+        return evaluateIssue(repo, issueNode);
     }
 
-    private void queueAtCapacity(WatchedRepo repo, JsonNode issueNode, int maxConcurrent) {
-        if (issueNode.has("pull_request")) return;
+    private WebhookOutcome queueAtCapacity(WatchedRepo repo, JsonNode issueNode, int maxConcurrent) {
+        if (issueNode.has("pull_request")) return WebhookOutcome.IGNORED;
 
         int issueNumber = issueNode.get("number").asInt();
         String title = issueNode.path("title").asText("Untitled");
 
-        if (!qualifiesForProcessing(repo, issueNumber)) return;
+        if (!qualifiesForProcessing(repo, issueNumber)) return WebhookOutcome.ALREADY_TRACKED;
 
         // Dependency state wins over capacity queueing: an issue with unresolved
         // blockers must be tracked as BLOCKED (so the recheck loop can promote it
         // when its blockers close), not QUEUED (which would let drainQueuedIssues
         // start it while its dependencies are still open).
-        if (blockIfUnresolvedDependencies(repo, issueNumber, title)) return;
+        if (blockIfUnresolvedDependencies(repo, issueNumber, title)) return WebhookOutcome.BLOCKED;
 
         TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
         tracked.setStatus(IssueStatus.QUEUED);
@@ -367,6 +368,7 @@ public class IssuePollingService {
                 repo, tracked);
         notificationService.info("Issue Queued",
                 repo.fullName() + " #" + issueNumber + ": " + title + " (at capacity, waiting for a slot)");
+        return WebhookOutcome.QUEUED;
     }
 
     /**

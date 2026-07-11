@@ -22,8 +22,9 @@ import static org.mockito.Mockito.*;
 class SetupControllerTest {
 
     private final WatchedRepoRepository repoRepository = mock(WatchedRepoRepository.class);
+    private final WebhookDeliveryLog webhookDeliveryLog = new WebhookDeliveryLog();
     private final WebhookController webhookController = new WebhookController(
-            new WebhookSignatureVerifier(), repoRepository, mock(IssuePollingService.class), "");
+            new WebhookSignatureVerifier(), repoRepository, mock(IssuePollingService.class), webhookDeliveryLog, "");
 
     private SetupController controller(GitHubApiClient gitHub, String token) {
         return controller(gitHub, token, webhookController);
@@ -37,7 +38,7 @@ class SetupControllerTest {
         when(claude.checkAuthentication()).thenReturn(true);
         lenient().when(repoRepository.findAll()).thenReturn(List.of());
         return new SetupController(claude, props, mock(IssuePollingService.class),
-                mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks);
+                mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks, webhookDeliveryLog);
     }
 
     @Test
@@ -93,7 +94,8 @@ class SetupControllerTest {
     @Test
     void setup_webhookSecretSet_reportsConfigured() {
         WebhookController secretConfigured = new WebhookController(
-                new WebhookSignatureVerifier(), repoRepository, mock(IssuePollingService.class), "a-real-secret");
+                new WebhookSignatureVerifier(), repoRepository, mock(IssuePollingService.class),
+                webhookDeliveryLog, "a-real-secret");
 
         Model model = new ExtendedModelMap();
         controller(mock(GitHubApiClient.class), null, secretConfigured).setup(model, null);
@@ -133,5 +135,54 @@ class SetupControllerTest {
                 (List<SetupController.WebhookRepoStatus>) model.getAttribute("webhookRepoStatuses");
         assertThat(statuses).hasSize(1);
         assertThat(statuses.get(0).lastEventDisplay()).isNotEqualTo("never");
+    }
+
+    // === Delivery log: counters + deliveries table ===
+
+    @Test
+    void setup_noDeliveriesYet_countersZeroAndTableEmpty() {
+        SetupController controller = controller(mock(GitHubApiClient.class), null);
+
+        Model model = new ExtendedModelMap();
+        controller.setup(model, null);
+
+        assertThat(model.getAttribute("webhookTotalReceived")).isEqualTo(0L);
+        assertThat(model.getAttribute("webhookSignatureFailures")).isEqualTo(0L);
+        assertThat(model.getAttribute("webhookActionsTaken")).isEqualTo(0L);
+        assertThat((List<?>) model.getAttribute("webhookDeliveries")).isEmpty();
+    }
+
+    @Test
+    void setup_exposesCountersAndDeliveryRows() {
+        webhookDeliveryLog.record("issues", "labeled", "acme/widgets", "started", "issue #12 started");
+        webhookDeliveryLog.record(null, null, "—", "bad-signature", null);
+
+        SetupController controller = controller(mock(GitHubApiClient.class), null);
+        Model model = new ExtendedModelMap();
+        controller.setup(model, null);
+
+        assertThat(model.getAttribute("webhookTotalReceived")).isEqualTo(2L);
+        assertThat(model.getAttribute("webhookSignatureFailures")).isEqualTo(1L);
+        assertThat(model.getAttribute("webhookActionsTaken")).isEqualTo(1L);
+
+        @SuppressWarnings("unchecked")
+        List<SetupController.WebhookDeliveryRow> rows =
+                (List<SetupController.WebhookDeliveryRow>) model.getAttribute("webhookDeliveries");
+        assertThat(rows).hasSize(2);
+
+        // Newest first: the bad-signature record was added after the labeled one.
+        SetupController.WebhookDeliveryRow badSig = rows.get(0);
+        assertThat(badSig.outcome()).isEqualTo("bad-signature");
+        assertThat(badSig.repo()).isEqualTo("—");
+        assertThat(badSig.badgeClass()).isEqualTo("status-failed");
+        assertThat(badSig.eventAction()).isEqualTo("—");
+
+        SetupController.WebhookDeliveryRow started = rows.get(1);
+        assertThat(started.outcome()).isEqualTo("started");
+        assertThat(started.eventAction()).isEqualTo("issues.labeled");
+        assertThat(started.repo()).isEqualTo("acme/widgets");
+        assertThat(started.badgeClass()).isEqualTo("status-completed");
+        assertThat(started.detail()).isEqualTo("issue #12 started");
+        assertThat(started.time()).matches("\\d{2}:\\d{2}:\\d{2}");
     }
 }

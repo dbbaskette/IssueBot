@@ -98,6 +98,52 @@
             </tbody>
         </table>
 
+        <h4>Delivery Health</h4>
+        <div class="metrics-grid mb-2">
+            <div class="metric-tile">
+                <div class="label"><i class="ti ti-antenna" aria-hidden="true"></i> Received</div>
+                <div class="value" th:text="${webhookTotalReceived}">0</div>
+            </div>
+            <div class="metric-tile" th:classappend="${webhookSignatureFailures > 0} ? 'danger' : ''">
+                <div class="label"><i class="ti ti-shield-x" aria-hidden="true"></i> Signature Failures</div>
+                <div class="value" th:text="${webhookSignatureFailures}">0</div>
+            </div>
+            <div class="metric-tile ok">
+                <div class="label"><i class="ti ti-bolt" aria-hidden="true"></i> Actions Taken</div>
+                <div class="value" th:text="${webhookActionsTaken}">0</div>
+            </div>
+        </div>
+
+        <h4 style="display:flex;align-items:center;justify-content:space-between">
+            <span>Recent Deliveries</span>
+            <a href="/setup" class="btn btn-outline btn-sm">
+                <i class="ti ti-refresh" aria-hidden="true"></i> Refresh
+            </a>
+        </h4>
+        <table class="data-table mb-2">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Event</th>
+                    <th>Repository</th>
+                    <th>Outcome</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="delivery : ${webhookDeliveries}">
+                    <td th:text="${delivery.time()}">12:00:00</td>
+                    <td th:text="${delivery.eventAction()}">issues.labeled</td>
+                    <td th:text="${delivery.repo()}">owner/repo</td>
+                    <td><span class="status" th:classappend="${delivery.badgeClass()}" th:text="${delivery.outcome()}">started</span></td>
+                    <td th:text="${delivery.detail()}">issue #12 started</td>
+                </tr>
+                <tr th:if="${#lists.isEmpty(webhookDeliveries)}">
+                    <td colspan="5" style="color: var(--text-tertiary)">No deliveries received yet.</td>
+                </tr>
+            </tbody>
+        </table>
+
         <p class="text-sm text-muted">
             On GitHub: repo <strong>Settings &rarr; Webhooks &rarr; Add webhook</strong>, set the payload URL above,
             content type <code>application/json</code>, the same secret as <code>ISSUEBOT_WEBHOOK_SECRET</code>,

@@ -49,10 +49,19 @@ class SetupPageRenderTest {
     }
 
     private WebContext baseContext(boolean secretConfigured, List<SetupController.WebhookRepoStatus> statuses) {
+        return baseContext(secretConfigured, statuses, List.of());
+    }
+
+    private WebContext baseContext(boolean secretConfigured, List<SetupController.WebhookRepoStatus> statuses,
+                                    List<SetupController.WebhookDeliveryRow> deliveries) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("webhookPath", "/webhooks/github");
         context.setVariable("webhookSecretConfigured", secretConfigured);
         context.setVariable("webhookRepoStatuses", statuses);
+        context.setVariable("webhookTotalReceived", 0L);
+        context.setVariable("webhookSignatureFailures", 0L);
+        context.setVariable("webhookActionsTaken", 0L);
+        context.setVariable("webhookDeliveries", deliveries);
         return context;
     }
 
@@ -94,5 +103,52 @@ class SetupPageRenderTest {
         assertThat(html).contains("never");
         assertThat(html).contains("Jul 10, 14:22:01");
         assertThat(html).doesNotContain("No repositories watched yet.");
+    }
+
+    @Test
+    void noDeliveries_showsZeroCountersAndEmptyMessage() {
+        String html = render(baseContext(true, List.of()));
+
+        assertThat(html).contains("No deliveries received yet.");
+        assertThat(html).contains("Recent Deliveries");
+        assertThat(html).contains("Refresh");
+    }
+
+    @Test
+    void deliveryRow_rendersTimeEventRepoOutcomeAndDetail() {
+        List<SetupController.WebhookDeliveryRow> deliveries = List.of(
+                new SetupController.WebhookDeliveryRow(
+                        "14:22:01", "issues.labeled", "acme/widgets", "started", "status-completed", "issue #12 started"),
+                new SetupController.WebhookDeliveryRow(
+                        "14:21:00", "—", "—", "bad-signature", "status-failed", "—"));
+
+        String html = render(baseContext(true, List.of(), deliveries));
+
+        assertThat(html).contains("14:22:01");
+        assertThat(html).contains("issues.labeled");
+        assertThat(html).contains("acme/widgets");
+        assertThat(html).contains("started");
+        assertThat(html).contains("status-completed");
+        assertThat(html).contains("issue #12 started");
+        assertThat(html).contains("bad-signature");
+        assertThat(html).contains("status-failed");
+        assertThat(html).doesNotContain("No deliveries received yet.");
+    }
+
+    @Test
+    void countersRendered() {
+        WebContext context = baseContext(true, List.of());
+        context.setVariable("webhookTotalReceived", 12L);
+        context.setVariable("webhookSignatureFailures", 3L);
+        context.setVariable("webhookActionsTaken", 5L);
+
+        String html = render(context);
+
+        assertThat(html).contains("Received");
+        assertThat(html).contains("Signature Failures");
+        assertThat(html).contains("Actions Taken");
+        assertThat(html).contains(">12<");
+        assertThat(html).contains(">3<");
+        assertThat(html).contains(">5<");
     }
 }
