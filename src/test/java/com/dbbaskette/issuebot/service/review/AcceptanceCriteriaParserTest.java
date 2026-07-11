@@ -204,6 +204,29 @@ class AcceptanceCriteriaParserTest {
     }
 
     @Test
+    void nestedSubBulletsUnderCriteriaHeadingAreSkippedWithoutEndingSection() {
+        // Only top-level bullets are criteria; indented sub-bullets are detail
+        // lines — skipped, but they must NOT terminate the section (the next
+        // top-level bullet is still captured).
+        String body = """
+                ## Acceptance Criteria
+                - Parent criterion
+                  - nested sub-bullet detail
+                    - deeper nested detail
+                - Second parent criterion
+                \t- tab-indented detail
+                - Third parent criterion
+                """;
+
+        List<String> criteria = AcceptanceCriteriaParser.parse(body);
+
+        assertThat(criteria).containsExactly(
+                "Parent criterion",
+                "Second parent criterion",
+                "Third parent criterion");
+    }
+
+    @Test
     void bulletsUnderUnrelatedHeadingAreNotCaptured() {
         String body = """
                 ## Notes

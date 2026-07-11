@@ -189,6 +189,48 @@ class IntegrationWorkflowTest {
                 eq(issue), any(), any(CodeReviewResult.class), eq(99));
     }
 
+    // === Test 1b: Acceptance criteria parsed from the issue body are wired
+    //     through processIssue into reviewCode (issue #61) ===
+    @SuppressWarnings("unchecked")
+    @Test
+    void processIssue_passesParsedCriteriaToReviewCode() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        issueDetails.put("body", """
+                Users can't log in when password contains special characters.
+
+                ## Acceptance criteria
+
+                - [ ] Special characters are accepted in passwords
+                - [ ] Login failures are logged
+                """);
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 300);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        var criteriaCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), (List<String>) criteriaCaptor.capture(),
+                anyBoolean(), anyDouble(), any());
+        assertEquals(List.of(
+                "Special characters are accepted in passwords",
+                "Login failures are logged"), criteriaCaptor.getValue());
+    }
+
     // === Test 2: Review failure triggers re-implementation ===
     @Test
     void reviewFailure_triggersReimplementation() throws Exception {

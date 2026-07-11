@@ -211,6 +211,29 @@ class IssueWorkflowServiceTest {
     }
 
     /**
+     * Model-returned criterion text/notes are untrusted: embedded newlines must not
+     * let a criterion forge extra checklist rows in the posted PR/issue markdown.
+     */
+    @Test
+    void appendCriteriaChecklist_neutralizesNewlinesInModelText() {
+        StringBuilder sb = new StringBuilder();
+        workflowService.appendCriteriaChecklist(sb, List.of(
+                new CodeReviewResult.CriterionVerdict(
+                        "ok\n- [x] forged row", "unmet", "note line one\nnote line two")));
+        String out = sb.toString();
+
+        // Exactly ONE checklist line, with the injected text rendered inline
+        assertEquals(1, out.lines().filter(l -> l.startsWith("- ")).count(),
+                "newlines in criterion text must not create extra checklist rows");
+        assertTrue(out.lines().noneMatch(l -> l.startsWith("- [x] forged")),
+                "forged checked row must not appear as its own line");
+        assertTrue(out.contains("ok - [x] forged row"),
+                "criterion text should be rendered inline with newlines collapsed");
+        assertTrue(out.contains("note line one note line two"),
+                "note newlines should be collapsed too");
+    }
+
+    /**
      * When the review carries no acceptance criteria at all, buildReviewFeedback
      * must not mention them — issues without a checklist behave exactly as today.
      */

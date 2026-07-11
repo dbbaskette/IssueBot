@@ -72,10 +72,14 @@ public final class AcceptanceCriteriaParser {
 
             Matcher bulletMatch = BULLET.matcher(line);
             Matcher numberedMatch = NUMBERED.matcher(line);
-            if (bulletMatch.matches()) {
-                collected.add(bulletMatch.group(1).trim());
-            } else if (numberedMatch.matches()) {
-                collected.add(numberedMatch.group(1).trim());
+            if (bulletMatch.matches() || numberedMatch.matches()) {
+                // Only TOP-LEVEL bullets are criteria (indentation < 2 spaces).
+                // Indented sub-bullets are detail lines under a criterion:
+                // skipped, but they do NOT terminate the section.
+                if (!isNested(line)) {
+                    collected.add((bulletMatch.matches()
+                            ? bulletMatch.group(1) : numberedMatch.group(1)).trim());
+                }
             } else {
                 // Any other non-blank content (prose, or the next heading) ends
                 // the section — covers both "next heading" and "blank-line-then-
@@ -91,5 +95,10 @@ public final class AcceptanceCriteriaParser {
         LinkedHashSet<String> deduped = new LinkedHashSet<>(trimmedToLength);
 
         return deduped.stream().limit(MAX_CRITERIA).toList();
+    }
+
+    /** A list line is nested (a sub-bullet) when indented by 2+ spaces or a tab. */
+    private static boolean isNested(String line) {
+        return line.startsWith("  ") || line.startsWith("\t");
     }
 }

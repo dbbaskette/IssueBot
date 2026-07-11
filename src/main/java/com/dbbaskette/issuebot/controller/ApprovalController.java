@@ -305,7 +305,8 @@ public class ApprovalController {
 
     /**
      * Parse the review JSON's "criteria" array into per-criterion verdicts
-     * (issue #61), leniently: missing/unknown verdict strings default to "unclear".
+     * (issue #61), leniently: missing/unknown verdict strings default to "unclear"
+     * via {@link CodeReviewResult.CriterionVerdict#lenient}.
      */
     private List<CodeReviewResult.CriterionVerdict> parseCriteria(JsonNode criteriaNode) {
         if (!criteriaNode.isArray()) {
@@ -313,18 +314,10 @@ public class ApprovalController {
         }
         List<CodeReviewResult.CriterionVerdict> criteria = new java.util.ArrayList<>();
         for (JsonNode c : criteriaNode) {
-            String text = c.path("text").asText("");
-            String verdictRaw = c.path("verdict").asText("");
-            String verdict;
-            if ("met".equalsIgnoreCase(verdictRaw)) {
-                verdict = "met";
-            } else if ("unmet".equalsIgnoreCase(verdictRaw)) {
-                verdict = "unmet";
-            } else {
-                verdict = "unclear";
-            }
-            String note = c.path("note").asText("");
-            criteria.add(new CodeReviewResult.CriterionVerdict(text, verdict, note));
+            criteria.add(CodeReviewResult.CriterionVerdict.lenient(
+                    c.path("text").asText(""),
+                    c.path("verdict").asText(""),
+                    c.path("note").asText("")));
         }
         return criteria;
     }

@@ -926,32 +926,41 @@ public class IssueWorkflowService {
      * Render a per-criterion checklist (issue #61): met criteria as checked items,
      * unmet/unclear as unchecked with the reviewer's note attached. No-op when the
      * review carries no acceptance criteria (issues without a checklist behave
-     * exactly as today).
+     * exactly as today). Model-returned text/notes are untrusted, so both are
+     * collapsed to one line — embedded newlines must not forge extra checklist rows
+     * in the posted PR/issue markdown. Package-private for direct unit testing.
      */
-    private void appendCriteriaChecklist(StringBuilder sb, List<CodeReviewResult.CriterionVerdict> criteria) {
+    void appendCriteriaChecklist(StringBuilder sb, List<CodeReviewResult.CriterionVerdict> criteria) {
         if (criteria == null || criteria.isEmpty()) {
             return;
         }
         sb.append("\n#### Acceptance Criteria\n\n");
         for (CodeReviewResult.CriterionVerdict c : criteria) {
+            String text = oneLine(c.text());
+            String note = oneLine(c.note());
             switch (c.verdict()) {
-                case "met" -> sb.append("- [x] ").append(c.text()).append("\n");
+                case "met" -> sb.append("- [x] ").append(text).append("\n");
                 case "unmet" -> {
-                    sb.append("- [ ] ").append(c.text());
-                    if (c.note() != null && !c.note().isBlank()) {
-                        sb.append(" — ⚠ ").append(c.note());
+                    sb.append("- [ ] ").append(text);
+                    if (!note.isEmpty()) {
+                        sb.append(" — ⚠ ").append(note);
                     }
                     sb.append("\n");
                 }
                 default -> {
-                    sb.append("- [ ] ").append(c.text()).append(" — (unclear)");
-                    if (c.note() != null && !c.note().isBlank()) {
-                        sb.append(" ").append(c.note());
+                    sb.append("- [ ] ").append(text).append(" — (unclear)");
+                    if (!note.isEmpty()) {
+                        sb.append(" ").append(note);
                     }
                     sb.append("\n");
                 }
             }
         }
+    }
+
+    /** Collapse all line breaks to single spaces so untrusted text cannot span checklist lines. */
+    private static String oneLine(String s) {
+        return s == null ? "" : s.replaceAll("\\R+", " ").strip();
     }
 
     private String formatScore(double score, double threshold) {
