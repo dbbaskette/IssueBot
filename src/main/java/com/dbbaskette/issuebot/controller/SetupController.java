@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -12,27 +13,45 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.io.File;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 @Controller
 public class SetupController {
+
+    private static final DateTimeFormatter LAST_EVENT_FORMAT =
+            DateTimeFormatter.ofPattern("MMM d, HH:mm:ss").withZone(ZoneId.systemDefault());
 
     private final ClaudeCodeService claudeCodeService;
     private final IssueBotProperties properties;
     private final IssuePollingService pollingService;
     private final TrackedIssueRepository issueRepository;
     private final GitHubApiClient gitHubApiClient;
+    private final WatchedRepoRepository repoRepository;
+    private final WebhookController webhookController;
 
     public SetupController(ClaudeCodeService claudeCodeService,
                             IssueBotProperties properties,
                             IssuePollingService pollingService,
                             TrackedIssueRepository issueRepository,
-                            GitHubApiClient gitHubApiClient) {
+                            GitHubApiClient gitHubApiClient,
+                            WatchedRepoRepository repoRepository,
+                            WebhookController webhookController) {
         this.claudeCodeService = claudeCodeService;
         this.properties = properties;
         this.pollingService = pollingService;
         this.issueRepository = issueRepository;
         this.gitHubApiClient = gitHubApiClient;
+        this.repoRepository = repoRepository;
+        this.webhookController = webhookController;
     }
+
+    /** Row of the Webhooks table on the setup page: a watched repo and when it last sent a webhook event. */
+    public record WebhookRepoStatus(String fullName, String lastEventDisplay) {}
 
     /**
      * Main setup page — loads instantly with "Checking..." placeholders.
@@ -45,7 +64,23 @@ public class SetupController {
         model.addAttribute("contentTemplate", "setup");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+
+        model.addAttribute("webhookPath", "/webhooks/github");
+        model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());
+        model.addAttribute("webhookRepoStatuses", webhookRepoStatuses());
+
         return ViewResolver.view("setup", hx != null);
+    }
+
+    private List<WebhookRepoStatus> webhookRepoStatuses() {
+        Map<String, Instant> lastEvents = webhookController.getLastEventTimestamps();
+        return repoRepository.findAll().stream()
+                .map(repo -> new WebhookRepoStatus(
+                        repo.fullName(),
+                        Optional.ofNullable(lastEvents.get(repo.fullName()))
+                                .map(LAST_EVENT_FORMAT::format)
+                                .orElse("never")))
+                .toList();
     }
 
     /**

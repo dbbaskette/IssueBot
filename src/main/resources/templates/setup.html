@@ -54,6 +54,62 @@
 
     <div class="glass-card mb-3">
         <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+            <h3>Webhooks</h3>
+        </div>
+        <p class="text-sm text-muted mb-2">
+            GitHub webhooks give near-instant issue pickup instead of waiting for the next poll.
+            Polling keeps running as a fallback, so webhooks are optional but recommended.
+        </p>
+        <table class="data-table mb-2">
+            <tbody>
+                <tr>
+                    <td style="width: 200px">Payload URL</td>
+                    <td><code th:text="${webhookPath}">/webhooks/github</code></td>
+                </tr>
+                <tr>
+                    <td>Secret</td>
+                    <td>
+                        <span class="status" th:classappend="${webhookSecretConfigured ? 'status-completed' : 'status-failed'}"
+                              th:text="${webhookSecretConfigured ? 'SET' : 'NOT SET'}">SET</span>
+                        <span class="text-sm text-muted" style="margin-left: 0.5rem">
+                            (value is never displayed — set via the <code>ISSUEBOT_WEBHOOK_SECRET</code> environment variable)
+                        </span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h4>Watched Repositories</h4>
+        <table class="data-table mb-2">
+            <thead>
+                <tr>
+                    <th>Repository</th>
+                    <th>Last Webhook Event</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="repoStatus : ${webhookRepoStatuses}">
+                    <td th:text="${repoStatus.fullName()}">owner/repo</td>
+                    <td th:text="${repoStatus.lastEventDisplay()}">never</td>
+                </tr>
+                <tr th:if="${#lists.isEmpty(webhookRepoStatuses)}">
+                    <td colspan="2" style="color: var(--text-tertiary)">No repositories watched yet.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="text-sm text-muted">
+            On GitHub: repo <strong>Settings &rarr; Webhooks &rarr; Add webhook</strong>, set the payload URL above,
+            content type <code>application/json</code>, the same secret as <code>ISSUEBOT_WEBHOOK_SECRET</code>,
+            and subscribe to the <strong>Issues</strong> event.
+            Running locally? GitHub needs a public URL — see the README's
+            <a href="https://github.com/dbbaskette/IssueBot#github-webhooks-instant-pickup" target="_blank" rel="noopener">webhook tunnel guide</a>
+            (smee.io, cloudflared, etc.).
+        </p>
+    </div>
+
+    <div class="glass-card mb-3">
+        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
             <h3>Quick Start</h3>
         </div>
         <h4>Next Steps</h4>

@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,6 +31,9 @@ class IssuePollingServiceTest {
     private TrackedIssueRepository issueRepository;
     private WatchedRepoRepository repoRepository;
     private GitHubApiClient gitHubApiClient;
+    private IssueWorkflowService workflowService;
+    private IssueBotProperties properties;
+    private DependencyResolverService dependencyResolver;
     private WatchedRepo testRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -38,15 +42,18 @@ class IssuePollingServiceTest {
         issueRepository = mock(TrackedIssueRepository.class);
         repoRepository = mock(WatchedRepoRepository.class);
         gitHubApiClient = mock(GitHubApiClient.class);
+        workflowService = mock(IssueWorkflowService.class);
+        properties = new IssueBotProperties();
+        dependencyResolver = mock(DependencyResolverService.class);
         pollingService = new IssuePollingService(
                 gitHubApiClient,
                 repoRepository,
                 issueRepository,
                 mock(EventService.class),
                 mock(NotificationService.class),
-                mock(IssueWorkflowService.class),
-                new IssueBotProperties(),
-                mock(DependencyResolverService.class)
+                workflowService,
+                properties,
+                dependencyResolver
         );
         testRepo = new WatchedRepo("owner", "repo");
     }
@@ -174,5 +181,96 @@ class IssuePollingServiceTest {
         pollingService.pollForIssues();
 
         verify(gitHubApiClient, never()).closeIssue(anyString(), anyString(), anyInt());
+    }
+
+    // === evaluateSingleIssueFromWebhook tests ===
+
+    @Test
+    void evaluateSingleIssueFromWebhook_atCapacity_queuesInsteadOfStarting() {
+        properties.setMaxConcurrentIssues(1);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(1L);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 99)).thenReturn(Optional.empty());
+        when(dependencyResolver.resolve(testRepo, 99))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 99);
+        issueNode.put("title", "Capacity test issue");
+
+        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertEquals(IssueStatus.QUEUED, captor.getValue().getStatus());
+        verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_atCapacityWithUnresolvedBlockers_blocksNotQueues() {
+        properties.setMaxConcurrentIssues(1);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(1L);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 101)).thenReturn(Optional.empty());
+        when(dependencyResolver.resolve(testRepo, 101))
+                .thenReturn(new DependencyResolverService.DependencyResult(
+                        List.of(5, 6), List.of(5, 6), "blocked chain", false));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 101);
+        issueNode.put("title", "Blocked at capacity");
+
+        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        // Dependency state wins over capacity queueing: the issue must be saved
+        // BLOCKED with its blocker list, never QUEUED, and never started.
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertEquals(IssueStatus.BLOCKED, captor.getValue().getStatus());
+        assertEquals("5,6", captor.getValue().getBlockedByIssues());
+        verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_underCapacity_startsIssue() {
+        properties.setMaxConcurrentIssues(3);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 100)).thenReturn(Optional.empty());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList())).thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(dependencyResolver.resolve(testRepo, 100))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 100);
+        issueNode.put("title", "Under capacity issue");
+
+        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertEquals(IssueStatus.IN_PROGRESS, captor.getValue().getStatus());
+        verify(workflowService).processIssueAsync(captor.getValue());
+    }
+
+    // === recheckRepo tests ===
+
+    @Test
+    void recheckRepo_promotesBlockedAndClosesCompletedParents() {
+        TrackedIssue blocked = new TrackedIssue(testRepo, 5, "Blocked issue");
+        blocked.setStatus(IssueStatus.BLOCKED);
+        blocked.setBlockedByIssues("6");
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.BLOCKED)).thenReturn(List.of(blocked));
+        when(dependencyResolver.allBlockersResolved(testRepo, "6")).thenReturn(true);
+
+        ObjectNode parent = objectMapper.createObjectNode();
+        parent.put("number", 10);
+        when(gitHubApiClient.listIssues("owner", "repo", "issuebot-parent", "open"))
+                .thenReturn(List.<JsonNode>of(parent));
+        when(gitHubApiClient.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(List.of());
+
+        pollingService.recheckRepo(testRepo);
+
+        assertEquals(IssueStatus.QUEUED, blocked.getStatus());
+        verify(gitHubApiClient).closeIssue("owner", "repo", 10);
     }
 }
