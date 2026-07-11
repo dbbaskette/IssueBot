@@ -93,4 +93,20 @@ class LocalVerificationServiceTest {
         assertTrue(result.output().toLowerCase().contains("timed out"));
         assertTrue(lines.stream().anyMatch(l -> l.contains("before")));
     }
+
+    @Test
+    void run_backgroundedChildHoldingStdout_doesNotHangSuccessPath() {
+        // bash exits 0 immediately, but the backgrounded sleep inherits stdout and
+        // holds the pipe open for 30s. The success path must not block on it: the
+        // bounded reader join (2s) forces EOF and returns promptly with the output
+        // produced before bash exited. Finishing in ~2s (not 30s) proves the fix.
+        long start = System.currentTimeMillis();
+        LocalVerificationService.Result result = service.run(repoPath,
+                List.of("sleep 30 & echo bg-started"), 1, null);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertTrue(result.success());
+        assertTrue(result.output().contains("bg-started"));
+        assertTrue(elapsed < 15_000, "success path must not wait on the backgrounded child (took " + elapsed + "ms)");
+    }
 }

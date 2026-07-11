@@ -136,16 +136,14 @@ public class LocalVerificationService {
             boolean finished = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS);
             if (!finished) {
                 killProcessTree(process);
-                // Stream is closed by the kill, so the reader terminates promptly;
-                // join unbounded before touching the buffer.
-                reader.join();
+                awaitReader(reader, process);
                 String timeoutLabel = formatTimeout(timeoutMillis);
                 output.append("Command timed out after ").append(timeoutLabel).append("\n");
                 log.warn("Local verification command timed out after {}: {}", timeoutLabel, command);
                 return new CommandOutcome(false, output.toString());
             }
 
-            reader.join();
+            awaitReader(reader, process);
             int exitCode = process.exitValue();
             if (exitCode != 0) {
                 output.append("Command exited with code ").append(exitCode).append("\n");
@@ -168,6 +166,31 @@ public class LocalVerificationService {
     private static void killProcessTree(Process process) {
         process.descendants().forEach(ProcessHandle::destroyForcibly);
         process.destroyForcibly();
+    }
+
+    /** Grace period for the output reader to drain after the command has ended. */
+    static final long READER_JOIN_MILLIS = 2_000;
+
+    /**
+     * Wait for the reader thread to finish, but never indefinitely: a command that
+     * backgrounds a subprocess without redirecting stdout (e.g. {@code ./start-server.sh &})
+     * leaves an orphan holding the pipe open, which would block readLine() — and an
+     * unbounded join here would hang the whole workflow iteration. After the grace
+     * period, force EOF by closing the stream, then the reader terminates promptly.
+     * The buffer is only ever read after the reader has fully terminated.
+     */
+    private static void awaitReader(Thread reader, Process process) throws InterruptedException {
+        reader.join(READER_JOIN_MILLIS);
+        if (reader.isAlive()) {
+            log.warn("Local verification output stream still open after command ended "
+                    + "(backgrounded child holding the pipe?) — forcing EOF");
+            try {
+                process.getInputStream().close();
+            } catch (IOException ignored) {
+                // closing is best-effort; the reader's readLine will fail either way
+            }
+            reader.join();
+        }
     }
 
     private static String formatTimeout(long timeoutMillis) {
