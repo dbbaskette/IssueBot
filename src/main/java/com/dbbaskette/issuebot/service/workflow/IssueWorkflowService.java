@@ -142,6 +142,7 @@ public class IssueWorkflowService {
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
+        trackedIssue.setPendingGuidance(null);
         trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
         trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
         issueRepository.save(trackedIssue);
@@ -216,6 +217,20 @@ public class IssueWorkflowService {
             repo = trackedIssue.getRepo();
 
             if (cancelled(trackedIssue)) return;
+
+            // Consume any operator guidance queued since the last checkpoint (issue #63).
+            // Guidance is operator input, not review feedback, so it must not trigger the
+            // implementation-response comment that's reserved for addressing review findings.
+            String guidance = trackedIssue.getPendingGuidance();
+            if (guidance != null && !guidance.isBlank()) {
+                String block = "ADDITIONAL HUMAN GUIDANCE (mid-run):\n" + guidance;
+                previousFeedback = previousFeedback == null ? block : previousFeedback + "\n\n" + block;
+                reviewFeedback = false;
+                trackedIssue.setPendingGuidance(null);
+                issueRepository.save(trackedIssue);
+                eventService.log("GUIDANCE_APPLIED", "Applying operator guidance to this iteration",
+                        repo, trackedIssue);
+            }
 
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
             int maxIterations = repo.getMaxIterations();

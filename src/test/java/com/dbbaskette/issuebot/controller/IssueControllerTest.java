@@ -59,6 +59,7 @@ class IssueControllerTest {
         final IssueDecompositionService decompositionService = mock(IssueDecompositionService.class);
         final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
         final IterationRepository iterationRepository = mock(IterationRepository.class);
+        final EventService eventService = mock(EventService.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -81,7 +82,7 @@ class IssueControllerTest {
             controller = new IssueController(issues, repos,
                     iterationRepository, mock(EventRepository.class),
                     mock(CostTrackingRepository.class), mock(IssuePollingService.class),
-                    mock(IssueWorkflowService.class), mock(EventService.class),
+                    mock(IssueWorkflowService.class), eventService,
                     gitHubApiClient, properties, decompositionService, cancellationService,
                     new ObjectMapper());
         }
@@ -187,6 +188,67 @@ class IssueControllerTest {
         f.controller.detail(model, 1L, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isNull();
+    }
+
+    @Test
+    void guideQueuesGuidanceForRunningIssue() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        String view = f.controller.guide(1L, "Check the retry logic in FooService", f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        String saved = captor.getValue().getPendingGuidance();
+        org.assertj.core.api.Assertions.assertThat(saved).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(saved).contains("Check the retry logic in FooService");
+        // Timestamped, e.g. "[14:32] Check the retry logic in FooService"
+        org.assertj.core.api.Assertions.assertThat(saved).matches("(?s)^\\[\\d{2}:\\d{2}] .*");
+
+        verify(f.gitHubApiClient).addComment(eq("acme"), eq("widgets"), eq(42),
+                contains("Operator guidance (mid-run):"));
+        verify(f.eventService).log(eq("GUIDANCE_RECEIVED"), anyString(), any(), eq(f.issue));
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void guideRejectedForNonRunningIssue() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        String view = f.controller.guide(1L, "Some guidance", f.redirectAttributes);
+
+        verify(f.issues, never()).save(any());
+        verify(f.gitHubApiClient, never()).addComment(any(), any(), anyInt(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void guideRejectsBlankGuidance() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        String view = f.controller.guide(1L, "   ", f.redirectAttributes);
+
+        verify(f.issues, never()).save(any());
+        verify(f.gitHubApiClient, never()).addComment(any(), any(), anyInt(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void guideAppendsRatherThanReplacesOnSecondCall() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        f.controller.guide(1L, "First instruction", f.redirectAttributes);
+        f.controller.guide(1L, "Second instruction", f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues, times(2)).save(captor.capture());
+        String finalGuidance = captor.getAllValues().get(1).getPendingGuidance();
+        org.assertj.core.api.Assertions.assertThat(finalGuidance).contains("First instruction");
+        org.assertj.core.api.Assertions.assertThat(finalGuidance).contains("Second instruction");
+        // Both lines present, newline-separated
+        org.assertj.core.api.Assertions.assertThat(finalGuidance.lines().count()).isEqualTo(2);
     }
 
     @Test

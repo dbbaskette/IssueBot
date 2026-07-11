@@ -293,6 +293,49 @@ public class IssueController {
         return "redirect:/issues/" + id;
     }
 
+    @PostMapping("/{id}/guide")
+    public String guide(@PathVariable Long id,
+                        @RequestParam String guidance,
+                        RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null) {
+            redirectAttributes.addFlashAttribute("error", "Issue not found");
+            return "redirect:/issues";
+        }
+
+        if (guidance == null || guidance.isBlank()) {
+            redirectAttributes.addFlashAttribute("error", "Guidance cannot be empty");
+            return "redirect:/issues/" + id;
+        }
+
+        if (issue.getStatus() != IssueStatus.IN_PROGRESS) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Guidance can only be sent to a running issue");
+            return "redirect:/issues/" + id;
+        }
+
+        String stamped = "[" + java.time.LocalTime.now().format(
+                java.time.format.DateTimeFormatter.ofPattern("HH:mm")) + "] " + guidance.trim();
+        issue.setPendingGuidance(issue.getPendingGuidance() == null
+                ? stamped : issue.getPendingGuidance() + "\n" + stamped);
+        issueRepository.save(issue);
+
+        try {
+            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
+                    issue.getIssueNumber(), "**Operator guidance (mid-run):** " + guidance.trim());
+        } catch (Exception e) {
+            log.warn("Failed to post guidance comment on #{}: {}",
+                    issue.getIssueNumber(), e.getMessage());
+        }
+
+        eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + guidance.trim(),
+                issue.getRepo(), issue);
+
+        redirectAttributes.addFlashAttribute("success",
+                "Guidance queued — applies at the next checkpoint");
+        return "redirect:/issues/" + id;
+    }
+
     @PostMapping("/{id}/decomposition/approve")
     public String approveDecomposition(@PathVariable Long id, RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);

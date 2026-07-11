@@ -51,6 +51,7 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 - **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
 - **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
 - **Cancel Running Issues** - A Stop button on the issue-detail page kills the running Claude Code process at the next workflow checkpoint
+- **Mid-Loop Guidance** - Steer a running issue from the dashboard; guidance is injected at the next iteration boundary
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration
 - **Security Review** - Optional OWASP-focused security analysis per repository (injection, auth, data exposure, access control)
 - **Iteration Guardrails** - Separate budgets for implementation iterations (default: 2) and review iterations, `needs-human` escalation when retries are exhausted

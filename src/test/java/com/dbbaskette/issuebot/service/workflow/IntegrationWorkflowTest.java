@@ -562,6 +562,60 @@ class IntegrationWorkflowTest {
         verify(iterationManager, never()).handleMaxIterationsReached(issue);
     }
 
+    // === Test 15 (#63): Operator guidance queued after workflow start is present at
+    //     the loop-top checkpoint for iteration 1 — it must be injected into iteration 1's
+    //     implementation prompt and cleared afterwards, and must NOT reappear in iteration 2
+    //     since no new guidance was queued for it. ===
+    @Test
+    void pendingGuidance_appliedAtLoopTop_thenClearedAndNotReappliedNextIteration() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
+        when(iterationManager.canReviewIterate(issue)).thenReturn(true);
+
+        // Guidance queued by the operator after workflow start (pre-screen runs once,
+        // just before the iteration loop begins) — present at loop-top for iteration 1.
+        doAnswer(inv -> {
+            issue.setPendingGuidance("[09:15] Check the retry logic in FooService");
+            return new IssueDecompositionService.PreScreenResult(false, null);
+        }).when(decompositionService).preScreen(any(), any());
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 500);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // First review fails (forces iteration 2), second passes (completes)
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                .thenReturn(failedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(2)).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), any(), any());
+        String firstPrompt = promptCaptor.getAllValues().get(0);
+        String secondPrompt = promptCaptor.getAllValues().get(1);
+
+        assertTrue(firstPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
+                "guidance present at loop-top must appear in iteration 1's prompt");
+        assertTrue(firstPrompt.contains("Check the retry logic in FooService"));
+        assertFalse(secondPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
+                "guidance must not re-appear in iteration 2 — it was consumed and no new guidance was queued");
+
+        assertNull(issue.getPendingGuidance(), "guidance must be cleared once applied");
+        verify(eventService).log(eq("GUIDANCE_APPLIED"), anyString(), any(), eq(issue));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
     // === Test 14: An exception thrown by local verification is treated as a failed
     //     check and routes through the retry path instead of escaping the workflow ===
     @Test
