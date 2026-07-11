@@ -266,39 +266,214 @@
     }
   });
 
-  // --- Diff coloring ------------------------------------------------------
-  // Diffs render as plain text inside [data-diff] containers. Split into lines
-  // and wrap +/- lines in colored spans. textContent (never innerHTML) is used
-  // per line so content is HTML-escaped safely.
-  function colorizeDiff(el) {
-    if (el.__diffColorized) { return; }
-    el.__diffColorized = true;
-    var raw = el.textContent || '';
+  // --- Per-file diff viewer (#85) ------------------------------------------
+  // Diffs render as plain text inside [data-diff-viewer] containers (the raw
+  // unified diff produced by GitOperationsService.diff via JGit's
+  // DiffFormatter — "diff --git a/... b/..." headers, "--- a/x"/"+++ b/x" or
+  // "/dev/null" for adds/deletes, "@@ ... @@" hunks). We parse that text into
+  // per-file sections client-side and render each as a collapsible <details>
+  // with a path + "+N -M" summary, reusing the original flat colorizer's line
+  // classes so existing CSS carries over. All text is inserted via
+  // textContent (never innerHTML) since diff content — file paths and line
+  // bodies — comes from repo data and must be treated as untrusted.
+
+  // Classify a single diff line the same way the original flat colorizer did,
+  // plus a new "hunk" class for "@@" separators (previously left neutral).
+  function diffLineExtraClass(lineText) {
+    if (lineText.indexOf('+++') === 0 || lineText.indexOf('---') === 0) {
+      return 'diff-header';
+    }
+    if (lineText.indexOf('@@') === 0) {
+      return 'hunk';
+    }
+    if (lineText.charAt(0) === '+') {
+      return 'added';
+    }
+    if (lineText.charAt(0) === '-') {
+      return 'removed';
+    }
+    return '';
+  }
+
+  function buildDiffLineSpan(lineText) {
+    var span = document.createElement('span');
+    span.className = 'diff-line';
+    var extra = diffLineExtraClass(lineText);
+    if (extra) { span.className += ' ' + extra; }
+    // Preserve empty lines as a row of height via a zero-width space.
+    span.textContent = lineText.length ? lineText : '​';
+    return span;
+  }
+
+  // Today's rendering: one flat colorized block, no per-file grouping. Used
+  // both as the initial render path's fallback and directly when parsing
+  // finds no file boundaries.
+  function renderFlatDiff(el, raw) {
     el.textContent = '';
-    var lines = raw.split('\n');
     var frag = document.createDocumentFragment();
     // .diff-line is display:block, so each line is its own row — no \n needed.
-    lines.forEach(function (lineText) {
-      var span = document.createElement('span');
-      span.className = 'diff-line';
-      if (lineText.indexOf('+++') === 0 || lineText.indexOf('---') === 0) {
-        span.className += ' diff-header';
-      } else if (lineText.indexOf('@@') === 0) {
-        // hunk header — leave neutral
-      } else if (lineText.charAt(0) === '+') {
-        span.className += ' added';
-      } else if (lineText.charAt(0) === '-') {
-        span.className += ' removed';
-      }
-      // Preserve empty lines as a row of height via a zero-width space.
-      span.textContent = lineText.length ? lineText : '​';
-      frag.appendChild(span);
+    raw.split('\n').forEach(function (lineText) {
+      frag.appendChild(buildDiffLineSpan(lineText));
     });
     el.appendChild(frag);
   }
 
-  function colorizeDiffs() {
-    document.querySelectorAll('[data-diff]').forEach(colorizeDiff);
+  // Strips a leading "a/" or "b/" prefix from a diff path (e.g. "b/src/Foo.java").
+  function stripDiffPathPrefix(path) {
+    if (path.indexOf('a/') === 0 || path.indexOf('b/') === 0) {
+      return path.slice(2);
+    }
+    return path;
+  }
+
+  // Parses a raw unified diff into per-file sections: [{ path, adds, dels, lines }].
+  // Returns null if no "diff --git " boundaries are found (caller should fall
+  // back to the flat renderer).
+  function parseDiffFiles(raw) {
+    var files = [];
+    var current = null;
+
+    function finishCurrent() {
+      if (!current) { return; }
+      var path, deleted = false;
+      if (current.plusPath && current.plusPath !== '/dev/null') {
+        path = stripDiffPathPrefix(current.plusPath);
+      } else if (current.minusPath && current.minusPath !== '/dev/null') {
+        path = stripDiffPathPrefix(current.minusPath);
+        deleted = true;
+      } else if (current.headerPathB) {
+        path = current.headerPathB;
+      } else if (current.headerPathA) {
+        path = current.headerPathA;
+      } else {
+        path = 'unknown file';
+      }
+      files.push({
+        path: deleted ? (path + ' (deleted)') : path,
+        adds: current.adds,
+        dels: current.dels,
+        lines: current.lines
+      });
+    }
+
+    raw.split('\n').forEach(function (lineText) {
+      if (lineText.indexOf('diff --git ') === 0) {
+        finishCurrent();
+        current = { adds: 0, dels: 0, lines: [lineText], plusPath: null, minusPath: null, headerPathA: null, headerPathB: null };
+        var m = /^diff --git a\/(.+) b\/(.+)$/.exec(lineText);
+        if (m) { current.headerPathA = m[1]; current.headerPathB = m[2]; }
+        return;
+      }
+      if (!current) { return; } // content before any file header — shouldn't happen for JGit output
+      current.lines.push(lineText);
+      if (lineText.indexOf('+++') === 0) {
+        current.plusPath = lineText.slice(3).trim();
+      } else if (lineText.indexOf('---') === 0) {
+        current.minusPath = lineText.slice(3).trim();
+      } else if (lineText.charAt(0) === '+') {
+        current.adds++;
+      } else if (lineText.charAt(0) === '-') {
+        current.dels++;
+      }
+    });
+    finishCurrent();
+
+    return files.length ? files : null;
+  }
+
+  function renderDiffFile(file, defaultOpen) {
+    var details = document.createElement('details');
+    details.className = 'diff-file';
+    details.open = defaultOpen;
+
+    var summary = document.createElement('summary');
+    summary.className = 'diff-file-summary';
+
+    var pathSpan = document.createElement('span');
+    pathSpan.className = 'diff-file-path';
+    pathSpan.textContent = file.path;
+    summary.appendChild(pathSpan);
+
+    var counts = document.createElement('span');
+    counts.className = 'diff-count-group';
+    var addSpan = document.createElement('span');
+    addSpan.className = 'diff-count diff-count-add';
+    addSpan.textContent = '+' + file.adds;
+    var delSpan = document.createElement('span');
+    delSpan.className = 'diff-count diff-count-del';
+    delSpan.textContent = '−' + file.dels;
+    counts.appendChild(addSpan);
+    counts.appendChild(delSpan);
+    summary.appendChild(counts);
+
+    details.appendChild(summary);
+
+    var body = document.createElement('div');
+    body.className = 'diff-viewer diff-file-body';
+    var frag = document.createDocumentFragment();
+    file.lines.forEach(function (lineText) {
+      frag.appendChild(buildDiffLineSpan(lineText));
+    });
+    body.appendChild(frag);
+    details.appendChild(body);
+
+    return details;
+  }
+
+  // Builds the per-file view into `el`: an "expand/collapse all" toolbar row
+  // plus one <details class="diff-file"> per file. Falls back to the flat
+  // single-block rendering when there are no parseable file boundaries.
+  function renderDiffViewer(el, raw) {
+    var files = parseDiffFiles(raw);
+    if (!files) {
+      renderFlatDiff(el, raw);
+      return;
+    }
+
+    var totalLines = raw.split('\n').length;
+    var defaultOpen = files.length <= 5 && totalLines <= 800;
+
+    el.textContent = '';
+
+    var toolbar = document.createElement('div');
+    toolbar.className = 'diff-viewer-toolbar';
+    var expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'btn btn-ghost btn-sm';
+    expandBtn.textContent = 'Expand all';
+    expandBtn.setAttribute('data-diff-expand-all', '');
+    var collapseBtn = document.createElement('button');
+    collapseBtn.type = 'button';
+    collapseBtn.className = 'btn btn-ghost btn-sm';
+    collapseBtn.textContent = 'Collapse all';
+    collapseBtn.setAttribute('data-diff-collapse-all', '');
+    toolbar.appendChild(expandBtn);
+    toolbar.appendChild(collapseBtn);
+    el.appendChild(toolbar);
+
+    var list = document.createElement('div');
+    list.className = 'diff-file-list';
+    files.forEach(function (file) {
+      list.appendChild(renderDiffFile(file, defaultOpen));
+    });
+    el.appendChild(list);
+  }
+
+  function initDiffViewer(el) {
+    if (el.dataset.diffViewerInit === 'true') { return; }
+    el.dataset.diffViewerInit = 'true';
+    var raw = el.textContent || '';
+    if (!raw) { return; }
+    try {
+      renderDiffViewer(el, raw);
+    } catch (e) {
+      // Degrade to today's whole-blob rendering on any parse/render surprise.
+      try { renderFlatDiff(el, raw); } catch (e2) { /* leave raw text as-is */ }
+    }
+  }
+
+  function initDiffViewers() {
+    document.querySelectorAll('[data-diff-viewer]').forEach(initDiffViewer);
   }
 
   // --- Live terminal controller ------------------------------------------
@@ -719,6 +894,26 @@
       e.preventDefault();
       var target = document.querySelector(copyBtn.getAttribute('data-copy-target'));
       if (target) { copyText(target.innerText || target.textContent || '', copyBtn); }
+      return;
+    }
+    // Per-file diff viewer (#85): expand/collapse-all toggles scoped to the
+    // enclosing [data-diff-viewer] container.
+    var diffExpandAll = e.target.closest('[data-diff-expand-all]');
+    if (diffExpandAll) {
+      e.preventDefault();
+      var expandContainer = diffExpandAll.closest('[data-diff-viewer]');
+      if (expandContainer) {
+        expandContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = true; });
+      }
+      return;
+    }
+    var diffCollapseAll = e.target.closest('[data-diff-collapse-all]');
+    if (diffCollapseAll) {
+      e.preventDefault();
+      var collapseContainer = diffCollapseAll.closest('[data-diff-viewer]');
+      if (collapseContainer) {
+        collapseContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = false; });
+      }
       return;
     }
   });
@@ -1233,10 +1428,10 @@
     });
   }
 
-  // Re-run toast handling + diff coloring after HTMX swaps in new content.
+  // Re-run toast handling + diff viewers after HTMX swaps in new content.
   document.body.addEventListener('htmx:afterSwap', function (evt) {
     dismissToasts();
-    colorizeDiffs();
+    initDiffViewers();
     initSortableTables();
     initCostCharts();
 
@@ -1285,7 +1480,7 @@
   function init() {
     syncThemeIcon();
     dismissToasts();
-    colorizeDiffs();
+    initDiffViewers();
     initSortableTables();
     initCostCharts();
     UpdateStamps.markAllVisible();

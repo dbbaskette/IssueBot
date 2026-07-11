@@ -108,7 +108,7 @@
         <div th:if="${lastIterations.containsKey(issue.id)}" th:with="iter=${lastIterations.get(issue.id)}">
             <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
                 <summary class="text-sm">View Diff</summary>
-                <div class="diff-viewer" data-diff th:text="${iter.diff}">diff</div>
+                <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff</div>
             </details>
             <details th:if="${iter.selfAssessment != null}" class="mt-1">
                 <summary class="text-sm">Self-Assessment</summary>
