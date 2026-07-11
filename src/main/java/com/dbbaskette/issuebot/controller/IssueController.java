@@ -13,6 +13,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,6 +46,7 @@ public class IssueController {
     private final GitHubApiClient gitHubApiClient;
     private final IssueBotProperties properties;
     private final IssueDecompositionService decompositionService;
+    private final WorkflowCancellationService cancellationService;
     private final ObjectMapper objectMapper;
 
     public IssueController(TrackedIssueRepository issueRepository,
@@ -58,6 +60,7 @@ public class IssueController {
                             GitHubApiClient gitHubApiClient,
                             IssueBotProperties properties,
                             IssueDecompositionService decompositionService,
+                            WorkflowCancellationService cancellationService,
                             ObjectMapper objectMapper) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
@@ -70,6 +73,7 @@ public class IssueController {
         this.gitHubApiClient = gitHubApiClient;
         this.properties = properties;
         this.decompositionService = decompositionService;
+        this.cancellationService = cancellationService;
         this.objectMapper = objectMapper;
     }
 
@@ -272,6 +276,20 @@ public class IssueController {
                 issue.getRepo(), issue);
 
         redirectAttributes.addFlashAttribute("success", "Issue marked as completed");
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/cancel")
+    public String cancel(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null || issue.getStatus() != IssueStatus.IN_PROGRESS) {
+            redirectAttributes.addFlashAttribute("error", "Only running issues can be stopped");
+            return "redirect:/issues/" + id;
+        }
+        cancellationService.requestCancel(id);
+        eventService.log("CANCEL_REQUESTED", "Operator requested stop", issue.getRepo(), issue);
+        redirectAttributes.addFlashAttribute("success",
+                "Stop requested — the workflow halts at the next checkpoint");
         return "redirect:/issues/" + id;
     }
 

@@ -26,6 +26,10 @@
                     type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
                 <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
             </button>
+            <button th:if="${issue.status.name() == 'IN_PROGRESS'}"
+                    type="button" class="btn btn-danger btn-sm" data-modal-open="cancel-modal">
+                <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+            </button>
         </div>
     </div>
 
@@ -107,6 +111,21 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
                     <button type="submit" class="btn btn-success btn-sm">Mark Complete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Stop confirm modal === -->
+    <div th:if="${issue.status.name() == 'IN_PROGRESS'}"
+         id="cancel-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="cancel-modal-title">
+            <h3 id="cancel-modal-title" style="margin:0 0 0.5rem">Stop Issue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/cancel'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Stop Issue</button>
                 </div>
             </form>
         </div>

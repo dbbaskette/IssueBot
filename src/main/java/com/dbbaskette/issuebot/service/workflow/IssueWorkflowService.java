@@ -60,6 +60,7 @@ public class IssueWorkflowService {
     private final IssueDecompositionService decompositionService;
     private final FollowUpService followUpService;
     private final ModelResolver modelResolver;
+    private final WorkflowCancellationService cancellationService;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -77,6 +78,7 @@ public class IssueWorkflowService {
                                  IssueDecompositionService decompositionService,
                                  FollowUpService followUpService,
                                  ModelResolver modelResolver,
+                                 WorkflowCancellationService cancellationService,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -93,6 +95,7 @@ public class IssueWorkflowService {
         this.decompositionService = decompositionService;
         this.followUpService = followUpService;
         this.modelResolver = modelResolver;
+        this.cancellationService = cancellationService;
         this.objectMapper = objectMapper;
     }
 
@@ -131,6 +134,7 @@ public class IssueWorkflowService {
         log.info("Starting workflow for {} #{}: {}", repo.fullName(), issueNumber,
                 trackedIssue.getIssueTitle());
 
+        cancellationService.clear(trackedIssue.getId());
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
@@ -204,6 +208,8 @@ public class IssueWorkflowService {
             trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
             repo = trackedIssue.getRepo();
 
+            if (cancelled(trackedIssue)) return;
+
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
             int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
@@ -237,6 +243,8 @@ public class IssueWorkflowService {
                 reviewFeedback = false; // impl exception is not review feedback
                 continue;
             }
+
+            if (cancelled(trackedIssue)) return;
 
             if (!implResult.isSuccess()) {
                 log.warn("Claude Code returned failure for iteration {}", iterationNum);
@@ -335,6 +343,8 @@ public class IssueWorkflowService {
                 continue;
             }
 
+            if (cancelled(trackedIssue)) return;
+
             // === Phase 4: PR Creation (draft) ===
             try {
                 trackedIssue.setCurrentPhase("PR_CREATION");
@@ -350,6 +360,8 @@ public class IssueWorkflowService {
                         "PR creation failed: " + e.getMessage(), repo, trackedIssue);
                 return;
             }
+
+            if (cancelled(trackedIssue)) return;
 
             // === Phase 5: Independent Review (Sonnet) ===
             trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
@@ -425,6 +437,22 @@ public class IssueWorkflowService {
         iterationManager.handleMaxIterationsReached(trackedIssue);
     }
 
+    /**
+     * Checkpoint: returns true (and finalizes the issue as FAILED) if the operator
+     * requested cancellation. Callers must return immediately when this returns true.
+     */
+    private boolean cancelled(TrackedIssue trackedIssue) {
+        if (!cancellationService.isCancelled(trackedIssue.getId())) return false;
+        trackedIssue.setStatus(IssueStatus.FAILED);
+        trackedIssue.setCurrentPhase(null);
+        trackedIssue.setLastFailureReason("Cancelled by operator");
+        issueRepository.save(trackedIssue);
+        eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
+                trackedIssue.getRepo(), trackedIssue);
+        cancellationService.clear(trackedIssue.getId());
+        return true;
+    }
+
     // =====================================================
     // Phase Implementations
     // =====================================================
@@ -475,7 +503,7 @@ public class IssueWorkflowService {
         sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation...");
         ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
-                trackedIssue.getResolvedImplModel(), line -> streamClaudeLog(issueId, line));
+                trackedIssue.getResolvedImplModel(), issueId, line -> streamClaudeLog(issueId, line));
 
         eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
                 "Implementation complete: " + result, repo, trackedIssue);
@@ -713,6 +741,7 @@ public class IssueWorkflowService {
                     issueDetails.path("body").asText(""),
                     repo.getBranch(),
                     trackedIssue.getResolvedReviewModel(),
+                    issueId,
                     repo.isSecurityReviewEnabled(),
                     line -> streamClaudeLog(issueId, line));
         } catch (Exception e) {

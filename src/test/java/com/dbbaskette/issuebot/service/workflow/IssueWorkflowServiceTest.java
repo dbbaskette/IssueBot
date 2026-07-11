@@ -73,6 +73,7 @@ class IssueWorkflowServiceTest {
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
+                new WorkflowCancellationService(),
                 objectMapper
         );
     }
@@ -281,7 +282,7 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), anyBoolean(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---

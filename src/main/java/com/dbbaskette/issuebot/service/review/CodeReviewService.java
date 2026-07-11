@@ -43,7 +43,8 @@ public class CodeReviewService {
      * Execute an independent code review with the resolved review model.
      */
     public CodeReviewResult reviewCode(Path repoPath, String issueTitle, String issueBody,
-                                         String baseBranch, String model, boolean securityReview,
+                                         String baseBranch, String model, Long issueId,
+                                         boolean securityReview,
                                          Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
 
@@ -70,7 +71,7 @@ public class CodeReviewService {
                 issueTitle, issueBody, changedFiles, diff, securityReview);
 
         // 3. Invoke the review model via CLI
-        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, lineCallback);
+        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);
 
         if (!result.isSuccess()) {
             log.error("Sonnet review invocation failed: {}", result.getErrorMessage());

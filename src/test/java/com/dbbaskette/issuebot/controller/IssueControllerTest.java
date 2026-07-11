@@ -11,6 +11,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -34,7 +35,8 @@ class IssueControllerTest {
                 mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                 mock(IssueWorkflowService.class), mock(EventService.class),
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
-                mock(IssueDecompositionService.class), new ObjectMapper());
+                mock(IssueDecompositionService.class), mock(WorkflowCancellationService.class),
+                new ObjectMapper());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null);
@@ -54,6 +56,7 @@ class IssueControllerTest {
         final GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
         final IssueBotProperties properties = mock(IssueBotProperties.class);
         final IssueDecompositionService decompositionService = mock(IssueDecompositionService.class);
+        final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -76,7 +79,8 @@ class IssueControllerTest {
                     mock(IterationRepository.class), mock(EventRepository.class),
                     mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), mock(EventService.class),
-                    gitHubApiClient, properties, decompositionService, new ObjectMapper());
+                    gitHubApiClient, properties, decompositionService, cancellationService,
+                    new ObjectMapper());
         }
     }
 
@@ -128,6 +132,28 @@ class IssueControllerTest {
         verify(f.issues).save(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getImplModelOverride()).isNull();
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getReviewModelOverride()).isNull();
+    }
+
+    @Test
+    void cancelRequestsCancellationForRunningIssue() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        String view = f.controller.cancel(1L, f.redirectAttributes);
+
+        verify(f.cancellationService).requestCancel(1L);
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void cancelRejectsNonRunningIssue() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        String view = f.controller.cancel(1L, f.redirectAttributes);
+
+        verify(f.cancellationService, never()).requestCancel(anyLong());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
     }
 
     @Test
