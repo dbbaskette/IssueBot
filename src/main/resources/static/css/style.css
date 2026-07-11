@@ -418,6 +418,8 @@ main {
     cursor: pointer;
 }
 .metric-card.is-link:hover,
+/* Keyboard focus gets the same visual lift mouse hover does */
+.metric-tile.is-link:focus-visible,
 .metric-tile.is-link:hover {
     transform: translateY(-2px);
     border-color: var(--accent-border);
