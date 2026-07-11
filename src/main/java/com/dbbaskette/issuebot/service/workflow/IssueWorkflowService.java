@@ -873,7 +873,7 @@ public class IssueWorkflowService {
      */
     String buildReviewFeedback(CodeReviewResult review) {
         StringBuilder fb = new StringBuilder();
-        fb.append("The independent code review (Sonnet) found issues with your implementation.\n\n");
+        fb.append("The independent code review found issues with your implementation.\n\n");
         fb.append("**Overall:** ").append(review.summary()).append("\n\n");
 
         fb.append("**Scores:** ");

@@ -26,12 +26,12 @@ import java.util.List;
  * Decomposes large issues into smaller sub-issues when the implementation
  * times out or is too complex for a single pass.
  *
- * Also provides pre-screening: before attempting implementation, Sonnet can
- * rate an issue's complexity and, if it's too large, decompose it upfront
- * with implementation hints — saving expensive Opus tokens.
+ * Also provides pre-screening: before attempting implementation, the configured
+ * utility model can rate an issue's complexity and, if it's too large, decompose
+ * it upfront with implementation hints — saving expensive implementation-model tokens.
  *
- * Uses Claude (Sonnet) to analyze the original issue and suggest a breakdown,
- * then creates the sub-issues on GitHub and closes the original.
+ * Uses the configured utility model to analyze the original issue and suggest a
+ * breakdown, then creates the sub-issues on GitHub and closes the original.
  */
 @Service
 public class IssueDecompositionService {
@@ -253,6 +253,17 @@ public class IssueDecompositionService {
         WatchedRepo repo = issue.getRepo();
         int issueNumber = issue.getIssueNumber();
 
+        List<JsonNode> openSubs = gitHubApi.listIssues(repo.getOwner(), repo.getName(), DECOMPOSED_LABEL, "open");
+        if (openSubs != null && openSubs.size() >= MAX_OPEN_SUB_ISSUES) {
+            log.warn("Refusing to approve decomposition for {} #{} — {} open sub-issues (cap {})",
+                    repo.fullName(), issueNumber, openSubs.size(), MAX_OPEN_SUB_ISSUES);
+            eventService.log("DECOMPOSITION_REFUSED",
+                    "Open sub-issue cap reached (" + openSubs.size() + "/" + MAX_OPEN_SUB_ISSUES + ")",
+                    repo, issue);
+            throw new IllegalStateException("Open sub-issue cap reached (" + openSubs.size() + "/"
+                    + MAX_OPEN_SUB_ISSUES + ") — close some sub-issues and approve again");
+        }
+
         List<SubIssue> subIssues = objectMapper.readValue(
                 issue.getDecompositionProposal(), new TypeReference<List<SubIssue>>() {});
 
@@ -317,7 +328,7 @@ public class IssueDecompositionService {
 
     /**
      * Pre-screen an issue before implementation to determine if it's too large.
-     * Uses Sonnet to quickly analyze the issue against the codebase and rate complexity.
+     * Uses the configured utility model to quickly analyze the issue against the codebase and rate complexity.
      *
      * @param issueDetails the GitHub issue JSON
      * @param repoPath     the local repo checkout path
@@ -346,7 +357,7 @@ public class IssueDecompositionService {
     }
 
     /**
-     * Use Claude (Sonnet) to analyze the issue and produce a decomposition.
+     * Use the configured utility model to analyze the issue and produce a decomposition.
      */
     List<SubIssue> analyzeAndDecompose(JsonNode issueDetails, Path repoPath) {
         String prompt = buildDecompositionPrompt(issueDetails);

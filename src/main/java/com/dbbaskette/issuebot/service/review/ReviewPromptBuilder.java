@@ -5,13 +5,14 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Builds the structured review prompt for the independent Sonnet 4.6 code review.
+ * Builds the structured review prompt for the independent code review, run on
+ * the configured review model.
  */
 @Component
 public class ReviewPromptBuilder {
 
     /**
-     * Build the review prompt for Sonnet 4.6.
+     * Build the review prompt for the configured review model.
      *
      * @param issueTitle      The GitHub issue title (the "spec")
      * @param issueBody       The GitHub issue body with requirements/acceptance criteria

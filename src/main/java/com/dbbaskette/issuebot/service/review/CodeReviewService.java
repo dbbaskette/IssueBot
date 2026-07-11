@@ -16,8 +16,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Executes independent code review using Sonnet 4.6 via Claude CLI.
- * Builds a review prompt, invokes Sonnet, and parses the structured JSON response.
+ * Executes independent code review using the configured review model via Claude CLI.
+ * Builds a review prompt, invokes the review model, and parses the structured JSON response.
  */
 @Service
 public class CodeReviewService {
@@ -116,7 +116,7 @@ public class CodeReviewService {
     }
 
     /**
-     * Parse the Sonnet review response JSON from Claude Code output.
+     * Parse the review response JSON from Claude Code output.
      */
     private CodeReviewResult parseReviewResponse(ClaudeCodeResult result) {
         String output = result.getOutput();

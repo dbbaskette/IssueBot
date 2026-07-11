@@ -408,6 +408,28 @@ class IssueDecompositionServiceTest {
     }
 
     @Test
+    void approveRefusesWhenCapReached() {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+        when(gitHubApi.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(createOpenSubIssueNodes(10));
+
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        assertEquals(IssueStatus.AWAITING_DECOMPOSITION, issue.getStatus());
+        assertNotNull(issue.getDecompositionProposal());
+    }
+
+    @Test
     void buildDecompositionPrompt_includesTitleAndBody() {
         ObjectNode details = createIssueDetails();
         String prompt = decompositionService.buildDecompositionPrompt(details);

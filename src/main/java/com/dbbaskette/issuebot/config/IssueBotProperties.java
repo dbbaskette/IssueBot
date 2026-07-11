@@ -58,7 +58,6 @@ public class IssueBotProperties {
     public static class ClaudeCodeConfig {
         @Min(1)
         private int maxTurnsPerInvocation = 30;
-        private String model = "claude-sonnet-4-5-20250929";
         @Min(1)
         private int timeoutMinutes = 10;
 
@@ -74,8 +73,6 @@ public class IssueBotProperties {
 
         public int getMaxTurnsPerInvocation() { return maxTurnsPerInvocation; }
         public void setMaxTurnsPerInvocation(int v) { this.maxTurnsPerInvocation = v; }
-        public String getModel() { return model; }
-        public void setModel(String model) { this.model = model; }
         public int getTimeoutMinutes() { return timeoutMinutes; }
         public void setTimeoutMinutes(int v) { this.timeoutMinutes = v; }
 

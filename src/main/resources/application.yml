@@ -29,7 +29,6 @@ issuebot:
   work-directory: ${user.home}/.issuebot/repos
   claude-code:
     max-turns-per-invocation: 30
-    model: claude-sonnet-4-5-20250929
     timeout-minutes: 10
     implementation-model: claude-opus-4-8
     review-model: claude-sonnet-5

@@ -34,18 +34,6 @@ public class ClaudeCodeService {
         this.cancellationService = cancellationService;
     }
 
-    public ClaudeCodeResult executeTask(String prompt, Path workingDirectory) {
-        return executeTask(prompt, workingDirectory, null, null);
-    }
-
-    public ClaudeCodeResult executeTask(String prompt, Path workingDirectory,
-                                         String systemPrompt, Consumer<String> lineCallback) {
-        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getModel(),
-                config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
-                systemPrompt, null, lineCallback);
-    }
-
     /**
      * Execute implementation with the resolved model.
      */
