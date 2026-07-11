@@ -301,9 +301,18 @@ public class IssueWorkflowService {
                 eventService.log("PHASE_LOCAL_CHECKS", "Starting local verification commands", repo, trackedIssue);
 
                 Long issueIdForLog = trackedIssue.getId();
-                LocalVerificationService.Result localResult = localVerificationService.run(
-                        repoPath, verificationCommands, LocalVerificationService.TIMEOUT_MINUTES_PER_COMMAND,
-                        line -> sseService.broadcastClaudeLog(issueIdForLog, "[local-check] " + line));
+                LocalVerificationService.Result localResult;
+                try {
+                    localResult = localVerificationService.run(
+                            repoPath, verificationCommands, LocalVerificationService.TIMEOUT_MINUTES_PER_COMMAND,
+                            line -> sseService.broadcastClaudeLog(issueIdForLog, "[local-check] " + line));
+                } catch (Exception e) {
+                    // An unexpected error must route through the normal retry path,
+                    // not escape and fail the whole issue.
+                    log.warn("Local verification threw for iteration {}: {}", iterationNum, e.getMessage());
+                    localResult = LocalVerificationService.Result.failure(
+                            "(local verification error)", "Local verification error: " + e.getMessage());
+                }
 
                 if (!localResult.success()) {
                     log.info("Local verification failed for iteration {}: {}",
@@ -1105,7 +1114,7 @@ public class IssueWorkflowService {
                 prompt.append("### Assessment Feedback\n").append(previousAssessment).append("\n\n");
             }
             if (previousCiLogs != null) {
-                prompt.append("### CI Failure Logs\n").append(previousCiLogs).append("\n\n");
+                prompt.append("### Verification Failure Logs\n").append(previousCiLogs).append("\n\n");
             }
             if (previousDiff != null) {
                 prompt.append("### Previous Diff\n```\n")

@@ -69,11 +69,28 @@ class LocalVerificationServiceTest {
 
     @Test
     void run_timeout_isTreatedAsFailure() {
+        // 0-minute timeout: waitFor(0) returns immediately, forcing the kill path.
         LocalVerificationService.Result result = service.run(repoPath,
-                List.of("sleep 5"), 0, null); // 0-minute timeout — fails immediately... but waitFor(0, MINUTES) treats 0 as "don't wait", may finish=false
+                List.of("sleep 5"), 0, null);
 
         assertFalse(result.success());
         assertEquals("sleep 5", result.failedCommand());
         assertTrue(result.output().toLowerCase().contains("timed out"));
+    }
+
+    @Test
+    void run_timeoutAfterOutput_capturesOutputWithoutException() {
+        // The command prints, then hangs well past the 2s timeout. The kill must reap
+        // the whole process tree (the test finishing in ~2s, not 30s, proves it), and
+        // the output produced before the kill must survive the reader-thread handoff.
+        List<String> lines = new ArrayList<>();
+        LocalVerificationService.Result result = service.runWithTimeoutMillis(repoPath,
+                List.of("echo before; sleep 30"), 2000, lines::add);
+
+        assertFalse(result.success());
+        assertEquals("echo before; sleep 30", result.failedCommand());
+        assertTrue(result.output().contains("before"));
+        assertTrue(result.output().toLowerCase().contains("timed out"));
+        assertTrue(lines.stream().anyMatch(l -> l.contains("before")));
     }
 }

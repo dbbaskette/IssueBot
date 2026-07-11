@@ -135,6 +135,16 @@ class RepositoryControllerTest {
     }
 
     @Test
+    void addOrUpdateWithCommentsOnlyVerificationCommandsStoresNull() {
+        // A list with no effective commands (comments/blank lines only) must be stored
+        // as null so the UI's "configured" conditionals agree with the workflow.
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), "# just a comment\n\n   \n# another\n");
+
+        assertThat(saved.getVerificationCommands()).isNull();
+    }
+
+    @Test
     void addOrUpdateRespectsUncheckedAutoStart() throws Exception {
         // An unchecked HTML checkbox posts nothing at all for that field, so this simulates
         // the real form submission (via MockMvc) rather than calling the controller method

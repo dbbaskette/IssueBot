@@ -112,7 +112,15 @@ public class RepositoryController {
         repo.setFollowUpEnabled(followUpEnabled);
         repo.setImplementationModel(normalize(implementationModel));
         repo.setReviewModel(normalize(reviewModel));
-        repo.setVerificationCommands(normalize(verificationCommands));
+        // Comments-only / blank-effective command lists count as unset so the UI
+        // (pipeline stage, goal-card row) and the workflow agree on "configured".
+        String normalizedCommands = normalize(verificationCommands);
+        if (normalizedCommands != null
+                && com.dbbaskette.issuebot.service.workflow.LocalVerificationService
+                        .parseCommands(normalizedCommands).isEmpty()) {
+            normalizedCommands = null;
+        }
+        repo.setVerificationCommands(normalizedCommands);
         try {
             repo.setFollowUpMode(FollowUpMode.valueOf(followUpMode));
         } catch (IllegalArgumentException e) {

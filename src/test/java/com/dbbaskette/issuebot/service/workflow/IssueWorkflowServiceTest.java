@@ -146,6 +146,8 @@ class IssueWorkflowServiceTest {
                 "diff content", "Tests failed", "Build error on line 42");
         assertTrue(prompt.contains("Previous Iteration"));
         assertTrue(prompt.contains("Tests failed"));
+        // Source-neutral header — the logs may come from CI or local verification commands
+        assertTrue(prompt.contains("### Verification Failure Logs"));
         assertTrue(prompt.contains("Build error on line 42"));
         assertTrue(prompt.contains("diff content"));
     }

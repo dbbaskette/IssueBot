@@ -70,6 +70,15 @@ public class LocalVerificationService {
      * An empty command list is treated as success (no-op).
      */
     public Result run(Path repoPath, List<String> commands, int timeoutMinutes, Consumer<String> lineCallback) {
+        return runWithTimeoutMillis(repoPath, commands,
+                TimeUnit.MINUTES.toMillis(timeoutMinutes), lineCallback);
+    }
+
+    /**
+     * Millisecond-resolution variant; package-private so tests can exercise timeout
+     * behavior without waiting whole minutes.
+     */
+    Result runWithTimeoutMillis(Path repoPath, List<String> commands, long timeoutMillis, Consumer<String> lineCallback) {
         if (commands == null || commands.isEmpty()) {
             return Result.success("");
         }
@@ -83,7 +92,7 @@ public class LocalVerificationService {
                     // best-effort logging only
                 }
             }
-            CommandOutcome outcome = runOne(repoPath, command, timeoutMinutes, lineCallback);
+            CommandOutcome outcome = runOne(repoPath, command, timeoutMillis, lineCallback);
             combined.append("$ ").append(command).append("\n").append(outcome.output).append("\n");
             if (!outcome.success) {
                 return Result.failure(command, combined.toString());
@@ -94,8 +103,10 @@ public class LocalVerificationService {
 
     private record CommandOutcome(boolean success, String output) {}
 
-    private CommandOutcome runOne(Path repoPath, String command, int timeoutMinutes, Consumer<String> lineCallback) {
-        StringBuilder output = new StringBuilder();
+    private CommandOutcome runOne(Path repoPath, String command, long timeoutMillis, Consumer<String> lineCallback) {
+        // StringBuffer: written by the reader thread, read by this thread only after
+        // the reader has terminated (unbounded join) — thread-safe either way.
+        StringBuffer output = new StringBuffer();
         try {
             ProcessBuilder pb = new ProcessBuilder(List.of("bash", "-lc", command));
             pb.directory(repoPath.toFile());
@@ -122,16 +133,19 @@ public class LocalVerificationService {
                 }
             });
 
-            boolean finished = process.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+            boolean finished = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS);
             if (!finished) {
-                process.destroyForcibly();
-                reader.join(3000);
-                output.append("Command timed out after ").append(timeoutMinutes).append(" minute(s)\n");
-                log.warn("Local verification command timed out after {} minutes: {}", timeoutMinutes, command);
+                killProcessTree(process);
+                // Stream is closed by the kill, so the reader terminates promptly;
+                // join unbounded before touching the buffer.
+                reader.join();
+                String timeoutLabel = formatTimeout(timeoutMillis);
+                output.append("Command timed out after ").append(timeoutLabel).append("\n");
+                log.warn("Local verification command timed out after {}: {}", timeoutLabel, command);
                 return new CommandOutcome(false, output.toString());
             }
 
-            reader.join(5000);
+            reader.join();
             int exitCode = process.exitValue();
             if (exitCode != 0) {
                 output.append("Command exited with code ").append(exitCode).append("\n");
@@ -145,5 +159,21 @@ public class LocalVerificationService {
             Thread.currentThread().interrupt();
             return new CommandOutcome(false, "Command execution interrupted");
         }
+    }
+
+    /**
+     * Kill the command and everything it spawned. bash -lc typically forks children
+     * (e.g. ./mvnw forks a test JVM); destroying only the direct child would orphan them.
+     */
+    private static void killProcessTree(Process process) {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+    }
+
+    private static String formatTimeout(long timeoutMillis) {
+        if (timeoutMillis >= 60_000 && timeoutMillis % 60_000 == 0) {
+            return (timeoutMillis / 60_000) + " minute(s)";
+        }
+        return timeoutMillis + " ms";
     }
 }
