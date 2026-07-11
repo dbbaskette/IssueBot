@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.Event;
+import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
@@ -47,6 +48,7 @@ public class IssueController {
     private final IssueBotProperties properties;
     private final IssueDecompositionService decompositionService;
     private final WorkflowCancellationService cancellationService;
+    private final IssueGuidanceRepository guidanceRepository;
     private final ObjectMapper objectMapper;
 
     public IssueController(TrackedIssueRepository issueRepository,
@@ -61,6 +63,7 @@ public class IssueController {
                             IssueBotProperties properties,
                             IssueDecompositionService decompositionService,
                             WorkflowCancellationService cancellationService,
+                            IssueGuidanceRepository guidanceRepository,
                             ObjectMapper objectMapper) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
@@ -74,6 +77,7 @@ public class IssueController {
         this.properties = properties;
         this.decompositionService = decompositionService;
         this.cancellationService = cancellationService;
+        this.guidanceRepository = guidanceRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -314,25 +318,29 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
 
-        String stamped = "[" + java.time.LocalTime.now().format(
-                java.time.format.DateTimeFormatter.ofPattern("HH:mm")) + "] " + guidance.trim();
-        issue.setPendingGuidance(issue.getPendingGuidance() == null
-                ? stamped : issue.getPendingGuidance() + "\n" + stamped);
-        issueRepository.save(issue);
+        String text = guidance.trim();
+        if (text.length() > 4000) {
+            text = text.substring(0, 4000); // column limit on issue_guidance.guidance
+        }
+
+        // Guidance is inserted as its own row, never written onto TrackedIssue —
+        // the workflow's frequent full-entity saves from its in-memory copy would
+        // silently revert any column the controller wrote mid-iteration.
+        guidanceRepository.save(new IssueGuidance(issue.getId(), text));
 
         try {
             gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                    issue.getIssueNumber(), "**Operator guidance (mid-run):** " + guidance.trim());
+                    issue.getIssueNumber(), "**Operator guidance (mid-run):** " + text);
         } catch (Exception e) {
             log.warn("Failed to post guidance comment on #{}: {}",
                     issue.getIssueNumber(), e.getMessage());
         }
 
-        eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + guidance.trim(),
+        eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + text,
                 issue.getRepo(), issue);
 
         redirectAttributes.addFlashAttribute("success",
-                "Guidance queued — applies at the next checkpoint");
+                "Guidance queued — applied at the next iteration boundary while the run is active");
         return "redirect:/issues/" + id;
     }
 

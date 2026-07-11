@@ -74,10 +74,6 @@ public class TrackedIssue {
     @Column(name = "decomposition_proposal")
     private String decompositionProposal;
 
-    @Lob
-    @Column(name = "pending_guidance")
-    private String pendingGuidance;
-
     public TrackedIssue() {}
 
     public TrackedIssue(WatchedRepo repo, int issueNumber, String issueTitle) {
@@ -149,9 +145,6 @@ public class TrackedIssue {
 
     public String getDecompositionProposal() { return decompositionProposal; }
     public void setDecompositionProposal(String decompositionProposal) { this.decompositionProposal = decompositionProposal; }
-
-    public String getPendingGuidance() { return pendingGuidance; }
-    public void setPendingGuidance(String pendingGuidance) { this.pendingGuidance = pendingGuidance; }
 
     public List<Integer> getBlockerNumbers() {
         if (blockedByIssues == null || blockedByIssues.isBlank()) {
