@@ -198,7 +198,18 @@ public class IssueController {
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
         issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
-        issue.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
+        Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
+        issue.setPlanFirstOverride(planOverride);
+        // Explicitly selecting "Require" on a retry demands a fresh, full plan cycle —
+        // planApproved is never reset elsewhere, so without this a previously approved
+        // plan would silently skip the gate. Inherit/Skip leave the plan state as-is
+        // (a plain retry of an already-approved issue keeps its approved plan).
+        if (Boolean.TRUE.equals(planOverride)) {
+            issue.setPlanApproved(false);
+            issue.setImplementationPlan(null);
+            issue.setPlanFeedback(null);
+            issue.setPlanRejections(0);
+        }
         // Manual retry defaults to a fresh Claude session; the operator must explicitly
         // opt in via the "Continue previous session" checkbox to keep it (issue #67).
         if (!continueSession) {
@@ -463,15 +474,18 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
 
+        // Branch on the service's returned outcome — the service mutates a fresh
+        // re-read copy of the issue, so this controller's entity is stale after the call.
+        PlanFirstService.RejectOutcome outcome;
         try {
-            planFirstService.rejectPlan(issue, feedback.trim());
+            outcome = planFirstService.rejectPlan(issue, feedback.trim());
         } catch (Exception e) {
             log.warn("Failed to reject plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
             return "redirect:/issues/" + id;
         }
 
-        if (issue.getPlanRejections() >= 2) {
+        if (outcome == PlanFirstService.RejectOutcome.ESCALATED) {
             redirectAttributes.addFlashAttribute("success",
                     "Plan rejected twice — issue escalated to needs-human");
         } else {

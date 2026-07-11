@@ -31,6 +31,14 @@ public class PlanFirstService {
     private static final int MAX_PLAN_REJECTIONS = 2;
     private static final int MAX_PLAN_CHARS = 20_000;
 
+    /**
+     * What {@link #rejectPlan} did with the rejection. Returned to the caller because
+     * the service mutates a fresh re-read copy of the issue (open-in-view is off, no
+     * shared transaction) — the controller's own entity instance is stale after the
+     * call, so it must branch on this value, never on its pre-call entity's fields.
+     */
+    public enum RejectOutcome { REGENERATING, ESCALATED }
+
     private final ClaudeCodeService claudeCode;
     private final GitHubApiClient gitHubApi;
     private final TrackedIssueRepository issueRepository;
@@ -156,9 +164,12 @@ public class PlanFirstService {
      * Synchronized (single-JVM app) and re-reads the issue from the database so a
      * second rapid submit hits the status guard instead of double-escalating.
      *
+     * @return {@link RejectOutcome#ESCALATED} when this rejection hit the cap and the
+     *         issue was escalated to needs-human; {@link RejectOutcome#REGENERATING}
+     *         when a fresh plan will be generated on the next poll cycle
      * @throws IllegalStateException if the issue is not awaiting plan approval or has no plan
      */
-    public synchronized void rejectPlan(TrackedIssue trackedIssue, String feedback) {
+    public synchronized RejectOutcome rejectPlan(TrackedIssue trackedIssue, String feedback) {
         TrackedIssue issue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
         if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL || issue.getImplementationPlan() == null) {
             throw new IllegalStateException(
@@ -173,7 +184,7 @@ public class PlanFirstService {
         if (rejections >= MAX_PLAN_REJECTIONS) {
             issueRepository.save(issue);
             iterationManager.handlePlanRejectedTwice(issue);
-            return;
+            return RejectOutcome.ESCALATED;
         }
 
         issue.setStatus(IssueStatus.PENDING);
@@ -183,6 +194,7 @@ public class PlanFirstService {
                 "Plan rejected — regenerating with feedback, queued (~60s)", issue.getRepo(), issue);
         notificationService.info("Plan Rejected",
                 issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " — regenerating plan");
+        return RejectOutcome.REGENERATING;
     }
 
     String buildPlanPrompt(JsonNode issueDetails, int planRejections, String planFeedback) {

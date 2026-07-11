@@ -192,8 +192,10 @@ class PlanFirstServiceTest {
         issue.setImplementationPlan("Do the thing");
         when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
 
-        planFirstService.rejectPlan(issue, "Too vague — be specific about test coverage");
+        PlanFirstService.RejectOutcome outcome =
+                planFirstService.rejectPlan(issue, "Too vague — be specific about test coverage");
 
+        assertEquals(PlanFirstService.RejectOutcome.REGENERATING, outcome);
         assertEquals(1, issue.getPlanRejections());
         assertEquals("Too vague — be specific about test coverage", issue.getPlanFeedback());
         assertNull(issue.getImplementationPlan());
@@ -211,8 +213,10 @@ class PlanFirstServiceTest {
         issue.setPlanRejections(1);
         when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
 
-        planFirstService.rejectPlan(issue, "Still not good enough");
+        PlanFirstService.RejectOutcome outcome =
+                planFirstService.rejectPlan(issue, "Still not good enough");
 
+        assertEquals(PlanFirstService.RejectOutcome.ESCALATED, outcome);
         assertEquals(2, issue.getPlanRejections());
         assertEquals("Still not good enough", issue.getPlanFeedback());
         assertNull(issue.getImplementationPlan());

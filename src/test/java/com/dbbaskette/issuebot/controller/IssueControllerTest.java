@@ -342,12 +342,33 @@ class IssueControllerTest {
     @Test
     void rejectPlanEndpointDelegatesWithTrimmedFeedback() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(f.planFirstService.rejectPlan(any(), anyString()))
+                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
 
         String view = f.controller.rejectPlan(1L, "  Consider the caching layer  ", f.redirectAttributes);
 
         verify(f.planFirstService).rejectPlan(f.issue, "Consider the caching layer");
-        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("regenerates"));
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    /**
+     * The escalation flash must branch on the service's RETURNED outcome, never on the
+     * controller's own entity — the service mutates a fresh re-read copy (open-in-view
+     * off, no shared transaction), so the controller's instance stays stale. This test
+     * deliberately leaves the controller's entity untouched (planRejections = 0) and
+     * only stubs the return value: the escalated flash must still fire.
+     */
+    @Test
+    void rejectPlanEndpointFlashesEscalationOnServiceOutcome_notStaleEntity() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(f.planFirstService.rejectPlan(any(), anyString()))
+                .thenReturn(PlanFirstService.RejectOutcome.ESCALATED);
+
+        f.controller.rejectPlan(1L, "Still wrong", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPlanRejections()).isZero(); // stale copy untouched
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("escalated to needs-human"));
     }
 
     @Test
@@ -381,6 +402,51 @@ class IssueControllerTest {
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getPlanFirstOverride()).isNull();
+    }
+
+    /**
+     * Explicitly selecting "Require" on a retry must force a fresh, full plan cycle —
+     * planApproved is never reset anywhere else, so a previously approved plan would
+     * otherwise silently skip the gate on this and every future run.
+     */
+    @Test
+    void retryWithRequireResetsPlanGateForFreshCycle() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanApproved(true);
+        f.issue.setImplementationPlan("old approved plan");
+        f.issue.setPlanFeedback("old feedback");
+        f.issue.setPlanRejections(2);
+
+        f.controller.retry(1L, null, null, null, null, "require", false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        TrackedIssue saved = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanFirstOverride()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(saved.isPlanApproved()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(saved.getImplementationPlan()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanFeedback()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanRejections()).isZero();
+    }
+
+    /** Inherit (and Skip) must leave a previously approved plan untouched — no re-gate. */
+    @Test
+    void retryWithInheritLeavesApprovedPlanStateUntouched() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanApproved(true);
+        f.issue.setImplementationPlan("old approved plan");
+        f.issue.setPlanFeedback("old feedback");
+        f.issue.setPlanRejections(1);
+
+        f.controller.retry(1L, null, null, null, null, "inherit", false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        TrackedIssue saved = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(saved.isPlanApproved()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(saved.getImplementationPlan()).isEqualTo("old approved plan");
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanFeedback()).isEqualTo("old feedback");
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanRejections()).isEqualTo(1);
     }
 
     @Test
