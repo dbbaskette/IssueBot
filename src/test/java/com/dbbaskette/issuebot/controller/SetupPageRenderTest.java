@@ -146,7 +146,7 @@ class SetupPageRenderTest {
 
         assertThat(html).contains("Received");
         assertThat(html).contains("Signature Failures");
-        assertThat(html).contains("Actions Taken");
+        assertThat(html).contains("Deliveries Handled");
         assertThat(html).contains(">12<");
         assertThat(html).contains(">3<");
         assertThat(html).contains(">5<");
