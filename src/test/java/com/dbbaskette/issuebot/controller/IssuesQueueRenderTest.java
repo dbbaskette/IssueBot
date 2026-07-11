@@ -1,0 +1,114 @@
+package com.dbbaskette.issuebot.controller;
+
+import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.util.HumanizeHelper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockServletContext;
+import org.thymeleaf.TemplateSpec;
+import org.thymeleaf.context.WebContext;
+import org.thymeleaf.spring6.SpringTemplateEngine;
+import org.thymeleaf.templatemode.TemplateMode;
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
+import org.thymeleaf.web.servlet.IServletWebExchange;
+import org.thymeleaf.web.servlet.JakartaServletWebApplication;
+
+import java.io.StringWriter;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Renders the real issues.html "table-rows" fragment through Thymeleaf (no Spring context, no
+ * database) to verify the Phase column shows humanized phase names (#80) instead of raw
+ * SCREAMING_SNAKE_CASE values — mirrors {@link IssueDetailGoalCardRenderTest}'s approach. This
+ * is the fragment the {@code /issues/table} HTMX endpoint returns, so it's rendered directly
+ * (no need for the full "content" fragment's filter-bar variables).
+ */
+class IssuesQueueRenderTest {
+
+    private SpringTemplateEngine templateEngine;
+    private IServletWebExchange webExchange;
+
+    @BeforeEach
+    void setUp() {
+        ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
+        resolver.setPrefix("templates/");
+        resolver.setSuffix(".html");
+        resolver.setTemplateMode(TemplateMode.HTML);
+        resolver.setCharacterEncoding("UTF-8");
+
+        templateEngine = new SpringTemplateEngine();
+        templateEngine.setTemplateResolver(resolver);
+
+        MockServletContext servletContext = new MockServletContext();
+        JakartaServletWebApplication webApplication = JakartaServletWebApplication.buildApplication(servletContext);
+        MockHttpServletRequest request = new MockHttpServletRequest(servletContext);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        webExchange = webApplication.buildExchange(request, response);
+    }
+
+    private String renderTableRows(List<TrackedIssue> issues) {
+        WebContext context = new WebContext(webExchange, Locale.US);
+        context.setVariable("issues", issues);
+        // Mirrors what UiModelAdvice publishes on every real request.
+        context.setVariable("humanize", new HumanizeHelper());
+
+        TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
+                (org.thymeleaf.templatemode.TemplateMode) null, null);
+        StringWriter writer = new StringWriter();
+        templateEngine.process(spec, context, writer);
+        return writer.toString();
+    }
+
+    @Test
+    void phaseColumn_showsHumanizedPhaseName_notRawEnumValue() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the thing");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase("CI_VERIFICATION");
+
+        String html = renderTableRows(List.of(issue));
+
+        assertThat(html).contains("CI Verification");
+        assertThat(html).doesNotContain("CI_VERIFICATION");
+    }
+
+    @Test
+    void phaseColumn_showsEmDash_whenPhaseIsNull() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 43, "Another issue");
+        issue.setId(2L);
+        issue.setStatus(IssueStatus.QUEUED);
+
+        String html = renderTableRows(List.of(issue));
+
+        assertThat(html).contains("—"); // em dash
+    }
+
+    @Test
+    void blockedIssue_stillShowsWaitingOnBlockerLinks_notPhaseText() {
+        // The BLOCKED special case (issue #... "Waiting on #N") must keep working
+        // untouched by the humanizer change.
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 44, "Blocked issue");
+        issue.setId(3L);
+        issue.setStatus(IssueStatus.BLOCKED);
+        issue.setBlockedByIssues("5,6");
+        issue.setCurrentPhase("IMPLEMENTATION");
+
+        String html = renderTableRows(List.of(issue));
+
+        assertThat(html).contains("Waiting on");
+        assertThat(html).contains("#5");
+        assertThat(html).contains("#6");
+        assertThat(html).doesNotContain("Implementation");
+    }
+}

@@ -1,9 +1,11 @@
 package com.dbbaskette.issuebot.controller;
 
+import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -68,6 +70,8 @@ class IssueDetailGoalCardRenderTest {
         context.setVariable("phaseIndex", -1);
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
+        // Mirrors what UiModelAdvice publishes on every real request (#80).
+        context.setVariable("humanize", new HumanizeHelper());
         return context;
     }
 
@@ -352,5 +356,39 @@ class IssueDetailGoalCardRenderTest {
         String html = render(baseContext(issue, iteration));
 
         assertThat(html).doesNotContain("Claude session");
+    }
+
+    // === Activity log humanization (#80) ===
+
+    @Test
+    void activityLog_showsHumanizedEventType_notRawEnumValue() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 12, "Twelfth issue");
+        issue.setId(12L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+
+        WebContext context = baseContext(issue, null);
+        context.setVariable("events", List.of(new Event("PHASE_LOCAL_CHECKS_FAILED", "Local checks failed")));
+
+        String html = render(context);
+
+        assertThat(html).contains("Local Checks Failed");
+        assertThat(html).doesNotContain("PHASE_LOCAL_CHECKS_FAILED");
+    }
+
+    @Test
+    void activityLog_humanizesGuidanceAppliedEventType() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 13, "Thirteenth issue");
+        issue.setId(13L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+
+        WebContext context = baseContext(issue, null);
+        context.setVariable("events", List.of(new Event("GUIDANCE_APPLIED", "Applying operator guidance")));
+
+        String html = render(context);
+
+        assertThat(html).contains("Guidance Applied");
+        assertThat(html).doesNotContain("GUIDANCE_APPLIED");
     }
 }

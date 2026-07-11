@@ -14,57 +14,57 @@
          hx-swap="morph:outerHTML"
          hx-target="this">
         <div class="metrics-grid">
-            <a class="metric-tile is-link ok"
+            <a class="metric-tile is-link ok" href="/issues?status=COMPLETED"
                hx-get="/issues?status=COMPLETED" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-circle-check"></i> Completed</div>
                 <div class="value" th:text="${completed}">0</div>
             </a>
-            <a class="metric-tile is-link accent"
+            <a class="metric-tile is-link accent" href="/issues?status=IN_PROGRESS"
                hx-get="/issues?status=IN_PROGRESS" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-loader"></i> In Progress</div>
                 <div class="value" th:text="${inProgress}">0</div>
             </a>
-            <a class="metric-tile is-link"
+            <a class="metric-tile is-link" href="/issues?status=PENDING"
                hx-get="/issues?status=PENDING" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-clock"></i> Pending</div>
                 <div class="value" th:text="${pending}">0</div>
             </a>
-            <a class="metric-tile is-link"
+            <a class="metric-tile is-link" href="/issues?status=QUEUED"
                hx-get="/issues?status=QUEUED" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-stack-2"></i> Queued</div>
                 <div class="value" th:text="${queued}">0</div>
             </a>
-            <a class="metric-tile is-link danger"
+            <a class="metric-tile is-link danger" href="/issues?status=BLOCKED"
                hx-get="/issues?status=BLOCKED" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-ban"></i> Blocked</div>
                 <div class="value" th:text="${blocked}">0</div>
             </a>
-            <a class="metric-tile is-link danger"
+            <a class="metric-tile is-link danger" href="/issues?status=FAILED"
                hx-get="/issues?status=FAILED" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-alert-triangle"></i> Failed</div>
                 <div class="value" th:text="${failed}">0</div>
             </a>
-            <a class="metric-tile is-link"
+            <a class="metric-tile is-link" href="/issues?status=DECOMPOSED"
                hx-get="/issues?status=DECOMPOSED" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-git-branch"></i> Decomposed</div>
                 <div class="value" th:text="${decomposed}">0</div>
             </a>
-            <a class="metric-tile is-link accent"
+            <a class="metric-tile is-link accent" href="/issues?status=AWAITING_DECOMPOSITION"
                hx-get="/issues?status=AWAITING_DECOMPOSITION" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-git-fork"></i> Awaiting Split OK</div>
                 <div class="value" th:text="${awaitingDecomposition}">0</div>
             </a>
-            <a class="metric-tile is-link accent"
+            <a class="metric-tile is-link accent" href="/issues?status=AWAITING_PLAN_APPROVAL"
                hx-get="/issues?status=AWAITING_PLAN_APPROVAL" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-clipboard-check"></i> Awaiting Plan OK</div>
                 <div class="value" th:text="${awaitingPlanApproval}">0</div>
             </a>
-            <a class="metric-tile is-link"
+            <a class="metric-tile is-link" href="/repositories"
                hx-get="/repositories" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-folders"></i> Watched Repos</div>
                 <div class="value" th:text="${repoCount}">0</div>
             </a>
-            <a class="metric-tile is-link"
+            <a class="metric-tile is-link" href="/costs"
                hx-get="/costs" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-coin"></i> Total Cost</div>
                 <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
@@ -100,8 +100,13 @@
                             <span th:case="'FOLLOW_UP_ISSUE_CREATED'"><i class="ti ti-git-branch"></i> Follow-up issue created</span>
                             <span th:case="'STALE_PR_CLOSED'"><i class="ti ti-archive"></i> Stale PR closed</span>
                             <span th:case="'PRE_SCREEN_TOO_LARGE'"><i class="ti ti-ruler-measure"></i> Issue too large</span>
+                            <!-- Named cases above are hand-picked icon + copy pairs, deliberately curated
+                                 rather than raw enum output — left as-is. The fallback below is the
+                                 generic humanizer (#80): the one place unmapped event types get turned
+                                 from SCREAMING_SNAKE_CASE into readable text, shared with the issue
+                                 queue's Phase column and the issue-detail Activity Log. -->
                             <span th:case="*"><i class="ti ti-point"></i>
-                                <span th:text="${#strings.capitalizeWords(#strings.replace(#strings.toLowerCase(event.eventType), '_', ' '))}">Event</span>
+                                <span th:text="${humanize.eventType(event.eventType)}">Event</span>
                             </span>
                         </span>
                         <span th:text="${event.message}">Event message</span>

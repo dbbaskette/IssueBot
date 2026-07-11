@@ -518,7 +518,7 @@
             <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
                 <li th:each="event : ${events}">
                     <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm:ss')}">12:00:00</span>
-                    <span class="type" th:text="${event.eventType}">EVENT</span>
+                    <span class="type" th:text="${humanize.eventType(event.eventType)}">EVENT</span>
                     <span th:text="${event.message}">message</span>
                 </li>
             </ul>

@@ -80,7 +80,7 @@
         </td>
         <td class="text-sm">
             <span th:if="${issue.status.name() != 'BLOCKED' or issue.blockedByIssues == null}"
-                  th:text="${issue.currentPhase != null ? issue.currentPhase : '—'}">—</span>
+                  th:text="${issue.currentPhase != null ? humanize.phase(issue.currentPhase) : '—'}">—</span>
             <span th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}">
                 Waiting on
                 <a th:each="num,iter : ${issue.blockerNumbers}"
