@@ -381,14 +381,7 @@
         </div>
     </div>
 
-    <!-- === LIVE-REFRESHED STATUS SECTION ===
-         The stamp lives outside the #live-status fragment (rather than inside it) so the
-         5s morph:outerHTML poll below never wipes the JS-rendered "updated Xs ago" text —
-         idiomorph would otherwise reset it to the server-rendered (empty) markup on every
-         swap since Thymeleaf never writes text into the span itself. -->
-    <div class="mb-1" style="text-align:right" th:if="${issue.status.name() == 'IN_PROGRESS'}">
-        <span class="text-sm text-muted" data-updated-stamp="pipeline"></span>
-    </div>
+    <!-- === LIVE-REFRESHED STATUS SECTION === -->
     <div th:replace="~{issue-detail :: live-status}"></div>
 
     <!-- === LIVE TERMINAL (outside HTMX swap) === -->
@@ -542,6 +535,18 @@
      th:hx-trigger="${issue.status.name() == 'IN_PROGRESS' ? 'every 5s' : 'none'}"
      hx-target="#live-status"
      hx-swap="morph:outerHTML">
+
+    <!--/* Last-updated stamp (#83) lives INSIDE this fragment so its presence follows the
+           fragment's own lifecycle: once the issue leaves IN_PROGRESS, the next poll
+           re-renders the fragment without this element (and with hx-trigger "none"), so a
+           stamp can't keep ticking "updated Xs ago" after polling has silently stopped.
+           The 5s morph does wipe the JS-rendered text on each swap, but the global
+           htmx:afterSwap handler immediately re-marks the "pipeline" key (SWAP_TARGET_STAMPS
+           in app.js) and mark() re-renders synchronously, so the text is restored in the
+           same event turn — no visible flicker. */-->
+    <div class="mb-1" style="text-align:right" th:if="${issue.status.name() == 'IN_PROGRESS'}">
+        <span class="text-sm text-muted" data-updated-stamp="pipeline"></span>
+    </div>
 
     <div class="metrics-grid mb-3">
         <div class="metric-card">

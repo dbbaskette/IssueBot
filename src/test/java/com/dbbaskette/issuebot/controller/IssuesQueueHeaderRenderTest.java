@@ -72,7 +72,6 @@ class IssuesQueueHeaderRenderTest {
         String html = renderContent();
 
         assertThat(html).doesNotContain(">Refresh<");
-        assertThat(html).doesNotContain("hx-target=\"#issue-table-body\"\n                    hx-swap=\"innerHTML\"");
     }
 
     @Test

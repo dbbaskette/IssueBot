@@ -26,10 +26,13 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Renders the real issue-detail.html "content" fragment through Thymeleaf (no Spring context, no
+ * Renders the real issue-detail.html fragments through Thymeleaf (no Spring context, no
  * database) to verify #83's last-updated stamp for the live pipeline section: shown only while
  * the issue is actively polling (IN_PROGRESS, every 5s per the {@code live-status} fragment),
- * absent otherwise since there's nothing ticking to report. Mirrors
+ * absent otherwise since there's nothing ticking to report. The stamp lives INSIDE the
+ * live-status fragment — asserted here by rendering that fragment directly — so each poll
+ * re-render decides its presence: once the issue leaves IN_PROGRESS, the final swap removes
+ * the element and a dead pipeline can't keep ticking "updated Xs ago". Mirrors
  * {@link IssueDetailGoalCardRenderTest}'s setup.
  */
 class IssueDetailPipelineStampRenderTest {
@@ -55,7 +58,7 @@ class IssueDetailPipelineStampRenderTest {
         webExchange = webApplication.buildExchange(request, response);
     }
 
-    private String render(TrackedIssue issue) {
+    private String render(TrackedIssue issue, String fragment) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", null);
@@ -67,33 +70,50 @@ class IssueDetailPipelineStampRenderTest {
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
 
-        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("content"),
+        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
     }
 
+    private TrackedIssue issueWithStatus(long id, int number, IssueStatus status) {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, number, "Issue " + number);
+        issue.setId(id);
+        issue.setStatus(status);
+        return issue;
+    }
+
     @Test
     void pipelineStamp_present_whenIssueInProgress() {
-        WatchedRepo repo = new WatchedRepo("acme", "widgets");
-        TrackedIssue issue = new TrackedIssue(repo, 10, "In-flight issue");
-        issue.setId(10L);
-        issue.setStatus(IssueStatus.IN_PROGRESS);
-
-        String html = render(issue);
+        String html = render(issueWithStatus(10L, 10, IssueStatus.IN_PROGRESS), "content");
 
         assertThat(html).contains("data-updated-stamp=\"pipeline\"");
     }
 
     @Test
     void pipelineStamp_absent_whenIssueNotInProgress() {
-        WatchedRepo repo = new WatchedRepo("acme", "widgets");
-        TrackedIssue issue = new TrackedIssue(repo, 11, "Queued issue");
-        issue.setId(11L);
-        issue.setStatus(IssueStatus.QUEUED);
+        String html = render(issueWithStatus(11L, 11, IssueStatus.QUEUED), "content");
 
-        String html = render(issue);
+        assertThat(html).doesNotContain("data-updated-stamp=\"pipeline\"");
+    }
+
+    @Test
+    void pipelineStamp_isInsideLiveStatusFragment_soPollRerendersGovernIt() {
+        // The /issues/{id}/live-status poll endpoint returns exactly this fragment; the stamp
+        // must be part of it so the poll that stops (status leaves IN_PROGRESS) also removes
+        // the stamp in the same final swap.
+        String html = render(issueWithStatus(12L, 12, IssueStatus.IN_PROGRESS), "live-status");
+
+        assertThat(html).contains("data-updated-stamp=\"pipeline\"");
+    }
+
+    @Test
+    void liveStatusFragment_dropsStamp_onceIssueLeavesInProgress() {
+        // What the final poll response looks like after the run ends: no stamp element left
+        // in the DOM for the 1s ticker to write into.
+        String html = render(issueWithStatus(13L, 13, IssueStatus.COMPLETED), "live-status");
 
         assertThat(html).doesNotContain("data-updated-stamp=\"pipeline\"");
     }

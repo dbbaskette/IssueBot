@@ -167,15 +167,17 @@
       Object.keys(this.times).forEach(function (key) { self._renderOne(key); });
     },
 
-    // Marks any [data-updated-stamp] element visible on the page that isn't
-    // already tracked yet — covers full page loads/navigations, where the
-    // region's data is freshly rendered by the server but no swap/SSE event
-    // fired to trigger mark() (there's nothing "stale" to tick down from).
-    markUntrackedVisible: function () {
+    // Marks every [data-updated-stamp] element currently in the DOM. Called on
+    // initial page load and on every #content swap (SPA navigation): a freshly
+    // rendered region is by definition fresh data, so its stamp starts at
+    // "just now" — deliberately including keys already tracked from an earlier
+    // visit (Dashboard → Issues → Dashboard), whose stale per-session times
+    // must not be shown against freshly-rendered data.
+    markAllVisible: function () {
       var self = this;
       document.querySelectorAll('[data-updated-stamp]').forEach(function (el) {
         var key = el.getAttribute('data-updated-stamp');
-        if (key && !(key in self.times)) { self.mark(key); }
+        if (key) { self.mark(key); }
       });
     },
 
@@ -1060,18 +1062,21 @@
     initSortableTables();
     initCostCharts();
 
-    // Last-updated stamps (#83): a swap into one of the tracked live regions
-    // (queue table, dashboard metrics, issue-detail pipeline) means that
-    // region's data just refreshed — including the queue's SSE-triggered
-    // refresh, which flows through htmx's normal fetch+swap cycle just like
-    // the dashboard/pipeline polls do. Any other stamp elements newly present
-    // on the page (e.g. after navigating to a different page entirely) get
-    // an initial mark too, since their data was just freshly rendered.
+    // Last-updated stamps (#83): a #content swap is an SPA navigation — the
+    // whole page region (and every stamp on it) was just freshly rendered by
+    // the server, so ALL visible stamps reset to "just now". This includes
+    // revisits to a page whose key was already tracked from an earlier visit;
+    // without the reset, the previous visit's stale time would be shown
+    // against fresh data until the next live tick. Otherwise, a swap into one
+    // of the tracked live regions (queue table, dashboard metrics, issue-detail
+    // pipeline — including the queue's SSE-triggered refresh, which flows
+    // through htmx's normal fetch+swap cycle) marks just that region's key.
     var target = evt.detail && evt.detail.target;
-    if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
+    if (target && target.id === 'content') {
+      UpdateStamps.markAllVisible();
+    } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
       markUpdated(SWAP_TARGET_STAMPS[target.id]);
     }
-    UpdateStamps.markUntrackedVisible();
   });
 
   // Close the live-terminal EventSource when navigating away (registered once).
@@ -1105,7 +1110,7 @@
     colorizeDiffs();
     initSortableTables();
     initCostCharts();
-    UpdateStamps.markUntrackedVisible();
+    UpdateStamps.markAllVisible();
   }
 
   if (document.readyState === 'loading') {
