@@ -421,6 +421,7 @@
       var filter = (value || '').trim().toLowerCase();
       var self = this;
       Array.prototype.forEach.call(terminal.children, function (line) {
+        if (line.classList.contains('term-trim-marker')) { return; } // filter-exempt
         var raw = (line.dataset && line.dataset.raw) || '';
         line.classList.toggle('hidden', !self._matchesFilter(raw, filter));
       });
@@ -514,6 +515,8 @@
         if (!this.trimMarkerInserted) {
           this.trimMarkerInserted = true;
           var marker = document.createElement('div');
+          // Deliberately filter-exempt: the truncation notice must stay visible
+          // even when a filter is active, or filtered views look complete.
           marker.className = 'terminal-line term-system term-trim-marker';
           var markerText = '… earlier output trimmed';
           marker.textContent = markerText;
@@ -723,9 +726,15 @@
   // Live terminal filter box (#84): substring-hides non-matching lines as
   // the operator types, both for lines already rendered and (via _appendLine
   // consulting the same input) for lines that arrive afterward.
+  // Debounced: a full-buffer rescan per keystroke is wasteful at 5,000 lines.
+  var terminalFilterDebounce = null;
   document.addEventListener('input', function (e) {
     if (e.target && e.target.matches && e.target.matches('[data-terminal-filter]')) {
-      IssueBotTerminal.applyFilter(e.target.value);
+      var value = e.target.value;
+      clearTimeout(terminalFilterDebounce);
+      terminalFilterDebounce = setTimeout(function () {
+        IssueBotTerminal.applyFilter(value);
+      }, 150);
     }
   });
 
