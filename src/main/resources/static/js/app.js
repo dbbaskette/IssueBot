@@ -354,8 +354,31 @@
     }
   }
 
+  // --- Repositories: shared Remove-repository modal ------------------------
+  // The Remove button on each row carries [data-remove-repo] plus data-repo-name /
+  // data-issue-count / data-delete-url (Thymeleaf HTML-escapes these). Rather than render
+  // one modal per row, a single shared #remove-repo-modal is populated from whichever
+  // button was clicked, then its form's hx-delete target is (re)pointed at that repo and
+  // handed to htmx.process so the dynamically-set attribute takes effect (#81).
+  function populateRemoveRepoModal(ds) {
+    var nameEl = document.getElementById('remove-repo-name');
+    if (nameEl) { nameEl.textContent = ds.repoName || 'this repository'; }
+    var countEl = document.getElementById('remove-repo-issue-count');
+    if (countEl) { countEl.textContent = ds.issueCount || '0'; }
+    var form = document.getElementById('remove-repo-form');
+    if (form && ds.deleteUrl) {
+      form.setAttribute('hx-delete', ds.deleteUrl);
+      if (window.htmx && typeof window.htmx.process === 'function') { window.htmx.process(form); }
+    }
+  }
+
   // Delegated modal controls.
   document.addEventListener('click', function (e) {
+    var removeRepoBtn = e.target.closest('[data-remove-repo]');
+    if (removeRepoBtn) {
+      populateRemoveRepoModal(removeRepoBtn.dataset);
+      // Falls through — the same button also carries [data-modal-open] to open it.
+    }
     var opener = e.target.closest('[data-modal-open]');
     if (opener) {
       e.preventDefault();
@@ -931,6 +954,12 @@
       try { window.__issueBotES.close(); } catch (e) { /* ignore */ }
       window.__issueBotES = null;
       if (window.IssueBotTerminal) { window.IssueBotTerminal.es = null; }
+    }
+    // htmx suppresses swaps on 4xx by default; the server renders a friendly
+    // not-found page for 404s, so let it through instead of doing nothing.
+    if (evt.detail.xhr && evt.detail.xhr.status === 404) {
+      evt.detail.shouldSwap = true;
+      evt.detail.isError = false;
     }
   });
 

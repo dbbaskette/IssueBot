@@ -23,13 +23,14 @@ class RepositoryControllerTest {
 
     private static final class Fixture {
         final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         final RepoLessonRepository lessons = mock(RepoLessonRepository.class);
         final RepositoryController controller;
 
         Fixture() {
             when(repos.findByOwnerAndName("acme", "widgets")).thenReturn(Optional.empty());
             controller = new RepositoryController(repos,
-                    mock(TrackedIssueRepository.class), mock(IterationRepository.class),
+                    issues, mock(IterationRepository.class),
                     mock(CostTrackingRepository.class), mock(EventRepository.class),
                     lessons,
                     mock(IssuePollingService.class));
@@ -250,6 +251,31 @@ class RepositoryControllerTest {
                 false, new BigDecimal("0.70"), null, null, false, null, false);
 
         assertThat(saved.isLessonsEnabled()).isFalse();
+    }
+
+    // === Honest destructive confirmations (#81) ===
+
+    /**
+     * The Remove-repository confirmation modal states the real, total tracked-issue count
+     * (all statuses) — matching what {@link RepositoryController#delete} actually cascades,
+     * not the open-issue count shown in the table's "Issues" column.
+     */
+    @Test
+    void listPopulatesTotalIssueCountsForRemovalModalCopy() {
+        Fixture fixture = new Fixture();
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(7L);
+        when(fixture.repos.findAll()).thenReturn(java.util.List.of(repo));
+        when(fixture.issues.countByRepo(repo)).thenReturn(4L);
+        when(fixture.lessons.findByRepoIdOrderByCreatedAtAsc(7L)).thenReturn(java.util.List.of());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        fixture.controller.list(model, null, null);
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<Long, Long> totalIssueCounts =
+                (java.util.Map<Long, Long>) model.getAttribute("totalIssueCounts");
+        assertThat(totalIssueCounts).containsEntry(7L, 4L);
     }
 
     @Test

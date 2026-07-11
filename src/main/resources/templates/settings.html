@@ -169,12 +169,29 @@
                     <i class="ti ti-device-floppy" aria-hidden="true"></i> Save (restart required)
                 </button>
                 <button type="button" class="btn btn-outline"
-                        hx-get="/settings" hx-target="#content"
-                        hx-confirm="Discard unsaved edits and reload the config from disk?">
+                        data-modal-open="discard-config-modal">
                     Discard Changes
                 </button>
             </div>
         </form>
+    </div>
+
+    <!-- === Discard Config Modal (accessible dialog) === -->
+    <div id="discard-config-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="discard-config-modal-title">
+            <h3 id="discard-config-modal-title" style="margin:0 0 0.5rem">Discard changes?</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">
+                Reverts the editor above to the config file currently saved on disk &mdash; any
+                unsaved edits in the textarea are lost.
+            </p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                <button type="button" class="btn btn-danger btn-sm"
+                        hx-get="/settings" hx-target="#content">
+                    Discard Changes
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 </body>

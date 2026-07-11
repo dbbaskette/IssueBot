@@ -9,7 +9,9 @@
     <div class="panel">
         <div class="panel-body" style="text-align:center;padding:3rem">
             <p th:text="${errorMessage}" style="font-size:1.1rem">An error occurred.</p>
-            <a href="/" class="btn btn-primary mt-2">Back to Dashboard</a>
+            <a th:href="${backLink != null ? backLink : '/'}"
+               th:text="${backLabel != null ? backLabel : 'Back to Dashboard'}"
+               class="btn btn-primary mt-2">Back to Dashboard</a>
         </div>
     </div>
 </div>
