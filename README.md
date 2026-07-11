@@ -63,6 +63,8 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 - **Web Dashboard** - Liquid-glass UI with a light/dark theme toggle, real-time monitoring (live terminal streaming with scroll-lock/copy, phase pipeline, iteration history with colorized diffs, review scores), drill-through metric tiles, and keyboard-accessible navigation — mobile-responsive with hamburger menu
 - **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns, a per-repo cost chart, and sortable cost tables
 - **Local-First** - Runs on your machine with an embedded H2 database; no external infrastructure required
+- **Custom Instructions** - Free-text per-repo guidance ("use constructor injection", "never touch /legacy") injected into every implementation prompt and surfaced as reviewer context in the independent code review
+- **Cross-Issue Lessons** (opt-in) - When enabled, a cheap utility-model call distills 1-3 transferable lessons from each completed (or exhausted) issue and injects them into future implementation prompts for the same repo; capped at 30 lessons (oldest evicted first), with per-lesson delete from the dashboard
 
 ## Built With
 
@@ -202,6 +204,8 @@ Autonomy is spread across six settings (mode, auto-start, auto-merge, decomposit
 | `pre-screen-enabled` | `true` | Run a cheap utility-model pass before implementation to catch oversized issues early |
 | `implementation-model` | inherit global | Per-repo override of the implementation model |
 | `review-model` | inherit global | Per-repo override of the review model |
+| `custom-instructions` | (none) | Free-text standing guidance injected into every implementation prompt (`## Repository Instructions`) and into the review prompt as reviewer context ("the repo owner requires...") |
+| `lessons-enabled` | `false` | When on, a completed (or iteration-exhausted) issue triggers a cheap utility-model call that distills 1-3 transferable lessons, stored per-repo (capped at 30, oldest evicted first) and injected into future implementation prompts (`## Lessons from previous issues in this repo`). Curate/delete lessons from the repo row on the dashboard |
 
 ### Issue Dependencies
 

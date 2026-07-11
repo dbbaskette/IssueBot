@@ -46,6 +46,7 @@ public class CodeReviewService {
                                          String baseBranch, String model, Long issueId,
                                          List<String> criteria,
                                          boolean securityReview, double reviewPassThreshold,
+                                         String repoInstructions,
                                          Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
 
@@ -69,7 +70,8 @@ public class CodeReviewService {
 
         // 2. Build the review prompt
         String prompt = reviewPromptBuilder.buildReviewPrompt(
-                issueTitle, issueBody, changedFiles, diff, criteria, securityReview, reviewPassThreshold);
+                issueTitle, issueBody, changedFiles, diff, criteria, securityReview, reviewPassThreshold,
+                repoInstructions);
 
         // 3. Invoke the review model via CLI
         ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);

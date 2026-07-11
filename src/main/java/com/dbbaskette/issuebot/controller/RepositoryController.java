@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.FollowUpMode;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.RepoMode;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +39,7 @@ public class RepositoryController {
     private final IterationRepository iterationRepository;
     private final CostTrackingRepository costRepository;
     private final EventRepository eventRepository;
+    private final RepoLessonRepository lessonRepository;
     private final IssuePollingService pollingService;
 
     public RepositoryController(WatchedRepoRepository repoRepository,
@@ -44,12 +47,14 @@ public class RepositoryController {
                                  IterationRepository iterationRepository,
                                  CostTrackingRepository costRepository,
                                  EventRepository eventRepository,
+                                 RepoLessonRepository lessonRepository,
                                  IssuePollingService pollingService) {
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
         this.costRepository = costRepository;
         this.eventRepository = eventRepository;
+        this.lessonRepository = lessonRepository;
         this.pollingService = pollingService;
     }
 
@@ -85,6 +90,8 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "false") boolean preScreenEnabled,
                                @RequestParam(defaultValue = "false") boolean planFirst,
                                @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
+                               @RequestParam(required = false) String customInstructions,
+                               @RequestParam(required = false, defaultValue = "false") boolean lessonsEnabled,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
@@ -136,6 +143,8 @@ public class RepositoryController {
         repo.setPreScreenEnabled(preScreenEnabled);
         repo.setPlanFirst(planFirst);
         repo.setIssueBudgetUsd(normalizeBudget(issueBudgetUsd));
+        repo.setCustomInstructions(normalize(customInstructions));
+        repo.setLessonsEnabled(lessonsEnabled);
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {
                 List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))
@@ -171,6 +180,24 @@ public class RepositoryController {
         return ViewResolver.view("repositories", hx != null);
     }
 
+    /**
+     * Delete a single lesson from a repo's lessons list (operator curation, #69).
+     * Guarded so a lesson id belonging to a different repo can't be deleted via a
+     * crafted request — the id must actually belong to the {@code id} path repo.
+     */
+    @PostMapping("/{id}/lessons/{lessonId}/delete")
+    public String deleteLesson(@PathVariable Long id, @PathVariable Long lessonId,
+                                RedirectAttributes redirectAttributes) {
+        RepoLesson lesson = lessonRepository.findById(lessonId).orElse(null);
+        if (lesson == null || !lesson.getRepoId().equals(id)) {
+            redirectAttributes.addFlashAttribute("error", "Lesson not found for this repository.");
+            return "redirect:/repositories";
+        }
+        lessonRepository.delete(lesson);
+        redirectAttributes.addFlashAttribute("message", "Lesson removed.");
+        return "redirect:/repositories";
+    }
+
     private static String normalize(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
     }
@@ -202,15 +229,19 @@ public class RepositoryController {
     private void populateModel(Model model, String message, String error) {
         List<WatchedRepo> repos = repoRepository.findAll();
         Map<Long, Long> issueCounts = new HashMap<>();
+        Map<Long, List<RepoLesson>> lessonsByRepo = new HashMap<>();
         for (WatchedRepo repo : repos) {
             long count = issueRepository.countByRepoAndStatusNot(repo, IssueStatus.COMPLETED);
             issueCounts.put(repo.getId(), count);
+            // One query per repo is acceptable at this scale (small number of watched repos).
+            lessonsByRepo.put(repo.getId(), lessonRepository.findByRepoIdOrderByCreatedAtAsc(repo.getId()));
         }
 
         model.addAttribute("activePage", "repositories");
         model.addAttribute("contentTemplate", "repositories");
         model.addAttribute("repos", repos);
         model.addAttribute("issueCounts", issueCounts);
+        model.addAttribute("lessonsByRepo", lessonsByRepo);
         model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));

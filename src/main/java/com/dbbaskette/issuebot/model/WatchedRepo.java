@@ -83,6 +83,13 @@ public class WatchedRepo {
     @Lob
     private String verificationCommands;
 
+    @Column(name = "custom_instructions")
+    @Lob
+    private String customInstructions;
+
+    @Column(name = "lessons_enabled", nullable = false)
+    private boolean lessonsEnabled = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -175,6 +182,12 @@ public class WatchedRepo {
 
     public String getVerificationCommands() { return verificationCommands; }
     public void setVerificationCommands(String verificationCommands) { this.verificationCommands = verificationCommands; }
+
+    public String getCustomInstructions() { return customInstructions; }
+    public void setCustomInstructions(String customInstructions) { this.customInstructions = customInstructions; }
+
+    public boolean isLessonsEnabled() { return lessonsEnabled; }
+    public void setLessonsEnabled(boolean lessonsEnabled) { this.lessonsEnabled = lessonsEnabled; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

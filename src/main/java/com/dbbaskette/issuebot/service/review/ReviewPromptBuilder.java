@@ -28,6 +28,20 @@ public class ReviewPromptBuilder {
                                       List<String> changedFiles, String diff,
                                       List<String> criteria,
                                       boolean securityReview, double threshold) {
+        return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
+                securityReview, threshold, null);
+    }
+
+    /**
+     * @param repoInstructions the repo owner's custom instructions (#69), or null/blank
+     *                         when unset — in which case the prompt is byte-identical to
+     *                         the 7-arg overload above.
+     */
+    public String buildReviewPrompt(String issueTitle, String issueBody,
+                                      List<String> changedFiles, String diff,
+                                      List<String> criteria,
+                                      boolean securityReview, double threshold,
+                                      String repoInstructions) {
         // Locale.ROOT: the prompt must always render "0.70", never "0,70"
         String thresholdText = String.format(java.util.Locale.ROOT, "%.2f", threshold);
         List<String> effectiveCriteria = criteria != null ? criteria : List.of();
@@ -57,6 +71,10 @@ public class ReviewPromptBuilder {
 
         if (!effectiveCriteria.isEmpty()) {
             prompt.append(buildCriteriaSection(effectiveCriteria));
+        }
+
+        if (repoInstructions != null && !repoInstructions.isBlank()) {
+            prompt.append(buildRepoInstructionsSection(repoInstructions));
         }
 
         prompt.append("""
@@ -136,6 +154,13 @@ public class ReviewPromptBuilder {
             sb.append(i + 1).append(". ").append(criteria.get(i)).append("\n");
         }
         return sb.toString();
+    }
+
+    /** Repo owner requirements (#69) — a short section so violations become findings. */
+    private String buildRepoInstructionsSection(String repoInstructions) {
+        return "\n## Repository Owner Requirements\n\nThe repo owner requires:\n"
+                + repoInstructions
+                + "\n\nTreat violations of these requirements as findings.\n";
     }
 
     private String buildCriteriaResponseFormatAddition() {

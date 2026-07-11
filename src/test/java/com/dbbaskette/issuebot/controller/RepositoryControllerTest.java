@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.FollowUpMode;
+import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -22,6 +23,7 @@ class RepositoryControllerTest {
 
     private static final class Fixture {
         final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        final RepoLessonRepository lessons = mock(RepoLessonRepository.class);
         final RepositoryController controller;
 
         Fixture() {
@@ -29,6 +31,7 @@ class RepositoryControllerTest {
             controller = new RepositoryController(repos,
                     mock(TrackedIssueRepository.class), mock(IterationRepository.class),
                     mock(CostTrackingRepository.class), mock(EventRepository.class),
+                    lessons,
                     mock(IssuePollingService.class));
         }
 
@@ -68,12 +71,23 @@ class RepositoryControllerTest {
                                  String followUpMode, String decompositionMode, boolean preScreenEnabled,
                                  BigDecimal reviewPassThreshold, String verificationCommands,
                                  BigDecimal issueBudgetUsd, boolean planFirst) {
+            return addOrUpdate(implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, reviewPassThreshold, verificationCommands, issueBudgetUsd, planFirst,
+                    null, false);
+        }
+
+        WatchedRepo addOrUpdate(String implementationModel, String reviewModel,
+                                 String followUpMode, String decompositionMode, boolean preScreenEnabled,
+                                 BigDecimal reviewPassThreshold, String verificationCommands,
+                                 BigDecimal issueBudgetUsd, boolean planFirst,
+                                 String customInstructions, boolean lessonsEnabled) {
             org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
             controller.addOrUpdate(model, null, "acme", "widgets", "main", "AUTONOMOUS",
                     5, false, 15, false, false, 2, reviewPassThreshold, true, true, null,
                     verificationCommands,
                     implementationModel, reviewModel,
-                    followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd, null);
+                    followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd,
+                    customInstructions, lessonsEnabled, null);
             ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
             verify(repos).save(captor.capture());
             return captor.getValue();
@@ -200,6 +214,87 @@ class RepositoryControllerTest {
                 false, new BigDecimal("0.70"), null, new BigDecimal("-1.00"));
 
         assertThat(saved.getIssueBudgetUsd()).isNull();
+    }
+
+    // === Per-repo custom instructions + cross-issue lessons (#69) ===
+
+    @Test
+    void addOrUpdateStoresCustomInstructions() {
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), null, null, false,
+                "Always use constructor injection", false);
+
+        assertThat(saved.getCustomInstructions()).isEqualTo("Always use constructor injection");
+    }
+
+    @Test
+    void addOrUpdateWithBlankCustomInstructionsStoresNull() {
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), null, null, false, "   ", false);
+
+        assertThat(saved.getCustomInstructions()).isNull();
+    }
+
+    @Test
+    void addOrUpdateStoresLessonsEnabled() {
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), null, null, false, null, true);
+
+        assertThat(saved.isLessonsEnabled()).isTrue();
+    }
+
+    @Test
+    void addOrUpdateDefaultsLessonsEnabledToFalse() {
+        // Unchecked checkbox posts nothing; @RequestParam(defaultValue = "false") applies.
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), null, null, false, null, false);
+
+        assertThat(saved.isLessonsEnabled()).isFalse();
+    }
+
+    @Test
+    void deleteLesson_belongsToRepo_deletesAndRedirects() {
+        Fixture fixture = new Fixture();
+        RepoLesson lesson = new RepoLesson(1L, "Use constructor injection", 10);
+        lesson.setId(5L);
+        when(fixture.lessons.findById(5L)).thenReturn(Optional.of(lesson));
+        var redirectAttributes = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+
+        String view = fixture.controller.deleteLesson(1L, 5L, redirectAttributes);
+
+        assertThat(view).isEqualTo("redirect:/repositories");
+        verify(fixture.lessons).delete(lesson);
+        assertThat(redirectAttributes.getFlashAttributes().get("message")).isEqualTo("Lesson removed.");
+    }
+
+    @Test
+    void deleteLesson_belongsToDifferentRepo_flashesErrorAndDoesNotDelete() {
+        Fixture fixture = new Fixture();
+        RepoLesson lesson = new RepoLesson(2L, "Some other repo's lesson", 20);
+        lesson.setId(6L);
+        when(fixture.lessons.findById(6L)).thenReturn(Optional.of(lesson));
+        var redirectAttributes = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+
+        // Path repo id is 1, but the lesson belongs to repo 2 — must not delete.
+        String view = fixture.controller.deleteLesson(1L, 6L, redirectAttributes);
+
+        assertThat(view).isEqualTo("redirect:/repositories");
+        verify(fixture.lessons, never()).delete(any());
+        assertThat(redirectAttributes.getFlashAttributes().get("error"))
+                .isEqualTo("Lesson not found for this repository.");
+    }
+
+    @Test
+    void deleteLesson_notFound_flashesErrorAndDoesNotDelete() {
+        Fixture fixture = new Fixture();
+        when(fixture.lessons.findById(99L)).thenReturn(Optional.empty());
+        var redirectAttributes = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+
+        String view = fixture.controller.deleteLesson(1L, 99L, redirectAttributes);
+
+        assertThat(view).isEqualTo("redirect:/repositories");
+        verify(fixture.lessons, never()).delete(any());
+        assertThat(redirectAttributes.getFlashAttributes().get("error")).isNotNull();
     }
 
     @Test

@@ -55,6 +55,8 @@ class IntegrationWorkflowTest {
     private PlanFirstService planFirstService;
     private FollowUpService followUpService;
     private IssueGuidanceRepository guidanceRepository;
+    private com.dbbaskette.issuebot.repository.RepoLessonRepository lessonRepository;
+    private LessonsService lessonsService;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -76,6 +78,8 @@ class IntegrationWorkflowTest {
         planFirstService = mock(PlanFirstService.class);
         followUpService = mock(FollowUpService.class);
         guidanceRepository = mock(IssueGuidanceRepository.class);
+        lessonRepository = mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class);
+        lessonsService = mock(LessonsService.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
@@ -90,6 +94,8 @@ class IntegrationWorkflowTest {
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
                 new WorkflowCancellationService(),
                 guidanceRepository,
+                lessonRepository,
+                lessonsService,
                 objectMapper);
     }
 
@@ -184,7 +190,7 @@ class IntegrationWorkflowTest {
 
         // Review passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -195,6 +201,187 @@ class IntegrationWorkflowTest {
         // Passing review delegates non-blocking findings routing to FollowUpService
         verify(followUpService).handleNonBlockingFindings(
                 eq(issue), any(), any(CodeReviewResult.class), eq(99));
+    }
+
+    // === Per-repo custom instructions + cross-issue lessons (#69) ===
+
+    @Test
+    void happyPath_lessonsEnabled_capturesLessonsWithCompletedOutcome() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setLessonsEnabled(true);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 600);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        ArgumentCaptor<String> contextCaptor = ArgumentCaptor.forClass(String.class);
+        verify(lessonsService).capture(eq(issue), eq("completed successfully"),
+                contextCaptor.capture(), eq(Path.of("/tmp/repo")));
+        // First-attempt success — no failure context to summarize.
+        assertEquals("First-attempt success, no failures", contextCaptor.getValue());
+    }
+
+    /**
+     * The workflow calls lessonsService.capture() unconditionally at its two
+     * workflow-visible ends — gating on {@code repo.isLessonsEnabled()} is
+     * {@link LessonsService}'s own responsibility (see LessonsServiceTest), so the
+     * disabled case here still reaches capture(); it's the mocked service that's a
+     * no-op, exactly as the real one would be.
+     */
+    @Test
+    void lessonsDisabled_stillCallsCaptureButRealServiceWouldNoOp() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 601);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        verify(lessonsService).capture(eq(issue), eq("completed successfully"), anyString(), any());
+    }
+
+    @Test
+    void maxIterationsReached_lessonsEnabled_capturesLessonsWithFailedOutcome() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setLessonsEnabled(true);
+        Git mockGit = mock(Git.class);
+
+        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
+        when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(createIssueDetails());
+        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
+
+        when(iterationManager.canIterate(issue)).thenReturn(false);
+
+        workflowService.processIssue(issue);
+
+        verify(iterationManager).handleMaxIterationsReached(issue);
+        verify(lessonsService).capture(eq(issue), eq("failed after max iterations"),
+                anyString(), eq(Path.of("/tmp/repo")));
+    }
+
+    @Test
+    void lessonsEnabled_storedLessons_injectedIntoImplementationPrompt() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setLessonsEnabled(true);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        com.dbbaskette.issuebot.model.RepoLesson lesson1 =
+                new com.dbbaskette.issuebot.model.RepoLesson(1L, "Run tests with ./mvnw not mvn", 10);
+        com.dbbaskette.issuebot.model.RepoLesson lesson2 =
+                new com.dbbaskette.issuebot.model.RepoLesson(1L, "Never touch the legacy/ directory", 11);
+        when(lessonRepository.findByRepoIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(lesson1, lesson2));
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 602);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("## Lessons from previous issues in this repo"));
+        assertTrue(prompt.contains("Run tests with ./mvnw not mvn"));
+        assertTrue(prompt.contains("Never touch the legacy/ directory"));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void lessonsDisabled_neverFetchesLessonsFromRepository() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 603);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        verify(lessonRepository, never()).findByRepoIdOrderByCreatedAtAsc(any());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void customInstructions_injectedIntoImplementationPromptAndReviewPrompt() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setCustomInstructions("Always use constructor injection");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 604);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        ArgumentCaptor<String> implPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(implPromptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        assertTrue(implPromptCaptor.getValue().contains("## Repository Instructions"));
+        assertTrue(implPromptCaptor.getValue().contains("Always use constructor injection"));
+
+        ArgumentCaptor<String> reviewInstructionsCaptor = ArgumentCaptor.forClass(String.class);
+        verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(),
+                reviewInstructionsCaptor.capture(), any());
+        assertEquals("Always use constructor injection", reviewInstructionsCaptor.getValue());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
     // === Test 1b: Acceptance criteria parsed from the issue body are wired
@@ -226,14 +413,14 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
         var criteriaCaptor = ArgumentCaptor.forClass(List.class);
         verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyString(), any(), (List<String>) criteriaCaptor.capture(),
-                anyBoolean(), anyDouble(), any());
+                anyBoolean(), anyDouble(), any(), any());
         assertEquals(List.of(
                 "Special characters are accepted in passwords",
                 "Login failures are logged"), criteriaCaptor.getValue());
@@ -264,7 +451,7 @@ class IntegrationWorkflowTest {
 
         // First review fails, second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -297,7 +484,7 @@ class IntegrationWorkflowTest {
 
         // Review fails
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(failedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(failedReview());
 
         // No more review iterations
         when(iterationManager.canReviewIterate(issue)).thenReturn(false);
@@ -384,7 +571,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(true))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -413,7 +600,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -479,7 +666,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -534,7 +721,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -561,7 +748,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -590,7 +777,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -619,7 +806,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -659,7 +846,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean())).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -715,7 +902,7 @@ class IntegrationWorkflowTest {
 
         // First review fails (forces iteration 2), second passes (completes)
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -773,7 +960,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -822,7 +1009,7 @@ class IntegrationWorkflowTest {
 
         // Iteration 1's review fails → iteration 2 is a review-feedback iteration
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -950,7 +1137,7 @@ class IntegrationWorkflowTest {
 
         // First review fails (forces iteration 2), second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1002,7 +1189,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1054,7 +1241,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1109,7 +1296,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue); // manual retry without instructions

@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
@@ -69,6 +70,8 @@ public class IssueWorkflowService {
     private final ModelResolver modelResolver;
     private final WorkflowCancellationService cancellationService;
     private final IssueGuidanceRepository guidanceRepository;
+    private final RepoLessonRepository lessonRepository;
+    private final LessonsService lessonsService;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -90,6 +93,8 @@ public class IssueWorkflowService {
                                  ModelResolver modelResolver,
                                  WorkflowCancellationService cancellationService,
                                  IssueGuidanceRepository guidanceRepository,
+                                 RepoLessonRepository lessonRepository,
+                                 LessonsService lessonsService,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -110,6 +115,8 @@ public class IssueWorkflowService {
         this.modelResolver = modelResolver;
         this.cancellationService = cancellationService;
         this.guidanceRepository = guidanceRepository;
+        this.lessonRepository = lessonRepository;
+        this.lessonsService = lessonsService;
         this.objectMapper = objectMapper;
     }
 
@@ -527,6 +534,7 @@ public class IssueWorkflowService {
                 trackedIssue.setCurrentPhase("COMPLETION");
                 issueRepository.save(trackedIssue);
                 phaseCompletion(trackedIssue, issueDetails, branchName, iterationNum, diff, prNumber, reviewResult);
+                captureLessons(trackedIssue, "completed successfully", previousFeedback, previousCiLogs, repoPath);
                 return; // Success!
             } catch (Exception e) {
                 log.error("Phase 6 (Completion) failed", e);
@@ -549,7 +557,47 @@ public class IssueWorkflowService {
                         repoPath, maxIterReason)) {
             return;
         }
+        captureLessons(trackedIssue, "failed after max iterations", previousFeedback, previousCiLogs, repoPath);
         iterationManager.handleMaxIterationsReached(trackedIssue);
+    }
+
+    /**
+     * Cross-issue lessons capture (#69) at the two workflow-visible ends of a run:
+     * a successful completion, or exhausting the iteration budget without success.
+     * Wrapped in its own try/catch even though {@link LessonsService#capture} is
+     * already exception-proof — belt and suspenders, since a lessons hiccup must
+     * never affect the outcome of the issue that just finished.
+     */
+    private void captureLessons(TrackedIssue trackedIssue, String outcome,
+                                 String previousFeedback, String previousCiLogs, Path repoPath) {
+        try {
+            lessonsService.capture(trackedIssue, outcome,
+                    buildLessonsContextSummary(previousFeedback, previousCiLogs), repoPath);
+        } catch (Exception e) {
+            log.warn("Lessons capture failed for {} #{}: {}",
+                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber(), e.getMessage());
+        }
+    }
+
+    /**
+     * Build the context summary handed to {@link LessonsService#capture}: whatever
+     * retry context (operator/review feedback, CI/verification logs) drove the last
+     * iteration, truncated to a reasonable size for the utility-model prompt, or a
+     * clean-run placeholder when the run never hit a failure.
+     */
+    private String buildLessonsContextSummary(String previousFeedback, String previousCiLogs) {
+        StringBuilder sb = new StringBuilder();
+        if (previousFeedback != null && !previousFeedback.isBlank()) {
+            sb.append(previousFeedback);
+        }
+        if (previousCiLogs != null && !previousCiLogs.isBlank()) {
+            if (sb.length() > 0) sb.append("\n\n");
+            sb.append(previousCiLogs);
+        }
+        if (sb.length() == 0) {
+            return "First-attempt success, no failures";
+        }
+        return truncate(sb.toString(), 3000);
     }
 
     /**
@@ -648,9 +696,20 @@ public class IssueWorkflowService {
         String resumeId = trackedIssue.getClaudeSessionId();
         boolean resumed = resumeId != null && !resumeId.isBlank();
         String approvedPlan = trackedIssue.isPlanApproved() ? trackedIssue.getImplementationPlan() : null;
+        // Repo custom instructions (#69) — cheap and predictable to include in every
+        // prompt (cold and resumed alike) rather than tracking which sessions saw it.
+        String repoInstructions = repo.getCustomInstructions();
+        // Cross-issue lessons (#69, opt-in) — only fetched when the repo has lessons
+        // enabled; the prompt builder itself stays pure and just renders whatever list
+        // it's handed.
+        List<String> lessons = repo.isLessonsEnabled()
+                ? lessonRepository.findByRepoIdOrderByCreatedAtAsc(repo.getId()).stream()
+                        .map(RepoLesson::getLesson).toList()
+                : List.of();
 
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
-                previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan);
+                previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
+                repoInstructions, lessons);
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -685,7 +744,8 @@ public class IssueWorkflowService {
             issueRepository.save(trackedIssue);
 
             String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
-                    previousAssessment, previousCiLogs, false, null, approvedPlan);
+                    previousAssessment, previousCiLogs, false, null, approvedPlan,
+                    repoInstructions, lessons);
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
@@ -937,6 +997,7 @@ public class IssueWorkflowService {
                     criteria,
                     repo.isSecurityReviewEnabled(),
                     repo.getReviewPassThreshold().doubleValue(),
+                    repo.getCustomInstructions(),
                     line -> streamClaudeLog(issueId, line));
         } catch (Exception e) {
             log.error("Independent review failed", e);
@@ -1284,21 +1345,29 @@ public class IssueWorkflowService {
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs) {
         return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
-                false, null, null);
+                false, null, null, null, null);
     }
 
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
                                       boolean resumed) {
         return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
-                resumed, null, null);
+                resumed, null, null, null, null);
     }
 
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
                                       boolean resumed, String lastFailureReason) {
         return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
-                resumed, lastFailureReason, null);
+                resumed, lastFailureReason, null, null, null);
+    }
+
+    String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
+                                      String previousAssessment, String previousCiLogs,
+                                      boolean resumed, String lastFailureReason,
+                                      String approvedPlan) {
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
+                resumed, lastFailureReason, approvedPlan, null, null);
     }
 
     /**
@@ -1315,11 +1384,21 @@ public class IssueWorkflowService {
      *                alike: the plan was produced by a separate utility-model session, so a
      *                resumed implementation session has never seen it, and repeating it is
      *                harmless — simpler than tracking which sessions already got it.
+     * @param repoInstructions the repo owner's free-text custom instructions (#69), or
+     *                null/blank when unset. Included in cold AND resumed prompts alike —
+     *                same rationale as approvedPlan: cheap, and simpler than tracking which
+     *                sessions already saw it.
+     * @param lessons cross-issue lessons captured from previous issues in this repo (#69,
+     *                opt-in), or null/empty when lessons aren't enabled or none exist yet.
+     *                Section order is pinned: Issue, Approved Plan, Repository Instructions,
+     *                Lessons, then retry context (Previous Iteration Context) — see the
+     *                ordering test in IssueWorkflowServiceTest.
      */
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
                                       boolean resumed, String lastFailureReason,
-                                      String approvedPlan) {
+                                      String approvedPlan, String repoInstructions,
+                                      List<String> lessons) {
         StringBuilder prompt = new StringBuilder();
         if (resumed) {
             prompt.append("Continuing the same task. New information since your last attempt:\n\n");
@@ -1353,6 +1432,25 @@ public class IssueWorkflowService {
             prompt.append("## Approved Plan\n");
             prompt.append("The operator approved this implementation plan — follow it:\n\n");
             prompt.append(approvedPlan).append("\n\n");
+        }
+
+        // Repository custom instructions (#69) — standing per-repo guidance from the
+        // operator, injected after the Issue/Approved Plan sections and before lessons
+        // and retry context.
+        if (repoInstructions != null && !repoInstructions.isBlank()) {
+            prompt.append("## Repository Instructions\n");
+            prompt.append(repoInstructions).append("\n\n");
+        }
+
+        // Cross-issue lessons (#69, opt-in) — transferable lessons captured from
+        // previous issues in this repo. Immediately after Repository Instructions,
+        // before retry context.
+        if (lessons != null && !lessons.isEmpty()) {
+            prompt.append("## Lessons from previous issues in this repo\n");
+            for (String lesson : lessons) {
+                prompt.append("- ").append(lesson).append("\n");
+            }
+            prompt.append("\n");
         }
 
         // Context from previous iteration if this is a retry
