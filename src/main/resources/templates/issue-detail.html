@@ -81,6 +81,13 @@
             </div>
             <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push only</div>
 
+            <div class="flex-between mb-1" th:if="${issue.repo.verificationCommands != null}">
+                <span class="text-sm">Local checks pass</span>
+                <span class="status"
+                      th:classappend="${latestIteration != null and latestIteration.localCheckResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
+                      th:text="${(latestIteration != null and latestIteration.localCheckResult != null) ? latestIteration.localCheckResult : '—'}">—</span>
+            </div>
+
             <div class="flex-between mb-1">
                 <span class="text-sm">Independent review passes
                     <span class="text-muted" th:text="${'(all dimensions ≥ ' + #numbers.formatPercent(issue.repo.reviewPassThreshold, 1, 0) + ', no high-severity findings)'}">(all dimensions ≥ 70%, no high-severity findings)</span>
@@ -319,6 +326,11 @@
                         <span class="text-sm text-muted" th:if="${iter.completedAt == null}" th:text="${#temporals.format(iter.startedAt, 'MMM d HH:mm') + ' — running...'}">time</span>
                     </div>
 
+                    <div th:if="${iter.localCheckResult != null}" class="mb-1">
+                        <span class="text-sm">Local Checks: </span>
+                        <span class="status" th:classappend="${iter.localCheckResult == 'PASSED' ? 'status-completed' : 'status-failed'}" th:text="${iter.localCheckResult}">RESULT</span>
+                    </div>
+
                     <div th:if="${iter.ciResult != null}" class="mb-1">
                         <span class="text-sm">CI: </span>
                         <span class="status" th:classappend="${iter.ciResult == 'PASSED' ? 'status-completed' : 'status-failed'}" th:text="${iter.ciResult}">RESULT</span>
@@ -444,27 +456,36 @@
                              th:text="${issue.resolvedImplModel != null ? (issue.resolvedImplModel + ' writing code') : 'Implementation model writing code'}">Implementation model writing code</div>
                     </div>
                 </div>
-                <!-- 2: CI Checks -->
-                <div class="phase-step"
+                <!-- 2: Local Checks (only when the repo has verification commands configured) -->
+                <div class="phase-step" th:if="${issue.repo.verificationCommands != null}"
                      th:classappend="${phaseCompleted or phaseIndex > 2 ? 'done' : (phaseIndex == 2 ? 'active' : 'pending')}">
+                    <div class="phase-indicator"></div>
+                    <div class="phase-info">
+                        <div class="phase-name">Local Checks</div>
+                        <div class="phase-desc">Operator-defined verification</div>
+                    </div>
+                </div>
+                <!-- 3: CI Checks -->
+                <div class="phase-step"
+                     th:classappend="${phaseCompleted or phaseIndex > 3 ? 'done' : (phaseIndex == 3 ? 'active' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">CI Checks</div>
                         <div class="phase-desc">Compile &amp; test</div>
                     </div>
                 </div>
-                <!-- 3: Draft PR -->
+                <!-- 4: Draft PR -->
                 <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 3 ? 'done' : (phaseIndex == 3 ? 'active' : 'pending')}">
+                     th:classappend="${phaseCompleted or phaseIndex > 4 ? 'done' : (phaseIndex == 4 ? 'active' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Draft PR</div>
                         <div class="phase-desc">Create pull request</div>
                     </div>
                 </div>
-                <!-- 4: Code Review -->
+                <!-- 5: Code Review -->
                 <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 4 ? 'done' : (phaseIndex == 4 ? 'active' : 'pending')}">
+                     th:classappend="${phaseCompleted or phaseIndex > 5 ? 'done' : (phaseIndex == 5 ? 'active' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Code Review</div>
@@ -472,9 +493,9 @@
                              th:text="${issue.resolvedReviewModel != null ? (issue.resolvedReviewModel + ' review') : 'Independent review'}">Independent review</div>
                     </div>
                 </div>
-                <!-- 5: Completion -->
+                <!-- 6: Completion -->
                 <div class="phase-step"
-                     th:classappend="${phaseCompleted ? 'done' : (phaseIndex == 5 ? 'active' : 'pending')}">
+                     th:classappend="${phaseCompleted ? 'done' : (phaseIndex == 6 ? 'active' : 'pending')}">
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Completion</div>

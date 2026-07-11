@@ -62,6 +62,7 @@ class IssueWorkflowServiceTest {
                 mock(ClaudeCodeService.class),
                 codeReviewService,
                 mock(CiTemplateService.class),
+                mock(LocalVerificationService.class),
                 issueRepository,
                 iterationRepository,
                 costRepository,

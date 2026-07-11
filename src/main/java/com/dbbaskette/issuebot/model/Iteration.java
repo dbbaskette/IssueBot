@@ -29,6 +29,9 @@ public class Iteration {
     @Column(name = "ci_result")
     private String ciResult;
 
+    @Column(name = "local_check_result", length = 20)
+    private String localCheckResult;
+
     @Lob
     @Column(name = "diff")
     private String diff;
@@ -78,6 +81,9 @@ public class Iteration {
 
     public String getCiResult() { return ciResult; }
     public void setCiResult(String ciResult) { this.ciResult = ciResult; }
+
+    public String getLocalCheckResult() { return localCheckResult; }
+    public void setLocalCheckResult(String localCheckResult) { this.localCheckResult = localCheckResult; }
 
     public String getDiff() { return diff; }
     public void setDiff(String diff) { this.diff = diff; }

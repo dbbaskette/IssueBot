@@ -77,6 +77,7 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "false") boolean autoStart,
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
                                @RequestParam(required = false) String allowedPaths,
+                               @RequestParam(required = false) String verificationCommands,
                                @RequestParam(required = false) String implementationModel,
                                @RequestParam(required = false) String reviewModel,
                                @RequestParam(defaultValue = "ROLLING_BACKLOG") String followUpMode,
@@ -111,6 +112,7 @@ public class RepositoryController {
         repo.setFollowUpEnabled(followUpEnabled);
         repo.setImplementationModel(normalize(implementationModel));
         repo.setReviewModel(normalize(reviewModel));
+        repo.setVerificationCommands(normalize(verificationCommands));
         try {
             repo.setFollowUpMode(FollowUpMode.valueOf(followUpMode));
         } catch (IllegalArgumentException e) {
