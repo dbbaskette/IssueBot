@@ -197,8 +197,9 @@ class IssuePollingServiceTest {
         issueNode.put("number", 99);
         issueNode.put("title", "Capacity test issue");
 
-        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
 
+        assertEquals(WebhookOutcome.QUEUED, outcome);
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(issueRepository).save(captor.capture());
         assertEquals(IssueStatus.QUEUED, captor.getValue().getStatus());
@@ -218,15 +219,50 @@ class IssuePollingServiceTest {
         issueNode.put("number", 101);
         issueNode.put("title", "Blocked at capacity");
 
-        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
 
         // Dependency state wins over capacity queueing: the issue must be saved
         // BLOCKED with its blocker list, never QUEUED, and never started.
+        assertEquals(WebhookOutcome.BLOCKED, outcome);
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(issueRepository).save(captor.capture());
         assertEquals(IssueStatus.BLOCKED, captor.getValue().getStatus());
         assertEquals("5,6", captor.getValue().getBlockedByIssues());
         verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_atCapacityAlreadyTracked_returnsAlreadyTracked() {
+        properties.setMaxConcurrentIssues(1);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(1L);
+        TrackedIssue existing = new TrackedIssue(testRepo, 102, "Already tracked");
+        existing.setStatus(IssueStatus.COMPLETED);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 102)).thenReturn(Optional.of(existing));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 102);
+        issueNode.put("title", "Already tracked at capacity");
+
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        assertEquals(WebhookOutcome.ALREADY_TRACKED, outcome);
+        verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_atCapacityPullRequest_returnsIgnored() {
+        properties.setMaxConcurrentIssues(1);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(1L);
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 103);
+        issueNode.putObject("pull_request");
+
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        assertEquals(WebhookOutcome.IGNORED, outcome);
+        verifyNoInteractions(dependencyResolver);
+        verify(issueRepository, never()).save(any());
     }
 
     @Test
@@ -243,12 +279,62 @@ class IssuePollingServiceTest {
         issueNode.put("number", 100);
         issueNode.put("title", "Under capacity issue");
 
-        pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
 
+        assertEquals(WebhookOutcome.STARTED, outcome);
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(issueRepository).save(captor.capture());
         assertEquals(IssueStatus.IN_PROGRESS, captor.getValue().getStatus());
         verify(workflowService).processIssueAsync(captor.getValue());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_underCapacityButRepoGateBusy_returnsQueued() {
+        properties.setMaxConcurrentIssues(3);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 104)).thenReturn(Optional.empty());
+        TrackedIssue active = new TrackedIssue(testRepo, 999, "Active");
+        active.setStatus(IssueStatus.IN_PROGRESS);
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList())).thenReturn(List.of(active));
+        when(dependencyResolver.resolve(testRepo, 104))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 104);
+        issueNode.put("title", "Gate busy issue");
+
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, issueNode);
+
+        assertEquals(WebhookOutcome.QUEUED, outcome);
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertEquals(IssueStatus.QUEUED, captor.getValue().getStatus());
+        verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void evaluateSingleIssueFromWebhook_underCapacityButAutoStartOff_returnsQueued() {
+        WatchedRepo manualRepo = new WatchedRepo("owner", "manual-repo");
+        manualRepo.setAutoStart(false);
+        properties.setMaxConcurrentIssues(3);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndIssueNumber(manualRepo, 105)).thenReturn(Optional.empty());
+        when(issueRepository.findByRepoAndStatusIn(eq(manualRepo), anyList())).thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(dependencyResolver.resolve(manualRepo, 105))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        ObjectNode issueNode = objectMapper.createObjectNode();
+        issueNode.put("number", 105);
+        issueNode.put("title", "Auto-start off issue");
+
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(manualRepo, issueNode);
+
+        assertEquals(WebhookOutcome.QUEUED, outcome);
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(captor.capture());
+        assertEquals(IssueStatus.QUEUED, captor.getValue().getStatus());
+        verify(workflowService, never()).processIssueAsync(any());
     }
 
     // === recheckRepo tests ===

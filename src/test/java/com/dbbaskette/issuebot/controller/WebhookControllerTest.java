@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.security.WebhookSignatureVerifier;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.polling.WebhookOutcome;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,10 +18,12 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -33,19 +36,27 @@ class WebhookControllerTest {
 
     private WatchedRepoRepository repoRepository;
     private IssuePollingService pollingService;
+    private WebhookDeliveryLog deliveryLog;
     private WatchedRepo testRepo;
 
     @BeforeEach
     void setUp() {
         repoRepository = mock(WatchedRepoRepository.class);
         pollingService = mock(IssuePollingService.class);
+        deliveryLog = new WebhookDeliveryLog();
         testRepo = new WatchedRepo("acme", "widgets");
         when(repoRepository.findByOwnerAndName("acme", "widgets")).thenReturn(Optional.of(testRepo));
         when(repoRepository.findByOwnerAndName("stranger", "repo")).thenReturn(Optional.empty());
     }
 
     private WebhookController controllerWithSecret(String secret) {
-        return new WebhookController(new WebhookSignatureVerifier(), repoRepository, pollingService, secret);
+        return new WebhookController(new WebhookSignatureVerifier(), repoRepository, pollingService, deliveryLog, secret);
+    }
+
+    private WebhookDeliveryLog.Delivery onlyDelivery() {
+        List<WebhookDeliveryLog.Delivery> deliveries = deliveryLog.recentDeliveries();
+        assertEquals(1, deliveries.size());
+        return deliveries.get(0);
     }
 
     private static String sign(byte[] body, String secret) {
@@ -96,6 +107,16 @@ class WebhookControllerTest {
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         verifyNoInteractions(pollingService);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("bad-signature", delivery.outcome());
+        assertEquals("—", delivery.repo());
+        assertNull(delivery.event());
+        assertNull(delivery.action());
+        assertNull(delivery.detail());
+        assertEquals(1L, deliveryLog.totalReceived());
+        assertEquals(1L, deliveryLog.signatureFailures());
+        assertEquals(0L, deliveryLog.actionsTaken());
     }
 
     @Test
@@ -107,11 +128,13 @@ class WebhookControllerTest {
 
         assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         verifyNoInteractions(pollingService);
+        assertEquals("bad-signature", onlyDelivery().outcome());
     }
 
     @Test
     void agentReadyLabeledOnWatchedRepoTriggersEvaluation() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
+        when(pollingService.evaluateSingleIssueFromWebhook(eq(testRepo), any())).thenReturn(WebhookOutcome.STARTED);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
         String sig = sign(body, SECRET);
 
@@ -119,6 +142,42 @@ class WebhookControllerTest {
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verify(pollingService).evaluateSingleIssueFromWebhook(eq(testRepo), any());
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("started", delivery.outcome());
+        assertEquals("issues", delivery.event());
+        assertEquals("labeled", delivery.action());
+        assertEquals("acme/widgets", delivery.repo());
+        assertEquals("issue #42 started", delivery.detail());
+        assertEquals(1L, deliveryLog.totalReceived());
+        assertEquals(0L, deliveryLog.signatureFailures());
+        assertEquals(1L, deliveryLog.actionsTaken());
+    }
+
+    @Test
+    void agentReadyLabeled_queuedOutcome_recordedAndCountsAsAction() throws Exception {
+        WebhookController controller = controllerWithSecret(SECRET);
+        when(pollingService.evaluateSingleIssueFromWebhook(eq(testRepo), any())).thenReturn(WebhookOutcome.QUEUED);
+        byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
+        String sig = sign(body, SECRET);
+
+        controller.handleWebhook(request(body), sig, "issues");
+
+        assertEquals("queued", onlyDelivery().outcome());
+        assertEquals(1L, deliveryLog.actionsTaken());
+    }
+
+    @Test
+    void agentReadyLabeled_alreadyTrackedOutcome_recordedButNotAnAction() throws Exception {
+        WebhookController controller = controllerWithSecret(SECRET);
+        when(pollingService.evaluateSingleIssueFromWebhook(eq(testRepo), any())).thenReturn(WebhookOutcome.ALREADY_TRACKED);
+        byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
+        String sig = sign(body, SECRET);
+
+        controller.handleWebhook(request(body), sig, "issues");
+
+        assertEquals("already_tracked", onlyDelivery().outcome());
+        assertEquals(0L, deliveryLog.actionsTaken());
     }
 
     @Test
@@ -131,6 +190,11 @@ class WebhookControllerTest {
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verifyNoInteractions(pollingService);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("ignored", delivery.outcome());
+        assertEquals("stranger/repo", delivery.repo());
+        assertEquals(0L, deliveryLog.actionsTaken());
     }
 
     @Test
@@ -142,6 +206,11 @@ class WebhookControllerTest {
         controller.handleWebhook(request(body), sig, "issues");
 
         verifyNoInteractions(pollingService);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("ignored", delivery.outcome());
+        assertEquals("acme/widgets", delivery.repo());
+        assertEquals("labeled", delivery.action());
     }
 
     @Test
@@ -153,6 +222,10 @@ class WebhookControllerTest {
         controller.handleWebhook(request(body), sig, "issues");
 
         verifyNoInteractions(pollingService);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("ignored", delivery.outcome());
+        assertEquals("assigned", delivery.action());
     }
 
     @Test
@@ -165,6 +238,12 @@ class WebhookControllerTest {
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verify(pollingService).recheckRepo(testRepo);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("recheck", delivery.outcome());
+        assertEquals("acme/widgets", delivery.repo());
+        assertEquals("issue #42 closed", delivery.detail());
+        assertEquals(1L, deliveryLog.actionsTaken());
     }
 
     @Test
@@ -177,6 +256,11 @@ class WebhookControllerTest {
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         verifyNoInteractions(pollingService);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("ignored", delivery.outcome());
+        assertEquals("ping", delivery.event());
+        assertEquals("acme/widgets", delivery.repo());
     }
 
     @Test
@@ -188,6 +272,11 @@ class WebhookControllerTest {
         ResponseEntity<Void> response = assertDoesNotThrow(() -> controller.handleWebhook(request(body), sig, "issues"));
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("error", delivery.outcome());
+        assertEquals("unknown", delivery.repo());
+        assertEquals(0L, deliveryLog.actionsTaken());
     }
 
     @Test
@@ -200,11 +289,18 @@ class WebhookControllerTest {
         ResponseEntity<Void> response = assertDoesNotThrow(() -> controller.handleWebhook(request(body), sig, "issues"));
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("error", delivery.outcome());
+        assertEquals("RuntimeException", delivery.detail());
+        assertEquals(0L, deliveryLog.actionsTaken());
+        assertEquals(1L, deliveryLog.totalReceived());
     }
 
     @Test
     void lastEventTimestampRecordedForWatchedRepo() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
+        when(pollingService.evaluateSingleIssueFromWebhook(any(), any())).thenReturn(WebhookOutcome.STARTED);
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
         String sig = sign(body, SECRET);
 
@@ -226,7 +322,7 @@ class WebhookControllerTest {
     @Test
     void oversizedPayload_returns413_withoutVerificationOrEvaluation() throws Exception {
         WebhookSignatureVerifier verifier = mock(WebhookSignatureVerifier.class);
-        WebhookController controller = new WebhookController(verifier, repoRepository, pollingService, SECRET);
+        WebhookController controller = new WebhookController(verifier, repoRepository, pollingService, deliveryLog, SECRET);
         byte[] body = new byte[WebhookController.MAX_BODY_BYTES + 1];
 
         ResponseEntity<Void> response = controller.handleWebhook(request(body), "sha256=whatever", "issues");
@@ -234,6 +330,13 @@ class WebhookControllerTest {
         assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
         verifyNoInteractions(verifier);
         verifyNoInteractions(pollingService);
+
+        WebhookDeliveryLog.Delivery delivery = onlyDelivery();
+        assertEquals("oversized", delivery.outcome());
+        assertEquals("—", delivery.repo());
+        assertNull(delivery.event());
+        assertEquals(1L, deliveryLog.totalReceived());
+        assertEquals(0L, deliveryLog.actionsTaken());
     }
 
     @Test
@@ -276,6 +379,7 @@ class WebhookControllerTest {
     @Test
     void realHttpPost_withValidSignature_returns204() throws Exception {
         WebhookController controller = controllerWithSecret(SECRET);
+        when(pollingService.evaluateSingleIssueFromWebhook(eq(testRepo), any())).thenReturn(WebhookOutcome.STARTED);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         byte[] body = issuesPayload("labeled", "acme/widgets", "agent-ready");
         String sig = sign(body, SECRET);
@@ -288,6 +392,7 @@ class WebhookControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(pollingService).evaluateSingleIssueFromWebhook(eq(testRepo), any());
+        assertEquals("started", onlyDelivery().outcome());
     }
 
     @Test
