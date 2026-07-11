@@ -381,7 +381,14 @@
         </div>
     </div>
 
-    <!-- === LIVE-REFRESHED STATUS SECTION === -->
+    <!-- === LIVE-REFRESHED STATUS SECTION ===
+         The stamp lives outside the #live-status fragment (rather than inside it) so the
+         5s morph:outerHTML poll below never wipes the JS-rendered "updated Xs ago" text —
+         idiomorph would otherwise reset it to the server-rendered (empty) markup on every
+         swap since Thymeleaf never writes text into the span itself. -->
+    <div class="mb-1" style="text-align:right" th:if="${issue.status.name() == 'IN_PROGRESS'}">
+        <span class="text-sm text-muted" data-updated-stamp="pipeline"></span>
+    </div>
     <div th:replace="~{issue-detail :: live-status}"></div>
 
     <!-- === LIVE TERMINAL (outside HTMX swap) === -->

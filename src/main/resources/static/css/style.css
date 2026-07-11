@@ -341,6 +341,36 @@ code {
     50% { box-shadow: 0 0 10px rgba(245,158,11,0.55); }
 }
 
+/* SSE connection indicator — header dot reflecting the EventSource lifecycle of
+   whichever live stream (if any) is active on the current page. States are driven
+   by app.js's SseStatus helper via the data-state attribute; default markup ships
+   with data-state="none" so pages without a stream stay gray with no JS involved. */
+.sse-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: none;
+    background: var(--text-tertiary);
+    cursor: help;
+}
+
+.sse-dot[data-state="connected"] {
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16,185,129,0.6);
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.sse-dot[data-state="reconnecting"] {
+    background: var(--warn);
+    box-shadow: 0 0 6px var(--warn-soft);
+    animation: pulse-glow-amber 3s ease-in-out infinite;
+}
+
+.sse-dot[data-state="none"] {
+    background: var(--text-tertiary);
+}
+
 /* Notification badge */
 .badge {
     background: var(--danger);
