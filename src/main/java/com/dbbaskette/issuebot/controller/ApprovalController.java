@@ -9,6 +9,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,7 +47,8 @@ public class ApprovalController {
             double regressions,
             double security,
             int findingCount,
-            String model
+            String model,
+            List<CodeReviewResult.CriterionVerdict> criteria
     ) {}
 
     private final TrackedIssueRepository issueRepository;
@@ -270,7 +272,7 @@ public class ApprovalController {
             if (passed == null) {
                 return null;
             }
-            return new ReviewScore(passed, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, it.getReviewModel());
+            return new ReviewScore(passed, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, it.getReviewModel(), List.of());
         }
         try {
             JsonNode root = MAPPER.readTree(json);
@@ -288,15 +290,42 @@ public class ApprovalController {
             double overall = dims.length > 0 ? sum / dims.length : 0;
             boolean passedFlag = root.has("passed") ? root.path("passed").asBoolean(false)
                     : (passed != null && passed);
+            List<CodeReviewResult.CriterionVerdict> criteria = parseCriteria(root.path("criteria"));
             return new ReviewScore(passedFlag, root.path("summary").asText(null),
                     overall, spec, correct, quality, tests, arch, regress, security,
-                    findings, it.getReviewModel());
+                    findings, it.getReviewModel(), criteria);
         } catch (Exception e) {
             log.warn("Could not parse review JSON for iteration {}: {}", it.getId(), e.getMessage());
             if (passed == null) {
                 return null;
             }
-            return new ReviewScore(passed, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, it.getReviewModel());
+            return new ReviewScore(passed, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, it.getReviewModel(), List.of());
         }
+    }
+
+    /**
+     * Parse the review JSON's "criteria" array into per-criterion verdicts
+     * (issue #61), leniently: missing/unknown verdict strings default to "unclear".
+     */
+    private List<CodeReviewResult.CriterionVerdict> parseCriteria(JsonNode criteriaNode) {
+        if (!criteriaNode.isArray()) {
+            return List.of();
+        }
+        List<CodeReviewResult.CriterionVerdict> criteria = new java.util.ArrayList<>();
+        for (JsonNode c : criteriaNode) {
+            String text = c.path("text").asText("");
+            String verdictRaw = c.path("verdict").asText("");
+            String verdict;
+            if ("met".equalsIgnoreCase(verdictRaw)) {
+                verdict = "met";
+            } else if ("unmet".equalsIgnoreCase(verdictRaw)) {
+                verdict = "unmet";
+            } else {
+                verdict = "unclear";
+            }
+            String note = c.path("note").asText("");
+            criteria.add(new CodeReviewResult.CriterionVerdict(text, verdict, note));
+        }
+        return criteria;
     }
 }

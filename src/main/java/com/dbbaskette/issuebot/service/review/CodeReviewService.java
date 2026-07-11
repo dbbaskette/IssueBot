@@ -44,6 +44,7 @@ public class CodeReviewService {
      */
     public CodeReviewResult reviewCode(Path repoPath, String issueTitle, String issueBody,
                                          String baseBranch, String model, Long issueId,
+                                         List<String> criteria,
                                          boolean securityReview, double reviewPassThreshold,
                                          Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
@@ -68,7 +69,7 @@ public class CodeReviewService {
 
         // 2. Build the review prompt
         String prompt = reviewPromptBuilder.buildReviewPrompt(
-                issueTitle, issueBody, changedFiles, diff, securityReview, reviewPassThreshold);
+                issueTitle, issueBody, changedFiles, diff, criteria, securityReview, reviewPassThreshold);
 
         // 3. Invoke the review model via CLI
         ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);
@@ -117,8 +118,9 @@ public class CodeReviewService {
 
     /**
      * Parse the review response JSON from Claude Code output.
+     * Package-private for direct unit testing of the parsing logic.
      */
-    private CodeReviewResult parseReviewResponse(ClaudeCodeResult result) {
+    CodeReviewResult parseReviewResponse(ClaudeCodeResult result) {
         String output = result.getOutput();
         if (output == null || output.isBlank()) {
             return CodeReviewResult.failed("Empty review output",
@@ -157,9 +159,28 @@ public class CodeReviewService {
                 }
             }
 
-            log.info("Review parsed: passed={}, scores=[spec={}, correct={}, quality={}, tests={}, arch={}, regress={}, sec={}], findings={}",
+            List<CodeReviewResult.CriterionVerdict> criteria = new ArrayList<>();
+            JsonNode criteriaNode = root.path("criteria");
+            if (criteriaNode.isArray()) {
+                for (JsonNode c : criteriaNode) {
+                    String text = c.path("text").asText("");
+                    String verdictRaw = c.path("verdict").asText("");
+                    String verdict;
+                    if ("met".equalsIgnoreCase(verdictRaw)) {
+                        verdict = "met";
+                    } else if ("unmet".equalsIgnoreCase(verdictRaw)) {
+                        verdict = "unmet";
+                    } else {
+                        verdict = "unclear";
+                    }
+                    String note = c.path("note").asText("");
+                    criteria.add(new CodeReviewResult.CriterionVerdict(text, verdict, note));
+                }
+            }
+
+            log.info("Review parsed: passed={}, scores=[spec={}, correct={}, quality={}, tests={}, arch={}, regress={}, sec={}], findings={}, criteria={}",
                     passed, specCompliance, correctness, codeQuality, testCoverage,
-                    architectureFit, regressions, security, findings.size());
+                    architectureFit, regressions, security, findings.size(), criteria.size());
 
             return new CodeReviewResult(
                     passed, summary,
@@ -167,7 +188,8 @@ public class CodeReviewService {
                     architectureFit, regressions, security,
                     findings, advice, json,
                     result.getInputTokens(), result.getOutputTokens(), result.getModel(),
-                    result.getCostUsd()
+                    result.getCostUsd(),
+                    criteria
             );
         } catch (Exception e) {
             log.warn("Failed to parse review JSON: {}", e.getMessage());

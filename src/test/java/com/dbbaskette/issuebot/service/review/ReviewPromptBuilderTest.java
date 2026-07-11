@@ -27,7 +27,7 @@ class ReviewPromptBuilderTest {
     @Test
     void promptWithCustomThresholdUsesConfiguredValue() {
         String prompt = builder.buildReviewPrompt("Title", "Body",
-                List.of("src/Main.java"), "diff content", false, 0.60);
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.60);
 
         String rules = rulesSection(prompt);
         assertThat(rules).contains("0.60");
@@ -37,7 +37,7 @@ class ReviewPromptBuilderTest {
     @Test
     void promptWithDefaultThresholdContainsDefaultValue() {
         String prompt = builder.buildReviewPrompt("Title", "Body",
-                List.of("src/Main.java"), "diff content", false, 0.70);
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70);
 
         String rules = rulesSection(prompt);
         assertThat(rules).contains("0.70");
@@ -46,10 +46,49 @@ class ReviewPromptBuilderTest {
     @Test
     void promptStatesAllScoresRuleAndAnyScoreRuleWithThreshold() {
         String prompt = builder.buildReviewPrompt("Title", "Body",
-                List.of("src/Main.java"), "diff content", false, 0.85);
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.85);
 
         String rules = rulesSection(prompt);
         assertThat(rules).contains("ALL scores are >= 0.85");
         assertThat(rules).contains("ANY score is below 0.85");
+    }
+
+    // === Acceptance criteria (issue #61) ===
+
+    @Test
+    void promptWithNoCriteriaIsByteIdenticalToBaseline() {
+        String withEmptyList = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70);
+
+        String noCriteria = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), true, 0.70);
+
+        // Sanity: securityReview=true changes the prompt (proves the assertion below
+        // is actually discriminating), while an empty criteria list changes nothing.
+        assertThat(withEmptyList).isNotEqualTo(noCriteria);
+
+        String baselineFalse = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70);
+        assertThat(withEmptyList).isEqualTo(baselineFalse);
+        assertThat(withEmptyList).doesNotContain("Acceptance Criteria (score each)");
+    }
+
+    @Test
+    void promptWithCriteriaListsThemAndAddsResponseFormatAndRule() {
+        List<String> criteria = List.of("The button is disabled when invalid", "Errors are logged");
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", criteria, false, 0.70);
+
+        assertThat(prompt).contains("## Acceptance Criteria (score each)");
+        assertThat(prompt).contains("1. The button is disabled when invalid");
+        assertThat(prompt).contains("2. Errors are logged");
+        assertThat(prompt).contains("\"criteria\"");
+        assertThat(prompt).contains("\"verdict\"");
+        assertThat(prompt).contains("met");
+        assertThat(prompt).contains("unmet");
+        assertThat(prompt).contains("unclear");
+
+        String rules = rulesSection(prompt);
+        assertThat(rules).contains("Set \"passed\" to false if ANY acceptance criterion verdict is \"unmet\"");
     }
 }

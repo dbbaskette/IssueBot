@@ -166,7 +166,7 @@ class IssueWorkflowServiceTest {
                                 "Method too long", "Extract helper method")
                 ),
                 "Focus on test coverage",
-                null, 1000, 500, "claude-sonnet-4-6", null
+                null, 1000, 500, "claude-sonnet-4-6", null, List.of()
         );
 
         String feedback = workflowService.buildReviewFeedback(review);
@@ -176,6 +176,56 @@ class IssueWorkflowServiceTest {
         assertTrue(feedback.contains("No tests for edge case"));
         assertTrue(feedback.contains("Focus on test coverage"));
         assertTrue(feedback.contains("tests=40%"));
+    }
+
+    /**
+     * Unmet acceptance criteria (issue #61) must be surfaced in the feedback fed
+     * back to the implementation model, with their reviewer notes attached.
+     */
+    @Test
+    void buildReviewFeedback_includesUnmetAcceptanceCriteria() {
+        CodeReviewResult review = new CodeReviewResult(
+                false, "Missing test coverage",
+                0.9, 0.8, 0.85, 0.4, 0.9, 0.9, 1.0,
+                List.of(),
+                "Focus on test coverage",
+                null, 1000, 500, "claude-sonnet-4-6", null,
+                List.of(
+                        new CodeReviewResult.CriterionVerdict(
+                                "The button is disabled when the form is invalid", "unmet",
+                                "No disabled-state handling found"),
+                        new CodeReviewResult.CriterionVerdict(
+                                "The button changes color on hover", "met", "Confirmed in CSS"),
+                        new CodeReviewResult.CriterionVerdict(
+                                "Errors are logged", "unclear", "Could not verify from the diff")
+                )
+        );
+
+        String feedback = workflowService.buildReviewFeedback(review);
+        assertTrue(feedback.contains("Unmet acceptance criteria"));
+        assertTrue(feedback.contains("The button is disabled when the form is invalid"));
+        assertTrue(feedback.contains("No disabled-state handling found"));
+        // Only unmet criteria are listed in the feedback section
+        assertFalse(feedback.contains("The button changes color on hover"));
+        assertFalse(feedback.contains("Errors are logged"));
+    }
+
+    /**
+     * When the review carries no acceptance criteria at all, buildReviewFeedback
+     * must not mention them — issues without a checklist behave exactly as today.
+     */
+    @Test
+    void buildReviewFeedback_noCriteriaOmitsUnmetSection() {
+        CodeReviewResult review = new CodeReviewResult(
+                false, "Missing test coverage",
+                0.9, 0.8, 0.85, 0.4, 0.9, 0.9, 1.0,
+                List.of(),
+                "Focus on test coverage",
+                null, 1000, 500, "claude-sonnet-4-6", null, List.of()
+        );
+
+        String feedback = workflowService.buildReviewFeedback(review);
+        assertFalse(feedback.contains("Unmet acceptance criteria"));
     }
 
     @Test
@@ -285,12 +335,12 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---
         CodeReviewResult result = workflowService.phaseIndependentReview(
-                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration);
+                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration, List.of());
 
         // --- Assert ---
         assertNull(result, "Should return null on review invocation error");

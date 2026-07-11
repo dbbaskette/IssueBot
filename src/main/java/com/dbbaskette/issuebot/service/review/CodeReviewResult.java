@@ -21,7 +21,8 @@ public record CodeReviewResult(
         long inputTokens,
         long outputTokens,
         String modelUsed,
-        java.math.BigDecimal costUsd
+        java.math.BigDecimal costUsd,
+        List<CriterionVerdict> criteria
 ) {
     public record ReviewFinding(
             String severity,
@@ -33,6 +34,12 @@ public record CodeReviewResult(
     ) {}
 
     /**
+     * Per-criterion verdict from the independent review (issue #61).
+     * {@code verdict} is one of "met" / "unmet" / "unclear".
+     */
+    public record CriterionVerdict(String text, String verdict, String note) {}
+
+    /**
      * Create a failed result for error cases (e.g. JSON parse failure).
      */
     public static CodeReviewResult failed(String reason, long inputTokens, long outputTokens, String model) {
@@ -40,7 +47,8 @@ public record CodeReviewResult(
                 false, reason,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 List.of(), reason,
-                null, inputTokens, outputTokens, model, null
+                null, inputTokens, outputTokens, model, null,
+                List.of()
         );
     }
 }

@@ -83,6 +83,21 @@
                 <span th:text="${'Regressions ' + #numbers.formatDecimal(rev.regressions, 1, 1)}">Regressions</span>
                 <span th:text="${'Security ' + #numbers.formatDecimal(rev.security, 1, 1)}">Security</span>
             </div>
+            <div th:if="${not #lists.isEmpty(rev.criteria)}" class="mt-1">
+                <div class="text-sm text-muted" style="font-weight:600;margin-bottom:0.3rem">Acceptance Criteria</div>
+                <div th:each="c : ${rev.criteria}" class="text-sm"
+                     style="display:flex;gap:0.4rem;align-items:flex-start;margin-bottom:0.2rem">
+                    <i class="ti"
+                       th:classappend="${c.verdict == 'met' ? 'ti-circle-check' : (c.verdict == 'unmet' ? 'ti-circle-x' : 'ti-help-circle')}"
+                       th:style="${'color:var(--' + (c.verdict == 'met' ? 'ok' : (c.verdict == 'unmet' ? 'danger' : 'warn')) + ')'}"
+                       aria-hidden="true"></i>
+                    <span>
+                        <span th:text="${c.text}">criterion text</span>
+                        <span th:if="${c.note != null and not #strings.isEmpty(c.note)}"
+                              class="text-muted" th:text="${' — ' + c.note}"> — note</span>
+                    </span>
+                </div>
+            </div>
             <div th:if="${rev.summary != null and not #strings.isEmpty(rev.summary)}"
                  class="text-sm mt-1" th:text="${rev.summary}">summary</div>
             <div th:if="${rev.model != null}" class="text-sm text-muted mt-1"

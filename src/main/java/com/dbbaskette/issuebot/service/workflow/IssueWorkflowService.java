@@ -15,6 +15,7 @@ import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
+import com.dbbaskette.issuebot.service.review.AcceptanceCriteriaParser;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -170,6 +171,9 @@ public class IssueWorkflowService {
             eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
             return;
         }
+
+        // Parsed once per run: acceptance criteria drive per-criterion review verdicts (issue #61).
+        List<String> criteria = AcceptanceCriteriaParser.parse(issueDetails.path("body").asText(""));
 
         // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
         if (repo.isPreScreenEnabled() && repo.getDecompositionMode() != DecompositionMode.OFF) {
@@ -428,7 +432,7 @@ public class IssueWorkflowService {
             issueRepository.save(trackedIssue);
 
             CodeReviewResult reviewResult = phaseIndependentReview(
-                    trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration);
+                    trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria);
 
             // Post review to issue thread (regardless of pass/fail)
             if (reviewResult != null) {
@@ -781,7 +785,8 @@ public class IssueWorkflowService {
      */
     CodeReviewResult phaseIndependentReview(TrackedIssue trackedIssue, JsonNode issueDetails,
                                              Path repoPath, String branchName,
-                                             int prNumber, Iteration iteration) {
+                                             int prNumber, Iteration iteration,
+                                             List<String> criteria) {
         WatchedRepo repo = trackedIssue.getRepo();
         String reviewModelLabel = trackedIssue.getResolvedReviewModel() != null
                 ? trackedIssue.getResolvedReviewModel() : "the review model";
@@ -802,6 +807,7 @@ public class IssueWorkflowService {
                     repo.getBranch(),
                     trackedIssue.getResolvedReviewModel(),
                     issueId,
+                    criteria,
                     repo.isSecurityReviewEnabled(),
                     repo.getReviewPassThreshold().doubleValue(),
                     line -> streamClaudeLog(issueId, line));
@@ -902,6 +908,8 @@ public class IssueWorkflowService {
             appendScoreRow(sb, "Security", r.securityScore(), threshold);
         }
 
+        appendCriteriaChecklist(sb, r.criteria());
+
         if (r.advice() != null && !r.advice().isBlank()) {
             sb.append("\n**Advice:** ").append(r.advice()).append("\n");
         }
@@ -912,6 +920,38 @@ public class IssueWorkflowService {
 
     private void appendScoreRow(StringBuilder sb, String dimension, double score, double threshold) {
         sb.append("| ").append(dimension).append(" | ").append(formatScore(score, threshold)).append(" |\n");
+    }
+
+    /**
+     * Render a per-criterion checklist (issue #61): met criteria as checked items,
+     * unmet/unclear as unchecked with the reviewer's note attached. No-op when the
+     * review carries no acceptance criteria (issues without a checklist behave
+     * exactly as today).
+     */
+    private void appendCriteriaChecklist(StringBuilder sb, List<CodeReviewResult.CriterionVerdict> criteria) {
+        if (criteria == null || criteria.isEmpty()) {
+            return;
+        }
+        sb.append("\n#### Acceptance Criteria\n\n");
+        for (CodeReviewResult.CriterionVerdict c : criteria) {
+            switch (c.verdict()) {
+                case "met" -> sb.append("- [x] ").append(c.text()).append("\n");
+                case "unmet" -> {
+                    sb.append("- [ ] ").append(c.text());
+                    if (c.note() != null && !c.note().isBlank()) {
+                        sb.append(" — ⚠ ").append(c.note());
+                    }
+                    sb.append("\n");
+                }
+                default -> {
+                    sb.append("- [ ] ").append(c.text()).append(" — (unclear)");
+                    if (c.note() != null && !c.note().isBlank()) {
+                        sb.append(" ").append(c.note());
+                    }
+                    sb.append("\n");
+                }
+            }
+        }
     }
 
     private String formatScore(double score, double threshold) {
@@ -969,6 +1009,21 @@ public class IssueWorkflowService {
             }
         }
 
+        List<CodeReviewResult.CriterionVerdict> unmetCriteria = review.criteria() == null
+                ? List.of()
+                : review.criteria().stream().filter(c -> "unmet".equals(c.verdict())).toList();
+        if (!unmetCriteria.isEmpty()) {
+            fb.append("**Unmet acceptance criteria:**\n");
+            for (CodeReviewResult.CriterionVerdict c : unmetCriteria) {
+                fb.append("- ").append(c.text());
+                if (c.note() != null && !c.note().isBlank()) {
+                    fb.append(" — ").append(c.note());
+                }
+                fb.append("\n");
+            }
+            fb.append("\n");
+        }
+
         if (review.advice() != null && !review.advice().isBlank()) {
             fb.append("\n**Reviewer advice:** ").append(review.advice()).append("\n");
         }
@@ -1006,6 +1061,8 @@ public class IssueWorkflowService {
             if (review.securityScore() < 1.0) {
                 appendScoreRow(sb, "Security", review.securityScore(), threshold);
             }
+
+            appendCriteriaChecklist(sb, review.criteria());
 
             if (!review.findings().isEmpty()) {
                 sb.append("\n#### Findings\n\n");
