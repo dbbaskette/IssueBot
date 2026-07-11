@@ -9,12 +9,7 @@
             <span id="issue-refresh-indicator" class="glass-pill htmx-indicator" aria-hidden="true">
                 <i class="ti ti-loader spin-icon"></i> Updating…
             </span>
-            <button class="btn btn-outline btn-sm"
-                    hx-get="/issues/table"
-                    hx-include="#filter-form"
-                    hx-target="#issue-table-body"
-                    hx-swap="innerHTML"
-                    hx-indicator="#issue-refresh-indicator">Refresh</button>
+            <span class="text-sm text-muted" data-updated-stamp="queue"></span>
         </div>
     </div>
 

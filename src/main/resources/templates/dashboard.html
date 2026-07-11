@@ -5,9 +5,10 @@
     <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <h2>Dashboard</h2>
+        <span class="text-sm text-muted" data-updated-stamp="dashboard"></span>
     </div>
 
-    <div th:fragment="live"
+    <div th:fragment="live" id="dashboard-live"
          hx-get="/dashboard/live"
          hx-trigger="every 10s"
          hx-ext="morph"

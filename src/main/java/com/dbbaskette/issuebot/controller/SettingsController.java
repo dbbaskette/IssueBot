@@ -64,6 +64,19 @@ public class SettingsController {
         return ViewResolver.view("settings", hx != null);
     }
 
+    /**
+     * Fragment endpoint (#83) backing the sidebar "Agent Running/Paused" chip's own
+     * 30s poll (layout.html), so it reflects pause/resume without waiting for a full
+     * page navigation. Returns just the chip markup — "layout :: agent-status" — so
+     * every page (not only Settings) can refresh it independently of that page's own
+     * poll cadence, if any.
+     */
+    @GetMapping("/fragments/agent-status")
+    public String agentStatusFragment(Model model) {
+        model.addAttribute("agentRunning", pollingService.isEnabled());
+        return "layout :: agent-status";
+    }
+
     @PostMapping("/quick")
     public String quickSettings(Model model,
                                  @RequestParam int pollIntervalSeconds,

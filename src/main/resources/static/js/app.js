@@ -94,6 +94,115 @@
     });
   }
 
+  // --- SSE health indicator (#83) ------------------------------------------
+  // A single header dot (#sse-status, in layout.html) reflects whether live
+  // updates are actually flowing on the current page. Multiple independent
+  // streams can exist across the app (the queue's htmx-sse connection, the
+  // issue-detail terminal's raw EventSource) — never both at once today, but
+  // tracked per-stream by name so that could change without a rewrite here.
+  // Aggregate rule: reconnecting beats connected beats none (worst state wins),
+  // and "none" is the state when no stream is registered at all (e.g. Settings,
+  // Dashboard, Repositories — pages with no live stream on them).
+  var SseStatus = {
+    states: {},
+    TITLES: {
+      connected: 'Live updates connected',
+      reconnecting: 'Reconnecting to live updates…',
+      none: 'No live stream on this page'
+    },
+
+    set: function (name, state) {
+      this.states[name] = state;
+      this._render();
+    },
+
+    clear: function (name) {
+      delete this.states[name];
+      this._render();
+    },
+
+    _aggregate: function () {
+      var names = Object.keys(this.states);
+      if (names.length === 0) { return 'none'; }
+      for (var i = 0; i < names.length; i++) {
+        if (this.states[names[i]] === 'reconnecting') { return 'reconnecting'; }
+      }
+      return 'connected';
+    },
+
+    _render: function () {
+      var dot = document.getElementById('sse-status');
+      if (!dot) { return; }
+      var state = this._aggregate();
+      dot.setAttribute('data-state', state);
+      dot.setAttribute('title', this.TITLES[state]);
+    }
+  };
+  window.SseStatus = SseStatus;
+
+  // --- Last-updated stamps (#83) -------------------------------------------
+  // markUpdated(key) records "now" for a named live region; a single 1s tick
+  // renders "updated Xs ago" (relative, human-friendly) into every element
+  // carrying a matching [data-updated-stamp="key"]. Keys in use: "queue"
+  // (issues.html table), "dashboard" (dashboard.html metrics), "pipeline"
+  // (issue-detail.html live-status section).
+  var UpdateStamps = {
+    times: {},
+
+    mark: function (key) {
+      this.times[key] = Date.now();
+      this._renderOne(key);
+    },
+
+    _renderOne: function (key) {
+      var ts = this.times[key];
+      if (ts == null) { return; }
+      var text = UpdateStamps.formatAgo(Date.now() - ts);
+      var els = document.querySelectorAll('[data-updated-stamp="' + key + '"]');
+      Array.prototype.forEach.call(els, function (el) { el.textContent = text; });
+    },
+
+    renderAll: function () {
+      var self = this;
+      Object.keys(this.times).forEach(function (key) { self._renderOne(key); });
+    },
+
+    // Marks every [data-updated-stamp] element currently in the DOM. Called on
+    // initial page load and on every #content swap (SPA navigation): a freshly
+    // rendered region is by definition fresh data, so its stamp starts at
+    // "just now" — deliberately including keys already tracked from an earlier
+    // visit (Dashboard → Issues → Dashboard), whose stale per-session times
+    // must not be shown against freshly-rendered data.
+    markAllVisible: function () {
+      var self = this;
+      document.querySelectorAll('[data-updated-stamp]').forEach(function (el) {
+        var key = el.getAttribute('data-updated-stamp');
+        if (key) { self.mark(key); }
+      });
+    },
+
+    formatAgo: function (deltaMs) {
+      var s = Math.floor(deltaMs / 1000);
+      if (s < 5) { return 'updated just now'; }
+      if (s < 60) { return 'updated ' + s + 's ago'; }
+      var m = Math.floor(s / 60);
+      return 'updated ' + m + 'm ago';
+    }
+  };
+  window.markUpdated = function (key) { UpdateStamps.mark(key); };
+
+  setInterval(function () { UpdateStamps.renderAll(); }, 1000);
+
+  // Maps an htmx swap target's element id to the stamp key for that live
+  // region — the actual hx-target ids used by the dashboard/pipeline polls
+  // and the queue's SSE-triggered refresh (see issues.html, dashboard.html,
+  // issue-detail.html).
+  var SWAP_TARGET_STAMPS = {
+    'issue-table-body': 'queue',
+    'dashboard-live': 'dashboard',
+    'live-status': 'pipeline'
+  };
+
   // --- Event delegation ---------------------------------------------------
   document.addEventListener('click', function (e) {
     if (e.target.closest('#theme-toggle')) {
@@ -222,10 +331,16 @@
       if (window.__issueBotES) {
         try { window.__issueBotES.close(); } catch (e) { /* ignore */ }
         window.__issueBotES = null;
+        SseStatus.clear('terminal');
       }
       var es = new EventSource('/api/events/stream');
       window.__issueBotES = es;
       self.es = es;
+
+      // EventSource auto-reconnects on drop, firing 'error' then 'open' again —
+      // the dot mirrors that lifecycle directly, no extra retry bookkeeping needed.
+      es.addEventListener('open', function () { SseStatus.set('terminal', 'connected'); });
+      es.addEventListener('error', function () { SseStatus.set('terminal', 'reconnecting'); });
 
       es.addEventListener('claude-log', function (e) {
         try {
@@ -941,11 +1056,27 @@
   }
 
   // Re-run toast handling + diff coloring after HTMX swaps in new content.
-  document.body.addEventListener('htmx:afterSwap', function () {
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
     dismissToasts();
     colorizeDiffs();
     initSortableTables();
     initCostCharts();
+
+    // Last-updated stamps (#83): a #content swap is an SPA navigation — the
+    // whole page region (and every stamp on it) was just freshly rendered by
+    // the server, so ALL visible stamps reset to "just now". This includes
+    // revisits to a page whose key was already tracked from an earlier visit;
+    // without the reset, the previous visit's stale time would be shown
+    // against fresh data until the next live tick. Otherwise, a swap into one
+    // of the tracked live regions (queue table, dashboard metrics, issue-detail
+    // pipeline — including the queue's SSE-triggered refresh, which flows
+    // through htmx's normal fetch+swap cycle) marks just that region's key.
+    var target = evt.detail && evt.detail.target;
+    if (target && target.id === 'content') {
+      UpdateStamps.markAllVisible();
+    } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
+      markUpdated(SWAP_TARGET_STAMPS[target.id]);
+    }
   });
 
   // Close the live-terminal EventSource when navigating away (registered once).
@@ -954,6 +1085,7 @@
       try { window.__issueBotES.close(); } catch (e) { /* ignore */ }
       window.__issueBotES = null;
       if (window.IssueBotTerminal) { window.IssueBotTerminal.es = null; }
+      SseStatus.clear('terminal');
     }
     // htmx suppresses swaps on 4xx by default; the server renders a friendly
     // not-found page for 404s, so let it through instead of doing nothing.
@@ -963,6 +1095,14 @@
     }
   });
 
+  // Queue's htmx-sse connection (issues.html: hx-ext="sse" sse-connect="...").
+  // The extension dispatches these on the sse-connect element (bubbles to
+  // body) for the EventSource's open/error lifecycle and on cleanup (e.g. the
+  // element being removed from the DOM when navigating to another page).
+  document.body.addEventListener('htmx:sseOpen', function () { SseStatus.set('queue', 'connected'); });
+  document.body.addEventListener('htmx:sseError', function () { SseStatus.set('queue', 'reconnecting'); });
+  document.body.addEventListener('htmx:sseClose', function () { SseStatus.clear('queue'); });
+
   // --- Init ---------------------------------------------------------------
   function init() {
     syncThemeIcon();
@@ -970,6 +1110,7 @@
     colorizeDiffs();
     initSortableTables();
     initCostCharts();
+    UpdateStamps.markAllVisible();
   }
 
   if (document.readyState === 'loading') {

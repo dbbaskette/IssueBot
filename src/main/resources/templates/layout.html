@@ -27,8 +27,9 @@
     </button>
     <div class="sidebar-overlay"></div>
     <nav class="sidebar" id="sidebar" aria-label="Main navigation">
-        <header>
+        <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
             <h1>IssueBot</h1>
+            <span id="sse-status" class="sse-dot" data-state="none" title="No live stream on this page"></span>
         </header>
         <ul>
             <li><a th:classappend="${activePage == 'dashboard' ? 'active' : ''}" th:attr="aria-current=${activePage == 'dashboard'} ? 'page' : null" href="/" hx-get="/" hx-target="#content" hx-push-url="true">Dashboard</a></li>
@@ -45,7 +46,17 @@
             <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" th:attr="aria-current=${activePage == 'setup'} ? 'page' : null" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
         </ul>
         <footer>
-            <div class="agent-status">
+            <!--
+              Refreshed independently of any page-specific poll (the sidebar is static
+              chrome shared by every page) via its own small fragment endpoint — see
+              SettingsController#agentStatusFragment. th:fragment="agent-status" makes
+              this same markup addressable as "layout :: agent-status" for that endpoint's
+              response; on a normal full-page render th:fragment is a no-op and the div
+              renders in place as usual (same trick as the "toasts" fragment below).
+            -->
+            <div class="agent-status" id="agent-status-chip" th:fragment="agent-status"
+                 hx-get="/settings/fragments/agent-status" hx-trigger="every 30s"
+                 hx-target="this" hx-swap="outerHTML">
                 <span class="status-dot" th:classappend="${agentRunning != null and agentRunning ? 'running' : 'paused'}"></span>
                 <span th:text="${agentRunning != null and agentRunning ? 'Agent Running' : 'Agent Paused'}">Agent Running</span>
             </div>
