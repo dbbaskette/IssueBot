@@ -78,7 +78,18 @@
                   th:title="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN') ? issue.lastFailureReason : null}"
                   th:text="${issue.status}">PENDING</span>
         </td>
-        <td class="text-sm" th:text="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null ? 'Waiting on #' + issue.blockedByIssues.replace(',', ', #') : (issue.currentPhase != null ? issue.currentPhase : '—')}">—</td>
+        <td class="text-sm">
+            <span th:if="${issue.status.name() != 'BLOCKED' or issue.blockedByIssues == null}"
+                  th:text="${issue.currentPhase != null ? issue.currentPhase : '—'}">—</span>
+            <span th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}">
+                Waiting on
+                <a th:each="num,iter : ${issue.blockerNumbers}"
+                   target="_blank" rel="noopener" onclick="event.stopPropagation()"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
+                   th:title="${'Open issue #' + num + ' on GitHub'}"
+                   th:text="${(iter.first ? '' : ', ') + '#' + num}">#5</a>
+            </span>
+        </td>
         <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
         <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
         <td>

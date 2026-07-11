@@ -8,6 +8,31 @@
         <div>
             <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
             <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
+            <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
+                <a class="repo-link" target="_blank" rel="noopener"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${issue.issueNumber}"
+                   th:title="${'Open issue #' + issue.issueNumber + ' on GitHub'}">
+                    <i class="ti ti-brand-github" aria-hidden="true"></i>
+                    <span th:text="${'Issue #' + issue.issueNumber}">Issue #1</span>
+                    <i class="ti ti-external-link" aria-hidden="true"></i>
+                </a>
+                <a class="repo-link" target="_blank" rel="noopener"
+                   th:if="${issue.prNumber != null and issue.prNumber > 0}"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/pull/' + ${issue.prNumber}"
+                   th:title="${'Open PR #' + issue.prNumber + ' on GitHub'}">
+                    <i class="ti ti-git-pull-request" aria-hidden="true"></i>
+                    <span th:text="${'PR #' + issue.prNumber}">PR #1</span>
+                    <i class="ti ti-external-link" aria-hidden="true"></i>
+                </a>
+                <a class="repo-link" target="_blank" rel="noopener"
+                   th:if="${issue.branchName != null}"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/tree/' + ${issue.branchName}"
+                   th:title="${'Open branch ' + issue.branchName + ' on GitHub'}">
+                    <i class="ti ti-git-branch" aria-hidden="true"></i>
+                    <span th:text="${issue.branchName}">branch-name</span>
+                    <i class="ti ti-external-link" aria-hidden="true"></i>
+                </a>
+            </div>
         </div>
         <div class="flex gap-1" style="align-items:center">
             <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
@@ -139,11 +164,13 @@
         </div>
         <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
         <div class="flex gap-1" style="flex-wrap:wrap">
-            <span th:each="num : ${issue.blockerNumbers}"
-                  class="status status-blocked"
-                  th:text="${'#' + num}">
+            <a th:each="num : ${issue.blockerNumbers}"
+               class="status status-blocked" target="_blank" rel="noopener"
+               th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
+               th:title="${'Open issue #' + num + ' on GitHub'}"
+               th:text="${'#' + num}">
                 #5
-            </span>
+            </a>
         </div>
     </div>
 
