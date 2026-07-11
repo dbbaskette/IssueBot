@@ -39,14 +39,24 @@
             </div>
         </div>
 
-        <!-- PR link -->
-        <div th:if="${prUrls.containsKey(issue.id)}" class="mb-2">
+        <!-- PR link + CI status -->
+        <div th:if="${prUrls.containsKey(issue.id)}" class="mb-2 flex gap-1" style="align-items:center;flex-wrap:wrap">
             <a th:href="${prUrls.get(issue.id)}" target="_blank" rel="noopener"
                class="btn btn-ghost btn-sm">
                 <i class="ti ti-external-link" aria-hidden="true"></i>
                 <span th:if="${issue.prNumber != null}" th:text="'View PR #' + ${issue.prNumber} + ' on GitHub'">View PR on GitHub</span>
                 <span th:unless="${issue.prNumber != null}">View Pull Request on GitHub</span>
             </a>
+            <span th:if="${ciStatuses.containsKey(issue.id)}" th:with="ci=${ciStatuses.get(issue.id)}"
+                  class="status" th:classappend="${'ci-' + ci}">
+                <i class="ti" th:classappend="${ci == 'passed' ? 'ti-circle-check' : (ci == 'failed' ? 'ti-circle-x' : (ci == 'pending' ? 'ti-clock' : 'ti-help-circle'))}" aria-hidden="true"></i>
+                <span th:switch="${ci}">
+                    <span th:case="'passed'">CI Passed</span>
+                    <span th:case="'failed'">CI Failed</span>
+                    <span th:case="'pending'">CI Pending</span>
+                    <span th:case="*">CI Unknown</span>
+                </span>
+            </span>
         </div>
 
         <!-- Review score -->
@@ -95,7 +105,7 @@
         <div class="form-actions mt-2 flex gap-1" style="align-items:center">
             <button type="button" class="btn btn-primary"
                     th:attr="data-modal-open=${'approve-modal-' + issue.id}">
-                <i class="ti ti-check" aria-hidden="true"></i> Approve &amp; Merge
+                <i class="ti ti-check" aria-hidden="true"></i> Approve
             </button>
             <button type="button" class="btn btn-danger"
                     th:attr="data-reject-toggle=${issue.id}">
@@ -126,15 +136,28 @@
         <div th:id="${'approve-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
             <div class="modal glass-card" role="dialog" aria-modal="true"
                  th:attr="aria-labelledby=${'approve-modal-' + issue.id + '-title'}">
-                <h3 th:id="${'approve-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve &amp; Merge</h3>
+                <h3 th:id="${'approve-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve</h3>
                 <p class="text-sm text-muted" style="margin:0 0 1rem">
                     Approving marks
                     <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                    as completed and ends automated processing. Make sure you have reviewed the
-                    pull request, the review score, and the diff above. This cannot be undone here.
+                    as completed. Make sure you have reviewed the pull request, the review score,
+                    and the diff above. This cannot be undone here.
                 </p>
                 <form th:attr="hx-post='/approvals/' + ${issue.id} + '/approve'" hx-target="#content"
                       hx-disabled-elt="find button[type='submit']">
+                    <div class="checkbox-field" th:if="${issue.prNumber != null}">
+                        <input type="checkbox" th:id="${'merge-checkbox-' + issue.id}" name="merge" value="true" checked>
+                        <label th:for="${'merge-checkbox-' + issue.id}">
+                            Squash-merge PR <span th:text="'#' + ${issue.prNumber}"></span> on GitHub
+                        </label>
+                    </div>
+                    <p class="text-sm text-muted" th:if="${issue.prNumber != null}" style="margin:0.5rem 0 1rem">
+                        With the box checked, the PR is squash-merged; unchecked, the PR stays open
+                        for you to merge manually.
+                    </p>
+                    <p class="text-sm text-muted" th:unless="${issue.prNumber != null}" style="margin:0.5rem 0 1rem">
+                        No PR recorded — nothing to merge.
+                    </p>
                     <div class="modal-actions">
                         <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
                         <button type="submit" class="btn btn-primary btn-sm">
