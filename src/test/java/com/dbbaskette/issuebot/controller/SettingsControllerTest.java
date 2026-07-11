@@ -5,6 +5,8 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.ui.ExtendedModelMap;
+import org.springframework.ui.Model;
 import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
 
 import java.nio.file.Files;
@@ -180,5 +182,132 @@ class SettingsControllerTest {
         assertThat(properties.getClaudeCode().getUtilityModel()).isEqualTo("sentinel-utility");
 
         assertThat(redirectAttributes.getFlashAttributes().get("error")).isNotNull();
+    }
+
+    @Test
+    void quickSettingsPersistToYaml() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        String yaml = "issuebot:\n"
+                + "  poll-interval-seconds: 45\n"
+                + "  github:\n"
+                + "    token: abc123\n";
+        Files.writeString(configFile, yaml);
+
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+
+        Model model = new ExtendedModelMap();
+        String view = controller.quickSettings(model, 120, 5, false, true, null);
+
+        assertThat(view).isEqualTo("layout");
+
+        // Bean updated live.
+        assertThat(properties.getPollIntervalSeconds()).isEqualTo(120);
+        assertThat(properties.getMaxConcurrentIssues()).isEqualTo(5);
+        assertThat(properties.getNotifications().isDesktop()).isFalse();
+        assertThat(properties.getNotifications().isDashboard()).isTrue();
+
+        // File updated with the new keys, and unrelated keys retained.
+        String written = Files.readString(configFile);
+        assertThat(written).contains("poll-interval-seconds: 120");
+        assertThat(written).contains("max-concurrent-issues: 5");
+        assertThat(written).contains("desktop: false");
+        assertThat(written).contains("dashboard: true");
+        assertThat(written).contains("token: abc123");
+
+        assertThat(model.getAttribute("message")).isNotNull();
+        assertThat(model.getAttribute("error")).isNull();
+    }
+
+    @Test
+    void quickSettingsWithUnparseableYamlAppliesLiveButDoesNotWrite() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        String badYaml = "issuebot: [unclosed";
+        Files.writeString(configFile, badYaml);
+        byte[] originalBytes = Files.readAllBytes(configFile);
+
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+
+        Model model = new ExtendedModelMap();
+        String view = controller.quickSettings(model, 90, 4, true, false, null);
+
+        assertThat(view).isEqualTo("layout");
+
+        // Bean still updated live even though the write failed.
+        assertThat(properties.getPollIntervalSeconds()).isEqualTo(90);
+        assertThat(properties.getMaxConcurrentIssues()).isEqualTo(4);
+        assertThat(properties.getNotifications().isDesktop()).isTrue();
+        assertThat(properties.getNotifications().isDashboard()).isFalse();
+
+        // File bytes identical to before — never touched.
+        assertThat(Files.readAllBytes(configFile)).isEqualTo(originalBytes);
+
+        assertThat(model.getAttribute("error")).isNotNull();
+    }
+
+    @Test
+    void rawConfigSaveRejectsUnparseableYaml() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        String yaml = "issuebot:\n  poll-interval-seconds: 45\n";
+        Files.writeString(configFile, yaml);
+        byte[] originalBytes = Files.readAllBytes(configFile);
+
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+
+        Model model = new ExtendedModelMap();
+        String badContent = "issuebot: [unclosed";
+        String view = controller.saveConfig(model, badContent, null);
+
+        assertThat(view).isEqualTo("layout");
+
+        // File untouched on parse error.
+        assertThat(Files.readAllBytes(configFile)).isEqualTo(originalBytes);
+
+        assertThat(model.getAttribute("error"))
+                .isNotNull()
+                .asString().contains("YAML parse error");
+    }
+
+    @Test
+    void rawConfigSaveRejectsMissingIssuebotSection() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        String yaml = "issuebot:\n  poll-interval-seconds: 45\n";
+        Files.writeString(configFile, yaml);
+        byte[] originalBytes = Files.readAllBytes(configFile);
+
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+
+        Model model = new ExtendedModelMap();
+        String contentWithoutIssuebot = "foo:\n  bar: baz\n";
+        String view = controller.saveConfig(model, contentWithoutIssuebot, null);
+
+        assertThat(view).isEqualTo("layout");
+
+        // File untouched — missing issuebot: section.
+        assertThat(Files.readAllBytes(configFile)).isEqualTo(originalBytes);
+
+        assertThat(model.getAttribute("error"))
+                .isNotNull()
+                .asString().contains("issuebot:");
+    }
+
+    @Test
+    void rawConfigSaveWritesValidYaml() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        Files.writeString(configFile, "issuebot:\n  poll-interval-seconds: 45\n");
+
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+
+        Model model = new ExtendedModelMap();
+        String newContent = "issuebot:\n  poll-interval-seconds: 99\n";
+        String view = controller.saveConfig(model, newContent, null);
+
+        assertThat(view).isEqualTo("layout");
+        assertThat(Files.readString(configFile)).isEqualTo(newContent);
+        assertThat(model.getAttribute("message")).isNotNull();
     }
 }

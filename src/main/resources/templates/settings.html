@@ -112,9 +112,7 @@
 
         <div class="alert alert-info" style="margin-bottom:1rem">
             <i class="ti ti-info-circle" aria-hidden="true"></i>
-            These changes apply immediately to the running agent, but are <strong>not</strong>
-            written to the config file &mdash; they revert to the file's values on restart.
-            To persist them, edit the Configuration File below.
+            Applies immediately and is saved to config.yml.
         </div>
 
         <form hx-post="/settings/quick" hx-target="#content"
@@ -146,7 +144,7 @@
                 </div>
             </div>
             <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Apply Now (not saved to file)</button>
+                <button type="submit" class="btn btn-primary">Save</button>
             </div>
         </form>
     </div>

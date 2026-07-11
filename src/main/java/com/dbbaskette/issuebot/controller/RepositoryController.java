@@ -73,7 +73,7 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "false") boolean autoMerge,
                                @RequestParam(required = false, defaultValue = "false") boolean securityReviewEnabled,
                                @RequestParam(defaultValue = "2") int maxReviewIterations,
-                               @RequestParam(required = false, defaultValue = "true") boolean autoStart,
+                               @RequestParam(required = false, defaultValue = "false") boolean autoStart,
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
                                @RequestParam(required = false) String allowedPaths,
                                @RequestParam(required = false) String implementationModel,

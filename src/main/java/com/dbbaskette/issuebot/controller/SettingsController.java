@@ -76,7 +76,18 @@ public class SettingsController {
         properties.getNotifications().setDesktop(desktopNotifications);
         properties.getNotifications().setDashboard(dashboardNotifications);
 
-        populateModel(model, "Settings updated.", null);
+        boolean written = writeConfigValues(Map.of(
+                "poll-interval-seconds", pollIntervalSeconds,
+                "max-concurrent-issues", maxConcurrentIssues,
+                "notifications", Map.of("desktop", desktopNotifications, "dashboard", dashboardNotifications)));
+
+        if (written) {
+            populateModel(model, "Saved — applies immediately and persists across restarts.", null);
+        } else {
+            populateModel(model, null,
+                    "Settings applied to the running agent, but could not be saved to " + configPath
+                            + " — fix the YAML in the editor below, then try again.");
+        }
         return ViewResolver.view("settings", hx != null);
     }
 
@@ -119,14 +130,30 @@ public class SettingsController {
 
     /**
      * Loads config.yml into a Map, navigates/creates the issuebot.claude-code
-     * maps, sets the three model keys, and dumps the whole structure back in
+     * maps, sets the three model keys, and delegates to
+     * {@link #writeConfigValues(Map)} to merge and persist them.
+     */
+    private boolean writeModelsToConfig(String implementationModel, String reviewModel, String utilityModel) {
+        return writeConfigValues(Map.of("claude-code", Map.of(
+                "implementation-model", implementationModel,
+                "review-model", reviewModel,
+                "utility-model", utilityModel)));
+    }
+
+    /**
+     * Loads config.yml into a Map, merges the given key/value pairs into the
+     * {@code issuebot} map (one level deep — if both the existing and new
+     * value for a key are Maps, the new entries are merged into the existing
+     * map rather than replacing it wholesale; this is what lets
+     * {@code claude-code} and {@code notifications} sub-keys be updated
+     * independently of their siblings), and dumps the whole structure back in
      * block flow style. The dump is written to a sibling temp file and moved
      * into place (atomically where the filesystem supports it) so a mid-write
      * failure can never truncate the user's config. Returns false (without
      * writing) if the existing file fails to parse as YAML.
      */
     @SuppressWarnings("unchecked")
-    private boolean writeModelsToConfig(String implementationModel, String reviewModel, String utilityModel) {
+    private boolean writeConfigValues(Map<String, Object> issuebotLevelUpdates) {
         Map<String, Object> root;
         try {
             if (Files.exists(configPath)) {
@@ -157,30 +184,33 @@ public class SettingsController {
             root.put("issuebot", issuebot);
         }
 
-        Object claudeCodeObj = issuebot.get("claude-code");
-        Map<String, Object> claudeCode;
-        if (claudeCodeObj instanceof Map) {
-            claudeCode = (Map<String, Object>) claudeCodeObj;
-        } else {
-            claudeCode = new LinkedHashMap<>();
-            issuebot.put("claude-code", claudeCode);
+        for (Map.Entry<String, Object> entry : issuebotLevelUpdates.entrySet()) {
+            Object existing = issuebot.get(entry.getKey());
+            if (existing instanceof Map && entry.getValue() instanceof Map) {
+                ((Map<String, Object>) existing).putAll((Map<String, Object>) entry.getValue());
+            } else {
+                issuebot.put(entry.getKey(), entry.getValue());
+            }
         }
-
-        claudeCode.put("implementation-model", implementationModel);
-        claudeCode.put("review-model", reviewModel);
-        claudeCode.put("utility-model", utilityModel);
 
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         String yamlOut = new Yaml(options).dump(root);
+        return writeStringAtomic(yamlOut);
+    }
 
-        // Write-to-temp + move so an IOException mid-write never truncates config.yml.
+    /**
+     * Writes the given content to a sibling temp file and moves it into place
+     * (atomically where the filesystem supports it) so a mid-write failure can
+     * never truncate the user's config.
+     */
+    private boolean writeStringAtomic(String content) {
         Path tmp = configPath.resolveSibling(configPath.getFileName() + ".tmp");
         try {
             if (configPath.getParent() != null) {
                 Files.createDirectories(configPath.getParent());
             }
-            Files.writeString(tmp, yamlOut);
+            Files.writeString(tmp, content);
             try {
                 Files.move(tmp, configPath,
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -202,26 +232,32 @@ public class SettingsController {
     @PostMapping("/config")
     public String saveConfig(Model model, @RequestParam String configContent,
                              @RequestHeader(value = "HX-Request", required = false) String hx) {
-        Path configPath = getConfigPath();
-        try {
-            // Basic YAML validation: check it's not empty and has some structure
-            if (configContent == null || configContent.isBlank()) {
-                populateModel(model, null, "Configuration cannot be empty.");
-                return ViewResolver.view("settings", hx != null);
-            }
-
-            if (!configContent.contains("issuebot:")) {
-                populateModel(model, null, "Invalid configuration: missing 'issuebot:' root key.");
-                return ViewResolver.view("settings", hx != null);
-            }
-
-            Files.writeString(configPath, configContent);
-            log.info("Configuration saved to {}", configPath);
-            populateModel(model, "Configuration saved. Restart to apply all changes.", null);
-        } catch (IOException e) {
-            log.error("Failed to save configuration", e);
-            populateModel(model, null, "Failed to save: " + e.getMessage());
+        if (configContent == null || configContent.isBlank()) {
+            populateModel(model, null, "Configuration cannot be empty.");
+            return ViewResolver.view("settings", hx != null);
         }
+
+        Object parsed;
+        try {
+            parsed = new Yaml().load(configContent);
+        } catch (Exception e) {
+            populateModel(model, null, "config.yml not saved — YAML parse error: " + e.getMessage());
+            return ViewResolver.view("settings", hx != null);
+        }
+
+        if (!(parsed instanceof Map) || !(((Map<?, ?>) parsed).get("issuebot") instanceof Map)) {
+            populateModel(model, null,
+                    "config.yml not saved — configuration must contain an issuebot: section.");
+            return ViewResolver.view("settings", hx != null);
+        }
+
+        if (!writeStringAtomic(configContent)) {
+            populateModel(model, null, "Failed to save configuration to " + configPath);
+            return ViewResolver.view("settings", hx != null);
+        }
+
+        log.info("Configuration saved to {}", configPath);
+        populateModel(model, "Configuration saved. Restart to apply all changes.", null);
         return ViewResolver.view("settings", hx != null);
     }
 

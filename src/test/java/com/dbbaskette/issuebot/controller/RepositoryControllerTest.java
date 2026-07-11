@@ -7,10 +7,15 @@ import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class RepositoryControllerTest {
 
@@ -80,5 +85,31 @@ class RepositoryControllerTest {
         org.assertj.core.api.Assertions.assertThat(saved.getFollowUpMode()).isEqualTo(FollowUpMode.ROLLING_BACKLOG);
         org.assertj.core.api.Assertions.assertThat(saved.getDecompositionMode()).isEqualTo(DecompositionMode.PROPOSE);
         org.assertj.core.api.Assertions.assertThat(saved.isPreScreenEnabled()).isFalse();
+    }
+
+    @Test
+    void addOrUpdateRespectsUncheckedAutoStart() throws Exception {
+        // An unchecked HTML checkbox posts nothing at all for that field, so this simulates
+        // the real form submission (via MockMvc) rather than calling the controller method
+        // directly — a direct Java call can't distinguish "omitted" from "explicitly false".
+        Fixture fixture = new Fixture();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(fixture.controller).build();
+
+        mockMvc.perform(post("/repositories")
+                        .param("owner", "acme")
+                        .param("name", "widgets")
+                        .param("branch", "main")
+                        .param("mode", "AUTONOMOUS")
+                        .param("maxIterations", "5")
+                        .param("ciTimeoutMinutes", "15")
+                        .param("maxReviewIterations", "2")
+                        // autoStart intentionally omitted — unchecked checkbox
+                        .param("followUpMode", "ROLLING_BACKLOG")
+                        .param("decompositionMode", "PROPOSE"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
+        verify(fixture.repos).save(captor.capture());
+        assertThat(captor.getValue().isAutoStart()).isFalse();
     }
 }
