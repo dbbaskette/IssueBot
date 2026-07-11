@@ -759,6 +759,9 @@ label {
     border-bottom: 1px solid var(--hairline);
 }
 .form-section-title:first-of-type { margin-top: 0; }
+/* :first-of-type is per-parent — the first section heading inside the
+   Advanced <details> keeps its gap below the summary toggle */
+#advanced-settings .form-section-title:first-of-type { margin-top: 1.4rem; }
 .form-section-title i { color: var(--accent); font-size: 1rem; }
 
 /* Inline checkbox + label (replaces the old margin-top alignment hacks) */

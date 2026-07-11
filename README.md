@@ -173,6 +173,19 @@ issuebot:
         - test/
 ```
 
+### Autonomy Presets
+
+Autonomy is spread across six settings (mode, auto-start, auto-merge, decomposition mode, follow-up mode, plan-first) — configuring a new repo from scratch means understanding all of them. The dashboard's repo add/edit form offers an **Autonomy preset** selector at the top instead: **Observe**, **Assist** (default), or **Autonomous**. Picking a preset fills in the six settings below it (which live in a collapsible "Advanced settings" section); editing any of them afterward flips the selector to **Custom**. This is pure UI sugar — nothing new is persisted, and `config.yml` still only has the six underlying settings.
+
+| Setting | Observe | Assist | Autonomous |
+|---------|---------|--------|------------|
+| `mode` | `approval-gated` | `approval-gated` | `autonomous` |
+| `auto-start` | off | on | on |
+| `auto-merge` | off | off | on |
+| `decomposition-mode` | `PROPOSE` | `PROPOSE` | `AUTO` |
+| `follow-up-mode` | `COMMENT_ONLY` | `ROLLING_BACKLOG` | `ROLLING_BACKLOG` |
+| `plan-first` | on | off | off |
+
 ### Repository Settings
 
 | Setting | Default | Description |

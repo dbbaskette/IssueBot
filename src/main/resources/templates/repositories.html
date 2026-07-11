@@ -24,6 +24,21 @@
                   hx-disabled-elt="find button[type='submit']">
                 <input type="hidden" id="edit-id" name="id" value="">
 
+                <!-- Autonomy preset -->
+                <h4 class="form-section-title"><i class="ti ti-gauge" aria-hidden="true"></i> Autonomy</h4>
+                <div class="form-grid">
+                    <div class="field-group full-width">
+                        <label for="autonomy-preset">Autonomy preset</label>
+                        <select id="autonomy-preset">
+                            <option value="OBSERVE">Observe</option>
+                            <option value="ASSIST" selected>Assist</option>
+                            <option value="AUTONOMOUS">Autonomous</option>
+                            <option value="CUSTOM">Custom</option>
+                        </select>
+                        <p class="text-muted" id="preset-description">IssueBot works automatically but PRs wait for your approval.</p>
+                    </div>
+                </div>
+
                 <!-- Identity -->
                 <h4 class="form-section-title"><i class="ti ti-brand-github" aria-hidden="true"></i> Repository</h4>
                 <div class="form-grid">
@@ -41,114 +56,118 @@
                     </div>
                 </div>
 
-                <!-- Workflow -->
-                <h4 class="form-section-title"><i class="ti ti-route" aria-hidden="true"></i> Workflow</h4>
-                <div class="form-grid">
-                    <div class="field-group">
-                        <label for="mode">Mode</label>
-                        <select id="mode" name="mode">
-                            <option value="AUTONOMOUS">Autonomous</option>
-                            <option value="APPROVAL_GATED">Approval Gated</option>
-                        </select>
-                    </div>
-                    <div class="field-group">
-                        <label for="max-iterations">Max Iterations</label>
-                        <input type="number" id="max-iterations" name="maxIterations" value="5" min="1" max="20">
-                    </div>
-                    <div class="field-group">
-                        <label for="max-review-iterations">Max Review Iterations</label>
-                        <input type="number" id="max-review-iterations" name="maxReviewIterations" value="2" min="1" max="10">
-                    </div>
-                    <div class="field-group">
-                        <label for="review-pass-threshold">Review pass threshold</label>
-                        <input type="number" id="review-pass-threshold" name="reviewPassThreshold"
-                               value="0.70" min="0.5" max="0.95" step="0.05">
-                    </div>
-                    <div class="field-group">
-                        <label for="issue-budget-usd">Issue budget (USD, blank = unlimited)</label>
-                        <input type="number" id="issue-budget-usd" name="issueBudgetUsd"
-                               step="0.50" min="0" placeholder="unlimited">
-                    </div>
-                    <div class="field-group">
-                        <label for="implementation-model">Implementation model (blank = inherit global)</label>
-                        <select id="implementation-model" name="implementationModel">
-                            <option value="">Inherit global</option>
-                            <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                        </select>
-                    </div>
-                    <div class="field-group">
-                        <label for="review-model">Review model (blank = inherit global)</label>
-                        <select id="review-model" name="reviewModel">
-                            <option value="">Inherit global</option>
-                            <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                        </select>
-                    </div>
-                    <div class="checkbox-field">
-                        <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
-                        <label for="auto-start">Auto-start issues</label>
-                    </div>
-                    <div class="field-group">
-                        <label for="follow-up-mode">Review findings handling</label>
-                        <select id="follow-up-mode" name="followUpMode">
-                            <option value="ROLLING_BACKLOG">Rolling backlog issue (recommended)</option>
-                            <option value="COMMENT_ONLY">Comment on issue only</option>
-                            <option value="PER_ISSUE">One follow-up issue per PR (legacy)</option>
-                            <option value="OFF">Off — PR review comment only</option>
-                        </select>
-                    </div>
-                    <div class="field-group">
-                        <label for="decomposition-mode">Large-issue splitting</label>
-                        <select id="decomposition-mode" name="decompositionMode">
-                            <option value="PROPOSE">Propose — I approve splits (recommended)</option>
-                            <option value="AUTO">Automatic (legacy)</option>
-                            <option value="OFF">Off — escalate to needs-human</option>
-                        </select>
-                    </div>
-                    <div class="checkbox-field">
-                        <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
-                        <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
-                    </div>
-                    <div class="checkbox-field">
-                        <input type="checkbox" id="plan-first" name="planFirst" value="true">
-                        <label for="plan-first">Plan first — approve a plan before implementation</label>
-                    </div>
-                </div>
+                <details id="advanced-settings">
+                    <summary>Advanced settings</summary>
 
-                <!-- Safety -->
-                <h4 class="form-section-title"><i class="ti ti-shield-lock" aria-hidden="true"></i> Safety</h4>
-                <div class="form-grid">
-                    <div class="checkbox-field">
-                        <input type="checkbox" id="auto-merge" name="autoMerge" value="true">
-                        <label for="auto-merge">Auto-merge PRs (squash)</label>
+                    <!-- Workflow -->
+                    <h4 class="form-section-title"><i class="ti ti-route" aria-hidden="true"></i> Workflow</h4>
+                    <div class="form-grid">
+                        <div class="field-group">
+                            <label for="mode">Mode</label>
+                            <select id="mode" name="mode">
+                                <option value="AUTONOMOUS">Autonomous</option>
+                                <option value="APPROVAL_GATED">Approval Gated</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="max-iterations">Max Iterations</label>
+                            <input type="number" id="max-iterations" name="maxIterations" value="5" min="1" max="20">
+                        </div>
+                        <div class="field-group">
+                            <label for="max-review-iterations">Max Review Iterations</label>
+                            <input type="number" id="max-review-iterations" name="maxReviewIterations" value="2" min="1" max="10">
+                        </div>
+                        <div class="field-group">
+                            <label for="review-pass-threshold">Review pass threshold</label>
+                            <input type="number" id="review-pass-threshold" name="reviewPassThreshold"
+                                   value="0.70" min="0.5" max="0.95" step="0.05">
+                        </div>
+                        <div class="field-group">
+                            <label for="issue-budget-usd">Issue budget (USD, blank = unlimited)</label>
+                            <input type="number" id="issue-budget-usd" name="issueBudgetUsd"
+                                   step="0.50" min="0" placeholder="unlimited">
+                        </div>
+                        <div class="field-group">
+                            <label for="implementation-model">Implementation model (blank = inherit global)</label>
+                            <select id="implementation-model" name="implementationModel">
+                                <option value="">Inherit global</option>
+                                <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="review-model">Review model (blank = inherit global)</label>
+                            <select id="review-model" name="reviewModel">
+                                <option value="">Inherit global</option>
+                                <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                            </select>
+                        </div>
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
+                            <label for="auto-start">Auto-start issues</label>
+                        </div>
+                        <div class="field-group">
+                            <label for="follow-up-mode">Review findings handling</label>
+                            <select id="follow-up-mode" name="followUpMode">
+                                <option value="ROLLING_BACKLOG">Rolling backlog issue (recommended)</option>
+                                <option value="COMMENT_ONLY">Comment on issue only</option>
+                                <option value="PER_ISSUE">One follow-up issue per PR (legacy)</option>
+                                <option value="OFF">Off — PR review comment only</option>
+                            </select>
+                        </div>
+                        <div class="field-group">
+                            <label for="decomposition-mode">Large-issue splitting</label>
+                            <select id="decomposition-mode" name="decompositionMode">
+                                <option value="PROPOSE">Propose — I approve splits (recommended)</option>
+                                <option value="AUTO">Automatic (legacy)</option>
+                                <option value="OFF">Off — escalate to needs-human</option>
+                            </select>
+                        </div>
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
+                            <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
+                        </div>
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="plan-first" name="planFirst" value="true">
+                            <label for="plan-first">Plan first — approve a plan before implementation</label>
+                        </div>
                     </div>
-                    <div class="checkbox-field">
-                        <input type="checkbox" id="security-review" name="securityReviewEnabled" value="true">
-                        <label for="security-review">Security review (OWASP)</label>
-                    </div>
-                    <div class="field-group full-width">
-                        <label for="allowed-paths">Allowed Paths (comma-separated)</label>
-                        <input type="text" id="allowed-paths" name="allowedPaths" placeholder="src/, test/">
-                    </div>
-                    <div class="field-group full-width">
-                        <label for="verification-commands">Verification commands (one per line, run before CI/push)</label>
-                        <textarea id="verification-commands" name="verificationCommands" rows="3"
-                                  placeholder="./mvnw -q verify&#10;npm run lint"></textarea>
-                    </div>
-                </div>
 
-                <!-- CI -->
-                <h4 class="form-section-title"><i class="ti ti-rocket" aria-hidden="true"></i> CI</h4>
-                <div class="form-grid">
-                    <div class="checkbox-field">
-                        <input type="checkbox" id="ci-enabled" name="ciEnabled" value="true" checked
-                               data-toggle-target="ci-timeout-group">
-                        <label for="ci-enabled">CI / GitHub Actions enabled</label>
+                    <!-- Safety -->
+                    <h4 class="form-section-title"><i class="ti ti-shield-lock" aria-hidden="true"></i> Safety</h4>
+                    <div class="form-grid">
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="auto-merge" name="autoMerge" value="true">
+                            <label for="auto-merge">Auto-merge PRs (squash)</label>
+                        </div>
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="security-review" name="securityReviewEnabled" value="true">
+                            <label for="security-review">Security review (OWASP)</label>
+                        </div>
+                        <div class="field-group full-width">
+                            <label for="allowed-paths">Allowed Paths (comma-separated)</label>
+                            <input type="text" id="allowed-paths" name="allowedPaths" placeholder="src/, test/">
+                        </div>
+                        <div class="field-group full-width">
+                            <label for="verification-commands">Verification commands (one per line, run before CI/push)</label>
+                            <textarea id="verification-commands" name="verificationCommands" rows="3"
+                                      placeholder="./mvnw -q verify&#10;npm run lint"></textarea>
+                        </div>
                     </div>
-                    <div class="field-group" id="ci-timeout-group">
-                        <label for="ci-timeout">CI Timeout (min)</label>
-                        <input type="number" id="ci-timeout" name="ciTimeoutMinutes" value="15" min="1" max="60">
+
+                    <!-- CI -->
+                    <h4 class="form-section-title"><i class="ti ti-rocket" aria-hidden="true"></i> CI</h4>
+                    <div class="form-grid">
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="ci-enabled" name="ciEnabled" value="true" checked
+                                   data-toggle-target="ci-timeout-group">
+                            <label for="ci-enabled">CI / GitHub Actions enabled</label>
+                        </div>
+                        <div class="field-group" id="ci-timeout-group">
+                            <label for="ci-timeout">CI Timeout (min)</label>
+                            <input type="number" id="ci-timeout" name="ciTimeoutMinutes" value="15" min="1" max="60">
+                        </div>
                     </div>
-                </div>
+                </details>
 
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">
