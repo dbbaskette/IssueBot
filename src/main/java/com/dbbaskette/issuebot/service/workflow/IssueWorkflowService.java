@@ -270,6 +270,9 @@ public class IssueWorkflowService {
                 implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
                         previousDiff, previousFeedback, previousCiLogs);
                 iteration.setClaudeOutput(implResult.getOutput());
+                if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
+                    iteration.setClaudeSessionId(implResult.getSessionId());
+                }
                 trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
             } catch (Exception e) {
                 log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
@@ -600,7 +603,15 @@ public class IssueWorkflowService {
     }
 
     /**
-     * Phase 2 — Implementation: Invoke Claude Code CLI with structured prompt
+     * Phase 2 — Implementation: Invoke Claude Code CLI with structured prompt.
+     *
+     * Session continuity (#67): resumes the session stored on the tracked issue
+     * (populated after a prior iteration's successful invocation — see the
+     * post-implementation handling in {@link #processIssue}), so iteration 2+ of a
+     * run warm-starts against the same Claude session instead of a cold one.
+     * If a resumed invocation fails, the same iteration is retried exactly once
+     * cold (with the full, un-abbreviated prompt) and the stored session id is
+     * discarded — a stale/bogus session must never consume an extra iteration.
      */
     ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
                                           Path repoPath, String previousDiff,
@@ -608,14 +619,38 @@ public class IssueWorkflowService {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_IMPLEMENTATION", "Starting implementation phase", repo, trackedIssue);
 
-        String prompt = buildImplementationPrompt(issueDetails, previousDiff,
-                previousAssessment, previousCiLogs);
-
         Long issueId = trackedIssue.getId();
+        String resumeId = trackedIssue.getClaudeSessionId();
+        boolean resumed = resumeId != null && !resumeId.isBlank();
+
+        String prompt = buildImplementationPrompt(issueDetails, previousDiff,
+                previousAssessment, previousCiLogs, resumed);
+
         sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
-                + trackedIssue.getResolvedImplModel() + ") for implementation...");
+                + trackedIssue.getResolvedImplModel() + ") for implementation"
+                + (resumed ? " (resuming session)" : "") + "...");
         ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
-                trackedIssue.getResolvedImplModel(), issueId, line -> streamClaudeLog(issueId, line));
+                trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
+
+        if (!result.isSuccess() && resumed) {
+            log.warn("Resumed invocation failed — retrying cold (session {} discarded): {}",
+                    resumeId, result.getErrorMessage());
+            eventService.log("SESSION_RESUME_FAILED",
+                    "Resume failed — falling back to a fresh session", repo, trackedIssue);
+            trackedIssue.setClaudeSessionId(null);
+            issueRepository.save(trackedIssue);
+
+            String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
+                    previousAssessment, previousCiLogs, false);
+            sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
+            result = claudeCode.executeImplementation(coldPrompt, repoPath,
+                    trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
+        }
+
+        if (result.isSuccess() && result.getSessionId() != null && !result.getSessionId().isBlank()) {
+            trackedIssue.setClaudeSessionId(result.getSessionId());
+            issueRepository.save(trackedIssue);
+        }
 
         eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
                 "Implementation complete: " + result, repo, trackedIssue);
@@ -1204,20 +1239,36 @@ public class IssueWorkflowService {
 
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs) {
-        StringBuilder prompt = new StringBuilder();
-        prompt.append("You are implementing a GitHub issue. Here are the details:\n\n");
-        prompt.append("## Issue\n");
-        prompt.append("Title: ").append(issueDetails.path("title").asText()).append("\n");
-        prompt.append("Body:\n").append(issueDetails.path("body").asText("No description")).append("\n\n");
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs, false);
+    }
 
-        // Labels
-        JsonNode labels = issueDetails.path("labels");
-        if (labels.isArray() && !labels.isEmpty()) {
-            prompt.append("Labels: ");
-            for (JsonNode label : labels) {
-                prompt.append(label.path("name").asText()).append(", ");
+    /**
+     * @param resumed when true, this invocation resumes a prior Claude session (issue #67):
+     *                the "## Issue" section is skipped (the session already has it) and the
+     *                prompt opens with a continuation cue instead. Cold prompts (resumed=false)
+     *                are byte-for-byte unchanged from before session continuity existed.
+     */
+    String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
+                                      String previousAssessment, String previousCiLogs,
+                                      boolean resumed) {
+        StringBuilder prompt = new StringBuilder();
+        if (resumed) {
+            prompt.append("Continuing the same task. New information since your last attempt:\n\n");
+        } else {
+            prompt.append("You are implementing a GitHub issue. Here are the details:\n\n");
+            prompt.append("## Issue\n");
+            prompt.append("Title: ").append(issueDetails.path("title").asText()).append("\n");
+            prompt.append("Body:\n").append(issueDetails.path("body").asText("No description")).append("\n\n");
+
+            // Labels
+            JsonNode labels = issueDetails.path("labels");
+            if (labels.isArray() && !labels.isEmpty()) {
+                prompt.append("Labels: ");
+                for (JsonNode label : labels) {
+                    prompt.append(label.path("name").asText()).append(", ");
+                }
+                prompt.append("\n\n");
             }
-            prompt.append("\n\n");
         }
 
         // Context from previous iteration if this is a retry

@@ -15,6 +15,7 @@ public class ClaudeCodeResult {
     private String errorMessage;
     private boolean timedOut;
     private java.math.BigDecimal costUsd; // CLI-reported total_cost_usd; null if absent
+    private String sessionId; // captured from stream-json system/init or result events (#67)
 
     public boolean isSuccess() { return success; }
     public void setSuccess(boolean success) { this.success = success; }
@@ -45,6 +46,9 @@ public class ClaudeCodeResult {
 
     public java.math.BigDecimal getCostUsd() { return costUsd; }
     public void setCostUsd(java.math.BigDecimal costUsd) { this.costUsd = costUsd; }
+
+    public String getSessionId() { return sessionId; }
+    public void setSessionId(String sessionId) { this.sessionId = sessionId; }
 
     @Override
     public String toString() {

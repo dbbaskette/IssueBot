@@ -95,7 +95,7 @@ class IssueControllerTest {
     void retryStoresModelOverrides() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, "claude-sonnet-5", "  ", null, f.redirectAttributes);
+        f.controller.retry(1L, null, "claude-sonnet-5", "  ", null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -108,7 +108,7 @@ class IssueControllerTest {
     void retryWithoutOverridesLeavesThemNull() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, null, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -120,7 +120,7 @@ class IssueControllerTest {
     void retryStoresBudgetOverride() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("2.50"), f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("2.50"), false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -132,7 +132,7 @@ class IssueControllerTest {
     void retryWithNegativeBudgetOverrideStoresNull() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("-3.00"), f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("-3.00"), false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -146,11 +146,61 @@ class IssueControllerTest {
 
         // A blank submission (binds to null) explicitly clears a previously set override —
         // manual retry's budget field is not "sticky" across attempts.
-        f.controller.retry(1L, null, null, null, null, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getBudgetOverrideUsd()).isNull();
+    }
+
+    // === Session continuity (#67) ===
+
+    /**
+     * Manual retry defaults to a fresh Claude session — the stored session id
+     * must be cleared unless the operator explicitly opts into continuation.
+     */
+    @Test
+    void retryDefaultClearsStoredSessionId() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setClaudeSessionId("sess-old");
+
+        f.controller.retry(1L, null, null, null, null, false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getClaudeSessionId()).isNull();
+    }
+
+    /**
+     * The retry modal's "Continue previous Claude session" checkbox, when checked,
+     * must keep the stored session id so the resumed implementation invocation
+     * picks it up.
+     */
+    @Test
+    void retryWithContinueSessionKeepsStoredSessionId() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setClaudeSessionId("sess-old");
+
+        f.controller.retry(1L, null, null, null, null, true, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getClaudeSessionId()).isEqualTo("sess-old");
+    }
+
+    /**
+     * continueSession=true is a no-op (not an error) when there's no session id to
+     * continue — retrying a never-run or already-cold issue.
+     */
+    @Test
+    void retryWithContinueSessionButNoStoredSessionIdStaysNull() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        f.controller.retry(1L, null, null, null, null, true, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getClaudeSessionId()).isNull();
     }
 
     @Test

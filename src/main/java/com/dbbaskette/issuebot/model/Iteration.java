@@ -49,6 +49,9 @@ public class Iteration {
     @Column(name = "impl_model")
     private String implModel;
 
+    @Column(name = "claude_session_id", length = 64)
+    private String claudeSessionId;
+
     @Column(name = "started_at", nullable = false, updatable = false)
     private LocalDateTime startedAt = LocalDateTime.now();
 
@@ -103,4 +106,7 @@ public class Iteration {
 
     public String getImplModel() { return implModel; }
     public void setImplModel(String implModel) { this.implModel = implModel; }
+
+    public String getClaudeSessionId() { return claudeSessionId; }
+    public void setClaudeSessionId(String claudeSessionId) { this.claudeSessionId = claudeSessionId; }
 }

@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -44,6 +45,7 @@ class IssueWorkflowServiceTest {
     private FollowUpService followUpService;
     private CodeReviewService codeReviewService;
     private CostTrackingRepository costRepository;
+    private ClaudeCodeService claudeCode;
 
     @BeforeEach
     void setUp() {
@@ -56,10 +58,11 @@ class IssueWorkflowServiceTest {
         followUpService = mock(FollowUpService.class);
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
+        claudeCode = mock(ClaudeCodeService.class);
         workflowService = new IssueWorkflowService(
                 mock(GitOperationsService.class),
                 gitHubApi,
-                mock(ClaudeCodeService.class),
+                claudeCode,
                 codeReviewService,
                 mock(CiTemplateService.class),
                 mock(LocalVerificationService.class),
@@ -151,6 +154,172 @@ class IssueWorkflowServiceTest {
         assertTrue(prompt.contains("### Verification Failure Logs"));
         assertTrue(prompt.contains("Build error on line 42"));
         assertTrue(prompt.contains("diff content"));
+    }
+
+    // === Session continuity (#67) ===
+
+    /**
+     * The cold (4-arg) overload must produce byte-for-byte the same prompt it always
+     * has — session continuity must not perturb the existing cold-start behavior.
+     */
+    @Test
+    void buildImplementationPrompt_coldOverloadUnchanged_matchesExplicitFalse() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+
+        String viaOverload = workflowService.buildImplementationPrompt(issue, null, null, null);
+        String viaExplicitFalse = workflowService.buildImplementationPrompt(issue, null, null, null, false);
+        assertEquals(viaExplicitFalse, viaOverload);
+        assertTrue(viaOverload.contains("## Issue"));
+        assertTrue(viaOverload.startsWith("You are implementing a GitHub issue"));
+    }
+
+    @Test
+    void buildImplementationPrompt_resumed_skipsIssueSectionAndCarriesContinuationCue() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint — this text must not leak");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null, true);
+        assertTrue(prompt.startsWith("Continuing the same task. New information since your last attempt:"));
+        assertFalse(prompt.contains("## Issue"));
+        assertFalse(prompt.contains("this text must not leak"));
+        // Instructions section still present
+        assertTrue(prompt.contains("## Instructions"));
+    }
+
+    @Test
+    void buildImplementationPrompt_resumed_stillIncludesRetryContext() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Description");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue,
+                "diff content", "Tests failed", "Build error on line 42", true);
+        assertTrue(prompt.contains("Continuing the same task"));
+        assertTrue(prompt.contains("Tests failed"));
+        assertTrue(prompt.contains("Build error on line 42"));
+        assertTrue(prompt.contains("diff content"));
+        assertFalse(prompt.contains("## Issue"));
+    }
+
+    /**
+     * Iteration 1 of a fresh run: trackedIssue.claudeSessionId is null, so phaseImplementation
+     * must invoke executeImplementation with a null resume id, and — on a successful result
+     * carrying a session id — persist it onto the tracked issue.
+     */
+    @Test
+    void phaseImplementation_coldStart_storesReturnedSessionIdOnIssue() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        ObjectNode issueDetails = objectMapper.createObjectNode();
+        issueDetails.put("title", "Fix the bug");
+        issueDetails.put("body", "Details");
+        issueDetails.putArray("labels");
+
+        ClaudeCodeResult success = new ClaudeCodeResult();
+        success.setSuccess(true);
+        success.setOutput("done");
+        success.setSessionId("sess-new-1");
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+                .thenReturn(success);
+
+        ClaudeCodeResult result = workflowService.phaseImplementation(
+                issue, issueDetails, Path.of("/tmp/repo"), null, null, null);
+
+        assertTrue(result.isSuccess());
+        assertEquals("sess-new-1", issue.getClaudeSessionId());
+        verify(issueRepository).save(issue);
+        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+    }
+
+    /**
+     * Iteration 2+: the session id stored on the tracked issue (from a prior iteration's
+     * successful invocation) must be passed as the resume id, and the prompt must be the
+     * abbreviated "resumed" variant.
+     */
+    @Test
+    void phaseImplementation_withStoredSessionId_resumesAndUsesShortPrompt() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        issue.setClaudeSessionId("sess-prior");
+        ObjectNode issueDetails = objectMapper.createObjectNode();
+        issueDetails.put("title", "Fix the bug");
+        issueDetails.put("body", "Details — must not appear in a resumed prompt");
+        issueDetails.putArray("labels");
+
+        ClaudeCodeResult success = new ClaudeCodeResult();
+        success.setSuccess(true);
+        success.setOutput("done");
+        // No new session id returned this time — the stored one should remain.
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-prior"), any(), any()))
+                .thenReturn(success);
+
+        ClaudeCodeResult result = workflowService.phaseImplementation(
+                issue, issueDetails, Path.of("/tmp/repo"), null, null, null);
+
+        assertTrue(result.isSuccess());
+        assertEquals("sess-prior", issue.getClaudeSessionId());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> resumeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(1)).executeImplementation(
+                promptCaptor.capture(), any(Path.class), anyString(), resumeCaptor.capture(), any(), any());
+        assertEquals("sess-prior", resumeCaptor.getValue());
+        assertTrue(promptCaptor.getValue().contains("Continuing the same task"));
+        assertFalse(promptCaptor.getValue().contains("must not appear in a resumed prompt"));
+    }
+
+    /**
+     * A resumed invocation that fails must be retried — same iteration, no extra
+     * iteration consumed — exactly once cold, with the stored session id discarded
+     * first so the retry genuinely starts fresh.
+     */
+    @Test
+    void phaseImplementation_resumedInvocationFails_retriesColdExactlyOnce_clearsSessionId() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        issue.setClaudeSessionId("sess-stale");
+        ObjectNode issueDetails = objectMapper.createObjectNode();
+        issueDetails.put("title", "Fix the bug");
+        issueDetails.put("body", "Details");
+        issueDetails.putArray("labels");
+
+        ClaudeCodeResult failure = new ClaudeCodeResult();
+        failure.setSuccess(false);
+        failure.setErrorMessage("No conversation found with session ID: sess-stale");
+
+        ClaudeCodeResult coldSuccess = new ClaudeCodeResult();
+        coldSuccess.setSuccess(true);
+        coldSuccess.setOutput("done cold");
+        coldSuccess.setSessionId("sess-fresh");
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
+                .thenReturn(failure);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+                .thenReturn(coldSuccess);
+
+        ClaudeCodeResult result = workflowService.phaseImplementation(
+                issue, issueDetails, Path.of("/tmp/repo"), null, null, null);
+
+        assertTrue(result.isSuccess());
+        assertEquals("done cold", result.getOutput());
+        // Exactly two invocations for this single iteration: resumed (failed) + cold (succeeded)
+        verify(claudeCode, times(2)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any());
+        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any());
+        // Final state: the new session from the successful cold retry, not the stale one
+        assertEquals("sess-fresh", issue.getClaudeSessionId());
     }
 
     @Test

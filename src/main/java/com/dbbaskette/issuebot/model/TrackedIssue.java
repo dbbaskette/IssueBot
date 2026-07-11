@@ -78,6 +78,9 @@ public class TrackedIssue {
     @Column(name = "decomposition_proposal")
     private String decompositionProposal;
 
+    @Column(name = "claude_session_id", length = 64)
+    private String claudeSessionId;
+
     public TrackedIssue() {}
 
     public TrackedIssue(WatchedRepo repo, int issueNumber, String issueTitle) {
@@ -152,6 +155,9 @@ public class TrackedIssue {
 
     public String getDecompositionProposal() { return decompositionProposal; }
     public void setDecompositionProposal(String decompositionProposal) { this.decompositionProposal = decompositionProposal; }
+
+    public String getClaudeSessionId() { return claudeSessionId; }
+    public void setClaudeSessionId(String claudeSessionId) { this.claudeSessionId = claudeSessionId; }
 
     /**
      * Effective spend ceiling for this issue (#66): the per-issue override wins over

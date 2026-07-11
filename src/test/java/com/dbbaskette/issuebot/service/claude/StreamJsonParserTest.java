@@ -110,4 +110,53 @@ class StreamJsonParserTest {
         assertTrue(result.getFilesChanged().contains("/src/New.java"),
                 "Expected /src/New.java tracked when tool name comes from 'name' key only");
     }
+
+    // === Session continuity (#67): session_id capture ===
+
+    @Test
+    void sessionIdCapturedFromSystemInitEvent() {
+        String json = """
+                {"type":"system","subtype":"init","session_id":"sess-abc123"}
+                """;
+        ClaudeCodeResult result = parser.parse(json);
+        assertTrue(result.isSuccess());
+        assertEquals("sess-abc123", result.getSessionId());
+    }
+
+    @Test
+    void sessionIdCapturedFromResultEvent() {
+        String json = """
+                {"type":"result","result":"done","session_id":"sess-xyz789"}
+                """;
+        ClaudeCodeResult result = parser.parse(json);
+        assertTrue(result.isSuccess());
+        assertEquals("sess-xyz789", result.getSessionId());
+    }
+
+    @Test
+    void sessionIdNullWhenAbsent() {
+        String output = """
+                {"type":"system","subtype":"init"}
+                {"type":"result","result":"done"}
+                """;
+        ClaudeCodeResult result = parser.parse(output);
+        assertTrue(result.isSuccess());
+        assertNull(result.getSessionId());
+    }
+
+    /**
+     * Both the init/system event and the result event may carry session_id — the
+     * result event (processed later in the stream) must win, since it's the
+     * canonical end-of-session value.
+     */
+    @Test
+    void sessionIdFromResultEventWinsOverSystemInit() {
+        String output = """
+                {"type":"system","subtype":"init","session_id":"sess-init"}
+                {"type":"result","result":"done","session_id":"sess-final"}
+                """;
+        ClaudeCodeResult result = parser.parse(output);
+        assertTrue(result.isSuccess());
+        assertEquals("sess-final", result.getSessionId());
+    }
 }

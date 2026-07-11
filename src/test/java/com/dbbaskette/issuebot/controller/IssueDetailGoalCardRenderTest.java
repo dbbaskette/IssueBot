@@ -289,4 +289,68 @@ class IssueDetailGoalCardRenderTest {
 
         assertThat(html).contains("currently FAILED");
     }
+
+    // === Session continuity (#67) ===
+
+    @Test
+    void retryModal_showsContinueSessionCheckbox_whenSessionIdStored() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 8, "Eighth issue");
+        issue.setId(8L);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setClaudeSessionId("sess-abcdef123456");
+
+        String html = render(baseContext(issue, null));
+
+        assertThat(html).contains("name=\"continueSession\"");
+        assertThat(html).contains("Continue previous Claude session");
+    }
+
+    @Test
+    void retryModal_hidesContinueSessionCheckbox_whenNoSessionIdStored() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 9, "Ninth issue");
+        issue.setId(9L);
+        issue.setStatus(IssueStatus.FAILED);
+        // no claudeSessionId set
+
+        String html = render(baseContext(issue, null));
+
+        assertThat(html).doesNotContain("name=\"continueSession\"");
+    }
+
+    @Test
+    void iterationHistory_showsTruncatedSessionIdWithFullIdInTitle() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 10, "Tenth issue");
+        issue.setId(10L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setClaudeSessionId("sess-abcdef123456");
+
+        String html = render(baseContext(issue, iteration));
+
+        assertThat(html).contains("Claude session");
+        // Truncated to exactly the first 8 chars + ellipsis in the visible text...
+        assertThat(html).contains("sess-abc…");
+        assertThat(html).doesNotContain("sess-abcd…");
+        // ...while the title attribute carries the full id for copy/CLI use.
+        assertThat(html).contains("title=\"sess-abcdef123456\"");
+    }
+
+    @Test
+    void iterationHistory_omitsSessionRow_whenNoSessionId() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 11, "Eleventh issue");
+        issue.setId(11L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+
+        Iteration iteration = new Iteration(issue, 1);
+        // no claudeSessionId set
+
+        String html = render(baseContext(issue, iteration));
+
+        assertThat(html).doesNotContain("Claude session");
+    }
 }
