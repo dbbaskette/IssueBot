@@ -94,7 +94,7 @@ class IssueControllerTest {
     void retryStoresModelOverrides() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, "claude-sonnet-5", "  ", f.redirectAttributes);
+        f.controller.retry(1L, null, "claude-sonnet-5", "  ", null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -107,7 +107,7 @@ class IssueControllerTest {
     void retryWithoutOverridesLeavesThemNull() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -116,10 +116,47 @@ class IssueControllerTest {
     }
 
     @Test
+    void retryStoresBudgetOverride() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("2.50"), f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getBudgetOverrideUsd())
+                .isEqualByComparingTo(new java.math.BigDecimal("2.50"));
+    }
+
+    @Test
+    void retryWithNegativeBudgetOverrideStoresNull() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("-3.00"), f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getBudgetOverrideUsd()).isNull();
+    }
+
+    @Test
+    void retryWithBlankBudgetOverrideClearsExistingOverride() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setBudgetOverrideUsd(new java.math.BigDecimal("9.00"));
+
+        // A blank submission (binds to null) explicitly clears a previously set override —
+        // manual retry's budget field is not "sticky" across attempts.
+        f.controller.retry(1L, null, null, null, null, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getBudgetOverrideUsd()).isNull();
+    }
+
+    @Test
     void startStoresModelOverrides() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
-        f.controller.start(1L, "claude-opus-4-8", "  ", f.redirectAttributes);
+        f.controller.start(1L, "claude-opus-4-8", "  ", null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -132,12 +169,24 @@ class IssueControllerTest {
     void startWithoutOverridesLeavesThemNull() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
-        f.controller.start(1L, null, null, f.redirectAttributes);
+        f.controller.start(1L, null, null, null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getImplModelOverride()).isNull();
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getReviewModelOverride()).isNull();
+    }
+
+    @Test
+    void startStoresBudgetOverride() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+
+        f.controller.start(1L, null, null, new java.math.BigDecimal("1.00"), f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getBudgetOverrideUsd())
+                .isEqualByComparingTo(new java.math.BigDecimal("1.00"));
     }
 
     @Test
@@ -180,6 +229,30 @@ class IssueControllerTest {
 
         verify(f.decompositionService).approveProposal(f.issue);
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void detailExposesEffectiveBudgetAndSpend_issueOverrideWinsOverRepo() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        f.issue.getRepo().setIssueBudgetUsd(new java.math.BigDecimal("10.00"));
+        f.issue.setBudgetOverrideUsd(new java.math.BigDecimal("2.00"));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        org.assertj.core.api.Assertions.assertThat((java.math.BigDecimal) model.getAttribute("effectiveBudget"))
+                .isEqualByComparingTo(new java.math.BigDecimal("2.00"));
+        org.assertj.core.api.Assertions.assertThat(model.asMap()).containsKey("issueSpent");
+    }
+
+    @Test
+    void detailExposesNullEffectiveBudgetWhenNoneConfigured() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("effectiveBudget")).isNull();
     }
 
     @Test

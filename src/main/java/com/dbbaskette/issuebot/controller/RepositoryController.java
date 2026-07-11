@@ -83,6 +83,7 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "ROLLING_BACKLOG") String followUpMode,
                                @RequestParam(defaultValue = "PROPOSE") String decompositionMode,
                                @RequestParam(defaultValue = "false") boolean preScreenEnabled,
+                               @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
@@ -132,6 +133,7 @@ public class RepositoryController {
             log.warn("Invalid decompositionMode '{}' for {} — keeping existing value", decompositionMode, repo.fullName());
         }
         repo.setPreScreenEnabled(preScreenEnabled);
+        repo.setIssueBudgetUsd(normalizeBudget(issueBudgetUsd));
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {
                 List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))
@@ -169,6 +171,16 @@ public class RepositoryController {
 
     private static String normalize(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    /**
+     * Blank input arrives as null (Spring can't bind an empty numeric field), and a
+     * negative value is nonsensical for a spend ceiling — both mean "unlimited".
+     */
+    private static java.math.BigDecimal normalizeBudget(java.math.BigDecimal value) {
+        if (value == null) return null;
+        if (value.compareTo(java.math.BigDecimal.ZERO) < 0) return null;
+        return value;
     }
 
     private static final java.math.BigDecimal REVIEW_THRESHOLD_MIN = new java.math.BigDecimal("0.50");

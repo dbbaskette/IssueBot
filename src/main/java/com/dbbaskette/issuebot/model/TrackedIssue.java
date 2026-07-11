@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.model;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
@@ -69,6 +70,9 @@ public class TrackedIssue {
 
     @Column(name = "last_failure_reason", length = 2000)
     private String lastFailureReason;
+
+    @Column(name = "budget_override_usd", precision = 10, scale = 2)
+    private BigDecimal budgetOverrideUsd;
 
     @Lob
     @Column(name = "decomposition_proposal")
@@ -142,6 +146,9 @@ public class TrackedIssue {
 
     public String getLastFailureReason() { return lastFailureReason; }
     public void setLastFailureReason(String lastFailureReason) { this.lastFailureReason = lastFailureReason; }
+
+    public BigDecimal getBudgetOverrideUsd() { return budgetOverrideUsd; }
+    public void setBudgetOverrideUsd(BigDecimal budgetOverrideUsd) { this.budgetOverrideUsd = budgetOverrideUsd; }
 
     public String getDecompositionProposal() { return decompositionProposal; }
     public void setDecompositionProposal(String decompositionProposal) { this.decompositionProposal = decompositionProposal; }

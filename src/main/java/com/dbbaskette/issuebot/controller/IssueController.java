@@ -153,6 +153,7 @@ public class IssueController {
                         @RequestParam(required = false) String instructions,
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
+                        @RequestParam(required = false) BigDecimal budgetOverrideUsd,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -190,6 +191,7 @@ public class IssueController {
         issue.setCooldownUntil(null);
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
+        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         issueRepository.save(issue);
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
@@ -221,6 +223,7 @@ public class IssueController {
     public String start(@PathVariable Long id,
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
+                        @RequestParam(required = false) BigDecimal budgetOverrideUsd,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -241,6 +244,7 @@ public class IssueController {
         issue.setCurrentPhase(null);
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
+        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         issueRepository.save(issue);
 
         eventService.log("MANUAL_START",
@@ -401,6 +405,25 @@ public class IssueController {
     }
 
     /**
+     * Blank binds to null already (Spring converts an empty numeric field to null);
+     * a negative value is nonsensical for a spend ceiling — both mean "unlimited".
+     * A blank submission on retry explicitly clears any previous override, matching
+     * the model-override fields' semantics — mirrors RepositoryController's helper.
+     */
+    private static BigDecimal normalizeBudget(BigDecimal value) {
+        if (value == null) return null;
+        if (value.compareTo(BigDecimal.ZERO) < 0) return null;
+        return value;
+    }
+
+    /** Issue override wins over the repo default; null means unlimited. Mirrors
+     *  IssueWorkflowService#effectiveBudget for display purposes. */
+    private static BigDecimal effectiveBudget(TrackedIssue issue) {
+        if (issue.getBudgetOverrideUsd() != null) return issue.getBudgetOverrideUsd();
+        return issue.getRepo().getIssueBudgetUsd();
+    }
+
+    /**
      * Check repo-level and global concurrency gates. Returns null if clear,
      * or an error message explaining why the issue cannot start.
      * Pass a pre-fetched PR list to avoid re-fetching, or null to fetch fresh.
@@ -482,6 +505,8 @@ public class IssueController {
         model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("issueSpent", totalCost);
+        model.addAttribute("effectiveBudget", effectiveBudget(issue));
 
         if (issue.getStatus() == IssueStatus.AWAITING_DECOMPOSITION && issue.getDecompositionProposal() != null) {
             try {

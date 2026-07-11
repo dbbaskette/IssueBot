@@ -729,6 +729,50 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
+    // === Test 18 (#66): A $0.01 repo budget with $0.50 already spent must halt the
+    //     workflow at the first checkpoint after implementation — before CI/PR — with
+    //     no PR created and a BUDGET_EXCEEDED escalation via IterationManager. ===
+    @Test
+    void budgetExceeded_haltsBeforePrCreation_noPrCreated() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setIssueBudgetUsd(new BigDecimal("0.01"));
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails); // stubs costRepository.totalCostForIssue(issue) -> 0.05... override below
+
+        when(costRepository.totalCostForIssue(issue)).thenReturn(new BigDecimal("0.50"));
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        workflowService.processIssue(issue);
+
+        verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
+        verify(gitHubApi, never()).createPullRequest(any(), any(), any(), any(), any(), any(), anyBoolean());
+    }
+
+    // === Test 19 (#66): An issue-level budget override wins over the repo default,
+    //     and no budget anywhere is zero behavior change (covered by the existing
+    //     happyPath_fullPipelineSuccess test, which sets neither and completes normally). ===
+    @Test
+    void budgetOverride_winsOverRepoDefault() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setIssueBudgetUsd(new BigDecimal("100.00")); // repo default would allow this spend
+        issue.setBudgetOverrideUsd(new BigDecimal("0.01")); // issue override is much stricter
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(costRepository.totalCostForIssue(issue)).thenReturn(new BigDecimal("0.50"));
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        workflowService.processIssue(issue);
+
+        verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
+    }
+
     // === Test 14: An exception thrown by local verification is treated as a failed
     //     check and routes through the retry path instead of escaping the workflow ===
     @Test

@@ -49,6 +49,9 @@ public class WatchedRepo {
     @Column(name = "review_pass_threshold", nullable = false, precision = 3, scale = 2)
     private BigDecimal reviewPassThreshold = new BigDecimal("0.70");
 
+    @Column(name = "issue_budget_usd", precision = 10, scale = 2)
+    private BigDecimal issueBudgetUsd;
+
     @Column(name = "follow_up_enabled", nullable = false)
     private boolean followUpEnabled = true;
 
@@ -136,6 +139,9 @@ public class WatchedRepo {
 
     public BigDecimal getReviewPassThreshold() { return reviewPassThreshold; }
     public void setReviewPassThreshold(BigDecimal reviewPassThreshold) { this.reviewPassThreshold = reviewPassThreshold; }
+
+    public BigDecimal getIssueBudgetUsd() { return issueBudgetUsd; }
+    public void setIssueBudgetUsd(BigDecimal issueBudgetUsd) { this.issueBudgetUsd = issueBudgetUsd; }
 
     public boolean isAutoStart() { return autoStart; }
     public void setAutoStart(boolean autoStart) { this.autoStart = autoStart; }
