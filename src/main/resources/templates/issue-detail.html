@@ -66,6 +66,44 @@
               th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
     </div>
 
+    <!-- === GOAL CARD === -->
+    <div class="panel mb-3 goal-card">
+        <div class="panel-header">
+            <h3>Goal</h3>
+            <span class="text-sm text-muted">Done when all of these hold:</span>
+        </div>
+        <div class="panel-body">
+            <div class="flex-between mb-1" th:if="${issue.repo.ciEnabled}">
+                <span class="text-sm">CI checks pass</span>
+                <span class="status"
+                      th:classappend="${latestIteration != null and latestIteration.ciResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
+                      th:text="${(latestIteration != null and latestIteration.ciResult != null) ? latestIteration.ciResult : '—'}">—</span>
+            </div>
+            <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push only</div>
+
+            <div class="flex-between mb-1">
+                <span class="text-sm">Independent review passes
+                    <span class="text-muted" th:text="${'(all dimensions ≥ ' + #numbers.formatPercent(issue.repo.reviewPassThreshold, 1, 0) + ', no high-severity findings)'}">(all dimensions ≥ 70%, no high-severity findings)</span>
+                </span>
+                <span class="status"
+                      th:classappend="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'status-completed' : 'status-failed') : 'status-pending'}"
+                      th:text="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'PASSED' : 'CHANGES REQUESTED') : '—'}">—</span>
+            </div>
+
+            <div class="flex-between mb-1">
+                <span class="text-sm">Budget</span>
+                <span class="text-sm"
+                      th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
+            </div>
+
+            <div class="text-sm text-muted">
+                On exhaustion: escalates to needs-human with 24 h cooldown<span
+                        th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                        th:text="' — currently ' + ${issue.status}"></span>
+            </div>
+        </div>
+    </div>
+
     <!-- === Retry Modal (accessible dialog) === -->
     <div th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
          id="retry-modal" class="modal-backdrop" data-modal hidden>

@@ -10,6 +10,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,9 +38,16 @@ class RepositoryControllerTest {
 
         WatchedRepo addOrUpdate(String implementationModel, String reviewModel,
                                  String followUpMode, String decompositionMode, boolean preScreenEnabled) {
+            return addOrUpdate(implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, new BigDecimal("0.70"));
+        }
+
+        WatchedRepo addOrUpdate(String implementationModel, String reviewModel,
+                                 String followUpMode, String decompositionMode, boolean preScreenEnabled,
+                                 BigDecimal reviewPassThreshold) {
             org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
             controller.addOrUpdate(model, null, "acme", "widgets", "main", "AUTONOMOUS",
-                    5, false, 15, false, false, 2, true, true, null,
+                    5, false, 15, false, false, 2, reviewPassThreshold, true, true, null,
                     implementationModel, reviewModel,
                     followUpMode, decompositionMode, preScreenEnabled, null);
             ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
@@ -85,6 +93,21 @@ class RepositoryControllerTest {
         org.assertj.core.api.Assertions.assertThat(saved.getFollowUpMode()).isEqualTo(FollowUpMode.ROLLING_BACKLOG);
         org.assertj.core.api.Assertions.assertThat(saved.getDecompositionMode()).isEqualTo(DecompositionMode.PROPOSE);
         org.assertj.core.api.Assertions.assertThat(saved.isPreScreenEnabled()).isFalse();
+    }
+
+    @Test
+    void addOrUpdateClampsReviewThreshold() {
+        WatchedRepo savedLow = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.30"));
+        assertThat(savedLow.getReviewPassThreshold()).isEqualByComparingTo(new BigDecimal("0.50"));
+
+        WatchedRepo savedHigh = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.99"));
+        assertThat(savedHigh.getReviewPassThreshold()).isEqualByComparingTo(new BigDecimal("0.95"));
+
+        WatchedRepo savedMid = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.80"));
+        assertThat(savedMid.getReviewPassThreshold()).isEqualByComparingTo(new BigDecimal("0.80"));
     }
 
     @Test

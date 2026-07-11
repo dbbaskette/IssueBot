@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.model;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -44,6 +45,9 @@ public class WatchedRepo {
 
     @Column(name = "max_review_iterations", nullable = false)
     private int maxReviewIterations = 2;
+
+    @Column(name = "review_pass_threshold", nullable = false, precision = 3, scale = 2)
+    private BigDecimal reviewPassThreshold = new BigDecimal("0.70");
 
     @Column(name = "follow_up_enabled", nullable = false)
     private boolean followUpEnabled = true;
@@ -125,6 +129,9 @@ public class WatchedRepo {
 
     public int getMaxReviewIterations() { return maxReviewIterations; }
     public void setMaxReviewIterations(int maxReviewIterations) { this.maxReviewIterations = maxReviewIterations; }
+
+    public BigDecimal getReviewPassThreshold() { return reviewPassThreshold; }
+    public void setReviewPassThreshold(BigDecimal reviewPassThreshold) { this.reviewPassThreshold = reviewPassThreshold; }
 
     public boolean isAutoStart() { return autoStart; }
     public void setAutoStart(boolean autoStart) { this.autoStart = autoStart; }

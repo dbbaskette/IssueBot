@@ -73,6 +73,7 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "false") boolean autoMerge,
                                @RequestParam(required = false, defaultValue = "false") boolean securityReviewEnabled,
                                @RequestParam(defaultValue = "2") int maxReviewIterations,
+                               @RequestParam(defaultValue = "0.70") java.math.BigDecimal reviewPassThreshold,
                                @RequestParam(required = false, defaultValue = "false") boolean autoStart,
                                @RequestParam(required = false, defaultValue = "true") boolean followUpEnabled,
                                @RequestParam(required = false) String allowedPaths,
@@ -105,6 +106,7 @@ public class RepositoryController {
         repo.setAutoMerge(autoMerge);
         repo.setSecurityReviewEnabled(securityReviewEnabled);
         repo.setMaxReviewIterations(maxReviewIterations);
+        repo.setReviewPassThreshold(clampReviewPassThreshold(reviewPassThreshold));
         repo.setAutoStart(autoStart);
         repo.setFollowUpEnabled(followUpEnabled);
         repo.setImplementationModel(normalize(implementationModel));
@@ -157,6 +159,20 @@ public class RepositoryController {
 
     private static String normalize(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private static final java.math.BigDecimal REVIEW_THRESHOLD_MIN = new java.math.BigDecimal("0.50");
+    private static final java.math.BigDecimal REVIEW_THRESHOLD_MAX = new java.math.BigDecimal("0.95");
+
+    /**
+     * Clamps the review pass threshold to the supported UI range [0.50, 0.95] rather
+     * than rejecting out-of-range values — see issue #62.
+     */
+    private static java.math.BigDecimal clampReviewPassThreshold(java.math.BigDecimal value) {
+        if (value == null) return new java.math.BigDecimal("0.70");
+        if (value.compareTo(REVIEW_THRESHOLD_MIN) < 0) return REVIEW_THRESHOLD_MIN;
+        if (value.compareTo(REVIEW_THRESHOLD_MAX) > 0) return REVIEW_THRESHOLD_MAX;
+        return value;
     }
 
     private void populateModel(Model model, String message, String error) {
