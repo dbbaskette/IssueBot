@@ -18,6 +18,7 @@ import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,7 @@ class IssueWorkflowServiceTest {
     private ClaudeCodeService claudeCode;
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
+    private SseService sseService;
 
     @BeforeEach
     void setUp() {
@@ -65,6 +67,7 @@ class IssueWorkflowServiceTest {
         claudeCode = mock(ClaudeCodeService.class);
         eventService = mock(EventService.class);
         cancellationService = new WorkflowCancellationService();
+        sseService = mock(SseService.class);
         workflowService = new IssueWorkflowService(
                 mock(GitOperationsService.class),
                 gitHubApi,
@@ -76,7 +79,7 @@ class IssueWorkflowServiceTest {
                 iterationRepository,
                 costRepository,
                 eventService,
-                mock(SseService.class),
+                sseService,
                 mock(NotificationService.class),
                 iterationManager,
                 decompositionService,
@@ -892,5 +895,44 @@ class IssueWorkflowServiceTest {
         // The issue must NOT have been saved with an incremented counter
         verify(issueRepository, never()).save(argThat(
                 i -> i instanceof TrackedIssue ti && ti.getCurrentReviewIteration() > 0));
+    }
+
+    // === Terminal QoL (#84) — per-line SSE cap lifted from 500 to 10,000 chars ===
+
+    /** Builds a stream-json "assistant" line whose text block is exactly {@code length} chars. */
+    private String assistantLine(int length) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "assistant");
+        ObjectNode message = node.putObject("message");
+        ArrayNode content = message.putArray("content");
+        ObjectNode block = content.addObject();
+        block.put("type", "text");
+        block.put("text", "a".repeat(length));
+        return node.toString();
+    }
+
+    @Test
+    void streamClaudeLog_2000CharLine_broadcastsIntact() {
+        String line = assistantLine(2000);
+
+        workflowService.streamClaudeLog(7L, line);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
+        assertEquals(2000, captor.getValue().length(), "a 2,000-char line must arrive intact, not truncated at 500");
+        assertEquals("a".repeat(2000), captor.getValue());
+    }
+
+    @Test
+    void streamClaudeLog_12000CharLine_truncatesAt10000() {
+        String line = assistantLine(12000);
+
+        workflowService.streamClaudeLog(7L, line);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
+        String broadcast = captor.getValue();
+        assertEquals(10000 + 3, broadcast.length(), "cap is 10,000 chars plus the \"...\" overflow marker");
+        assertEquals("a".repeat(10000) + "...", broadcast);
     }
 }

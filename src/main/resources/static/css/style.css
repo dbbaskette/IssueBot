@@ -1273,19 +1273,71 @@ details summary:hover { color: var(--text-primary); }
     from { opacity: 0; transform: translateY(2px); }
     to { opacity: 1; transform: translateY(0); }
 }
-.terminal-line.terminal-system {
+/* Prefix coloring (#84) — subtle, source-neutral tint per recognized line
+   prefix. Fixed hex values (not theme tokens) since the live terminal itself
+   stays dark in both themes — see --term-bg/--term-fg/--term-accent above. */
+.terminal-line.term-system {
     color: #94a3b8;
     font-style: italic;
 }
-.terminal-line.terminal-tool {
+.terminal-line.term-tool {
     color: var(--term-accent);
     padding-left: 0.5rem;
     border-left: 2px solid rgba(94,234,212,0.3);
+    font-style: italic;
 }
-.terminal-line.terminal-result {
+.terminal-line.term-result {
     color: var(--term-accent);
     font-weight: 600;
 }
+.terminal-line.term-stderr {
+    color: #fda4af;
+    padding-left: 0.5rem;
+    border-left: 2px solid rgba(253,164,175,0.35);
+}
+.terminal-line.term-localcheck {
+    color: #7dd3fc;
+}
+.terminal-line.term-raw {
+    color: #64748b;
+}
+
+/* Long-line collapse (#84): lines over the JS threshold (500 chars) render
+   clamped to a few lines via -webkit-line-clamp, with a trailing toggle
+   button to expand/collapse. dataset.raw on the line always carries the
+   untruncated text regardless of clamp state (used by filter/copy/download). */
+.term-line-text {
+    display: inline;
+}
+.terminal-line.clamped .term-line-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+}
+.terminal-line.expanded .term-line-text {
+    display: inline;
+}
+.term-line-toggle {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0 0.5rem;
+    font-family: var(--font-sans);
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.6rem;
+    color: var(--term-accent);
+    background: transparent;
+    border: 1px solid rgba(94,234,212,0.35);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    vertical-align: baseline;
+}
+.term-line-toggle:hover { background: rgba(94,234,212,0.12); }
+
+/* Filter (#84): non-matching lines are hidden entirely rather than dimmed,
+   so scanning a filtered view reads as a clean, contiguous log. */
+.terminal-line.hidden { display: none; }
 
 /* ============================================================
    Filter bar
@@ -1613,6 +1665,9 @@ details summary:hover { color: var(--text-primary); }
 
     .live-terminal { font-size: 11px; padding: 0.75rem; overflow-x: auto; }
     .live-terminal .terminal-line { font-size: inherit; }
+    .terminal-toolbar { width: 100%; }
+    .terminal-filter-input { min-width: 0; flex: 1; }
+    .terminal-filter-group { flex: 1 1 100%; }
 
     .config-editor { font-size: 0.78rem; min-height: 250px; }
     .diff-viewer { font-size: 0.72rem; padding: 0.75rem; }
@@ -1741,6 +1796,51 @@ details summary:hover { color: var(--text-primary); }
     opacity: 0.85;
 }
 .terminal-trim-note[hidden] { display: none; }
+
+/* Terminal filter box (#84) — styled to match .filter-bar's inputs/selects
+   so it reads as part of the same design system, just pill-shaped and
+   compact enough to sit in the panel-header toolbar row. */
+.terminal-filter-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-pill);
+    backdrop-filter: blur(var(--blur));
+    -webkit-backdrop-filter: blur(var(--blur));
+}
+.terminal-filter-group:focus-within {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.terminal-filter-input {
+    min-width: 10rem;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+}
+.terminal-filter-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    padding: 0;
+    color: var(--text-tertiary);
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    line-height: 1;
+}
+.terminal-filter-clear:hover { color: var(--text-primary); background: var(--row-hover); }
 
 /* Diff header lines (e.g. +++/---) rendered neutral, not added/removed colored */
 .diff-line.diff-header {

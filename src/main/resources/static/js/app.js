@@ -306,13 +306,36 @@
   // one so a partial HTMX swap re-running the inline init script cannot leak
   // duplicate connections. Tracks auto-scroll (follow) state and surfaces a
   // "lines trimmed" note + "jump to bottom" affordance.
+  // Maps a line's recognized prefix to a CSS modifier class (#84). Checked in
+  // order against the start of the line; first match wins. Lines with no
+  // recognized prefix (e.g. plain assistant text) get no extra class.
+  var TERMINAL_PREFIX_CLASSES = [
+    ['[local-check]', 'term-localcheck'],
+    ['[stderr]', 'term-stderr'],
+    ['[system]', 'term-system'],
+    ['[tool_use]', 'term-tool'],
+    ['[tool_result]', 'term-tool'],
+    ['[tool]', 'term-tool'],
+    ['[result]', 'term-result'],
+    ['[raw]', 'term-raw']
+  ];
+
+  function classifyTerminalLine(text) {
+    for (var i = 0; i < TERMINAL_PREFIX_CLASSES.length; i++) {
+      if (text.indexOf(TERMINAL_PREFIX_CLASSES[i][0]) === 0) { return TERMINAL_PREFIX_CLASSES[i][1]; }
+    }
+    return '';
+  }
+
   var IssueBotTerminal = {
     es: null,
     issueId: null,
     follow: true,
     lineCount: 0,
     trimmed: 0,
-    maxLines: 200,
+    trimMarkerInserted: false,
+    maxLines: 5000,
+    longLineThreshold: 500,
 
     init: function (issueId) {
       var terminal = document.getElementById('live-terminal');
@@ -320,6 +343,7 @@
       this.issueId = issueId;
       this.lineCount = 0;
       this.trimmed = 0;
+      this.trimMarkerInserted = false;
       this.follow = true;
       this._wireControls(terminal);
       this._openStream();
@@ -377,6 +401,65 @@
       if (jump) { jump.hidden = follow; }
     },
 
+    // --- Filter (#84) --------------------------------------------------
+    // Case-insensitive substring match against each line's full (unclamped)
+    // text, stored in dataset.raw. Applied to existing lines on every
+    // keystroke and to each new line as it arrives.
+    _currentFilter: function () {
+      var input = document.querySelector('[data-terminal-filter]');
+      return input ? input.value.trim().toLowerCase() : '';
+    },
+
+    _matchesFilter: function (raw, filter) {
+      if (!filter) { return true; }
+      return raw.toLowerCase().indexOf(filter) !== -1;
+    },
+
+    applyFilter: function (value) {
+      var terminal = document.getElementById('live-terminal');
+      if (!terminal) { return; }
+      var filter = (value || '').trim().toLowerCase();
+      var self = this;
+      Array.prototype.forEach.call(terminal.children, function (line) {
+        var raw = (line.dataset && line.dataset.raw) || '';
+        line.classList.toggle('hidden', !self._matchesFilter(raw, filter));
+      });
+    },
+
+    clearFilter: function () {
+      var input = document.querySelector('[data-terminal-filter]');
+      if (input) { input.value = ''; }
+      this.applyFilter('');
+    },
+
+    // --- Buffered raw text (#84) ----------------------------------------
+    // Shared by Copy and Download so both always agree: the full text of
+    // every buffered line (including ones currently hidden by the filter),
+    // joined with newlines. Only covers what's still in the DOM buffer —
+    // lines evicted by the FIFO cap are gone (see the trim marker below).
+    _bufferedText: function () {
+      var terminal = document.getElementById('live-terminal');
+      if (!terminal) { return ''; }
+      return Array.prototype.map.call(terminal.children, function (line) {
+        return (line.dataset && line.dataset.raw) || '';
+      }).join('\n');
+    },
+
+    // Removes the oldest buffered line for the FIFO cap, but never the
+    // one-off trim marker (identified by .term-trim-marker) once inserted —
+    // it always occupies position 0 from then on, so the victim is its next
+    // sibling instead. Returns false if there was nothing left to remove.
+    _trimOldest: function (terminal) {
+      var victim = terminal.firstChild;
+      if (victim && victim.classList && victim.classList.contains('term-trim-marker')) {
+        victim = victim.nextSibling;
+      }
+      if (!victim) { return false; }
+      terminal.removeChild(victim);
+      this.trimmed++;
+      return true;
+    },
+
     _appendLine: function (text) {
       var terminal = document.getElementById('live-terminal');
       if (!terminal) { return; }
@@ -384,24 +467,63 @@
 
       var line = document.createElement('div');
       line.className = 'terminal-line';
-      if (text.indexOf('[tool]') === 0) {
-        line.className += ' terminal-tool';
-      } else if (text.indexOf('[result]') === 0) {
-        line.className += ' terminal-result';
+      var prefixClass = classifyTerminalLine(text);
+      if (prefixClass) { line.className += ' ' + prefixClass; }
+      line.dataset.raw = text;
+
+      var textSpan = document.createElement('span');
+      textSpan.className = 'term-line-text';
+      textSpan.textContent = text;
+      line.appendChild(textSpan);
+
+      // Long-line collapse (#84): lines over the threshold render clamped
+      // (CSS max-height + ellipsis) with an inline show more/less toggle.
+      // dataset.raw above already carries the untruncated text regardless.
+      if (text.length > this.longLineThreshold) {
+        line.classList.add('clamped');
+        var toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'term-line-toggle';
+        toggle.textContent = 'show more';
+        toggle.setAttribute('aria-expanded', 'false');
+        line.appendChild(toggle);
       }
-      line.textContent = text;
+
+      if (!this._matchesFilter(text, this._currentFilter())) {
+        line.classList.add('hidden');
+      }
+
       terminal.appendChild(line);
       this.lineCount++;
 
+      // FIFO cap (#84): raised from 200 to 5,000 rendered lines. The first
+      // time a trim happens, a one-off marker line is inserted at the front
+      // of the buffer so the gap is visible in both the live view and any
+      // Copy/Download taken afterward. _trimOldest skips the marker itself
+      // once it exists (it always sits at position 0) — otherwise the very
+      // next trim would immediately evict the marker it just inserted.
       while (terminal.children.length > this.maxLines) {
-        terminal.removeChild(terminal.firstChild);
-        this.trimmed++;
+        if (!this._trimOldest(terminal)) { break; }
       }
       if (this.trimmed > 0) {
         var note = document.getElementById('terminal-trim-note');
         if (note) {
           note.hidden = false;
           note.textContent = this.trimmed + ' earlier line' + (this.trimmed === 1 ? '' : 's') + ' trimmed';
+        }
+        if (!this.trimMarkerInserted) {
+          this.trimMarkerInserted = true;
+          var marker = document.createElement('div');
+          marker.className = 'terminal-line term-system term-trim-marker';
+          var markerText = '… earlier output trimmed';
+          marker.textContent = markerText;
+          marker.dataset.raw = markerText;
+          terminal.insertBefore(marker, terminal.firstChild);
+          // Inserting the marker pushes the total one past the cap — trim
+          // exactly one more real line (never the marker) to compensate.
+          while (terminal.children.length > this.maxLines) {
+            if (!this._trimOldest(terminal)) { break; }
+          }
         }
       }
 
@@ -417,11 +539,27 @@
       terminal.scrollTop = terminal.scrollHeight;
     },
 
+    // Copies the same buffered raw text as Download (#84) — previously this
+    // copied the terminal's rendered innerText, which would have included
+    // "show more" button labels and excluded clamped overflow.
     copy: function () {
-      var terminal = document.getElementById('live-terminal');
-      if (!terminal) { return; }
-      var text = terminal.innerText || terminal.textContent || '';
-      copyText(text, document.querySelector('[data-terminal-copy]'));
+      copyText(this._bufferedText(), document.querySelector('[data-terminal-copy]'));
+    },
+
+    // Downloads the full buffered log as a text file. Covers only what's
+    // still in the DOM buffer (see the FIFO cap above) — not the complete
+    // server-side history if lines have been trimmed since the run started.
+    download: function () {
+      var text = this._bufferedText();
+      var blob = new Blob([text], { type: 'text/plain' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'issue-' + this.issueId + '-terminal.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
   };
   window.IssueBotTerminal = IssueBotTerminal;
@@ -526,6 +664,28 @@
       IssueBotTerminal.copy();
       return;
     }
+    if (e.target.closest('[data-terminal-download]')) {
+      e.preventDefault();
+      IssueBotTerminal.download();
+      return;
+    }
+    if (e.target.closest('[data-terminal-filter-clear]')) {
+      e.preventDefault();
+      IssueBotTerminal.clearFilter();
+      return;
+    }
+    var lineToggle = e.target.closest('.term-line-toggle');
+    if (lineToggle) {
+      e.preventDefault();
+      var toggleLine = lineToggle.closest('.terminal-line');
+      if (toggleLine) {
+        var expanded = toggleLine.classList.toggle('expanded');
+        toggleLine.classList.toggle('clamped', !expanded);
+        lineToggle.textContent = expanded ? 'show less' : 'show more';
+        lineToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      }
+      return;
+    }
     // Approvals reject inline panel. The toggle button carries
     // [data-reject-toggle]=<issueId>; the panel has id "reject-form-<issueId>"
     // and contains a [data-reject-textarea]. Cancel carries [data-reject-cancel].
@@ -557,6 +717,15 @@
       var target = document.querySelector(copyBtn.getAttribute('data-copy-target'));
       if (target) { copyText(target.innerText || target.textContent || '', copyBtn); }
       return;
+    }
+  });
+
+  // Live terminal filter box (#84): substring-hides non-matching lines as
+  // the operator types, both for lines already rendered and (via _appendLine
+  // consulting the same input) for lines that arrive afterward.
+  document.addEventListener('input', function (e) {
+    if (e.target && e.target.matches && e.target.matches('[data-terminal-filter]')) {
+      IssueBotTerminal.applyFilter(e.target.value);
     }
   });
 
