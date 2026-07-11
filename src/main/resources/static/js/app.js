@@ -955,6 +955,12 @@
       window.__issueBotES = null;
       if (window.IssueBotTerminal) { window.IssueBotTerminal.es = null; }
     }
+    // htmx suppresses swaps on 4xx by default; the server renders a friendly
+    // not-found page for 404s, so let it through instead of doing nothing.
+    if (evt.detail.xhr && evt.detail.xhr.status === 404) {
+      evt.detail.shouldSwap = true;
+      evt.detail.isError = false;
+    }
   });
 
   // --- Init ---------------------------------------------------------------
