@@ -803,7 +803,8 @@ public class IssueWorkflowService {
                                     ? "\n\n**Suggestion:** " + f.suggestion() : "")))
                     .toList();
 
-            String summary = formatReviewSummary(reviewResult);
+            String summary = formatReviewSummary(reviewResult,
+                    repo.getReviewPassThreshold().doubleValue());
             String event = reviewResult.passed() ? "APPROVE" : "REQUEST_CHANGES";
 
             gitHubApi.createPullRequestReview(
@@ -821,7 +822,7 @@ public class IssueWorkflowService {
     /**
      * Format the review result into a markdown summary for the PR review body.
      */
-    private String formatReviewSummary(CodeReviewResult r) {
+    private String formatReviewSummary(CodeReviewResult r, double threshold) {
         String model = r.modelUsed() != null ? r.modelUsed() : "review model";
         String verdict = r.passed() ? "**PASSED**" : "**CHANGES REQUESTED**";
 
@@ -831,14 +832,14 @@ public class IssueWorkflowService {
         sb.append(r.summary()).append("\n\n");
 
         sb.append("| Dimension | Score |\n|---|---|\n");
-        appendScoreRow(sb, "Spec Compliance", r.specComplianceScore());
-        appendScoreRow(sb, "Correctness", r.correctnessScore());
-        appendScoreRow(sb, "Code Quality", r.codeQualityScore());
-        appendScoreRow(sb, "Test Coverage", r.testCoverageScore());
-        appendScoreRow(sb, "Architecture Fit", r.architectureFitScore());
-        appendScoreRow(sb, "Regressions", r.regressionsScore());
+        appendScoreRow(sb, "Spec Compliance", r.specComplianceScore(), threshold);
+        appendScoreRow(sb, "Correctness", r.correctnessScore(), threshold);
+        appendScoreRow(sb, "Code Quality", r.codeQualityScore(), threshold);
+        appendScoreRow(sb, "Test Coverage", r.testCoverageScore(), threshold);
+        appendScoreRow(sb, "Architecture Fit", r.architectureFitScore(), threshold);
+        appendScoreRow(sb, "Regressions", r.regressionsScore(), threshold);
         if (r.securityScore() < 1.0) {
-            appendScoreRow(sb, "Security", r.securityScore());
+            appendScoreRow(sb, "Security", r.securityScore(), threshold);
         }
 
         if (r.advice() != null && !r.advice().isBlank()) {
@@ -849,15 +850,17 @@ public class IssueWorkflowService {
         return sb.toString();
     }
 
-    private void appendScoreRow(StringBuilder sb, String dimension, double score) {
-        sb.append("| ").append(dimension).append(" | ").append(formatScore(score)).append(" |\n");
+    private void appendScoreRow(StringBuilder sb, String dimension, double score, double threshold) {
+        sb.append("| ").append(dimension).append(" | ").append(formatScore(score, threshold)).append(" |\n");
     }
 
-    private String formatScore(double score) {
+    private String formatScore(double score, double threshold) {
+        // Badge cutoffs track the repo's configured pass threshold:
+        // red = fails the gate, yellow = passes, green = passes with 0.2 margin
         String indicator;
-        if (score >= 0.9) {
+        if (score >= threshold + 0.2) {
             indicator = "🟢";
-        } else if (score >= 0.7) {
+        } else if (score >= threshold) {
             indicator = "🟡";
         } else {
             indicator = "🔴";
@@ -931,16 +934,17 @@ public class IssueWorkflowService {
             sb.append("**Verdict: ").append(verdict).append("**\n\n");
             sb.append(review.summary()).append("\n\n");
 
+            double threshold = repo.getReviewPassThreshold().doubleValue();
             sb.append("#### Scores\n");
             sb.append("| Dimension | Score |\n|---|---|\n");
-            appendScoreRow(sb, "Spec Compliance", review.specComplianceScore());
-            appendScoreRow(sb, "Correctness", review.correctnessScore());
-            appendScoreRow(sb, "Code Quality", review.codeQualityScore());
-            appendScoreRow(sb, "Test Coverage", review.testCoverageScore());
-            appendScoreRow(sb, "Architecture Fit", review.architectureFitScore());
-            appendScoreRow(sb, "Regressions", review.regressionsScore());
+            appendScoreRow(sb, "Spec Compliance", review.specComplianceScore(), threshold);
+            appendScoreRow(sb, "Correctness", review.correctnessScore(), threshold);
+            appendScoreRow(sb, "Code Quality", review.codeQualityScore(), threshold);
+            appendScoreRow(sb, "Test Coverage", review.testCoverageScore(), threshold);
+            appendScoreRow(sb, "Architecture Fit", review.architectureFitScore(), threshold);
+            appendScoreRow(sb, "Regressions", review.regressionsScore(), threshold);
             if (review.securityScore() < 1.0) {
-                appendScoreRow(sb, "Security", review.securityScore());
+                appendScoreRow(sb, "Security", review.securityScore(), threshold);
             }
 
             if (!review.findings().isEmpty()) {

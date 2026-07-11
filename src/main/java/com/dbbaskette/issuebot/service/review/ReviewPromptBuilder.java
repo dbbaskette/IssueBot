@@ -25,7 +25,8 @@ public class ReviewPromptBuilder {
     public String buildReviewPrompt(String issueTitle, String issueBody,
                                       List<String> changedFiles, String diff,
                                       boolean securityReview, double threshold) {
-        String thresholdText = String.format("%.2f", threshold);
+        // Locale.ROOT: the prompt must always render "0.70", never "0,70"
+        String thresholdText = String.format(java.util.Locale.ROOT, "%.2f", threshold);
         StringBuilder prompt = new StringBuilder();
 
         prompt.append("""
