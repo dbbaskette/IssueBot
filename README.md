@@ -232,9 +232,31 @@ The web dashboard at `http://localhost:8090` provides:
 | Endpoint | Description |
 |----------|-------------|
 | `http://localhost:8090` | Web dashboard |
+| `POST /webhooks/github` | GitHub webhook receiver (instant issue pickup — see below) |
 | `GET /actuator/health` | Health check |
 | `GET /actuator/metrics` | Application metrics |
 | `GET /h2-console` | H2 database console |
+
+### GitHub Webhooks (instant pickup)
+
+Polling checks for `agent-ready` issues every `poll-interval-seconds` (default 60s). Webhooks make pickup near-instant — a `labeled` event for `agent-ready` on a watched repo is evaluated immediately, and a `closed` event opportunistically re-checks blocked issues and parent trackers for that repo. Polling keeps running unchanged as the fallback/reconciliation loop, so nothing breaks if a delivery is missed; once webhooks are working reliably you can raise `poll-interval-seconds` to reduce API calls.
+
+1. Set the `ISSUEBOT_WEBHOOK_SECRET` environment variable to a random string (e.g. `openssl rand -hex 32`) and restart IssueBot. The endpoint returns `503` while this is unset — webhooks are fully opt-in.
+2. On each watched GitHub repo: **Settings → Webhooks → Add webhook**.
+   - Payload URL: `http://<your-host>:8090/webhooks/github`
+   - Content type: `application/json`
+   - Secret: the same value as `ISSUEBOT_WEBHOOK_SECRET`
+   - Events: select **Issues** only
+3. The [Setup page](http://localhost:8090/setup) shows whether the secret is configured and a per-repo "last webhook event" timestamp, so you can confirm deliveries are actually arriving.
+
+**Local-first deployments** (no public URL) need a tunnel so GitHub can reach `localhost`. [smee.io](https://smee.io) is the simplest option:
+
+```bash
+npm install -g smee-client
+smee -u https://smee.io/YOUR_CHANNEL -t http://localhost:8090/webhooks/github
+```
+
+Use the smee channel URL (`https://smee.io/YOUR_CHANNEL`) as the GitHub webhook's payload URL instead of `localhost`; the `smee` client forwards deliveries to your local instance. Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:8090`) or Tailscale Funnel work the same way if you'd rather not depend on smee.io.
 
 ## Environment Variables
 
@@ -243,6 +265,7 @@ The web dashboard at `http://localhost:8090` provides:
 | `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
 | `ISSUEBOT_USERNAME` | No | Dashboard login username (auth disabled if unset) |
 | `ISSUEBOT_PASSWORD` | No | Dashboard login password (auth disabled if unset) |
+| `ISSUEBOT_WEBHOOK_SECRET` | No | HMAC secret for `POST /webhooks/github` (webhook receiver disabled/503 if unset) |
 
 ## Architecture
 

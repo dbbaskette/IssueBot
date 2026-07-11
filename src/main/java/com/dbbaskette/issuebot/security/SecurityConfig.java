@@ -29,6 +29,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/css/**", "/js/**", "/images/**").permitAll()
                     .requestMatchers("/actuator/health").permitAll()
+                    // Webhook auth is the HMAC signature, not the dashboard login —
+                    // GitHub can't present a browser session or basic auth credentials.
+                    .requestMatchers("/webhooks/**").permitAll()
                     .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
@@ -43,6 +46,9 @@ public class SecurityConfig {
                 );
         }
         http
+            // CSRF is disabled application-wide (no endpoint in this app sends a
+            // CSRF token), which already covers /webhooks/** — GitHub deliveries
+            // never carry one either.
             .csrf(csrf -> csrf.disable())
             .headers(headers -> headers
                 .frameOptions(frame -> frame.sameOrigin())

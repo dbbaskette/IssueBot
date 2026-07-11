@@ -80,8 +80,7 @@ public class IssuePollingService {
 
         for (WatchedRepo repo : repos) {
             try {
-                recheckBlockedIssues(repo);
-                closeCompletedParents(repo);
+                recheckRepo(repo);
                 drainQueuedIssues(repo);
                 resumePendingIssues(repo);
                 pollRepo(repo, maxConcurrent - activeCount);
@@ -90,6 +89,16 @@ public class IssuePollingService {
                 eventService.log("POLL_ERROR", "Failed to poll: " + e.getMessage(), repo);
             }
         }
+    }
+
+    /**
+     * Re-check BLOCKED issues for resolved dependencies and close any
+     * issuebot-parent tracking issues whose sub-issues are all closed.
+     * Shared by the polling loop and the webhook "closed" event handler.
+     */
+    public void recheckRepo(WatchedRepo repo) {
+        recheckBlockedIssues(repo);
+        closeCompletedParents(repo);
     }
 
     /** Close issuebot-parent tracking issues whose sub-issues are all closed. */
@@ -242,105 +251,157 @@ public class IssuePollingService {
         long slotsUsed = 0;
         for (JsonNode issueNode : issues) {
             if (slotsUsed >= availableSlots) break;
+            if (evaluateIssue(repo, issueNode)) {
+                slotsUsed++;
+            }
+        }
+    }
 
-            // Skip pull requests (GitHub API returns PRs in issues endpoint)
-            if (issueNode.has("pull_request")) continue;
+    /**
+     * Evaluates a single issue through the full qualification/gating pipeline:
+     * skip-PR check, qualification, dependency resolution, blocked/queued/auto-start
+     * gating, and IN_PROGRESS start. Shared by the polling loop ({@link #pollRepo})
+     * and the webhook path ({@link #evaluateSingleIssueFromWebhook}).
+     *
+     * @return true if the issue was actually started (workflow kicked off); false if
+     *         it was skipped, blocked, or queued for later.
+     */
+    public boolean evaluateIssue(WatchedRepo repo, JsonNode issueNode) {
+        // Skip pull requests (GitHub API returns PRs in issues endpoint)
+        if (issueNode.has("pull_request")) return false;
 
-            int issueNumber = issueNode.get("number").asInt();
-            String title = issueNode.path("title").asText("Untitled");
+        int issueNumber = issueNode.get("number").asInt();
+        String title = issueNode.path("title").asText("Untitled");
 
-            if (!qualifiesForProcessing(repo, issueNumber)) continue;
+        if (!qualifiesForProcessing(repo, issueNumber)) return false;
 
-            // Check dependencies before creating tracked issue
-            DependencyResult deps = dependencyResolver.resolve(repo, issueNumber);
+        // Check dependencies before creating tracked issue
+        DependencyResult deps = dependencyResolver.resolve(repo, issueNumber);
 
-            if (!deps.unresolvedBlockers().isEmpty()) {
-                // Auto-label all blocker issues with agent-ready
-                for (int blockerNum : deps.unresolvedBlockers()) {
-                    try {
-                        gitHubApiClient.addLabels(repo.getOwner(), repo.getName(),
-                                blockerNum, List.of(AGENT_READY_LABEL));
-                        log.info("Auto-labeled blocker #{} with '{}' in {}",
-                                blockerNum, AGENT_READY_LABEL, repo.fullName());
-                    } catch (Exception e) {
-                        log.warn("Failed to auto-label blocker #{}: {}", blockerNum, e.getMessage());
-                    }
-                }
-
-                // Save as BLOCKED with blocker list
-                TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
-                tracked.setStatus(IssueStatus.BLOCKED);
-                tracked.setBlockedByIssues(deps.unresolvedBlockers().stream()
-                        .map(String::valueOf)
-                        .collect(Collectors.joining(",")));
-                issueRepository.save(tracked);
-
-                // Post dependency chain comment
+        if (!deps.unresolvedBlockers().isEmpty()) {
+            // Auto-label all blocker issues with agent-ready
+            for (int blockerNum : deps.unresolvedBlockers()) {
                 try {
-                    gitHubApiClient.addComment(repo.getOwner(), repo.getName(),
-                            issueNumber, deps.chainDescription());
+                    gitHubApiClient.addLabels(repo.getOwner(), repo.getName(),
+                            blockerNum, List.of(AGENT_READY_LABEL));
+                    log.info("Auto-labeled blocker #{} with '{}' in {}",
+                            blockerNum, AGENT_READY_LABEL, repo.fullName());
                 } catch (Exception e) {
-                    log.warn("Failed to post dependency comment on #{}: {}", issueNumber, e.getMessage());
+                    log.warn("Failed to auto-label blocker #{}: {}", blockerNum, e.getMessage());
                 }
-
-                eventService.log("ISSUE_BLOCKED",
-                        "Issue #" + issueNumber + " blocked by " +
-                                deps.unresolvedBlockers().stream()
-                                        .map(n -> "#" + n)
-                                        .collect(Collectors.joining(", ")),
-                        repo, tracked);
-                notificationService.info("Issue Blocked",
-                        repo.fullName() + " #" + issueNumber + " waiting on dependencies");
-                continue;
             }
 
-            // No blockers — existing flow
+            // Save as BLOCKED with blocker list
             TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
-
-            // Per-repo serialization: queue if another issue is active or an IssueBot PR is open
-            boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                    List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
-            if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
-                tracked.setStatus(IssueStatus.QUEUED);
-                issueRepository.save(tracked);
-                eventService.log("ISSUE_QUEUED",
-                        "Issue #" + issueNumber + " queued — open IssueBot PR must merge first",
-                        repo, tracked);
-                notificationService.info("Issue Queued",
-                        repo.fullName() + " #" + issueNumber + ": " + title
-                                + " (waiting for open PR to merge)");
-                continue;
-            }
-
-            // Auto-start OFF: discover and queue but don't start
-            if (!repo.isAutoStart()) {
-                tracked.setStatus(IssueStatus.QUEUED);
-                issueRepository.save(tracked);
-                eventService.log("ISSUE_DISCOVERED",
-                        "Discovered issue #" + issueNumber + ": " + title + " (auto-start off, queued)",
-                        repo, tracked);
-                notificationService.info("Issue Discovered",
-                        repo.fullName() + " #" + issueNumber + ": " + title
-                                + " (queued — manual start required)");
-                continue;
-            }
-
-            // Set IN_PROGRESS before saving so the per-repo gate sees it
-            // immediately (prevents race where multiple issues for the same
-            // repo slip through in the same polling cycle).
-            tracked.setStatus(IssueStatus.IN_PROGRESS);
+            tracked.setStatus(IssueStatus.BLOCKED);
+            tracked.setBlockedByIssues(deps.unresolvedBlockers().stream()
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(",")));
             issueRepository.save(tracked);
 
-            eventService.log("ISSUE_DETECTED",
-                    "Detected agent-ready issue #" + issueNumber + ": " + title,
-                    repo, tracked);
-            notificationService.info("New Issue Detected",
-                    repo.fullName() + " #" + issueNumber + ": " + title);
+            // Post dependency chain comment
+            try {
+                gitHubApiClient.addComment(repo.getOwner(), repo.getName(),
+                        issueNumber, deps.chainDescription());
+            } catch (Exception e) {
+                log.warn("Failed to post dependency comment on #{}: {}", issueNumber, e.getMessage());
+            }
 
-            // Start workflow
-            workflowService.processIssueAsync(tracked);
-            slotsUsed++;
+            eventService.log("ISSUE_BLOCKED",
+                    "Issue #" + issueNumber + " blocked by " +
+                            deps.unresolvedBlockers().stream()
+                                    .map(n -> "#" + n)
+                                    .collect(Collectors.joining(", ")),
+                    repo, tracked);
+            notificationService.info("Issue Blocked",
+                    repo.fullName() + " #" + issueNumber + " waiting on dependencies");
+            return false;
         }
+
+        // No blockers — existing flow
+        TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
+
+        // Per-repo serialization: queue if another issue is active or an IssueBot PR is open
+        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+        if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
+            tracked.setStatus(IssueStatus.QUEUED);
+            issueRepository.save(tracked);
+            eventService.log("ISSUE_QUEUED",
+                    "Issue #" + issueNumber + " queued — open IssueBot PR must merge first",
+                    repo, tracked);
+            notificationService.info("Issue Queued",
+                    repo.fullName() + " #" + issueNumber + ": " + title
+                            + " (waiting for open PR to merge)");
+            return false;
+        }
+
+        // Auto-start OFF: discover and queue but don't start
+        if (!repo.isAutoStart()) {
+            tracked.setStatus(IssueStatus.QUEUED);
+            issueRepository.save(tracked);
+            eventService.log("ISSUE_DISCOVERED",
+                    "Discovered issue #" + issueNumber + ": " + title + " (auto-start off, queued)",
+                    repo, tracked);
+            notificationService.info("Issue Discovered",
+                    repo.fullName() + " #" + issueNumber + ": " + title
+                            + " (queued — manual start required)");
+            return false;
+        }
+
+        // Set IN_PROGRESS before saving so the per-repo gate sees it
+        // immediately (prevents race where multiple issues for the same
+        // repo slip through in the same polling cycle).
+        tracked.setStatus(IssueStatus.IN_PROGRESS);
+        issueRepository.save(tracked);
+
+        eventService.log("ISSUE_DETECTED",
+                "Detected agent-ready issue #" + issueNumber + ": " + title,
+                repo, tracked);
+        notificationService.info("New Issue Detected",
+                repo.fullName() + " #" + issueNumber + ": " + title);
+
+        // Start workflow
+        workflowService.processIssueAsync(tracked);
+        return true;
+    }
+
+    /**
+     * Webhook entry point: evaluate a single issue immediately (bypassing the poll
+     * interval) when a "labeled agent-ready" event arrives for a watched repo.
+     * <p>
+     * Respects the same global concurrency gate {@link #pollForIssues} checks before
+     * iterating repos — if the fleet is already at max concurrent issues, the issue
+     * is queued (not started) so it will be picked up later by {@link #drainQueuedIssues}
+     * or the next poll cycle.
+     */
+    public void evaluateSingleIssueFromWebhook(WatchedRepo repo, JsonNode issueNode) {
+        long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
+        int maxConcurrent = properties.getMaxConcurrentIssues();
+        if (activeCount >= maxConcurrent) {
+            queueAtCapacity(repo, issueNode, maxConcurrent);
+            return;
+        }
+        evaluateIssue(repo, issueNode);
+    }
+
+    private void queueAtCapacity(WatchedRepo repo, JsonNode issueNode, int maxConcurrent) {
+        if (issueNode.has("pull_request")) return;
+
+        int issueNumber = issueNode.get("number").asInt();
+        String title = issueNode.path("title").asText("Untitled");
+
+        if (!qualifiesForProcessing(repo, issueNumber)) return;
+
+        TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
+        tracked.setStatus(IssueStatus.QUEUED);
+        issueRepository.save(tracked);
+
+        eventService.log("ISSUE_QUEUED",
+                "Issue #" + issueNumber + " queued via webhook — at max concurrent issues (" + maxConcurrent + ")",
+                repo, tracked);
+        notificationService.info("Issue Queued",
+                repo.fullName() + " #" + issueNumber + ": " + title + " (at capacity, waiting for a slot)");
     }
 
     /**
