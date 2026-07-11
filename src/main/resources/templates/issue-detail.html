@@ -47,7 +47,7 @@
                     data-modal-open="start-modal">
                 <i class="ti ti-player-play" aria-hidden="true"></i> Start
             </button>
-            <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL'}"
+            <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
                     type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
                 <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
             </button>
@@ -122,6 +122,10 @@
                 </div>
             </div>
 
+            <div class="text-sm text-muted" th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
+                Waiting for plan approval
+            </div>
+
             <div class="text-sm text-muted">
                 On exhaustion: escalates to needs-human with 24 h cooldown<span
                         th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
@@ -158,6 +162,14 @@
                     <input type="number" id="retryBudgetOverride" name="budgetOverrideUsd"
                            step="0.50" min="0" placeholder="unlimited">
                     <p class="text-sm text-muted" style="margin:0.25rem 0 0">Spend is cumulative for this issue's lifetime and is not reset by retrying — raise the budget here if it was exhausted. Blank clears any previous override, same as the model overrides above.</p>
+                </div>
+                <div class="field-group">
+                    <label for="retryPlanFirstOverride">Plan approval (this issue)</label>
+                    <select id="retryPlanFirstOverride" name="planFirstOverride">
+                        <option value="" selected>Use repo setting</option>
+                        <option value="require">Require plan approval before implementation</option>
+                        <option value="skip">Skip plan approval</option>
+                    </select>
                 </div>
                 <div class="field-group" th:if="${issue.claudeSessionId != null}">
                     <label style="display:flex; align-items:center; gap:0.5rem; font-weight:normal">
@@ -200,6 +212,14 @@
                     <input type="number" id="startBudgetOverride" name="budgetOverrideUsd"
                            step="0.50" min="0" placeholder="unlimited">
                 </div>
+                <div class="field-group">
+                    <label for="startPlanFirstOverride">Plan approval (this issue)</label>
+                    <select id="startPlanFirstOverride" name="planFirstOverride">
+                        <option value="" selected>Use repo setting</option>
+                        <option value="require">Require plan approval before implementation</option>
+                        <option value="skip">Skip plan approval</option>
+                    </select>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Start Issue</button>
@@ -209,7 +229,7 @@
     </div>
 
     <!-- === Mark Complete confirm modal === -->
-    <div th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL'}"
+    <div th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
          id="complete-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="complete-modal-title">
             <h3 id="complete-modal-title" style="margin:0 0 0.5rem">Mark Complete</h3>
@@ -304,6 +324,58 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
                     <button type="submit" class="btn btn-danger btn-sm">Reject &amp; escalate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === PROPOSED PLAN CARD (plan-first mode, #64) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}" class="panel mb-3">
+        <div class="panel-header">
+            <h3>Proposed Plan</h3>
+            <div class="flex gap-1">
+                <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-plan-modal">
+                    <i class="ti ti-check" aria-hidden="true"></i> Approve plan
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-plan-modal">
+                    <i class="ti ti-x" aria-hidden="true"></i> Reject with feedback
+                </button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <!--/* Model output is untrusted — rendered as preformatted text via th:text,
+                   never injected as HTML. */-->
+            <pre class="code-output plan-text" th:text="${issue.implementationPlan}">plan text</pre>
+        </div>
+    </div>
+
+    <!-- === Approve Plan Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}"
+         id="approve-plan-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="approve-plan-modal-title">
+            <h3 id="approve-plan-modal-title" style="margin:0 0 0.5rem">Approve Plan</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Starts implementation using this plan. The issue is queued and resumes on the next poll cycle (~60s).</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Approve plan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Reject Plan Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}"
+         id="reject-plan-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="reject-plan-modal-title">
+            <h3 id="reject-plan-modal-title" style="margin:0 0 0.5rem">Reject Plan</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Feedback for the next plan (required). After 2 rejections the issue escalates to needs-human.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/plan/reject'}" method="post">
+                <textarea name="feedback" rows="4" class="modal-textarea" required data-modal-autofocus
+                          placeholder="e.g. The plan misses the caching layer — include how invalidation is handled"></textarea>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Reject plan</button>
                 </div>
             </form>
         </div>

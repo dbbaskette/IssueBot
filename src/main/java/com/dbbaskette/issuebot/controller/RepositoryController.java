@@ -83,6 +83,7 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "ROLLING_BACKLOG") String followUpMode,
                                @RequestParam(defaultValue = "PROPOSE") String decompositionMode,
                                @RequestParam(defaultValue = "false") boolean preScreenEnabled,
+                               @RequestParam(defaultValue = "false") boolean planFirst,
                                @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
@@ -133,6 +134,7 @@ public class RepositoryController {
             log.warn("Invalid decompositionMode '{}' for {} — keeping existing value", decompositionMode, repo.fullName());
         }
         repo.setPreScreenEnabled(preScreenEnabled);
+        repo.setPlanFirst(planFirst);
         repo.setIssueBudgetUsd(normalizeBudget(issueBudgetUsd));
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {

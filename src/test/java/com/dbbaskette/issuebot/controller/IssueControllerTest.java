@@ -13,6 +13,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,8 @@ class IssueControllerTest {
                 mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                 mock(IssueWorkflowService.class), mock(EventService.class),
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
-                mock(IssueDecompositionService.class), mock(WorkflowCancellationService.class),
+                mock(IssueDecompositionService.class), mock(PlanFirstService.class),
+                mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
@@ -58,6 +60,7 @@ class IssueControllerTest {
         final GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
         final IssueBotProperties properties = mock(IssueBotProperties.class);
         final IssueDecompositionService decompositionService = mock(IssueDecompositionService.class);
+        final PlanFirstService planFirstService = mock(PlanFirstService.class);
         final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
         final IterationRepository iterationRepository = mock(IterationRepository.class);
         final CostTrackingRepository costRepository = mock(CostTrackingRepository.class);
@@ -86,8 +89,8 @@ class IssueControllerTest {
                     iterationRepository, mock(EventRepository.class),
                     costRepository, mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), eventService,
-                    gitHubApiClient, properties, decompositionService, cancellationService,
-                    guidanceRepository, new ObjectMapper());
+                    gitHubApiClient, properties, decompositionService, planFirstService,
+                    cancellationService, guidanceRepository, new ObjectMapper());
         }
     }
 
@@ -95,7 +98,7 @@ class IssueControllerTest {
     void retryStoresModelOverrides() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, "claude-sonnet-5", "  ", null, false, f.redirectAttributes);
+        f.controller.retry(1L, null, "claude-sonnet-5", "  ", null, null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -108,7 +111,7 @@ class IssueControllerTest {
     void retryWithoutOverridesLeavesThemNull() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, null, false, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -120,7 +123,7 @@ class IssueControllerTest {
     void retryStoresBudgetOverride() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("2.50"), false, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("2.50"), null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -132,7 +135,7 @@ class IssueControllerTest {
     void retryWithNegativeBudgetOverrideStoresNull() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("-3.00"), false, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, new java.math.BigDecimal("-3.00"), null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -146,7 +149,7 @@ class IssueControllerTest {
 
         // A blank submission (binds to null) explicitly clears a previously set override —
         // manual retry's budget field is not "sticky" across attempts.
-        f.controller.retry(1L, null, null, null, null, false, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -164,7 +167,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.FAILED);
         f.issue.setClaudeSessionId("sess-old");
 
-        f.controller.retry(1L, null, null, null, null, false, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, null, false, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -181,7 +184,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.FAILED);
         f.issue.setClaudeSessionId("sess-old");
 
-        f.controller.retry(1L, null, null, null, null, true, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, null, true, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -196,7 +199,7 @@ class IssueControllerTest {
     void retryWithContinueSessionButNoStoredSessionIdStaysNull() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        f.controller.retry(1L, null, null, null, null, true, f.redirectAttributes);
+        f.controller.retry(1L, null, null, null, null, null, true, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -207,7 +210,7 @@ class IssueControllerTest {
     void startStoresModelOverrides() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
-        f.controller.start(1L, "claude-opus-4-8", "  ", null, f.redirectAttributes);
+        f.controller.start(1L, "claude-opus-4-8", "  ", null, null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -220,7 +223,7 @@ class IssueControllerTest {
     void startWithoutOverridesLeavesThemNull() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
-        f.controller.start(1L, null, null, null, f.redirectAttributes);
+        f.controller.start(1L, null, null, null, null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -232,7 +235,7 @@ class IssueControllerTest {
     void startStoresBudgetOverride() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
-        f.controller.start(1L, null, null, new java.math.BigDecimal("1.00"), f.redirectAttributes);
+        f.controller.start(1L, null, null, new java.math.BigDecimal("1.00"), null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -280,6 +283,181 @@ class IssueControllerTest {
 
         verify(f.decompositionService).approveProposal(f.issue);
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    // === Plan-first mode (#64) ===
+
+    @Test
+    void approvePlanEndpointGuardsStatus() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        f.controller.approvePlan(1L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        verify(f.planFirstService, never()).approvePlan(any());
+    }
+
+    @Test
+    void approvePlanEndpointCallsService() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+
+        String view = f.controller.approvePlan(1L, f.redirectAttributes);
+
+        verify(f.planFirstService).approvePlan(f.issue);
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("next poll cycle"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void approvePlanEndpointFlashesServiceFailure() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        doThrow(new IllegalStateException("Issue is not awaiting plan approval: PENDING"))
+                .when(f.planFirstService).approvePlan(any());
+
+        f.controller.approvePlan(1L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("not awaiting plan approval"));
+    }
+
+    @Test
+    void rejectPlanEndpointGuardsStatus() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        f.controller.rejectPlan(1L, "some feedback", f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        verify(f.planFirstService, never()).rejectPlan(any(), anyString());
+    }
+
+    @Test
+    void rejectPlanEndpointRequiresFeedback() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+
+        f.controller.rejectPlan(1L, "   ", f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Feedback is required"));
+        verify(f.planFirstService, never()).rejectPlan(any(), anyString());
+    }
+
+    @Test
+    void rejectPlanEndpointDelegatesWithTrimmedFeedback() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(f.planFirstService.rejectPlan(any(), anyString()))
+                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
+
+        String view = f.controller.rejectPlan(1L, "  Consider the caching layer  ", f.redirectAttributes);
+
+        verify(f.planFirstService).rejectPlan(f.issue, "Consider the caching layer");
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("regenerates"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    /**
+     * The escalation flash must branch on the service's RETURNED outcome, never on the
+     * controller's own entity — the service mutates a fresh re-read copy (open-in-view
+     * off, no shared transaction), so the controller's instance stays stale. This test
+     * deliberately leaves the controller's entity untouched (planRejections = 0) and
+     * only stubs the return value: the escalated flash must still fire.
+     */
+    @Test
+    void rejectPlanEndpointFlashesEscalationOnServiceOutcome_notStaleEntity() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(f.planFirstService.rejectPlan(any(), anyString()))
+                .thenReturn(PlanFirstService.RejectOutcome.ESCALATED);
+
+        f.controller.rejectPlan(1L, "Still wrong", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPlanRejections()).isZero(); // stale copy untouched
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("escalated to needs-human"));
+    }
+
+    @Test
+    void parsePlanFirstOverride_mapsSelectValuesToTriState() {
+        org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride(null)).isNull();
+        org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride("")).isNull();
+        org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride("inherit")).isNull();
+        org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride("require")).isTrue();
+        org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride("skip")).isFalse();
+        org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride("bogus")).isNull();
+    }
+
+    @Test
+    void retryStoresPlanFirstOverride() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        f.controller.retry(1L, null, null, null, null, "require", false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getPlanFirstOverride()).isTrue();
+    }
+
+    @Test
+    void retryWithInheritClearsPlanFirstOverride() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanFirstOverride(true);
+
+        f.controller.retry(1L, null, null, null, null, "inherit", false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getPlanFirstOverride()).isNull();
+    }
+
+    /**
+     * Explicitly selecting "Require" on a retry must force a fresh, full plan cycle —
+     * planApproved is never reset anywhere else, so a previously approved plan would
+     * otherwise silently skip the gate on this and every future run.
+     */
+    @Test
+    void retryWithRequireResetsPlanGateForFreshCycle() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanApproved(true);
+        f.issue.setImplementationPlan("old approved plan");
+        f.issue.setPlanFeedback("old feedback");
+        f.issue.setPlanRejections(2);
+
+        f.controller.retry(1L, null, null, null, null, "require", false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        TrackedIssue saved = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanFirstOverride()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(saved.isPlanApproved()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(saved.getImplementationPlan()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanFeedback()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanRejections()).isZero();
+    }
+
+    /** Inherit (and Skip) must leave a previously approved plan untouched — no re-gate. */
+    @Test
+    void retryWithInheritLeavesApprovedPlanStateUntouched() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanApproved(true);
+        f.issue.setImplementationPlan("old approved plan");
+        f.issue.setPlanFeedback("old feedback");
+        f.issue.setPlanRejections(1);
+
+        f.controller.retry(1L, null, null, null, null, "inherit", false, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        TrackedIssue saved = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(saved.isPlanApproved()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(saved.getImplementationPlan()).isEqualTo("old approved plan");
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanFeedback()).isEqualTo("old feedback");
+        org.assertj.core.api.Assertions.assertThat(saved.getPlanRejections()).isEqualTo(1);
+    }
+
+    @Test
+    void startStoresPlanFirstOverrideSkip() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+
+        f.controller.start(1L, null, null, null, "skip", f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getPlanFirstOverride()).isFalse();
     }
 
     @Test

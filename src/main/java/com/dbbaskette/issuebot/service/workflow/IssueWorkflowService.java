@@ -64,6 +64,7 @@ public class IssueWorkflowService {
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
     private final IssueDecompositionService decompositionService;
+    private final PlanFirstService planFirstService;
     private final FollowUpService followUpService;
     private final ModelResolver modelResolver;
     private final WorkflowCancellationService cancellationService;
@@ -84,6 +85,7 @@ public class IssueWorkflowService {
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
                                  IssueDecompositionService decompositionService,
+                                 PlanFirstService planFirstService,
                                  FollowUpService followUpService,
                                  ModelResolver modelResolver,
                                  WorkflowCancellationService cancellationService,
@@ -103,6 +105,7 @@ public class IssueWorkflowService {
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
         this.decompositionService = decompositionService;
+        this.planFirstService = planFirstService;
         this.followUpService = followUpService;
         this.modelResolver = modelResolver;
         this.cancellationService = cancellationService;
@@ -208,6 +211,17 @@ public class IssueWorkflowService {
                 log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
                         repo.fullName(), issueNumber, e.getMessage());
             }
+        }
+
+        // === Plan Gate: propose an implementation plan before writing code (#64) ===
+        // A planner failure must never block the issue — proposePlan returns false and
+        // this falls straight through into implementation instead of stalling forever.
+        if (trackedIssue.effectivePlanFirst() && !trackedIssue.isPlanApproved()) {
+            if (planFirstService.proposePlan(trackedIssue, issueDetails, repoPath)) {
+                return;
+            }
+            log.info("Plan proposal failed for {} #{}, proceeding with implementation",
+                    repo.fullName(), issueNumber);
         }
 
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
@@ -633,9 +647,10 @@ public class IssueWorkflowService {
         Long issueId = trackedIssue.getId();
         String resumeId = trackedIssue.getClaudeSessionId();
         boolean resumed = resumeId != null && !resumeId.isBlank();
+        String approvedPlan = trackedIssue.isPlanApproved() ? trackedIssue.getImplementationPlan() : null;
 
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
-                previousAssessment, previousCiLogs, resumed, lastRunFailureReason);
+                previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan);
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -670,7 +685,7 @@ public class IssueWorkflowService {
             issueRepository.save(trackedIssue);
 
             String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
-                    previousAssessment, previousCiLogs, false, null);
+                    previousAssessment, previousCiLogs, false, null, approvedPlan);
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
@@ -1268,13 +1283,22 @@ public class IssueWorkflowService {
 
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs) {
-        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs, false, null);
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
+                false, null, null);
     }
 
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
                                       boolean resumed) {
-        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs, resumed, null);
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
+                resumed, null, null);
+    }
+
+    String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
+                                      String previousAssessment, String previousCiLogs,
+                                      boolean resumed, String lastFailureReason) {
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
+                resumed, lastFailureReason, null);
     }
 
     /**
@@ -1286,10 +1310,16 @@ public class IssueWorkflowService {
      *                prompts that carry no other retry context (a continue-session manual retry
      *                with no operator instructions) — a resumed session must never open with a
      *                dangling "New information:" header followed by nothing.
+     * @param approvedPlan the operator-approved implementation plan (#64), or null when the
+     *                issue isn't plan-gated. Deliberately included in cold AND resumed prompts
+     *                alike: the plan was produced by a separate utility-model session, so a
+     *                resumed implementation session has never seen it, and repeating it is
+     *                harmless — simpler than tracking which sessions already got it.
      */
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
-                                      boolean resumed, String lastFailureReason) {
+                                      boolean resumed, String lastFailureReason,
+                                      String approvedPlan) {
         StringBuilder prompt = new StringBuilder();
         if (resumed) {
             prompt.append("Continuing the same task. New information since your last attempt:\n\n");
@@ -1316,6 +1346,13 @@ public class IssueWorkflowService {
                 }
                 prompt.append("\n\n");
             }
+        }
+
+        // Operator-approved implementation plan (#64) — injected after the Issue section
+        if (approvedPlan != null && !approvedPlan.isBlank()) {
+            prompt.append("## Approved Plan\n");
+            prompt.append("The operator approved this implementation plan — follow it:\n\n");
+            prompt.append(approvedPlan).append("\n\n");
         }
 
         // Context from previous iteration if this is a retry

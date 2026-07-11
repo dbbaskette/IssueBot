@@ -14,6 +14,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -47,6 +48,7 @@ public class IssueController {
     private final GitHubApiClient gitHubApiClient;
     private final IssueBotProperties properties;
     private final IssueDecompositionService decompositionService;
+    private final PlanFirstService planFirstService;
     private final WorkflowCancellationService cancellationService;
     private final IssueGuidanceRepository guidanceRepository;
     private final ObjectMapper objectMapper;
@@ -62,6 +64,7 @@ public class IssueController {
                             GitHubApiClient gitHubApiClient,
                             IssueBotProperties properties,
                             IssueDecompositionService decompositionService,
+                            PlanFirstService planFirstService,
                             WorkflowCancellationService cancellationService,
                             IssueGuidanceRepository guidanceRepository,
                             ObjectMapper objectMapper) {
@@ -76,6 +79,7 @@ public class IssueController {
         this.gitHubApiClient = gitHubApiClient;
         this.properties = properties;
         this.decompositionService = decompositionService;
+        this.planFirstService = planFirstService;
         this.cancellationService = cancellationService;
         this.guidanceRepository = guidanceRepository;
         this.objectMapper = objectMapper;
@@ -154,6 +158,7 @@ public class IssueController {
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
                         @RequestParam(required = false) BigDecimal budgetOverrideUsd,
+                        @RequestParam(required = false) String planFirstOverride,
                         @RequestParam(required = false, defaultValue = "false") boolean continueSession,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
@@ -193,6 +198,18 @@ public class IssueController {
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
         issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+        Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
+        issue.setPlanFirstOverride(planOverride);
+        // Explicitly selecting "Require" on a retry demands a fresh, full plan cycle —
+        // planApproved is never reset elsewhere, so without this a previously approved
+        // plan would silently skip the gate. Inherit/Skip leave the plan state as-is
+        // (a plain retry of an already-approved issue keeps its approved plan).
+        if (Boolean.TRUE.equals(planOverride)) {
+            issue.setPlanApproved(false);
+            issue.setImplementationPlan(null);
+            issue.setPlanFeedback(null);
+            issue.setPlanRejections(0);
+        }
         // Manual retry defaults to a fresh Claude session; the operator must explicitly
         // opt in via the "Continue previous session" checkbox to keep it (issue #67).
         if (!continueSession) {
@@ -230,6 +247,7 @@ public class IssueController {
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
                         @RequestParam(required = false) BigDecimal budgetOverrideUsd,
+                        @RequestParam(required = false) String planFirstOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -251,6 +269,7 @@ public class IssueController {
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
         issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+        issue.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
         issueRepository.save(issue);
 
         eventService.log("MANUAL_START",
@@ -406,8 +425,93 @@ public class IssueController {
         return "redirect:/issues/" + id;
     }
 
+    @PostMapping("/{id}/plan/approve")
+    public String approvePlan(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null) {
+            redirectAttributes.addFlashAttribute("error", "Issue not found");
+            return "redirect:/issues";
+        }
+
+        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot approve plan for issue in " + issue.getStatus() + " status");
+            return "redirect:/issues/" + id;
+        }
+
+        try {
+            planFirstService.approvePlan(issue);
+        } catch (Exception e) {
+            log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
+            redirectAttributes.addFlashAttribute("error", e.getMessage());
+            return "redirect:/issues/" + id;
+        }
+
+        redirectAttributes.addFlashAttribute("success",
+                "Plan approved — queued, implementation resumes on the next poll cycle (~60s)");
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/plan/reject")
+    public String rejectPlan(@PathVariable Long id,
+                             @RequestParam(required = false) String feedback,
+                             RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null) {
+            redirectAttributes.addFlashAttribute("error", "Issue not found");
+            return "redirect:/issues";
+        }
+
+        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot reject plan for issue in " + issue.getStatus() + " status");
+            return "redirect:/issues/" + id;
+        }
+
+        if (feedback == null || feedback.isBlank()) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Feedback is required when rejecting a plan — it drives the next plan");
+            return "redirect:/issues/" + id;
+        }
+
+        // Branch on the service's returned outcome — the service mutates a fresh
+        // re-read copy of the issue, so this controller's entity is stale after the call.
+        PlanFirstService.RejectOutcome outcome;
+        try {
+            outcome = planFirstService.rejectPlan(issue, feedback.trim());
+        } catch (Exception e) {
+            log.warn("Failed to reject plan for issue {}: {}", id, e.getMessage());
+            redirectAttributes.addFlashAttribute("error", e.getMessage());
+            return "redirect:/issues/" + id;
+        }
+
+        if (outcome == PlanFirstService.RejectOutcome.ESCALATED) {
+            redirectAttributes.addFlashAttribute("success",
+                    "Plan rejected twice — issue escalated to needs-human");
+        } else {
+            redirectAttributes.addFlashAttribute("success",
+                    "Plan rejected — a new plan is queued and regenerates on the next poll cycle (~60s)");
+        }
+        return "redirect:/issues/" + id;
+    }
+
     private static String normalize(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    /**
+     * Tri-state plan-approval select on the Start/Retry modals (#64) — a checkbox can't
+     * express "inherit", so the form posts a string: blank/"inherit" → null (use the
+     * repo's plan-first setting), "require" → true, "skip" → false. Unknown values fall
+     * back to null rather than erroring, matching the tolerant enum bindings elsewhere.
+     */
+    static Boolean parsePlanFirstOverride(String value) {
+        if (value == null || value.isBlank()) return null;
+        return switch (value.trim().toLowerCase()) {
+            case "require" -> Boolean.TRUE;
+            case "skip" -> Boolean.FALSE;
+            default -> null; // "inherit" and anything unexpected
+        };
     }
 
     /**

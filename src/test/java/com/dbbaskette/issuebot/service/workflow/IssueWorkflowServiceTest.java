@@ -42,6 +42,7 @@ class IssueWorkflowServiceTest {
     private IterationRepository iterationRepository;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private PlanFirstService planFirstService;
     private FollowUpService followUpService;
     private CodeReviewService codeReviewService;
     private CostTrackingRepository costRepository;
@@ -57,6 +58,7 @@ class IssueWorkflowServiceTest {
         iterationRepository = mock(IterationRepository.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        planFirstService = mock(PlanFirstService.class);
         followUpService = mock(FollowUpService.class);
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
@@ -78,6 +80,7 @@ class IssueWorkflowServiceTest {
                 mock(NotificationService.class),
                 iterationManager,
                 decompositionService,
+                planFirstService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
@@ -158,6 +161,50 @@ class IssueWorkflowServiceTest {
         assertTrue(prompt.contains("### Verification Failure Logs"));
         assertTrue(prompt.contains("Build error on line 42"));
         assertTrue(prompt.contains("diff content"));
+    }
+
+    // === Plan-first mode (#64) ===
+
+    @Test
+    void buildImplementationPrompt_withApprovedPlan_includesPlanSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                false, null, "1. Add a Pageable param\n2. Update the repository query");
+
+        assertTrue(prompt.contains("## Approved Plan"));
+        assertTrue(prompt.contains("Pageable param"));
+        // Issue section still present and precedes the plan
+        assertTrue(prompt.indexOf("## Issue") < prompt.indexOf("## Approved Plan"));
+    }
+
+    @Test
+    void buildImplementationPrompt_resumedWithApprovedPlan_includesPlanSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
+                true, null, "1. Add a Pageable param");
+
+        assertTrue(prompt.contains("## Approved Plan"));
+        assertTrue(prompt.contains("Pageable param"));
+    }
+
+    @Test
+    void buildImplementationPrompt_withoutPlan_hasNoPlanSection() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+
+        String prompt = workflowService.buildImplementationPrompt(issue, null, null, null);
+
+        assertFalse(prompt.contains("## Approved Plan"));
     }
 
     // === Session continuity (#67) ===

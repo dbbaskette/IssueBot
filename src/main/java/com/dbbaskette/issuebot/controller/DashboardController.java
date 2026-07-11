@@ -64,6 +64,8 @@ public class DashboardController {
         model.addAttribute("decomposed", issueRepository.countByStatus(IssueStatus.DECOMPOSED));
         model.addAttribute("awaitingDecomposition",
                 issueRepository.countByStatus(IssueStatus.AWAITING_DECOMPOSITION));
+        model.addAttribute("awaitingPlanApproval",
+                issueRepository.countByStatus(IssueStatus.AWAITING_PLAN_APPROVAL));
         model.addAttribute("repoCount", repoRepository.count());
 
         BigDecimal totalCost = costRepository.totalCost();

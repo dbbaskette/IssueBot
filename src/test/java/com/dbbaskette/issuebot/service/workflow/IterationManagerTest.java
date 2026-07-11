@@ -235,6 +235,23 @@ class IterationManagerTest {
     }
 
     @Test
+    void handlePlanRejectedTwice_escalatesToNeedsHuman() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setBranchName("issuebot/issue-1-test");
+
+        iterationManager.handlePlanRejectedTwice(issue);
+
+        assertEquals(IssueStatus.COOLDOWN, issue.getStatus());
+        assertTrue(issue.getLastFailureReason().contains("rejected the proposed plan twice"));
+        verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(1), eq(List.of("needs-human")));
+        verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(1),
+                argThat(comment -> comment.contains("Plan Rejected Twice")));
+        verify(eventService).log(eq("PLAN_REJECTED_TWICE"), anyString(), any(), eq(issue));
+        verify(notificationService).warn(eq("Plan Rejected Twice"), anyString());
+    }
+
+    @Test
     void enterCooldown_setsCooldownStatus() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         TrackedIssue issue = new TrackedIssue(repo, 1, "Test");

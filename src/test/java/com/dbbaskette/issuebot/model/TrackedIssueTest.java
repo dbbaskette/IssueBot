@@ -40,4 +40,45 @@ class TrackedIssueTest {
 
         assertEquals(0, new BigDecimal("1.00").compareTo(issue.effectiveBudgetUsd()));
     }
+
+    /**
+     * Plan-first precedence (#64) mirrors budget precedence: the per-issue override,
+     * when set, wins over the repo default; when unset (null), the repo default applies.
+     */
+    @Test
+    void effectivePlanFirst_usesRepoWhenNoOverride() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setPlanFirst(true);
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+
+        assertEquals(true, issue.effectivePlanFirst());
+    }
+
+    @Test
+    void effectivePlanFirst_falseByDefault() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+
+        assertEquals(false, issue.effectivePlanFirst());
+    }
+
+    @Test
+    void effectivePlanFirst_issueOverrideWinsOverRepo_trueOverridesFalse() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setPlanFirst(false);
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setPlanFirstOverride(true);
+
+        assertEquals(true, issue.effectivePlanFirst());
+    }
+
+    @Test
+    void effectivePlanFirst_issueOverrideWinsOverRepo_falseOverridesTrue() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setPlanFirst(true);
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setPlanFirstOverride(false);
+
+        assertEquals(false, issue.effectivePlanFirst());
+    }
 }
