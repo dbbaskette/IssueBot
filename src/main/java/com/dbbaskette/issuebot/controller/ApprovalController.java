@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -16,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.HashMap;
 import java.util.List;
@@ -77,8 +79,30 @@ public class ApprovalController {
 
     @PostMapping("/{id}/approve")
     public String approve(Model model, @PathVariable Long id,
-                          @RequestHeader(value = "HX-Request", required = false) String hx) {
+                          @RequestParam(defaultValue = "false") boolean merge,
+                          @RequestHeader(value = "HX-Request", required = false) String hx,
+                          RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+
+        if (merge) {
+            if (issue.getPrNumber() == null || issue.getPrNumber() <= 0) {
+                redirectAttributes.addFlashAttribute("error",
+                        "No PR recorded for this issue — merge manually on GitHub");
+                return "redirect:/approvals";
+            }
+            WatchedRepo repo = issue.getRepo();
+            try {
+                String prTitle = "IssueBot: " + issue.getIssueTitle()
+                        + " (#" + issue.getIssueNumber() + ") (#" + issue.getPrNumber() + ")";
+                gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
+                        issue.getPrNumber(), prTitle, "squash");
+                eventService.log("PR_MERGED_ON_APPROVAL", "Merged PR #" + issue.getPrNumber(), repo, issue);
+            } catch (Exception e) {
+                redirectAttributes.addFlashAttribute("error",
+                        "Merge failed: " + e.getMessage() + " — PR is still open on GitHub; issue NOT completed");
+                return "redirect:/approvals";
+            }
+        }
 
         // Mark as completed
         issue.setStatus(IssueStatus.COMPLETED);
@@ -117,6 +141,7 @@ public class ApprovalController {
         Map<Long, ReviewScore> reviewScores = new HashMap<>();
         Map<Long, Integer> changedFileCounts = new HashMap<>();
         Map<Long, String> prUrls = new HashMap<>();
+        Map<Long, String> ciStatuses = new HashMap<>();
 
         for (TrackedIssue issue : approvals) {
             List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
@@ -155,6 +180,8 @@ public class ApprovalController {
                                     + "/pulls?q=" + "is%3Apr+head%3A" + issue.getBranchName());
                 }
             }
+
+            ciStatuses.put(issue.getId(), fetchCiStatus(issue));
         }
 
         model.addAttribute("activePage", "approvals");
@@ -164,9 +191,57 @@ public class ApprovalController {
         model.addAttribute("reviewScores", reviewScores);
         model.addAttribute("changedFileCounts", changedFileCounts);
         model.addAttribute("prUrls", prUrls);
+        model.addAttribute("ciStatuses", ciStatuses);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", (long) approvals.size());
         if (message != null) model.addAttribute("message", message);
+    }
+
+    /**
+     * Fetch a cheap, best-effort CI status for the issue's branch to surface on the
+     * approval card. Returns "passed", "failed", "pending", or "unknown" (no repo/branch,
+     * no check-run data, or a GitHub API error).
+     */
+    private String fetchCiStatus(TrackedIssue issue) {
+        if (issue.getRepo() == null || issue.getBranchName() == null || issue.getBranchName().isBlank()) {
+            return "unknown";
+        }
+        try {
+            JsonNode checks = gitHubApi.getCheckRuns(
+                    issue.getRepo().getOwner(), issue.getRepo().getName(), issue.getBranchName());
+            if (checks == null || !checks.has("check_runs")) {
+                return "unknown";
+            }
+            JsonNode runs = checks.get("check_runs");
+            if (!runs.isArray() || runs.isEmpty()) {
+                return "unknown";
+            }
+
+            boolean anyPending = false;
+            boolean allSuccessOrSkipped = true;
+            for (JsonNode run : runs) {
+                String conclusion = run.path("conclusion").asText(null);
+                if (conclusion == null || conclusion.isBlank()) {
+                    anyPending = true;
+                    allSuccessOrSkipped = false;
+                    continue;
+                }
+                if ("failure".equals(conclusion) || "cancelled".equals(conclusion) || "timed_out".equals(conclusion)) {
+                    return "failed";
+                }
+                if (!"success".equals(conclusion) && !"skipped".equals(conclusion)) {
+                    allSuccessOrSkipped = false;
+                }
+            }
+            if (anyPending) {
+                return "pending";
+            }
+            return allSuccessOrSkipped ? "passed" : "unknown";
+        } catch (Exception e) {
+            log.debug("Could not fetch CI status for {} branch {}: {}",
+                    issue.getRepo().fullName(), issue.getBranchName(), e.getMessage());
+            return "unknown";
+        }
     }
 
     /** Count distinct changed files in a unified diff via {@code diff --git} headers. */

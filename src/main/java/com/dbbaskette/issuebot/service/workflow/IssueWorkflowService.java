@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.claude.ModelCatalog;
+import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
@@ -42,8 +44,6 @@ import java.util.List;
 public class IssueWorkflowService {
 
     private static final Logger log = LoggerFactory.getLogger(IssueWorkflowService.class);
-    private static final String FOLLOW_UP_LABEL = "issuebot-followup";
-    private static final String FOLLOW_UP_TITLE_PREFIX = "Follow-Up:";
 
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
@@ -58,6 +58,9 @@ public class IssueWorkflowService {
     private final NotificationService notificationService;
     private final IterationManager iterationManager;
     private final IssueDecompositionService decompositionService;
+    private final FollowUpService followUpService;
+    private final ModelResolver modelResolver;
+    private final WorkflowCancellationService cancellationService;
     private final ObjectMapper objectMapper;
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -73,6 +76,9 @@ public class IssueWorkflowService {
                                  NotificationService notificationService,
                                  IterationManager iterationManager,
                                  IssueDecompositionService decompositionService,
+                                 FollowUpService followUpService,
+                                 ModelResolver modelResolver,
+                                 WorkflowCancellationService cancellationService,
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
@@ -87,6 +93,9 @@ public class IssueWorkflowService {
         this.notificationService = notificationService;
         this.iterationManager = iterationManager;
         this.decompositionService = decompositionService;
+        this.followUpService = followUpService;
+        this.modelResolver = modelResolver;
+        this.cancellationService = cancellationService;
         this.objectMapper = objectMapper;
     }
 
@@ -107,6 +116,7 @@ public class IssueWorkflowService {
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
+            trackedIssue.setLastFailureReason("Unhandled error: " + e.getMessage());
             issueRepository.save(trackedIssue);
             eventService.log("WORKFLOW_ERROR", "Unhandled error: " + e.getMessage(),
                     trackedIssue.getRepo(), trackedIssue);
@@ -124,10 +134,16 @@ public class IssueWorkflowService {
         log.info("Starting workflow for {} #{}: {}", repo.fullName(), issueNumber,
                 trackedIssue.getIssueTitle());
 
+        cancellationService.clear(trackedIssue.getId());
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         trackedIssue.setCurrentPhase("SETUP");
+        trackedIssue.setLastFailureReason(null);
+        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
+        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
         issueRepository.save(trackedIssue);
-        eventService.log("WORKFLOW_STARTED", "Starting issue workflow", repo, trackedIssue);
+        eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
+                + trackedIssue.getResolvedImplModel() + " / "
+                + trackedIssue.getResolvedReviewModel() + ")", repo, trackedIssue);
 
         // === Phase 1: Setup ===
         String branchName;
@@ -146,29 +162,32 @@ public class IssueWorkflowService {
             log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
+            trackedIssue.setLastFailureReason("Setup failed: " + e.getMessage());
             issueRepository.save(trackedIssue);
             eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
             return;
         }
 
         // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
-        try {
-            IssueDecompositionService.PreScreenResult screenResult =
-                    decompositionService.preScreen(issueDetails, repoPath);
-            if (screenResult.tooLarge()) {
-                log.info("Pre-screen flagged {} #{} as too large: {}",
-                        repo.fullName(), issueNumber, screenResult.reason());
-                eventService.log("PRE_SCREEN_TOO_LARGE",
-                        "Pre-screen: " + screenResult.reason(), repo, trackedIssue);
-                if (decompositionService.decompose(trackedIssue, issueDetails,
-                        repoPath, "Pre-screen: " + screenResult.reason())) {
-                    return;
+        if (repo.isPreScreenEnabled() && repo.getDecompositionMode() != DecompositionMode.OFF) {
+            try {
+                IssueDecompositionService.PreScreenResult screenResult =
+                        decompositionService.preScreen(issueDetails, repoPath);
+                if (screenResult.tooLarge()) {
+                    log.info("Pre-screen flagged {} #{} as too large: {}",
+                            repo.fullName(), issueNumber, screenResult.reason());
+                    eventService.log("PRE_SCREEN_TOO_LARGE",
+                            "Pre-screen: " + screenResult.reason(), repo, trackedIssue);
+                    if (decompositionService.decompose(trackedIssue, issueDetails,
+                            repoPath, "Pre-screen: " + screenResult.reason())) {
+                        return;
+                    }
+                    log.info("Decomposition failed after pre-screen, proceeding with implementation");
                 }
-                log.info("Decomposition failed after pre-screen, proceeding with implementation");
+            } catch (Exception e) {
+                log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
+                        repo.fullName(), issueNumber, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("Pre-screen check failed for {} #{}, proceeding: {}",
-                    repo.fullName(), issueNumber, e.getMessage());
         }
 
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
@@ -189,12 +208,15 @@ public class IssueWorkflowService {
             trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
             repo = trackedIssue.getRepo();
 
+            if (cancelled(trackedIssue)) return;
+
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
             int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
             issueRepository.save(trackedIssue);
 
             Iteration iteration = new Iteration(trackedIssue, iterationNum);
+            iteration.setImplModel(trackedIssue.getResolvedImplModel());
             iterationRepository.save(iteration);
 
             log.info("Iteration counter updated: {}/{} for {} #{}",
@@ -222,6 +244,8 @@ public class IssueWorkflowService {
                 continue;
             }
 
+            if (cancelled(trackedIssue)) return;
+
             if (!implResult.isSuccess()) {
                 log.warn("Claude Code returned failure for iteration {}", iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
@@ -234,7 +258,8 @@ public class IssueWorkflowService {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
                     // Attempt decomposition for timeout/complexity issues
-                    if (decompositionService.isDecomposable(skipReason)
+                    if (repo.getDecompositionMode() != DecompositionMode.OFF
+                            && decompositionService.isDecomposable(skipReason)
                             && decompositionService.decompose(trackedIssue, issueDetails,
                                     repoPath, skipReason)) {
                         return;
@@ -301,7 +326,8 @@ public class IssueWorkflowService {
                 if (skipReason != null) {
                     log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
                             trackedIssue.getIssueNumber(), skipReason);
-                    if (decompositionService.isDecomposable(skipReason)
+                    if (repo.getDecompositionMode() != DecompositionMode.OFF
+                            && decompositionService.isDecomposable(skipReason)
                             && decompositionService.decompose(trackedIssue, issueDetails,
                                     repoPath, skipReason)) {
                         return;
@@ -317,6 +343,8 @@ public class IssueWorkflowService {
                 continue;
             }
 
+            if (cancelled(trackedIssue)) return;
+
             // === Phase 4: PR Creation (draft) ===
             try {
                 trackedIssue.setCurrentPhase("PR_CREATION");
@@ -326,11 +354,14 @@ public class IssueWorkflowService {
                 log.error("Phase 4 (PR Creation) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
+                trackedIssue.setLastFailureReason("PR creation failed: " + e.getMessage());
                 issueRepository.save(trackedIssue);
                 eventService.log("PHASE_PR_CREATION_FAILED",
                         "PR creation failed: " + e.getMessage(), repo, trackedIssue);
                 return;
             }
+
+            if (cancelled(trackedIssue)) return;
 
             // === Phase 5: Independent Review (Sonnet) ===
             trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
@@ -366,12 +397,12 @@ public class IssueWorkflowService {
                 continue;
             }
 
-            // Create follow-up issue for non-blocking review findings
+            // Route non-blocking review findings per the repo's follow-up mode
             if (reviewResult != null && reviewResult.passed()) {
                 try {
-                    createFollowUpIssue(trackedIssue, issueDetails, reviewResult, prNumber);
+                    followUpService.handleNonBlockingFindings(trackedIssue, issueDetails, reviewResult, prNumber);
                 } catch (Exception e) {
-                    log.warn("Failed to create follow-up issue for {} #{}: {}",
+                    log.warn("Follow-up handling failed for {} #{}: {}",
                             repo.fullName(), trackedIssue.getIssueNumber(), e.getMessage());
                 }
             }
@@ -386,6 +417,7 @@ public class IssueWorkflowService {
                 log.error("Phase 6 (Completion) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
+                trackedIssue.setLastFailureReason("Completion failed: " + e.getMessage());
                 issueRepository.save(trackedIssue);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);
@@ -396,12 +428,29 @@ public class IssueWorkflowService {
         // Max iterations reached — attempt decomposition before escalating
         String maxIterReason = "Failed after " + repo.getMaxIterations()
                 + " iterations — task is likely too large for automated resolution";
-        if (decompositionService.isDecomposable(maxIterReason)
+        if (repo.getDecompositionMode() != DecompositionMode.OFF
+                && decompositionService.isDecomposable(maxIterReason)
                 && decompositionService.decompose(trackedIssue, issueDetails,
                         repoPath, maxIterReason)) {
             return;
         }
         iterationManager.handleMaxIterationsReached(trackedIssue);
+    }
+
+    /**
+     * Checkpoint: returns true (and finalizes the issue as FAILED) if the operator
+     * requested cancellation. Callers must return immediately when this returns true.
+     */
+    private boolean cancelled(TrackedIssue trackedIssue) {
+        if (!cancellationService.isCancelled(trackedIssue.getId())) return false;
+        trackedIssue.setStatus(IssueStatus.FAILED);
+        trackedIssue.setCurrentPhase(null);
+        trackedIssue.setLastFailureReason("Cancelled by operator");
+        issueRepository.save(trackedIssue);
+        eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
+                trackedIssue.getRepo(), trackedIssue);
+        cancellationService.clear(trackedIssue.getId());
+        return true;
     }
 
     // =====================================================
@@ -451,9 +500,10 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs);
 
         Long issueId = trackedIssue.getId();
-        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code (Opus) for implementation...");
+        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
+                + trackedIssue.getResolvedImplModel() + ") for implementation...");
         ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
-                line -> streamClaudeLog(issueId, line));
+                trackedIssue.getResolvedImplModel(), issueId, line -> streamClaudeLog(issueId, line));
 
         eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
                 "Implementation complete: " + result, repo, trackedIssue);
@@ -673,11 +723,15 @@ public class IssueWorkflowService {
                                              Path repoPath, String branchName,
                                              int prNumber, Iteration iteration) {
         WatchedRepo repo = trackedIssue.getRepo();
-        eventService.log("PHASE_INDEPENDENT_REVIEW", "Starting independent code review (Sonnet)",
+        String reviewModelLabel = trackedIssue.getResolvedReviewModel() != null
+                ? trackedIssue.getResolvedReviewModel() : "the review model";
+        eventService.log("PHASE_INDEPENDENT_REVIEW",
+                "Starting independent code review (" + reviewModelLabel + ")",
                 repo, trackedIssue);
 
         Long issueId = trackedIssue.getId();
-        sseService.broadcastClaudeLog(issueId, "[system] Launching Sonnet for independent review...");
+        sseService.broadcastClaudeLog(issueId, "[system] Launching "
+                + trackedIssue.getResolvedReviewModel() + " for independent review...");
 
         CodeReviewResult reviewResult;
         try {
@@ -686,6 +740,8 @@ public class IssueWorkflowService {
                     issueDetails.path("title").asText(),
                     issueDetails.path("body").asText(""),
                     repo.getBranch(),
+                    trackedIssue.getResolvedReviewModel(),
+                    issueId,
                     repo.isSecurityReviewEnabled(),
                     line -> streamClaudeLog(issueId, line));
         } catch (Exception e) {
@@ -701,7 +757,7 @@ public class IssueWorkflowService {
         issueRepository.save(trackedIssue);
 
         // Track review cost
-        trackCost(trackedIssue, trackedIssue.getCurrentIteration(),
+        trackCost(trackedIssue, trackedIssue.getCurrentIteration(), reviewResult.costUsd(),
                 reviewResult.inputTokens(), reviewResult.outputTokens(),
                 reviewResult.modelUsed(), "REVIEW");
 
@@ -765,7 +821,7 @@ public class IssueWorkflowService {
      * Format the review result into a markdown summary for the PR review body.
      */
     private String formatReviewSummary(CodeReviewResult r) {
-        String model = r.modelUsed() != null ? r.modelUsed() : "Sonnet";
+        String model = r.modelUsed() != null ? r.modelUsed() : "review model";
         String verdict = r.passed() ? "**PASSED**" : "**CHANGES REQUESTED**";
 
         StringBuilder sb = new StringBuilder();
@@ -817,7 +873,7 @@ public class IssueWorkflowService {
      */
     String buildReviewFeedback(CodeReviewResult review) {
         StringBuilder fb = new StringBuilder();
-        fb.append("The independent code review (Sonnet) found issues with your implementation.\n\n");
+        fb.append("The independent code review found issues with your implementation.\n\n");
         fb.append("**Overall:** ").append(review.summary()).append("\n\n");
 
         fb.append("**Scores:** ");
@@ -864,7 +920,8 @@ public class IssueWorkflowService {
     private void postReviewToIssue(TrackedIssue trackedIssue, CodeReviewResult review, int iterationNum) {
         WatchedRepo repo = trackedIssue.getRepo();
         try {
-            String model = review.modelUsed() != null ? review.modelUsed() : "Sonnet 4.6";
+            String model = review.modelUsed() != null ? review.modelUsed()
+                    : (trackedIssue.getResolvedReviewModel() != null ? trackedIssue.getResolvedReviewModel() : "the review model");
             String verdict = review.passed() ? "PASSED" : "CHANGES REQUESTED";
 
             StringBuilder sb = new StringBuilder();
@@ -920,99 +977,6 @@ public class IssueWorkflowService {
     }
 
     /**
-     * Create a follow-up GitHub issue for non-blocking (medium/low severity) review findings.
-     * Posts a comment on the original issue linking to the follow-up.
-     */
-    private void createFollowUpIssue(TrackedIssue trackedIssue, JsonNode issueDetails,
-                                     CodeReviewResult reviewResult, int prNumber) {
-        if (!trackedIssue.getRepo().isFollowUpEnabled()) {
-            log.info("Skipping follow-up creation for {} #{} because follow-up issues are disabled",
-                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());
-            return;
-        }
-
-        if (isFollowUpIssue(issueDetails)) {
-            log.info("Skipping follow-up creation for {} #{} because it is already a follow-up issue",
-                    trackedIssue.getRepo().fullName(), trackedIssue.getIssueNumber());
-            return;
-        }
-
-        List<CodeReviewResult.ReviewFinding> nonBlocking = reviewResult.findings().stream()
-                .filter(f -> "medium".equalsIgnoreCase(f.severity()) || "low".equalsIgnoreCase(f.severity()))
-                .toList();
-
-        if (nonBlocking.isEmpty()) {
-            return;
-        }
-
-        WatchedRepo repo = trackedIssue.getRepo();
-        int originalIssueNumber = trackedIssue.getIssueNumber();
-
-        String title = FOLLOW_UP_TITLE_PREFIX + " Code Review Findings from #" + originalIssueNumber;
-
-        StringBuilder body = new StringBuilder();
-        body.append("The following non-blocking items were identified during the automated code review for #")
-            .append(originalIssueNumber).append(" (PR #").append(prNumber)
-            .append(") and should be addressed in a future iteration.\n\n");
-        body.append("#### Findings\n\n");
-
-        for (CodeReviewResult.ReviewFinding f : nonBlocking) {
-            body.append("**[").append(f.severity().toUpperCase()).append(" — ").append(f.category()).append("]");
-            if (f.file() != null && !f.file().isBlank()) {
-                body.append(" `").append(f.file());
-                if (f.line() != null) body.append(":").append(f.line());
-                body.append("`");
-            }
-            body.append("**\n");
-            body.append(f.finding()).append("\n");
-            if (f.suggestion() != null && !f.suggestion().isBlank()) {
-                body.append("> **Suggestion:** ").append(f.suggestion()).append("\n");
-            }
-            body.append("\n");
-        }
-
-        body.append("---\n*Auto-created by [IssueBot](https://github.com/dbbaskette/IssueBot) from review of #")
-            .append(originalIssueNumber).append("*");
-
-        JsonNode newIssue = gitHubApi.createIssue(
-                repo.getOwner(), repo.getName(), title, body.toString(),
-                List.of(FOLLOW_UP_LABEL));
-
-        int followUpNumber = newIssue.path("number").asInt();
-        log.info("Created follow-up issue #{} for {} #{} with {} findings",
-                followUpNumber, repo.fullName(), originalIssueNumber, nonBlocking.size());
-
-        gitHubApi.addComment(repo.getOwner(), repo.getName(), originalIssueNumber,
-                "Non-blocking review findings have been captured in follow-up issue #" + followUpNumber);
-
-        eventService.log("FOLLOW_UP_ISSUE_CREATED",
-                "Created follow-up issue #" + followUpNumber + " with " + nonBlocking.size() + " findings",
-                repo, trackedIssue);
-    }
-
-    boolean isFollowUpIssue(JsonNode issueDetails) {
-        if (issueDetails == null || issueDetails.isMissingNode()) {
-            return false;
-        }
-
-        String title = issueDetails.path("title").asText("");
-        if (title.startsWith(FOLLOW_UP_TITLE_PREFIX)) {
-            return true;
-        }
-
-        JsonNode labels = issueDetails.path("labels");
-        if (labels.isArray()) {
-            for (JsonNode label : labels) {
-                if (FOLLOW_UP_LABEL.equalsIgnoreCase(label.path("name").asText())) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * Post Opus's implementation response as a comment on the GitHub issue
      * when it addresses review feedback, showing what changed.
      */
@@ -1020,7 +984,8 @@ public class IssueWorkflowService {
                                                     String previousFeedback, int iterationNum) {
         WatchedRepo repo = trackedIssue.getRepo();
         try {
-            String model = implResult.getModel() != null ? implResult.getModel() : "Opus 4.6";
+            String model = implResult.getModel() != null ? implResult.getModel()
+                    : (trackedIssue.getResolvedImplModel() != null ? trackedIssue.getResolvedImplModel() : "the implementation model");
 
             StringBuilder sb = new StringBuilder();
             sb.append("### Implementation Response — Iteration ").append(iterationNum)
@@ -1141,31 +1106,34 @@ public class IssueWorkflowService {
 
     private void trackCost(TrackedIssue trackedIssue, int iterationNum,
                             ClaudeCodeResult result, String phase) {
-        trackCost(trackedIssue, iterationNum, result.getInputTokens(),
+        trackCost(trackedIssue, iterationNum, result.getCostUsd(), result.getInputTokens(),
                 result.getOutputTokens(), result.getModel(), phase);
     }
 
-    private void trackCost(TrackedIssue trackedIssue, int iterationNum,
+    private void trackCost(TrackedIssue trackedIssue, int iterationNum, BigDecimal cliCost,
                             long inputTokens, long outputTokens, String model, String phase) {
-        BigDecimal cost = estimateCost(inputTokens, outputTokens, phase);
+        BigDecimal cost = resolveCost(cliCost, model, inputTokens, outputTokens, phase);
         CostTracking ct = new CostTracking(trackedIssue, iterationNum,
                 inputTokens, outputTokens, cost, model);
         ct.setPhase(phase);
         costRepository.save(ct);
     }
 
-    private BigDecimal estimateCost(long inputTokens, long outputTokens, String phase) {
-        // Opus pricing: $15/1M input, $75/1M output
-        // Sonnet pricing: $3/1M input, $15/1M output
-        double inputRate;
-        double outputRate;
-        if ("REVIEW".equals(phase)) {
-            inputRate = 3.0;
-            outputRate = 15.0;
-        } else {
-            inputRate = 15.0;
-            outputRate = 75.0;
-        }
+    /**
+     * Cost priority: CLI-reported total_cost_usd (authoritative — reflects caching)
+     * → catalog pricing by model → legacy per-phase estimate for unknown models.
+     */
+    BigDecimal resolveCost(BigDecimal cliCost, String model,
+                            long inputTokens, long outputTokens, String phase) {
+        if (cliCost != null) return cliCost;
+        return ModelCatalog.estimateCost(model, inputTokens, outputTokens)
+                .orElseGet(() -> legacyEstimate(inputTokens, outputTokens, phase));
+    }
+
+    /** Last-resort estimate when the model is unknown to the catalog (current-tier pricing). */
+    private BigDecimal legacyEstimate(long inputTokens, long outputTokens, String phase) {
+        double inputRate = "REVIEW".equals(phase) ? 3.0 : 5.0;
+        double outputRate = "REVIEW".equals(phase) ? 15.0 : 25.0;
         BigDecimal inputCost = BigDecimal.valueOf(inputTokens)
                 .multiply(BigDecimal.valueOf(inputRate))
                 .divide(BigDecimal.valueOf(1_000_000), 6, RoundingMode.HALF_UP);

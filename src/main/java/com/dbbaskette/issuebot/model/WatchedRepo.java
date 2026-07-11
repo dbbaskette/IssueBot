@@ -48,6 +48,23 @@ public class WatchedRepo {
     @Column(name = "follow_up_enabled", nullable = false)
     private boolean followUpEnabled = true;
 
+    @Column(name = "implementation_model")
+    private String implementationModel;
+
+    @Column(name = "review_model")
+    private String reviewModel;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "follow_up_mode", nullable = false)
+    private FollowUpMode followUpMode = FollowUpMode.ROLLING_BACKLOG;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decomposition_mode", nullable = false)
+    private DecompositionMode decompositionMode = DecompositionMode.PROPOSE;
+
+    @Column(name = "pre_screen_enabled", nullable = false)
+    private boolean preScreenEnabled = true;
+
     @Column(name = "allowed_paths")
     @Lob
     private String allowedPaths;
@@ -114,6 +131,21 @@ public class WatchedRepo {
 
     public boolean isFollowUpEnabled() { return followUpEnabled; }
     public void setFollowUpEnabled(boolean followUpEnabled) { this.followUpEnabled = followUpEnabled; }
+
+    public String getImplementationModel() { return implementationModel; }
+    public void setImplementationModel(String implementationModel) { this.implementationModel = implementationModel; }
+
+    public String getReviewModel() { return reviewModel; }
+    public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
+
+    public FollowUpMode getFollowUpMode() { return followUpMode; }
+    public void setFollowUpMode(FollowUpMode followUpMode) { this.followUpMode = followUpMode; }
+
+    public DecompositionMode getDecompositionMode() { return decompositionMode; }
+    public void setDecompositionMode(DecompositionMode decompositionMode) { this.decompositionMode = decompositionMode; }
+
+    public boolean isPreScreenEnabled() { return preScreenEnabled; }
+    public void setPreScreenEnabled(boolean preScreenEnabled) { this.preScreenEnabled = preScreenEnabled; }
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }

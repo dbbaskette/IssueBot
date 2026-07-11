@@ -16,8 +16,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Executes independent code review using Sonnet 4.6 via Claude CLI.
- * Builds a review prompt, invokes Sonnet, and parses the structured JSON response.
+ * Executes independent code review using the configured review model via Claude CLI.
+ * Builds a review prompt, invokes the review model, and parses the structured JSON response.
  */
 @Service
 public class CodeReviewService {
@@ -40,10 +40,11 @@ public class CodeReviewService {
     }
 
     /**
-     * Execute an independent code review using Sonnet 4.6.
+     * Execute an independent code review with the resolved review model.
      */
     public CodeReviewResult reviewCode(Path repoPath, String issueTitle, String issueBody,
-                                         String baseBranch, boolean securityReview,
+                                         String baseBranch, String model, Long issueId,
+                                         boolean securityReview,
                                          Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
 
@@ -69,8 +70,8 @@ public class CodeReviewService {
         String prompt = reviewPromptBuilder.buildReviewPrompt(
                 issueTitle, issueBody, changedFiles, diff, securityReview);
 
-        // 3. Invoke Sonnet via CLI
-        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, lineCallback);
+        // 3. Invoke the review model via CLI
+        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);
 
         if (!result.isSuccess()) {
             log.error("Sonnet review invocation failed: {}", result.getErrorMessage());
@@ -115,7 +116,7 @@ public class CodeReviewService {
     }
 
     /**
-     * Parse the Sonnet review response JSON from Claude Code output.
+     * Parse the review response JSON from Claude Code output.
      */
     private CodeReviewResult parseReviewResponse(ClaudeCodeResult result) {
         String output = result.getOutput();
@@ -165,7 +166,8 @@ public class CodeReviewService {
                     specCompliance, correctness, codeQuality, testCoverage,
                     architectureFit, regressions, security,
                     findings, advice, json,
-                    result.getInputTokens(), result.getOutputTokens(), result.getModel()
+                    result.getInputTokens(), result.getOutputTokens(), result.getModel(),
+                    result.getCostUsd()
             );
         } catch (Exception e) {
             log.warn("Failed to parse review JSON: {}", e.getMessage());

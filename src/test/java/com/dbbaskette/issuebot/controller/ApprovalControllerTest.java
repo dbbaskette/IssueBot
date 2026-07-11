@@ -12,6 +12,7 @@ import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.List;
 import java.util.Map;
@@ -75,5 +76,126 @@ class ApprovalControllerTest {
         // Falls back to the branch-filtered PR list (no exact PR number to deep-link).
         assertThat(prUrls.get(1L)).isEqualTo(
                 "https://github.com/acme/widgets/pulls?q=is%3Apr+head%3Aissuebot/7");
+    }
+
+    @Test
+    void approveMergesThePrWhenRequested() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        issue.setPrNumber(55);
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
+        when(iterations.findByIssueOrderByIterationNumAsc(any())).thenReturn(List.of());
+
+        ApprovalController controller = new ApprovalController(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        controller.approve(model, 1L, true, null, redirectAttributes);
+
+        verify(gitHubApi).mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash"));
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
+        verify(issues).save(issue);
+    }
+
+    @Test
+    void approveWithoutMergeOnlyMarksCompleted() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        issue.setPrNumber(55);
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
+        when(iterations.findByIssueOrderByIterationNumAsc(any())).thenReturn(List.of());
+
+        ApprovalController controller = new ApprovalController(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        controller.approve(model, 1L, false, null, redirectAttributes);
+
+        verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
+        verify(issues).save(issue);
+    }
+
+    @Test
+    void approveMergeFailureKeepsAwaitingApproval() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        issue.setPrNumber(55);
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(gitHubApi.mergePullRequest(anyString(), anyString(), anyInt(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("merge conflict"));
+
+        ApprovalController controller = new ApprovalController(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        String outcome = controller.approve(model, 1L, true, null, redirectAttributes);
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        verify(issues, never()).save(any());
+        verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        assertThat(outcome).isEqualTo("redirect:/approvals");
+    }
+
+    @Test
+    void approveMergeWithoutPrNumberErrors() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        // no PR number recorded
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+
+        ApprovalController controller = new ApprovalController(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        String outcome = controller.approve(model, 1L, true, null, redirectAttributes);
+
+        verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        verify(issues, never()).save(any());
+        verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        assertThat(outcome).isEqualTo("redirect:/approvals");
     }
 }

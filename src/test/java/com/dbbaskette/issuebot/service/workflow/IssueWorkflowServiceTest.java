@@ -19,7 +19,6 @@ import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +41,7 @@ class IssueWorkflowServiceTest {
     private IterationRepository iterationRepository;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private FollowUpService followUpService;
     private CodeReviewService codeReviewService;
     private CostTrackingRepository costRepository;
 
@@ -53,6 +53,7 @@ class IssueWorkflowServiceTest {
         iterationRepository = mock(IterationRepository.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        followUpService = mock(FollowUpService.class);
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
         workflowService = new IssueWorkflowService(
@@ -69,6 +70,10 @@ class IssueWorkflowServiceTest {
                 mock(NotificationService.class),
                 iterationManager,
                 decompositionService,
+                followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(
+                        new com.dbbaskette.issuebot.config.IssueBotProperties()),
+                new WorkflowCancellationService(),
                 objectMapper
         );
     }
@@ -158,7 +163,7 @@ class IssueWorkflowServiceTest {
                                 "Method too long", "Extract helper method")
                 ),
                 "Focus on test coverage",
-                null, 1000, 500, "claude-sonnet-4-6"
+                null, 1000, 500, "claude-sonnet-4-6", null
         );
 
         String feedback = workflowService.buildReviewFeedback(review);
@@ -171,33 +176,27 @@ class IssueWorkflowServiceTest {
     }
 
     @Test
-    void isFollowUpIssue_trueWhenIssueHasFollowUpLabel() {
-        ObjectNode issue = objectMapper.createObjectNode();
-        issue.put("title", "Tighten null handling");
-        ArrayNode labels = issue.putArray("labels");
-        labels.addObject().put("name", "bug");
-        labels.addObject().put("name", "issuebot-followup");
-
-        assertTrue(workflowService.isFollowUpIssue(issue));
+    void trackCostPrefersCliReportedCost() {
+        java.math.BigDecimal cost = workflowService.resolveCost(
+                new java.math.BigDecimal("0.50"), "claude-opus-4-8",
+                1_000_000, 1_000_000, "IMPLEMENTATION");
+        assertEquals(0, cost.compareTo(new java.math.BigDecimal("0.50")));
     }
 
     @Test
-    void isFollowUpIssue_trueWhenTitleHasFollowUpPrefix() {
-        ObjectNode issue = objectMapper.createObjectNode();
-        issue.put("title", "Follow-Up: Code Review Findings from #42");
-        issue.putArray("labels");
-
-        assertTrue(workflowService.isFollowUpIssue(issue));
+    void trackCostFallsBackToCatalogPricing() {
+        // Opus 4.8 catalog pricing: $5/MTok in + $25/MTok out
+        java.math.BigDecimal cost = workflowService.resolveCost(
+                null, "claude-opus-4-8", 1_000_000, 1_000_000, "IMPLEMENTATION");
+        assertEquals(0, cost.compareTo(new java.math.BigDecimal("30")));
     }
 
     @Test
-    void isFollowUpIssue_falseForRegularIssue() {
-        ObjectNode issue = objectMapper.createObjectNode();
-        issue.put("title", "Fix retry modal z-index");
-        ArrayNode labels = issue.putArray("labels");
-        labels.addObject().put("name", "bug");
-
-        assertFalse(workflowService.isFollowUpIssue(issue));
+    void trackCostFallsBackToLegacyEstimateForUnknownModel() {
+        // Unknown model on REVIEW phase → legacy review rates $3/$15
+        java.math.BigDecimal cost = workflowService.resolveCost(
+                null, "my-custom-model", 1_000_000, 1_000_000, "REVIEW");
+        assertEquals(0, cost.compareTo(new java.math.BigDecimal("18")));
     }
 
     /**
@@ -283,7 +282,7 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), anyBoolean(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---

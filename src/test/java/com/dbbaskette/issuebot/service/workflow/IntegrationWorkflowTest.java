@@ -48,6 +48,7 @@ class IntegrationWorkflowTest {
     private NotificationService notificationService;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private FollowUpService followUpService;
     private ObjectMapper objectMapper;
 
     @BeforeEach
@@ -65,13 +66,19 @@ class IntegrationWorkflowTest {
         notificationService = mock(NotificationService.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        followUpService = mock(FollowUpService.class);
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
                 gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
-                decompositionService, objectMapper);
+                decompositionService,
+                followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(
+                        new com.dbbaskette.issuebot.config.IssueBotProperties()),
+                new WorkflowCancellationService(),
+                objectMapper);
     }
 
     private TrackedIssue createTestIssue() {
@@ -108,7 +115,7 @@ class IntegrationWorkflowTest {
                 true, "All looks good",
                 0.9, 0.9, 0.85, 0.8, 0.9, 0.95, 1.0,
                 List.of(), "No issues found",
-                "{\"passed\":true}", 500, 300, "claude-sonnet-4-6");
+                "{\"passed\":true}", 500, 300, "claude-sonnet-4-6", null);
     }
 
     private CodeReviewResult failedReview() {
@@ -119,7 +126,7 @@ class IntegrationWorkflowTest {
                         "high", "test_coverage", "src/Service.java", 42,
                         "No tests for method", "Add unit test")),
                 "Add tests",
-                "{\"passed\":false}", 500, 300, "claude-sonnet-4-6");
+                "{\"passed\":false}", 500, 300, "claude-sonnet-4-6", null);
     }
 
     private void setupCommonMocks(TrackedIssue issue, ObjectNode issueDetails) throws Exception {
@@ -150,7 +157,7 @@ class IntegrationWorkflowTest {
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
         // Implementation succeeds
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         // CI passes (CI disabled to skip polling)
@@ -165,7 +172,7 @@ class IntegrationWorkflowTest {
 
         // Review passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyBoolean(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), anyBoolean(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -173,6 +180,9 @@ class IntegrationWorkflowTest {
         assertNull(issue.getCurrentPhase());
         verify(gitHubApi, never()).markPrReady(anyString(), anyString(), anyInt());
         verify(notificationService).info(eq("Issue Completed"), anyString());
+        // Passing review delegates non-blocking findings routing to FollowUpService
+        verify(followUpService).handleNonBlockingFindings(
+                eq(issue), any(), any(CodeReviewResult.class), eq(99));
     }
 
     // === Test 2: Review failure triggers re-implementation ===
@@ -188,7 +198,7 @@ class IntegrationWorkflowTest {
         when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
         // Implementation succeeds both times
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         // PR creation (non-draft for autonomous mode)
@@ -200,7 +210,7 @@ class IntegrationWorkflowTest {
 
         // First review fails, second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyBoolean(), any()))
+                anyString(), anyString(), any(), anyBoolean(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -222,7 +232,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -233,7 +243,7 @@ class IntegrationWorkflowTest {
 
         // Review fails
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyBoolean(), any())).thenReturn(failedReview());
+                anyString(), anyString(), any(), anyBoolean(), any())).thenReturn(failedReview());
 
         // No more review iterations
         when(iterationManager.canReviewIterate(issue)).thenReturn(false);
@@ -253,7 +263,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         // CI fails
@@ -310,7 +320,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -320,11 +330,13 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(true))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyBoolean(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), anyBoolean(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
         assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
+        verify(followUpService).handleNonBlockingFindings(
+                eq(issue), any(), any(CodeReviewResult.class), eq(102));
     }
 
     // === Test 8: Cost tracking records for both implementation and review ===
@@ -337,7 +349,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -347,7 +359,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyBoolean(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), anyBoolean(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -386,7 +398,7 @@ class IntegrationWorkflowTest {
 
         // Verify decomposition was called but implementation was NOT
         verify(decompositionService).decompose(eq(issue), any(), any(), contains("Pre-screen"));
-        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), any());
+        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
         verify(iterationManager, never()).canIterate(any());
     }
 
@@ -404,7 +416,7 @@ class IntegrationWorkflowTest {
         when(decompositionService.decompose(eq(issue), any(), any(), anyString())).thenReturn(false);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), any()))
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -413,12 +425,12 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyBoolean(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), anyBoolean(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
         // Implementation still ran after decomposition failed
-        verify(claudeCode).executeImplementation(anyString(), any(Path.class), any());
+        verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 }

@@ -11,8 +11,12 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -23,6 +27,7 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 @Controller
 @RequestMapping("/issues")
@@ -40,6 +45,9 @@ public class IssueController {
     private final EventService eventService;
     private final GitHubApiClient gitHubApiClient;
     private final IssueBotProperties properties;
+    private final IssueDecompositionService decompositionService;
+    private final WorkflowCancellationService cancellationService;
+    private final ObjectMapper objectMapper;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -50,7 +58,10 @@ public class IssueController {
                             IssueWorkflowService workflowService,
                             EventService eventService,
                             GitHubApiClient gitHubApiClient,
-                            IssueBotProperties properties) {
+                            IssueBotProperties properties,
+                            IssueDecompositionService decompositionService,
+                            WorkflowCancellationService cancellationService,
+                            ObjectMapper objectMapper) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -61,6 +72,9 @@ public class IssueController {
         this.eventService = eventService;
         this.gitHubApiClient = gitHubApiClient;
         this.properties = properties;
+        this.decompositionService = decompositionService;
+        this.cancellationService = cancellationService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping
@@ -115,6 +129,7 @@ public class IssueController {
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id);
+        model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
         return ViewResolver.view("issue-detail", hx != null);
     }
 
@@ -132,6 +147,8 @@ public class IssueController {
     @PostMapping("/{id}/retry")
     public String retry(@PathVariable Long id,
                         @RequestParam(required = false) String instructions,
+                        @RequestParam(required = false) String implModelOverride,
+                        @RequestParam(required = false) String reviewModelOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -167,6 +184,8 @@ public class IssueController {
         issue.setCurrentReviewIteration(0);
         issue.setCurrentPhase(null);
         issue.setCooldownUntil(null);
+        issue.setImplModelOverride(normalize(implModelOverride));
+        issue.setReviewModelOverride(normalize(reviewModelOverride));
         issueRepository.save(issue);
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
@@ -195,7 +214,10 @@ public class IssueController {
     }
 
     @PostMapping("/{id}/start")
-    public String start(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+    public String start(@PathVariable Long id,
+                        @RequestParam(required = false) String implModelOverride,
+                        @RequestParam(required = false) String reviewModelOverride,
+                        RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
         if (issue.getStatus() != IssueStatus.QUEUED) {
@@ -213,6 +235,8 @@ public class IssueController {
 
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setCurrentPhase(null);
+        issue.setImplModelOverride(normalize(implModelOverride));
+        issue.setReviewModelOverride(normalize(reviewModelOverride));
         issueRepository.save(issue);
 
         eventService.log("MANUAL_START",
@@ -244,6 +268,7 @@ public class IssueController {
         issue.setStatus(IssueStatus.COMPLETED);
         issue.setCurrentPhase(null);
         issue.setCooldownUntil(null);
+        issue.setDecompositionProposal(null);
         issueRepository.save(issue);
 
         eventService.log("MANUAL_COMPLETE",
@@ -252,6 +277,76 @@ public class IssueController {
 
         redirectAttributes.addFlashAttribute("success", "Issue marked as completed");
         return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/cancel")
+    public String cancel(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null || issue.getStatus() != IssueStatus.IN_PROGRESS) {
+            redirectAttributes.addFlashAttribute("error", "Only running issues can be stopped");
+            return "redirect:/issues/" + id;
+        }
+        cancellationService.requestCancel(id);
+        eventService.log("CANCEL_REQUESTED", "Operator requested stop", issue.getRepo(), issue);
+        redirectAttributes.addFlashAttribute("success",
+                "Stop requested — the workflow halts at the next checkpoint");
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/decomposition/approve")
+    public String approveDecomposition(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null) {
+            redirectAttributes.addFlashAttribute("error", "Issue not found");
+            return "redirect:/issues";
+        }
+
+        if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot approve decomposition for issue in " + issue.getStatus() + " status");
+            return "redirect:/issues/" + id;
+        }
+
+        try {
+            decompositionService.approveProposal(issue);
+        } catch (Exception e) {
+            log.warn("Failed to approve decomposition for issue {}: {}", id, e.getMessage());
+            redirectAttributes.addFlashAttribute("error", e.getMessage());
+            return "redirect:/issues/" + id;
+        }
+
+        redirectAttributes.addFlashAttribute("success", "Split approved — sub-issues created");
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/decomposition/reject")
+    public String rejectDecomposition(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElse(null);
+        if (issue == null) {
+            redirectAttributes.addFlashAttribute("error", "Issue not found");
+            return "redirect:/issues";
+        }
+
+        if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Cannot reject decomposition for issue in " + issue.getStatus() + " status");
+            return "redirect:/issues/" + id;
+        }
+
+        try {
+            decompositionService.rejectProposal(issue);
+        } catch (Exception e) {
+            log.warn("Failed to reject decomposition for issue {}: {}", id, e.getMessage());
+            redirectAttributes.addFlashAttribute("error", e.getMessage());
+            return "redirect:/issues/" + id;
+        }
+
+        redirectAttributes.addFlashAttribute("success", "Proposal rejected — issue escalated");
+        return "redirect:/issues/" + id;
+    }
+
+    private static String normalize(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     /**
@@ -335,6 +430,16 @@ public class IssueController {
         model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+
+        if (issue.getStatus() == IssueStatus.AWAITING_DECOMPOSITION && issue.getDecompositionProposal() != null) {
+            try {
+                List<Map<String, Object>> proposal = objectMapper.readValue(
+                        issue.getDecompositionProposal(), new TypeReference<List<Map<String, Object>>>() {});
+                model.addAttribute("decompositionProposal", proposal);
+            } catch (Exception e) {
+                log.warn("Failed to parse decomposition proposal for issue {}: {}", issue.getId(), e.getMessage());
+            }
+        }
     }
 
     /**

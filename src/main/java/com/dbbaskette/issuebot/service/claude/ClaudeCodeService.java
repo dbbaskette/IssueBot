@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.claude;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,46 +23,48 @@ public class ClaudeCodeService {
 
     private final IssueBotProperties properties;
     private final StreamJsonParser parser;
+    private final WorkflowCancellationService cancellationService;
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
-    public ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser) {
+    public ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
+                              WorkflowCancellationService cancellationService) {
         this.properties = properties;
         this.parser = parser;
-    }
-
-    public ClaudeCodeResult executeTask(String prompt, Path workingDirectory) {
-        return executeTask(prompt, workingDirectory, null, null);
-    }
-
-    public ClaudeCodeResult executeTask(String prompt, Path workingDirectory,
-                                         String systemPrompt, Consumer<String> lineCallback) {
-        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getModel(),
-                config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
-                systemPrompt, lineCallback);
+        this.cancellationService = cancellationService;
     }
 
     /**
-     * Execute implementation using Opus model from config.
+     * Execute implementation with the resolved model.
      */
     public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
-                                                    Consumer<String> lineCallback) {
+                                                    String model, Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getImplementationModel(),
+        return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
-                null, lineCallback);
+                null, issueId, lineCallback);
     }
 
     /**
-     * Execute independent review using Sonnet model from config.
+     * Execute independent review with the resolved model.
      */
     public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
-                                            Consumer<String> lineCallback) {
+                                            String model, Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getReviewModel(),
+        return executeTask(prompt, workingDirectory, model,
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
-                null, lineCallback);
+                null, issueId, lineCallback);
+    }
+
+    /**
+     * Pre-screen / decomposition analysis on the cheap utility model (review budgets).
+     */
+    public ClaudeCodeResult executeUtility(String prompt, Path workingDirectory,
+                                             Consumer<String> lineCallback) {
+        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
+        return executeTask(prompt, workingDirectory, config.getUtilityModel(),
+                config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
+                null, null, lineCallback);
     }
 
     /**
@@ -69,7 +72,7 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executeTask(String prompt, Path workingDirectory,
                                          String model, int maxTurns, int timeoutMinutes,
-                                         String systemPrompt, Consumer<String> lineCallback) {
+                                         String systemPrompt, Long issueId, Consumer<String> lineCallback) {
         List<String> command = new ArrayList<>();
         command.add("claude");
         command.add("-p");
@@ -103,6 +106,7 @@ public class ClaudeCodeService {
             stripNestedSessionEnv(pb);
 
             Process process = pb.start();
+            if (issueId != null) cancellationService.registerProcess(issueId, process);
             process.getOutputStream().close(); // Close stdin — headless, no interactive input
             log.info("Claude Code process started, PID: {}, alive: {}", process.pid(), process.isAlive());
 
@@ -155,48 +159,52 @@ public class ClaudeCodeService {
                 }
             });
 
-            boolean finished = process.waitFor(timeoutMinutes, TimeUnit.MINUTES);
-            long duration = System.currentTimeMillis() - startTime;
+            try {
+                boolean finished = process.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+                long duration = System.currentTimeMillis() - startTime;
 
-            if (!finished) {
-                process.destroyForcibly();
-                stdoutReader.join(3000);
-                stderrReader.join(3000);
-                log.warn("Claude Code timed out after {} minutes. stdout length={}, stderr: {}",
-                        timeoutMinutes, stdout.length(),
-                        stderr.length() > 0 ? stderr.toString().trim() : "(empty)");
-                ClaudeCodeResult result = failedResult(duration,
-                        "Claude Code timed out after " + timeoutMinutes + " minutes"
-                                + (stderr.length() > 0 ? ". stderr: " + stderr.toString().trim() : ""));
-                result.setTimedOut(true);
-                return result;
-            }
-
-            stdoutReader.join(5000);
-            stderrReader.join(5000);
-
-            if (stderr.length() > 0) {
-                log.debug("Claude Code stderr: {}", stderr);
-            }
-
-            int exitCode = process.exitValue();
-            ClaudeCodeResult result = parser.parse(stdout.toString());
-            result.setDurationMs(duration);
-
-            if (exitCode != 0) {
-                result.setSuccess(false);
-                String errorDetail = stderr.length() > 0 ? stderr.toString().trim() : "";
-                if (errorDetail.isEmpty() && stdout.length() > 0) {
-                    // CLI may report errors on stdout (e.g. nested session detection)
-                    errorDetail = stdout.substring(0, Math.min(500, stdout.length())).trim();
+                if (!finished) {
+                    process.destroyForcibly();
+                    stdoutReader.join(3000);
+                    stderrReader.join(3000);
+                    log.warn("Claude Code timed out after {} minutes. stdout length={}, stderr: {}",
+                            timeoutMinutes, stdout.length(),
+                            stderr.length() > 0 ? stderr.toString().trim() : "(empty)");
+                    ClaudeCodeResult result = failedResult(duration,
+                            "Claude Code timed out after " + timeoutMinutes + " minutes"
+                                    + (stderr.length() > 0 ? ". stderr: " + stderr.toString().trim() : ""));
+                    result.setTimedOut(true);
+                    return result;
                 }
-                result.setErrorMessage("Claude Code exited with code " + exitCode
-                        + (errorDetail.isEmpty() ? "" : ": " + errorDetail));
-                log.warn("Claude Code failed (exit {}): {}", exitCode, errorDetail);
-            }
 
-            log.info("Claude Code completed: {}", result);
-            return result;
+                stdoutReader.join(5000);
+                stderrReader.join(5000);
+
+                if (stderr.length() > 0) {
+                    log.debug("Claude Code stderr: {}", stderr);
+                }
+
+                int exitCode = process.exitValue();
+                ClaudeCodeResult result = parser.parse(stdout.toString());
+                result.setDurationMs(duration);
+
+                if (exitCode != 0) {
+                    result.setSuccess(false);
+                    String errorDetail = stderr.length() > 0 ? stderr.toString().trim() : "";
+                    if (errorDetail.isEmpty() && stdout.length() > 0) {
+                        // CLI may report errors on stdout (e.g. nested session detection)
+                        errorDetail = stdout.substring(0, Math.min(500, stdout.length())).trim();
+                    }
+                    result.setErrorMessage("Claude Code exited with code " + exitCode
+                            + (errorDetail.isEmpty() ? "" : ": " + errorDetail));
+                    log.warn("Claude Code failed (exit {}): {}", exitCode, errorDetail);
+                }
+
+                log.info("Claude Code completed: {}", result);
+                return result;
+            } finally {
+                if (issueId != null) cancellationService.unregisterProcess(issueId);
+            }
 
         } catch (IOException e) {
             log.error("Failed to start Claude Code process", e);

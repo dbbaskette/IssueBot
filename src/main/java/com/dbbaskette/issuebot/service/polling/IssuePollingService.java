@@ -81,6 +81,7 @@ public class IssuePollingService {
         for (WatchedRepo repo : repos) {
             try {
                 recheckBlockedIssues(repo);
+                closeCompletedParents(repo);
                 drainQueuedIssues(repo);
                 resumePendingIssues(repo);
                 pollRepo(repo, maxConcurrent - activeCount);
@@ -88,6 +89,25 @@ public class IssuePollingService {
                 log.error("Error polling {}: {}", repo.fullName(), e.getMessage());
                 eventService.log("POLL_ERROR", "Failed to poll: " + e.getMessage(), repo);
             }
+        }
+    }
+
+    /** Close issuebot-parent tracking issues whose sub-issues are all closed. */
+    private void closeCompletedParents(WatchedRepo repo) {
+        try {
+            List<JsonNode> parents = gitHubApiClient.listIssues(repo.getOwner(), repo.getName(), "issuebot-parent", "open");
+            if (parents == null || parents.isEmpty()) return;
+            List<JsonNode> openSubs = gitHubApiClient.listIssues(repo.getOwner(), repo.getName(), "issuebot-decomposed", "open");
+            if (openSubs == null || !openSubs.isEmpty()) return; // any open sub → keep parents open
+            for (JsonNode parent : parents) {
+                int number = parent.path("number").asInt();
+                gitHubApiClient.addComment(repo.getOwner(), repo.getName(), number,
+                        "All sub-issues are closed — closing this tracking issue.");
+                gitHubApiClient.closeIssue(repo.getOwner(), repo.getName(), number);
+                eventService.log("PARENT_ISSUE_CLOSED", "Closed tracking issue #" + number, repo);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check parent tracking issues for {}: {}", repo.fullName(), e.getMessage());
         }
     }
 

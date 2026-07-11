@@ -59,13 +59,44 @@
                         <label for="max-review-iterations">Max Review Iterations</label>
                         <input type="number" id="max-review-iterations" name="maxReviewIterations" value="2" min="1" max="10">
                     </div>
+                    <div class="field-group">
+                        <label for="implementation-model">Implementation model (blank = inherit global)</label>
+                        <select id="implementation-model" name="implementationModel">
+                            <option value="">Inherit global</option>
+                            <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="review-model">Review model (blank = inherit global)</label>
+                        <select id="review-model" name="reviewModel">
+                            <option value="">Inherit global</option>
+                            <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                        </select>
+                    </div>
                     <div class="checkbox-field">
                         <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
                         <label for="auto-start">Auto-start issues</label>
                     </div>
+                    <div class="field-group">
+                        <label for="follow-up-mode">Review findings handling</label>
+                        <select id="follow-up-mode" name="followUpMode">
+                            <option value="ROLLING_BACKLOG">Rolling backlog issue (recommended)</option>
+                            <option value="COMMENT_ONLY">Comment on issue only</option>
+                            <option value="PER_ISSUE">One follow-up issue per PR (legacy)</option>
+                            <option value="OFF">Off — PR review comment only</option>
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="decomposition-mode">Large-issue splitting</label>
+                        <select id="decomposition-mode" name="decompositionMode">
+                            <option value="PROPOSE">Propose — I approve splits (recommended)</option>
+                            <option value="AUTO">Automatic (legacy)</option>
+                            <option value="OFF">Off — escalate to needs-human</option>
+                        </select>
+                    </div>
                     <div class="checkbox-field">
-                        <input type="checkbox" id="follow-up-enabled" name="followUpEnabled" value="true" checked>
-                        <label for="follow-up-enabled">Create follow-up issues</label>
+                        <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
+                        <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
                     </div>
                 </div>
 
@@ -123,7 +154,7 @@
                         <th scope="col" title="Security review"><i class="ti ti-shield-lock" aria-hidden="true"></i> Review</th>
                         <th scope="col" title="Auto-merge PRs"><i class="ti ti-git-merge" aria-hidden="true"></i> Merge</th>
                         <th scope="col" title="Auto-start issues"><i class="ti ti-player-play" aria-hidden="true"></i> Auto</th>
-                        <th scope="col" title="Create follow-up issues"><i class="ti ti-arrow-forward-up" aria-hidden="true"></i> Follow-Up</th>
+                        <th scope="col" title="Review findings handling"><i class="ti ti-arrow-forward-up" aria-hidden="true"></i> Follow-Up</th>
                         <th scope="col" title="Open issues"><i class="ti ti-bug" aria-hidden="true"></i> Issues</th>
                         <th scope="col">Actions</th>
                     </tr>
@@ -161,8 +192,8 @@
                             <span th:unless="${repo.autoStart}" class="status status-pending">OFF</span>
                         </td>
                         <td data-label="Follow-Up">
-                            <span th:if="${repo.followUpEnabled}" class="status status-completed">ON</span>
-                            <span th:unless="${repo.followUpEnabled}" class="status status-pending">OFF</span>
+                            <span class="status" th:classappend="${repo.followUpMode.name() == 'OFF' ? 'status-pending' : 'status-completed'}"
+                                  th:text="${repo.followUpMode}" th:title="${repo.followUpMode}">ROLLING_BACKLOG</span>
                         </td>
                         <td data-label="Issues" th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
                         <td data-label="Actions" class="repo-actions">
@@ -180,8 +211,12 @@
                                              data-security-review-enabled=${repo.securityReviewEnabled},
                                              data-max-review-iterations=${repo.maxReviewIterations},
                                              data-auto-start=${repo.autoStart},
-                                             data-follow-up-enabled=${repo.followUpEnabled},
-                                             data-allowed-paths=${repo.allowedPaths}">
+                                             data-follow-up-mode=${repo.followUpMode.name()},
+                                             data-decomposition-mode=${repo.decompositionMode.name()},
+                                             data-pre-screen-enabled=${repo.preScreenEnabled},
+                                             data-allowed-paths=${repo.allowedPaths},
+                                             data-implementation-model=${repo.implementationModel},
+                                             data-review-model=${repo.reviewModel}">
                                 <i class="ti ti-edit" aria-hidden="true"></i> Edit
                             </button>
                             <button class="btn btn-danger btn-sm"

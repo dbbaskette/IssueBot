@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.workflow;
 
+import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -9,13 +10,16 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -30,6 +34,7 @@ class IssueDecompositionServiceTest {
     private EventService eventService;
     private NotificationService notificationService;
     private ObjectMapper objectMapper;
+    private IterationManager iterationManager;
 
     @BeforeEach
     void setUp() {
@@ -39,10 +44,11 @@ class IssueDecompositionServiceTest {
         eventService = mock(EventService.class);
         notificationService = mock(NotificationService.class);
         objectMapper = new ObjectMapper();
+        iterationManager = mock(IterationManager.class);
 
         decompositionService = new IssueDecompositionService(
                 claudeCode, gitHubApi, issueRepository, eventService,
-                notificationService, objectMapper);
+                notificationService, objectMapper, iterationManager);
     }
 
     @Test
@@ -160,6 +166,7 @@ class IssueDecompositionServiceTest {
     @Test
     void decompose_success() {
         TrackedIssue issue = createIssue();
+        issue.getRepo().setDecompositionMode(DecompositionMode.AUTO);
         ObjectNode issueDetails = createIssueDetails();
 
         String claudeOutput = """
@@ -171,7 +178,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         ObjectNode sub1 = objectMapper.createObjectNode();
         sub1.put("number", 100);
@@ -189,7 +196,9 @@ class IssueDecompositionServiceTest {
         verify(issueRepository).save(issue);
         verify(gitHubApi, times(2)).createIssue(eq("owner"), eq("repo"), anyString(), anyString(), anyList());
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(42), contains("sub-issues"));
-        verify(gitHubApi).closeIssue("owner", "repo", 42);
+        verify(gitHubApi, never()).closeIssue(anyString(), anyString(), anyInt());
+        verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(42), eq(List.of("issuebot-parent")));
+        verify(gitHubApi).removeLabel("owner", "repo", 42, "agent-ready");
         verify(notificationService).info(eq("Issue Decomposed"), anyString());
     }
 
@@ -204,7 +213,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -222,7 +231,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(false);
         claudeResult.setOutput(null);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -233,6 +242,7 @@ class IssueDecompositionServiceTest {
     @Test
     void decompose_allGitHubCreationsFail_returnsFalse() {
         TrackedIssue issue = createIssue();
+        issue.getRepo().setDecompositionMode(DecompositionMode.AUTO);
         ObjectNode issueDetails = createIssueDetails();
 
         String claudeOutput = """
@@ -244,7 +254,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         when(gitHubApi.createIssue(anyString(), anyString(), anyString(), anyString(), anyList()))
                 .thenThrow(new RuntimeException("API error"));
@@ -254,6 +264,169 @@ class IssueDecompositionServiceTest {
 
         assertFalse(result);
         assertNotEquals(IssueStatus.DECOMPOSED, issue.getStatus());
+    }
+
+    // === PROPOSE mode / parent-as-tracker tests ===
+
+    @Test
+    void proposeStoresProposalAndDoesNotCreateIssues() {
+        TrackedIssue issue = createIssue();
+        issue.getRepo().setDecompositionMode(DecompositionMode.PROPOSE);
+        ObjectNode issueDetails = createIssueDetails();
+
+        String claudeOutput = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": "Look at Foo.java"},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": "See Bar.java"}
+                ]
+                """;
+        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        claudeResult.setSuccess(true);
+        claudeResult.setOutput(claudeOutput);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+
+        boolean result = decompositionService.decompose(issue, issueDetails,
+                Path.of("/tmp/repo"), "timed out");
+
+        assertTrue(result);
+        assertEquals(IssueStatus.AWAITING_DECOMPOSITION, issue.getStatus());
+        assertNotNull(issue.getDecompositionProposal());
+        assertTrue(issue.getDecompositionProposal().contains("title"));
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        verify(gitHubApi, never()).closeIssue(anyString(), anyString(), anyInt());
+        verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(42), contains("Proposed Split"));
+    }
+
+    @Test
+    void approveCreatesSubIssuesAndConvertsParentToTracker() throws Exception {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/3: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/3: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "3/3: Third task", "description": "Do third thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+
+        ObjectNode sub1 = objectMapper.createObjectNode();
+        sub1.put("number", 101);
+        ObjectNode sub2 = objectMapper.createObjectNode();
+        sub2.put("number", 102);
+        ObjectNode sub3 = objectMapper.createObjectNode();
+        sub3.put("number", 103);
+        when(gitHubApi.createIssue(eq("owner"), eq("repo"), anyString(), anyString(), anyList()))
+                .thenReturn(sub1, sub2, sub3);
+
+        decompositionService.approveProposal(issue);
+
+        verify(gitHubApi, times(3)).createIssue(eq("owner"), eq("repo"), anyString(), anyString(),
+                eq(List.of("agent-ready", "issuebot-decomposed")));
+        verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(42), eq(List.of("issuebot-parent")));
+        verify(gitHubApi).removeLabel("owner", "repo", 42, "agent-ready");
+        verify(gitHubApi, never()).closeIssue(anyString(), anyString(), anyInt());
+        assertEquals(IssueStatus.DECOMPOSED, issue.getStatus());
+        assertNull(issue.getDecompositionProposal());
+    }
+
+    @Test
+    void approveWithAllCreationsFailingKeepsProposalAndStatus() {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+        when(gitHubApi.createIssue(anyString(), anyString(), anyString(), anyString(), anyList()))
+                .thenThrow(new RuntimeException("API error"));
+
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        assertEquals(IssueStatus.AWAITING_DECOMPOSITION, issue.getStatus());
+        assertNotNull(issue.getDecompositionProposal());
+        verify(gitHubApi, never()).addLabels(anyString(), anyString(), anyInt(), anyList());
+        verify(gitHubApi, never()).removeLabel(anyString(), anyString(), anyInt(), anyString());
+        verify(gitHubApi, never()).closeIssue(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void secondApproveIsRejectedByGuard() throws Exception {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+
+        ObjectNode sub1 = objectMapper.createObjectNode();
+        sub1.put("number", 101);
+        ObjectNode sub2 = objectMapper.createObjectNode();
+        sub2.put("number", 102);
+        when(gitHubApi.createIssue(eq("owner"), eq("repo"), anyString(), anyString(), anyList()))
+                .thenReturn(sub1, sub2);
+
+        decompositionService.approveProposal(issue);
+
+        // Second submit re-reads the (now DECOMPOSED, proposal-cleared) issue and must hit the guard
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        verify(gitHubApi, times(2)).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+    }
+
+    @Test
+    void rejectDelegatesToEscalation() {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        issue.setDecompositionProposal("[{\"title\":\"x\",\"description\":\"y\",\"acceptance_criteria\":\"z\",\"hints\":\"\"}]");
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+
+        decompositionService.rejectProposal(issue);
+
+        assertNull(issue.getDecompositionProposal());
+        verify(iterationManager).handleProposalRejected(issue);
+    }
+
+    @Test
+    void approveGuardsWrongStatus() {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        verifyNoInteractions(gitHubApi);
+    }
+
+    @Test
+    void approveRefusesWhenCapReached() {
+        TrackedIssue issue = createIssue();
+        issue.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        String proposalJson = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        issue.setDecompositionProposal(proposalJson);
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+        when(gitHubApi.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(createOpenSubIssueNodes(10));
+
+        assertThrows(IllegalStateException.class, () -> decompositionService.approveProposal(issue));
+
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        assertEquals(IssueStatus.AWAITING_DECOMPOSITION, issue.getStatus());
+        assertNotNull(issue.getDecompositionProposal());
     }
 
     @Test
@@ -277,7 +450,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -294,7 +467,7 @@ class IssueDecompositionServiceTest {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -304,7 +477,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void preScreen_claudeFailure_defaultsToFalse() {
-        when(claudeCode.executeReview(anyString(), any(Path.class), any()))
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any()))
                 .thenThrow(new RuntimeException("API error"));
 
         IssueDecompositionService.PreScreenResult result =
@@ -317,7 +490,7 @@ class IssueDecompositionServiceTest {
     void preScreen_emptyResponse_defaultsToFalse() {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setOutput("");
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -329,7 +502,7 @@ class IssueDecompositionServiceTest {
     void preScreen_invalidJson_defaultsToFalse() {
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setOutput("Not JSON at all");
-        when(claudeCode.executeReview(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -364,6 +537,71 @@ class IssueDecompositionServiceTest {
         assertTrue(prompt.contains("too_large"));
     }
 
+    // === Decomposition guard tests ===
+
+    @Test
+    void neverDecomposesAnAlreadyDecomposedIssue() {
+        TrackedIssue issue = createIssue();
+        ObjectNode issueDetails = createIssueDetailsWithLabel("issuebot-decomposed");
+
+        boolean result = decompositionService.decompose(issue, issueDetails,
+                Path.of("/tmp/repo"), "timed out");
+
+        assertFalse(result);
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+    }
+
+    @Test
+    void preScreenSkipsDecomposedIssues() {
+        ObjectNode issueDetails = createIssueDetailsWithLabel("issuebot-decomposed");
+
+        IssueDecompositionService.PreScreenResult result =
+                decompositionService.preScreen(issueDetails, Path.of("/tmp/repo"));
+
+        assertFalse(result.tooLarge());
+        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+    }
+
+    @Test
+    void refusesDecompositionBeyondOpenSubIssueCap() {
+        TrackedIssue issue = createIssue();
+        ObjectNode issueDetails = createIssueDetails();
+
+        // Stub Claude + GitHub so decomposition WOULD succeed if the cap didn't stop it first —
+        // this ensures the cap guard itself is what causes the false return, not an unrelated failure.
+        String claudeOutput = """
+                [
+                  {"title": "1/2: First task", "description": "Do first thing", "acceptance_criteria": "Done", "hints": ""},
+                  {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
+                ]
+                """;
+        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        claudeResult.setSuccess(true);
+        claudeResult.setOutput(claudeOutput);
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+
+        when(gitHubApi.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(createOpenSubIssueNodes(10));
+
+        boolean result = decompositionService.decompose(issue, issueDetails,
+                Path.of("/tmp/repo"), "timed out");
+
+        assertFalse(result);
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+    }
+
+    private List<JsonNode> createOpenSubIssueNodes(int count) {
+        List<JsonNode> nodes = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("number", 200 + i);
+            nodes.add(node);
+        }
+        return nodes;
+    }
+
     private TrackedIssue createIssue() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
@@ -380,6 +618,16 @@ class IssueDecompositionServiceTest {
         details.put("title", "Fix the login bug");
         details.put("body", "Users can't log in when password contains special characters");
         details.putArray("labels");
+        return details;
+    }
+
+    private ObjectNode createIssueDetailsWithLabel(String labelName) {
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the login bug");
+        details.put("body", "Users can't log in when password contains special characters");
+        ObjectNode label = objectMapper.createObjectNode();
+        label.put("name", labelName);
+        details.putArray("labels").add(label);
         return details;
     }
 }

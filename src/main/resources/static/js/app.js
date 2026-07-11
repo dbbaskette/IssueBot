@@ -476,8 +476,12 @@
     setValue('mode', 'AUTONOMOUS');
     setValue('max-iterations', '5');
     setValue('max-review-iterations', '2');
+    setValue('implementation-model', '');
+    setValue('review-model', '');
     setChecked('auto-start', true);
-    setChecked('follow-up-enabled', true);
+    setValue('follow-up-mode', 'ROLLING_BACKLOG');
+    setValue('decomposition-mode', 'PROPOSE');
+    setChecked('pre-screen-enabled', true);
     setChecked('auto-merge', false);
     setChecked('security-review', false);
     setValue('allowed-paths', '');
@@ -496,8 +500,12 @@
     setValue('mode', ds.mode);
     setValue('max-iterations', ds.maxIterations);
     setValue('max-review-iterations', ds.maxReviewIterations);
+    setValue('implementation-model', ds.implementationModel);
+    setValue('review-model', ds.reviewModel);
     setChecked('auto-start', ds.autoStart);
-    setChecked('follow-up-enabled', ds.followUpEnabled);
+    setValue('follow-up-mode', ds.followUpMode);
+    setValue('decomposition-mode', ds.decompositionMode);
+    setChecked('pre-screen-enabled', ds.preScreenEnabled);
     setChecked('auto-merge', ds.autoMerge);
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));
@@ -539,6 +547,49 @@
     if (e.target && e.target.id === 'ci-enabled') {
       syncCiTimeout();
     }
+  });
+
+  // --- Models card (custom model select) -----------------------------------
+  // The Implementation/Review selects on the Settings page offer a
+  // "Custom…" option; picking it reveals a sibling .custom-model-input text
+  // field (scoped to the select's .field-group container). On submit, any
+  // .model-select still set to "__custom__" gets a new <option> appended
+  // whose value is the custom input's text, so the posted <select> param
+  // carries the real model ID. (The Utility select has no custom option and
+  // is untouched by either handler.)
+  function customModelInputFor(select) {
+    var group = select.closest('.field-group');
+    return group ? group.querySelector('.custom-model-input') : null;
+  }
+
+  document.addEventListener('change', function (e) {
+    var select = e.target;
+    if (!select.classList || !select.classList.contains('model-select')) { return; }
+    var input = customModelInputFor(select);
+    if (!input) { return; }
+    var custom = (select.value === '__custom__');
+    input.hidden = !custom;
+    // Required only while visible: blocks submitting an empty custom ID, but a
+    // hidden required input would invisibly wedge the form.
+    input.required = custom;
+  });
+
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form || form.nodeName !== 'FORM') { return; }
+    var selects = form.querySelectorAll('.model-select');
+    Array.prototype.forEach.call(selects, function (select) {
+      if (select.value !== '__custom__') { return; }
+      var input = customModelInputFor(select);
+      var value = input ? input.value.trim() : '';
+      if (!value) { return; }
+      var opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      opt.selected = true;
+      select.appendChild(opt);
+      select.value = value;
+    });
   });
 
   // --- Sortable tables ----------------------------------------------------

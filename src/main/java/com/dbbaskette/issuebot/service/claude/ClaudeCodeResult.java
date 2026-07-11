@@ -14,6 +14,7 @@ public class ClaudeCodeResult {
     private long durationMs;
     private String errorMessage;
     private boolean timedOut;
+    private java.math.BigDecimal costUsd; // CLI-reported total_cost_usd; null if absent
 
     public boolean isSuccess() { return success; }
     public void setSuccess(boolean success) { this.success = success; }
@@ -41,6 +42,9 @@ public class ClaudeCodeResult {
 
     public boolean isTimedOut() { return timedOut; }
     public void setTimedOut(boolean timedOut) { this.timedOut = timedOut; }
+
+    public java.math.BigDecimal getCostUsd() { return costUsd; }
+    public void setCostUsd(java.math.BigDecimal costUsd) { this.costUsd = costUsd; }
 
     @Override
     public String toString() {

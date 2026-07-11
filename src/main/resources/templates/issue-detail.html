@@ -8,19 +8,62 @@
         <div>
             <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
             <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
+            <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
+                <a class="repo-link" target="_blank" rel="noopener"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${issue.issueNumber}"
+                   th:title="${'Open issue #' + issue.issueNumber + ' on GitHub'}">
+                    <i class="ti ti-brand-github" aria-hidden="true"></i>
+                    <span th:text="${'Issue #' + issue.issueNumber}">Issue #1</span>
+                    <i class="ti ti-external-link" aria-hidden="true"></i>
+                </a>
+                <a class="repo-link" target="_blank" rel="noopener"
+                   th:if="${issue.prNumber != null and issue.prNumber > 0}"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/pull/' + ${issue.prNumber}"
+                   th:title="${'Open PR #' + issue.prNumber + ' on GitHub'}">
+                    <i class="ti ti-git-pull-request" aria-hidden="true"></i>
+                    <span th:text="${'PR #' + issue.prNumber}">PR #1</span>
+                    <i class="ti ti-external-link" aria-hidden="true"></i>
+                </a>
+                <a class="repo-link" target="_blank" rel="noopener"
+                   th:if="${issue.branchName != null}"
+                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/tree/' + ${issue.branchName}"
+                   th:title="${'Open branch ' + issue.branchName + ' on GitHub'}">
+                    <i class="ti ti-git-branch" aria-hidden="true"></i>
+                    <span th:text="${issue.branchName}">branch-name</span>
+                    <i class="ti ti-external-link" aria-hidden="true"></i>
+                </a>
+            </div>
         </div>
         <div class="flex gap-1" style="align-items:center">
             <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
             <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                     type="button" class="btn btn-ghost btn-sm"
                     data-modal-open="retry-modal">
-                <i class="ti ti-refresh" aria-hidden="true"></i> Retry
+                <i class="ti ti-refresh" aria-hidden="true"></i>
+                <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
+            </button>
+            <button th:if="${issue.status.name() == 'QUEUED'}"
+                    type="button" class="btn btn-primary btn-sm"
+                    data-modal-open="start-modal">
+                <i class="ti ti-player-play" aria-hidden="true"></i> Start
             </button>
             <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL'}"
                     type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
                 <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
             </button>
+            <button th:if="${issue.status.name() == 'IN_PROGRESS'}"
+                    type="button" class="btn btn-danger btn-sm" data-modal-open="cancel-modal">
+                <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+            </button>
         </div>
+    </div>
+
+    <!-- === LAST FAILURE BANNER === -->
+    <div class="alert alert-danger" role="alert"
+         th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
+        <strong>Last failure:</strong> <span th:text="${issue.lastFailureReason}"></span>
+        <span th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
+              th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
     </div>
 
     <!-- === Retry Modal (accessible dialog) === -->
@@ -32,9 +75,52 @@
             <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post">
                 <textarea name="instructions" rows="4" class="modal-textarea" data-modal-autofocus
                           placeholder="e.g. Break this into smaller changes, focus on the API layer first..."></textarea>
+                <div class="field-group">
+                    <label for="retryImplModel">Implementation model for this retry (optional)</label>
+                    <select id="retryImplModel" name="implModelOverride">
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="retryReviewModel">Review model for this retry (optional)</label>
+                    <select id="retryReviewModel" name="reviewModelOverride">
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Start Retry</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Start Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'QUEUED'}"
+         id="start-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="start-modal-title">
+            <h3 id="start-modal-title" style="margin:0 0 0.5rem">Start Issue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Start processing this issue now?</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/start'}" method="post">
+                <div class="field-group">
+                    <label for="startImplModel">Implementation model for this run (optional)</label>
+                    <select id="startImplModel" name="implModelOverride" data-modal-autofocus>
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="startReviewModel">Review model for this run (optional)</label>
+                    <select id="startReviewModel" name="reviewModelOverride">
+                        <option value="" selected>Use repo/global setting</option>
+                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Start Issue</button>
                 </div>
             </form>
         </div>
@@ -55,6 +141,21 @@
         </div>
     </div>
 
+    <!-- === Stop confirm modal === -->
+    <div th:if="${issue.status.name() == 'IN_PROGRESS'}"
+         id="cancel-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="cancel-modal-title">
+            <h3 id="cancel-modal-title" style="margin:0 0 0.5rem">Stop Issue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/cancel'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Stop Issue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- === BLOCKED-BY INFO PANEL === -->
     <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
         <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
@@ -63,11 +164,66 @@
         </div>
         <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
         <div class="flex gap-1" style="flex-wrap:wrap">
-            <span th:each="num : ${issue.blockerNumbers}"
-                  class="status status-blocked"
-                  th:text="${'#' + num}">
+            <a th:each="num : ${issue.blockerNumbers}"
+               class="status status-blocked" target="_blank" rel="noopener"
+               th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
+               th:title="${'Open issue #' + num + ' on GitHub'}"
+               th:text="${'#' + num}">
                 #5
-            </span>
+            </a>
+        </div>
+    </div>
+
+    <!-- === DECOMPOSITION PROPOSAL CARD === -->
+    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}" class="panel mb-3">
+        <div class="panel-header">
+            <h3>Proposed Split</h3>
+            <div class="flex gap-1">
+                <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-decomposition-modal">
+                    <i class="ti ti-check" aria-hidden="true"></i> Approve split
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-decomposition-modal">
+                    <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
+                </button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <ol class="decomposition-proposal-list">
+                <li th:each="sub : ${decompositionProposal}">
+                    <strong th:text="${sub['title']}">Sub-issue title</strong>
+                    <div class="text-sm text-muted" th:text="${sub['description']}">Sub-issue description</div>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- === Approve Decomposition Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}"
+         id="approve-decomposition-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="approve-decomposition-modal-title">
+            <h3 id="approve-decomposition-modal-title" style="margin:0 0 0.5rem">Approve Split</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Creates the sub-issues labeled agent-ready; this issue stays open as a tracker.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/approve'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Approve split</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Reject Decomposition Modal (accessible dialog) === -->
+    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}"
+         id="reject-decomposition-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="reject-decomposition-modal-title">
+            <h3 id="reject-decomposition-modal-title" style="margin:0 0 0.5rem">Reject Split</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Escalates to needs-human; no sub-issues are created.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/reject'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Reject &amp; escalate</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -206,6 +362,11 @@
             <div class="label">Branch</div>
             <div class="value small" th:text="${issue.branchName != null ? issue.branchName : '—'}">—</div>
         </div>
+        <div class="metric-card" th:if="${issue.resolvedImplModel != null or issue.resolvedReviewModel != null}">
+            <div class="label">Models</div>
+            <div class="value small"
+                 th:text="${(issue.resolvedImplModel != null ? issue.resolvedImplModel : '—') + ' / ' + (issue.resolvedReviewModel != null ? issue.resolvedReviewModel : '—')}">claude-opus-4-8 / claude-sonnet-5</div>
+        </div>
         <div class="metric-card">
             <div class="label">Review Iter</div>
             <div class="value" th:text="${issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">0/2</div>
@@ -241,7 +402,8 @@
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Implementation</div>
-                        <div class="phase-desc">Opus writing code</div>
+                        <div class="phase-desc"
+                             th:text="${issue.resolvedImplModel != null ? (issue.resolvedImplModel + ' writing code') : 'Implementation model writing code'}">Implementation model writing code</div>
                     </div>
                 </div>
                 <!-- 2: CI Checks -->
@@ -268,7 +430,8 @@
                     <div class="phase-indicator"></div>
                     <div class="phase-info">
                         <div class="phase-name">Code Review</div>
-                        <div class="phase-desc">Sonnet 4.6 review</div>
+                        <div class="phase-desc"
+                             th:text="${issue.resolvedReviewModel != null ? (issue.resolvedReviewModel + ' review') : 'Independent review'}">Independent review</div>
                     </div>
                 </div>
                 <!-- 5: Completion -->

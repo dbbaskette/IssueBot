@@ -55,6 +55,25 @@ public class TrackedIssue {
     @Column(name = "pr_number")
     private Integer prNumber;
 
+    @Column(name = "impl_model_override")
+    private String implModelOverride;
+
+    @Column(name = "review_model_override")
+    private String reviewModelOverride;
+
+    @Column(name = "resolved_impl_model")
+    private String resolvedImplModel;
+
+    @Column(name = "resolved_review_model")
+    private String resolvedReviewModel;
+
+    @Column(name = "last_failure_reason", length = 2000)
+    private String lastFailureReason;
+
+    @Lob
+    @Column(name = "decomposition_proposal")
+    private String decompositionProposal;
+
     public TrackedIssue() {}
 
     public TrackedIssue(WatchedRepo repo, int issueNumber, String issueTitle) {
@@ -108,6 +127,24 @@ public class TrackedIssue {
 
     public Integer getPrNumber() { return prNumber; }
     public void setPrNumber(Integer prNumber) { this.prNumber = prNumber; }
+
+    public String getImplModelOverride() { return implModelOverride; }
+    public void setImplModelOverride(String implModelOverride) { this.implModelOverride = implModelOverride; }
+
+    public String getReviewModelOverride() { return reviewModelOverride; }
+    public void setReviewModelOverride(String reviewModelOverride) { this.reviewModelOverride = reviewModelOverride; }
+
+    public String getResolvedImplModel() { return resolvedImplModel; }
+    public void setResolvedImplModel(String resolvedImplModel) { this.resolvedImplModel = resolvedImplModel; }
+
+    public String getResolvedReviewModel() { return resolvedReviewModel; }
+    public void setResolvedReviewModel(String resolvedReviewModel) { this.resolvedReviewModel = resolvedReviewModel; }
+
+    public String getLastFailureReason() { return lastFailureReason; }
+    public void setLastFailureReason(String lastFailureReason) { this.lastFailureReason = lastFailureReason; }
+
+    public String getDecompositionProposal() { return decompositionProposal; }
+    public void setDecompositionProposal(String decompositionProposal) { this.decompositionProposal = decompositionProposal; }
 
     public List<Integer> getBlockerNumbers() {
         if (blockedByIssues == null || blockedByIssues.isBlank()) {

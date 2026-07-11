@@ -67,8 +67,10 @@ public class ConfigInitializer implements ApplicationRunner {
                   work-directory: ${user.home}/.issuebot/repos
 
                   claude-code:
+                    implementation-model: claude-opus-4-8
+                    review-model: claude-sonnet-5
+                    utility-model: claude-haiku-4-5
                     max-turns-per-invocation: 30
-                    model: claude-sonnet-4-5-20250929
                     timeout-minutes: 10
 
                   github:
@@ -100,15 +102,20 @@ public class ConfigInitializer implements ApplicationRunner {
         }
     }
 
-    private void syncRepositories() {
+    /**
+     * Creates a {@link WatchedRepo} for each configured repository that doesn't already exist
+     * in the database. Existing repos are left entirely alone — they're managed from the
+     * dashboard from that point on, and config.yml values must never clobber dashboard edits
+     * (branch, mode, iteration limits, etc.) on every restart.
+     */
+    void syncRepositories() {
+        int created = 0;
         for (IssueBotProperties.RepositoryConfig repoCfg : properties.getRepositories()) {
-            WatchedRepo repo = repoRepository.findByOwnerAndName(repoCfg.getOwner(), repoCfg.getName())
-                    .orElseGet(() -> {
-                        WatchedRepo r = new WatchedRepo(repoCfg.getOwner(), repoCfg.getName());
-                        log.info("Adding new watched repo: {}", repoCfg.fullName());
-                        return r;
-                    });
+            if (repoRepository.findByOwnerAndName(repoCfg.getOwner(), repoCfg.getName()).isPresent()) {
+                continue;
+            }
 
+            WatchedRepo repo = new WatchedRepo(repoCfg.getOwner(), repoCfg.getName());
             repo.setBranch(repoCfg.getBranch());
             repo.setMode(parseMode(repoCfg.getMode()));
             repo.setMaxIterations(repoCfg.getMaxIterations());
@@ -123,8 +130,10 @@ public class ConfigInitializer implements ApplicationRunner {
             }
 
             repoRepository.save(repo);
+            created++;
+            log.info("Adding new watched repo: {}", repoCfg.fullName());
         }
-        log.info("Synced {} repositories from config", properties.getRepositories().size());
+        log.info("Synced {} new repositories from config (existing repos are managed from the dashboard)", created);
     }
 
     private RepoMode parseMode(String mode) {

@@ -4,11 +4,11 @@
 ![Java](https://img.shields.io/badge/java-21-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)
 
-An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI (Opus), runs independent code review (Sonnet), and delivers pull requests.
+An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI, runs an independent code review with a separate model, and delivers pull requests.
 
 ## How It Works
 
-IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: **Opus** writes the code, **Sonnet** reviews it independently.
+IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. Both roles are configurable from the dashboard at the global, per-repo, and per-issue level (defaults: Opus 4.8 for implementation, Sonnet 5 for review).
 
 ```mermaid
 flowchart LR
@@ -22,7 +22,7 @@ flowchart LR
     E -->|Pass| H[Create PR]
     H --> I[Code Review<br>Sonnet]
     I -->|Fail| D
-    I -->|Pass| J[Follow-Up<br>Issue?]
+    I -->|Pass| J[Backlog<br>Findings]
     J --> K[Finalize &<br>Auto-Merge]
     K --> L[Done]
 ```
@@ -32,29 +32,32 @@ flowchart LR
 | Phase | What Happens | Model |
 |-------|-------------|-------|
 | **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
-| **2. Implementation** | Claude Code CLI writes code based on issue spec | Opus |
+| **2. Implementation** | Claude Code CLI writes code based on issue spec | Implementation model (default Opus 4.8) |
 | **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
 | **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
-| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Sonnet |
-| **6. Completion** | Post review to PR, create follow-up issue for non-blocking findings (max one follow-up level), auto-merge if configured | - |
+| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (default Sonnet 5) |
+| **6. Completion** | Post review to PR, route non-blocking review findings per repo setting (default: deduplicated rolling backlog issue), auto-merge if configured | - |
 
 If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
 
 ## Key Features
 
-- **Dual-Model Architecture** - Opus (implementation) + Sonnet (independent review) for checks and balances
+- **Dual-Model Architecture** - Implementation and review use independently configurable models (default: Opus 4.8 for implementation, Sonnet 5 for review), settable at the global, per-repo, and per-issue level for checks and balances
 - **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
 - **Independent Code Review** - Sonnet evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
 - **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
-- **Follow-Up Issues** - Non-blocking review findings (medium/low severity) are captured as a follow-up GitHub issue so they aren't lost after merge; follow-up issues do not spawn additional follow-up issues
+- **Noise-Controlled Findings** - Non-blocking review findings are routed per the per-repo `follow-up-mode` setting: `ROLLING_BACKLOG` (default) dedupes findings into a single per-repo backlog issue capped at 50 items, `COMMENT_ONLY` posts a summary comment on the original issue instead of opening a new one, `PER_ISSUE` is the legacy one-follow-up-issue-per-completed-issue behavior, and `OFF` keeps findings in the PR review comment only
+- **Approval-Gated Issue Splitting** - When an issue is too large, IssueBot proposes a sub-issue breakdown and waits for you to approve or reject it from the dashboard (`PROPOSE`, the default); `AUTO` creates sub-issues immediately and `OFF` disables splitting, all per repo. One split level only (sub-issues are never re-split further), capped at 10 open sub-issues per repo, and the parent stays open as a tracking issue that auto-closes once all sub-issues are closed
 - **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
 - **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
+- **Cancel Running Issues** - A Stop button on the issue-detail page kills the running Claude Code process at the next workflow checkpoint
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration
 - **Security Review** - Optional OWASP-focused security analysis per repository (injection, auth, data exposure, access control)
 - **Iteration Guardrails** - Separate budgets for implementation iterations (default: 2) and review iterations, `needs-human` escalation when retries are exhausted
 - **Issue Dependency Resolution** - Uses GitHub's native issue dependencies (`blockedBy` relationships) with body-text fallback, processes issues in topological order
 - **CI Template Generation** - Auto-generates GitHub Actions workflows (Maven, Gradle, Node, Go) for repos without CI
 - **Dual Mode** - Fully autonomous (auto-merge) or approval-gated (draft PRs with human review)
+- **Honest Approvals** - Approving an issue can optionally squash-merge its PR directly from the dashboard, with inline CI status shown before you approve
 - **Dashboard Authentication** - Optional username/password login via environment variables
 - **Web Dashboard** - Liquid-glass UI with a light/dark theme toggle, real-time monitoring (live terminal streaming with scroll-lock/copy, phase pipeline, iteration history with colorized diffs, review scores), drill-through metric tiles, and keyboard-accessible navigation — mobile-responsive with hamburger menu
 - **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns, a per-repo cost chart, and sortable cost tables
@@ -137,8 +140,9 @@ issuebot:
   max-concurrent-issues: 3
 
   claude-code:
-    implementation-model: claude-opus-4-6
-    review-model: claude-sonnet-4-6
+    implementation-model: claude-opus-4-8
+    review-model: claude-sonnet-5
+    utility-model: claude-haiku-4-5
     max-turns-per-invocation: 30
     timeout-minutes: 10
     review-max-turns: 15
@@ -158,6 +162,11 @@ issuebot:
       ci-enabled: true
       ci-timeout-minutes: 15
       auto-merge: false
+      follow-up-mode: ROLLING_BACKLOG
+      decomposition-mode: PROPOSE
+      pre-screen-enabled: true
+      # implementation-model: claude-opus-4-8   # optional per-repo override; omit to inherit global
+      # review-model: claude-sonnet-5           # optional per-repo override; omit to inherit global
       allowed-paths:
         - src/
         - test/
@@ -174,6 +183,11 @@ issuebot:
 | `ci-enabled` | `true` | Push and poll GitHub Actions after implementation |
 | `ci-timeout-minutes` | `15` | How long to wait for CI checks |
 | `auto-merge` | `false` | Auto-merge PRs via squash after review passes |
+| `follow-up-mode` | `ROLLING_BACKLOG` | How non-blocking review findings are captured: `ROLLING_BACKLOG` (deduped per-repo backlog issue, capped at 50 items), `COMMENT_ONLY` (summary comment on the original issue), `PER_ISSUE` (legacy: one follow-up issue per completed issue), or `OFF` (PR review comment only) |
+| `decomposition-mode` | `PROPOSE` | How oversized issues are split: `PROPOSE` (bot proposes, you approve from the dashboard), `AUTO` (legacy: splits immediately), or `OFF` (never split, escalate instead) |
+| `pre-screen-enabled` | `true` | Run a cheap utility-model pass before implementation to catch oversized issues early |
+| `implementation-model` | inherit global | Per-repo override of the implementation model |
+| `review-model` | inherit global | Per-repo override of the review model |
 
 ### Issue Dependencies
 

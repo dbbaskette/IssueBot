@@ -549,6 +549,33 @@ main {
     color: var(--info);
     border-color: rgba(2,132,199,0.3);
 }
+.status-awaiting_decomposition {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: rgba(180,83,9,0.3);
+}
+
+/* CI status badges (approval cards) */
+.ci-passed {
+    background: var(--ok-soft);
+    color: var(--ok);
+    border-color: rgba(20,184,166,0.3);
+}
+.ci-failed {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: rgba(244,63,94,0.3);
+}
+.ci-pending {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: rgba(180,83,9,0.3);
+}
+.ci-unknown {
+    background: rgba(148,163,184,0.15);
+    color: var(--text-secondary);
+    border-color: rgba(148,163,184,0.3);
+}
 
 /* ============================================================
    Data tables — glass operations log
