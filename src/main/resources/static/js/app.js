@@ -446,6 +446,110 @@
     if (el) { el.value = (val == null ? '' : val); }
   }
 
+  // --- Autonomy presets -----------------------------------------------
+  // "Observe / Assist / Autonomous" are pure client-side sugar over six
+  // existing fields — nothing new is posted (the <select> has no [name]).
+  // AUTONOMY_FIELD_META maps each mapped field to its element id + how to
+  // read/write it, so the preset-application and preset-derivation code
+  // below share one source of truth for "which fields are mapped."
+  var AUTONOMY_FIELD_META = {
+    mode: { id: 'mode', type: 'value' },
+    autoStart: { id: 'auto-start', type: 'checked' },
+    autoMerge: { id: 'auto-merge', type: 'checked' },
+    decompositionMode: { id: 'decomposition-mode', type: 'value' },
+    followUpMode: { id: 'follow-up-mode', type: 'value' },
+    planFirst: { id: 'plan-first', type: 'checked' }
+  };
+  var AUTONOMY_FIELD_IDS = Object.keys(AUTONOMY_FIELD_META).map(function (key) {
+    return AUTONOMY_FIELD_META[key].id;
+  });
+
+  var AUTONOMY_PRESETS = {
+    OBSERVE: {
+      mode: 'APPROVAL_GATED', autoStart: false, autoMerge: false,
+      decompositionMode: 'PROPOSE', followUpMode: 'COMMENT_ONLY', planFirst: true
+    },
+    ASSIST: {
+      mode: 'APPROVAL_GATED', autoStart: true, autoMerge: false,
+      decompositionMode: 'PROPOSE', followUpMode: 'ROLLING_BACKLOG', planFirst: false
+    },
+    AUTONOMOUS: {
+      mode: 'AUTONOMOUS', autoStart: true, autoMerge: true,
+      decompositionMode: 'AUTO', followUpMode: 'ROLLING_BACKLOG', planFirst: false
+    }
+  };
+
+  var AUTONOMY_PRESET_DESCRIPTIONS = {
+    OBSERVE: 'Nothing happens without your approval — plans, splits, and merges all wait for you.',
+    ASSIST: 'IssueBot works automatically but PRs wait for your approval.',
+    AUTONOMOUS: 'Full autopilot — auto-start, auto-merge, automatic splitting.',
+    CUSTOM: 'Your own combination of the advanced settings below.'
+  };
+
+  function updatePresetDescription(name) {
+    var el = document.getElementById('preset-description');
+    if (el) { el.textContent = AUTONOMY_PRESET_DESCRIPTIONS[name] || AUTONOMY_PRESET_DESCRIPTIONS.CUSTOM; }
+  }
+
+  function setAdvancedOpen(open) {
+    var details = document.getElementById('advanced-settings');
+    if (details) { details.open = !!open; }
+  }
+
+  // Reads the six mapped fields' current values off the DOM.
+  function readAutonomyValues() {
+    var values = {};
+    Object.keys(AUTONOMY_FIELD_META).forEach(function (key) {
+      var meta = AUTONOMY_FIELD_META[key];
+      var el = document.getElementById(meta.id);
+      values[key] = el ? (meta.type === 'checked' ? el.checked : el.value) : null;
+    });
+    return values;
+  }
+
+  function matchesPreset(values, preset) {
+    return Object.keys(AUTONOMY_FIELD_META).every(function (key) {
+      return values[key] === preset[key];
+    });
+  }
+
+  // Returns 'OBSERVE' | 'ASSIST' | 'AUTONOMOUS' if the six mapped fields
+  // exactly match a known preset, else 'CUSTOM'.
+  function derivePreset() {
+    var current = readAutonomyValues();
+    var names = ['OBSERVE', 'ASSIST', 'AUTONOMOUS'];
+    for (var i = 0; i < names.length; i++) {
+      if (matchesPreset(current, AUTONOMY_PRESETS[names[i]])) { return names[i]; }
+    }
+    return 'CUSTOM';
+  }
+
+  // Updates the preset <select> + description text, and — only when
+  // `allowCollapse` is true — the Advanced-settings open/closed state.
+  // Manual edits to a mapped field must flip the selector to Custom
+  // WITHOUT collapsing the section the user is actively editing, so that
+  // path calls this with allowCollapse=false.
+  function syncPresetUi(name, allowCollapse) {
+    var select = document.getElementById('autonomy-preset');
+    if (select) { select.value = name; }
+    updatePresetDescription(name);
+    if (allowCollapse) { setAdvancedOpen(name === 'CUSTOM'); }
+  }
+
+  // Applies a named preset's field values (Custom is a no-op on the fields —
+  // it just opens Advanced so the user can see what they're working with).
+  function applyPreset(name) {
+    var preset = AUTONOMY_PRESETS[name];
+    if (preset) {
+      Object.keys(AUTONOMY_FIELD_META).forEach(function (key) {
+        var meta = AUTONOMY_FIELD_META[key];
+        if (meta.type === 'checked') { setChecked(meta.id, preset[key]); }
+        else { setValue(meta.id, preset[key]); }
+      });
+    }
+    syncPresetUi(name, true);
+  }
+
   // Stored allowedPaths is JSON (e.g. ["src/","test/"]); the form input is a
   // comma-separated string. Convert back, tolerating non-JSON/blank values.
   function allowedPathsToInput(raw) {
@@ -473,25 +577,26 @@
     setValue('owner', '');
     setValue('repo-name', '');
     setValue('branch', 'main');
-    setValue('mode', 'AUTONOMOUS');
     setValue('max-iterations', '5');
     setValue('max-review-iterations', '2');
     setValue('review-pass-threshold', '0.70');
     setValue('issue-budget-usd', '');
     setValue('implementation-model', '');
     setValue('review-model', '');
-    setChecked('auto-start', true);
-    setValue('follow-up-mode', 'ROLLING_BACKLOG');
-    setValue('decomposition-mode', 'PROPOSE');
     setChecked('pre-screen-enabled', true);
-    setChecked('plan-first', false);
-    setChecked('auto-merge', false);
     setChecked('security-review', false);
     setValue('allowed-paths', '');
     setValue('verification-commands', '');
     setChecked('ci-enabled', true);
     setValue('ci-timeout', '15');
     syncCiTimeout();
+    // The six autonomy-mapped fields (mode/autoStart/autoMerge/decompositionMode/
+    // followUpMode/planFirst) are set via the Assist preset — the blank-form
+    // default is "Assist", per #65. This makes the blank form's effective
+    // default mode APPROVAL_GATED (previously AUTONOMOUS, the <select>'s first
+    // option) — an intentional behavior change, since Assist maps mode to
+    // APPROVAL_GATED and Assist is now the documented default preset.
+    applyPreset('ASSIST');
   }
 
   function editRepoFromDataset(ds) {
@@ -520,6 +625,11 @@
     setChecked('ci-enabled', ds.ciEnabled);
     setValue('ci-timeout', ds.ciTimeoutMinutes);
     syncCiTimeout();
+    // Derive which preset (if any) the loaded repo's values match, so editing
+    // a repo whose config is exactly Assist/Observe/Autonomous shows that
+    // preset selected (and Advanced collapsed); a mixed config shows Custom
+    // (and Advanced expanded so the mismatched fields are visible).
+    syncPresetUi(derivePreset(), true);
   }
 
   // Show/hide the CI timeout field based on the CI-enabled checkbox.
@@ -554,6 +664,22 @@
   document.addEventListener('change', function (e) {
     if (e.target && e.target.id === 'ci-enabled') {
       syncCiTimeout();
+    }
+  });
+
+  // Delegated change handler for the autonomy preset select + its six mapped
+  // fields. Choosing a preset applies it (Custom is a no-op on the fields —
+  // just opens Advanced). Manually editing a mapped field re-derives the
+  // preset and flips the selector to Custom (or back) without touching the
+  // Advanced open/closed state, since the user is actively looking at it.
+  document.addEventListener('change', function (e) {
+    if (!e.target || !e.target.id) { return; }
+    if (e.target.id === 'autonomy-preset') {
+      applyPreset(e.target.value);
+      return;
+    }
+    if (AUTONOMY_FIELD_IDS.indexOf(e.target.id) !== -1) {
+      syncPresetUi(derivePreset(), false);
     }
   });
 
