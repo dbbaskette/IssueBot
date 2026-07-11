@@ -153,6 +153,7 @@ public class IssueController {
                         @RequestParam(required = false) String instructions,
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
+                        @RequestParam(required = false) BigDecimal budgetOverrideUsd,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -190,6 +191,7 @@ public class IssueController {
         issue.setCooldownUntil(null);
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
+        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         issueRepository.save(issue);
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
@@ -221,6 +223,7 @@ public class IssueController {
     public String start(@PathVariable Long id,
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
+                        @RequestParam(required = false) BigDecimal budgetOverrideUsd,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -241,6 +244,7 @@ public class IssueController {
         issue.setCurrentPhase(null);
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
+        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         issueRepository.save(issue);
 
         eventService.log("MANUAL_START",
@@ -401,6 +405,35 @@ public class IssueController {
     }
 
     /**
+     * Blank binds to null already (Spring converts an empty numeric field to null);
+     * a negative value is nonsensical for a spend ceiling — both mean "unlimited".
+     * A blank submission on retry explicitly clears any previous override, matching
+     * the model-override fields' semantics — mirrors RepositoryController's helper.
+     */
+    private static BigDecimal normalizeBudget(BigDecimal value) {
+        if (value == null) return null;
+        if (value.compareTo(BigDecimal.ZERO) < 0) return null;
+        return value;
+    }
+
+    /**
+     * Clamped 0–100 integer spend percentage for the Goal-card budget bar, computed
+     * server-side so the template never divides — a $0.00 budget (reachable: the form
+     * allows min=0 and normalizeBudget only rejects negatives) would render width:NaN%.
+     * A zero budget counts as fully exhausted once anything was spent, and 0% when
+     * nothing was. Rounds down so the ≥80% warning state doesn't fire early; clamps at
+     * 100 so the bar never overflows. Package-private for the template render test.
+     */
+    static int budgetPct(BigDecimal spent, BigDecimal budget) {
+        if (budget == null) return 0;
+        if (spent == null || spent.signum() <= 0) return 0;
+        if (budget.signum() <= 0) return 100;
+        BigDecimal pct = spent.multiply(BigDecimal.valueOf(100))
+                .divide(budget, 0, java.math.RoundingMode.DOWN);
+        return pct.compareTo(BigDecimal.valueOf(100)) >= 0 ? 100 : pct.intValue();
+    }
+
+    /**
      * Check repo-level and global concurrency gates. Returns null if clear,
      * or an error message explaining why the issue cannot start.
      * Pass a pre-fetched PR list to avoid re-fetching, or null to fetch fresh.
@@ -482,6 +515,10 @@ public class IssueController {
         model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        BigDecimal effectiveBudget = issue.effectiveBudgetUsd();
+        model.addAttribute("issueSpent", totalCost);
+        model.addAttribute("effectiveBudget", effectiveBudget);
+        model.addAttribute("budgetPct", budgetPct(totalCost, effectiveBudget));
 
         if (issue.getStatus() == IssueStatus.AWAITING_DECOMPOSITION && issue.getDecompositionProposal() != null) {
             try {

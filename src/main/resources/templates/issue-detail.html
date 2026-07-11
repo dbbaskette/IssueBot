@@ -98,9 +98,28 @@
             </div>
 
             <div class="flex-between mb-1">
-                <span class="text-sm">Budget</span>
+                <span class="text-sm">Iteration budget</span>
                 <span class="text-sm"
                       th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
+            </div>
+
+            <!--/* Cost budget progress bar — only shown when an effective budget (issue
+                   override, else repo default) is configured; unlimited issues show nothing here.
+                   budgetPct is a clamped 0–100 integer computed in IssueController#budgetPct so
+                   the template never divides (a $0.00 budget would render width:NaN%).
+                   Parser-level comment: stripped from output so the render tests can assert
+                   on the absence of these words. */-->
+            <div class="mb-1" th:if="${effectiveBudget != null}">
+                <div class="flex-between mb-1">
+                    <span class="text-sm">Cost budget</span>
+                    <span class="text-sm"
+                          th:text="${'$' + #numbers.formatDecimal(issueSpent, 1, 2) + ' of $' + #numbers.formatDecimal(effectiveBudget, 1, 2)}">$1.84 of $5.00</span>
+                </div>
+                <div class="budget-bar-track">
+                    <div class="budget-bar-fill"
+                         th:classappend="${budgetPct >= 100 ? 'over' : (budgetPct >= 80 ? 'warning' : '')}"
+                         th:style="'width:' + ${budgetPct} + '%'"></div>
+                </div>
             </div>
 
             <div class="text-sm text-muted">
@@ -134,6 +153,12 @@
                         <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                     </select>
                 </div>
+                <div class="field-group">
+                    <label for="retryBudgetOverride">Budget for this issue (USD, blank = use repo setting)</label>
+                    <input type="number" id="retryBudgetOverride" name="budgetOverrideUsd"
+                           step="0.50" min="0" placeholder="unlimited">
+                    <p class="text-sm text-muted" style="margin:0.25rem 0 0">Spend is cumulative for this issue's lifetime and is not reset by retrying — raise the budget here if it was exhausted. Blank clears any previous override, same as the model overrides above.</p>
+                </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Start Retry</button>
@@ -162,6 +187,11 @@
                         <option value="" selected>Use repo/global setting</option>
                         <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                     </select>
+                </div>
+                <div class="field-group">
+                    <label for="startBudgetOverride">Budget for this issue (USD, blank = use repo setting)</label>
+                    <input type="number" id="startBudgetOverride" name="budgetOverrideUsd"
+                           step="0.50" min="0" placeholder="unlimited">
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>

@@ -337,6 +337,43 @@ class IssueWorkflowServiceTest {
                 argThat(text -> text != null && text.contains("Addressed the review findings")));
     }
 
+    // === Cost budgets (#66) ===
+    // Budget-precedence tests live in TrackedIssueTest — effectiveBudgetUsd() is the
+    // entity's own derivation, shared by this service's overBudget and IssueController.
+
+    @Test
+    void overBudget_falseWhenNoBudgetConfigured() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+
+        assertFalse(workflowService.overBudget(issue));
+        verify(costRepository, never()).totalCostForIssue(any());
+        verify(iterationManager, never()).handleBudgetExceeded(any(), any(), any());
+    }
+
+    @Test
+    void overBudget_falseWhenUnderBudget() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setIssueBudgetUsd(new java.math.BigDecimal("5.00"));
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        when(costRepository.totalCostForIssue(issue)).thenReturn(new java.math.BigDecimal("2.00"));
+
+        assertFalse(workflowService.overBudget(issue));
+        verify(iterationManager, never()).handleBudgetExceeded(any(), any(), any());
+    }
+
+    @Test
+    void overBudget_trueAndEscalatesWhenExceeded() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setIssueBudgetUsd(new java.math.BigDecimal("0.01"));
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        when(costRepository.totalCostForIssue(issue)).thenReturn(new java.math.BigDecimal("0.50"));
+
+        assertTrue(workflowService.overBudget(issue));
+        verify(iterationManager).handleBudgetExceeded(issue,
+                new java.math.BigDecimal("0.50"), new java.math.BigDecimal("0.01"));
+    }
+
     /**
      * When reviewCode() throws, currentReviewIteration must remain unchanged
      * and the issue must NOT be saved with an incremented review iteration.

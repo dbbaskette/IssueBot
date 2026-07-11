@@ -729,6 +729,57 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
+    // === Test 18 (#66): The budget check must genuinely fire at the post-implementation
+    //     checkpoint: the loop-top check sees spend still under the $0.01 budget, so
+    //     iteration 1 runs; the checkpoint right after implementation sees $0.50 and must
+    //     halt there — implementation ran exactly once, no PR created, BUDGET_EXCEEDED
+    //     escalation via IterationManager. ===
+    @Test
+    void budgetExceeded_haltsAtPostImplementationCheckpoint_noPrCreated() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setIssueBudgetUsd(new BigDecimal("0.01"));
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // 1st checkpoint (loop top): $0.005 — under budget, iteration proceeds.
+        // 2nd checkpoint (post-implementation): $0.50 — over budget, halt.
+        when(costRepository.totalCostForIssue(issue))
+                .thenReturn(new BigDecimal("0.005"), new BigDecimal("0.50"));
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        workflowService.processIssue(issue);
+
+        verify(claudeCode, times(1)).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any());
+        verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
+        verify(gitHubApi, never()).createPullRequest(any(), any(), any(), any(), any(), any(), anyBoolean());
+    }
+
+    // === Test 19 (#66): An issue-level budget override wins over the repo default —
+    //     the loop-top checkpoint already sees the spend over the stricter override, so
+    //     the run halts before implementation even starts. No budget anywhere is zero
+    //     behavior change (covered by happyPath_fullPipelineSuccess, which sets neither). ===
+    @Test
+    void budgetOverride_winsOverRepoDefault() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setIssueBudgetUsd(new BigDecimal("100.00")); // repo default would allow this spend
+        issue.setBudgetOverrideUsd(new BigDecimal("0.01")); // issue override is much stricter
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(costRepository.totalCostForIssue(issue)).thenReturn(new BigDecimal("0.50"));
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+
+        workflowService.processIssue(issue);
+
+        verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
+        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any());
+    }
+
     // === Test 14: An exception thrown by local verification is treated as a failed
     //     check and routes through the retry path instead of escaping the workflow ===
     @Test

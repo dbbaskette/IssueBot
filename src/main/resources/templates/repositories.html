@@ -65,6 +65,11 @@
                                value="0.70" min="0.5" max="0.95" step="0.05">
                     </div>
                     <div class="field-group">
+                        <label for="issue-budget-usd">Issue budget (USD, blank = unlimited)</label>
+                        <input type="number" id="issue-budget-usd" name="issueBudgetUsd"
+                               step="0.50" min="0" placeholder="unlimited">
+                    </div>
+                    <div class="field-group">
                         <label for="implementation-model">Implementation model (blank = inherit global)</label>
                         <select id="implementation-model" name="implementationModel">
                             <option value="">Inherit global</option>
@@ -221,6 +226,7 @@
                                              data-security-review-enabled=${repo.securityReviewEnabled},
                                              data-max-review-iterations=${repo.maxReviewIterations},
                                              data-review-pass-threshold=${repo.reviewPassThreshold},
+                                             data-issue-budget-usd=${repo.issueBudgetUsd},
                                              data-auto-start=${repo.autoStart},
                                              data-follow-up-mode=${repo.followUpMode.name()},
                                              data-decomposition-mode=${repo.decompositionMode.name()},

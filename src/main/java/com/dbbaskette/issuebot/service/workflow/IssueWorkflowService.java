@@ -225,7 +225,7 @@ public class IssueWorkflowService {
             trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
             repo = trackedIssue.getRepo();
 
-            if (cancelled(trackedIssue)) return;
+            if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             // Consume any operator guidance queued since the last checkpoint (issue #63).
             // Guidance lives in its own insert-only table — never on TrackedIssue, whose
@@ -282,7 +282,7 @@ public class IssueWorkflowService {
                 continue;
             }
 
-            if (cancelled(trackedIssue)) return;
+            if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             if (!implResult.isSuccess()) {
                 log.warn("Claude Code returned failure for iteration {}", iterationNum);
@@ -438,7 +438,7 @@ public class IssueWorkflowService {
                 continue;
             }
 
-            if (cancelled(trackedIssue)) return;
+            if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             // === Phase 4: PR Creation (draft) ===
             try {
@@ -456,7 +456,7 @@ public class IssueWorkflowService {
                 return;
             }
 
-            if (cancelled(trackedIssue)) return;
+            if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             // === Phase 5: Independent Review (Sonnet) ===
             trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
@@ -545,6 +545,23 @@ public class IssueWorkflowService {
         eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
                 trackedIssue.getRepo(), trackedIssue);
         cancellationService.clear(trackedIssue.getId());
+        return true;
+    }
+
+    /**
+     * Checkpoint: true (and escalates via {@link IterationManager#handleBudgetExceeded})
+     * when the issue's effective budget ({@link TrackedIssue#effectiveBudgetUsd()}:
+     * issue override, else repo default, else unlimited) has been exhausted by
+     * cumulative spend. Callers must return immediately when this returns true —
+     * same contract as {@link #cancelled}. A manual retry does NOT reset spend;
+     * raising the budget is the escape hatch.
+     */
+    boolean overBudget(TrackedIssue trackedIssue) {
+        BigDecimal budget = trackedIssue.effectiveBudgetUsd();
+        if (budget == null) return false;
+        BigDecimal spent = costRepository.totalCostForIssue(trackedIssue);
+        if (spent == null || spent.compareTo(budget) <= 0) return false;
+        iterationManager.handleBudgetExceeded(trackedIssue, spent, budget);
         return true;
     }
 

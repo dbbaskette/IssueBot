@@ -11,11 +11,16 @@ import com.dbbaskette.issuebot.service.notification.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class IterationManagerTest {
@@ -203,6 +208,30 @@ class IterationManagerTest {
         // For handleRetrySkipped, the notificationDetail passed through to
         // escalateFailure IS the reason string itself.
         assertEquals(reason, issue.getLastFailureReason());
+    }
+
+    @Test
+    void handleBudgetExceeded_persistsFailureReasonAndEscalates() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setBranchName("issuebot/issue-1-test");
+
+        iterationManager.handleBudgetExceeded(issue,
+                new BigDecimal("0.50"), new BigDecimal("0.01"));
+
+        assertTrue(issue.getLastFailureReason().contains("Budget exceeded"),
+                "failure reason must mention the budget was exceeded");
+        assertTrue(issue.getLastFailureReason().contains("$0.50"));
+        assertTrue(issue.getLastFailureReason().contains("$0.01"));
+        // escalateFailure sets FAILED then immediately enters cooldown
+        assertEquals(IssueStatus.COOLDOWN, issue.getStatus());
+        assertNotNull(issue.getCooldownUntil());
+
+        verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(1), eq(List.of("needs-human")));
+        verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(1),
+                argThat(comment -> comment.contains("Budget Exceeded")));
+        verify(eventService).log(eq("BUDGET_EXCEEDED"), anyString(), any(), eq(issue));
+        verify(notificationService).warn(eq("Budget Exceeded"), anyString());
     }
 
     @Test

@@ -477,6 +477,7 @@
     setValue('max-iterations', '5');
     setValue('max-review-iterations', '2');
     setValue('review-pass-threshold', '0.70');
+    setValue('issue-budget-usd', '');
     setValue('implementation-model', '');
     setValue('review-model', '');
     setChecked('auto-start', true);
@@ -503,6 +504,7 @@
     setValue('max-iterations', ds.maxIterations);
     setValue('max-review-iterations', ds.maxReviewIterations);
     setValue('review-pass-threshold', ds.reviewPassThreshold);
+    setValue('issue-budget-usd', ds.issueBudgetUsd);
     setValue('implementation-model', ds.implementationModel);
     setValue('review-model', ds.reviewModel);
     setChecked('auto-start', ds.autoStart);
