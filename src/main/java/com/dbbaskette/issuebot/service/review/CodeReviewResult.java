@@ -21,7 +21,8 @@ public record CodeReviewResult(
         long inputTokens,
         long outputTokens,
         String modelUsed,
-        java.math.BigDecimal costUsd
+        java.math.BigDecimal costUsd,
+        List<CriterionVerdict> criteria
 ) {
     public record ReviewFinding(
             String severity,
@@ -33,6 +34,29 @@ public record CodeReviewResult(
     ) {}
 
     /**
+     * Per-criterion verdict from the independent review (issue #61).
+     * {@code verdict} is one of "met" / "unmet" / "unclear".
+     */
+    public record CriterionVerdict(String text, String verdict, String note) {
+
+        /**
+         * Lenient factory for model-supplied verdicts: matches "met"/"unmet"
+         * case-insensitively; anything else (unknown, missing) becomes "unclear".
+         */
+        public static CriterionVerdict lenient(String text, String verdict, String note) {
+            String normalized;
+            if ("met".equalsIgnoreCase(verdict)) {
+                normalized = "met";
+            } else if ("unmet".equalsIgnoreCase(verdict)) {
+                normalized = "unmet";
+            } else {
+                normalized = "unclear";
+            }
+            return new CriterionVerdict(text, normalized, note);
+        }
+    }
+
+    /**
      * Create a failed result for error cases (e.g. JSON parse failure).
      */
     public static CodeReviewResult failed(String reason, long inputTokens, long outputTokens, String model) {
@@ -40,7 +64,8 @@ public record CodeReviewResult(
                 false, reason,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                 List.of(), reason,
-                null, inputTokens, outputTokens, model, null
+                null, inputTokens, outputTokens, model, null,
+                List.of()
         );
     }
 }

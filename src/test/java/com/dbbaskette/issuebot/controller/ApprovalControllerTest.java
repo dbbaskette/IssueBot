@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
@@ -8,6 +9,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.ui.ExtendedModelMap;
@@ -197,5 +199,89 @@ class ApprovalControllerTest {
         verify(issues, never()).save(any());
         verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
         assertThat(outcome).isEqualTo("redirect:/approvals");
+    }
+
+    /**
+     * The approvals card's review score must surface per-criterion verdicts
+     * (issue #61) parsed from the iteration's stored review JSON.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    void reviewScoreIncludesParsedCriteriaVerdicts() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setReviewPassed(false);
+        iteration.setReviewModel("claude-sonnet-4-6");
+        iteration.setReviewJson("""
+                {"passed": false, "summary": "Missing one criterion",
+                 "specComplianceScore": 0.8, "correctnessScore": 0.8, "codeQualityScore": 0.8,
+                 "testCoverageScore": 0.8, "architectureFitScore": 0.8, "regressionsScore": 0.8,
+                 "securityScore": 1.0, "findings": [],
+                 "criteria": [
+                   {"text": "Button disables on invalid form", "verdict": "unmet", "note": "No handling found"},
+                   {"text": "Button changes color on hover", "verdict": "met", "note": ""}
+                 ]}
+                """);
+
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
+
+        ApprovalController controller = new ApprovalController(issues, iterations,
+                mock(IterationManager.class), mock(GitHubApiClient.class),
+                mock(EventService.class), mock(IssuePollingService.class));
+
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        Map<Long, ApprovalController.ReviewScore> reviewScores =
+                (Map<Long, ApprovalController.ReviewScore>) model.getAttribute("reviewScores");
+        assertThat(reviewScores).isNotNull();
+        ApprovalController.ReviewScore score = reviewScores.get(1L);
+        assertThat(score).isNotNull();
+        assertThat(score.criteria()).hasSize(2);
+        assertThat(score.criteria()).contains(
+                new CodeReviewResult.CriterionVerdict("Button disables on invalid form", "unmet", "No handling found"),
+                new CodeReviewResult.CriterionVerdict("Button changes color on hover", "met", ""));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void reviewScoreWithoutCriteriaHasEmptyCriteriaList() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setReviewPassed(true);
+        iteration.setReviewModel("claude-sonnet-4-6");
+        iteration.setReviewJson("""
+                {"passed": true, "summary": "All good",
+                 "specComplianceScore": 0.9, "correctnessScore": 0.9, "codeQualityScore": 0.9,
+                 "testCoverageScore": 0.9, "architectureFitScore": 0.9, "regressionsScore": 0.9,
+                 "securityScore": 1.0, "findings": []}
+                """);
+
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
+
+        ApprovalController controller = new ApprovalController(issues, iterations,
+                mock(IterationManager.class), mock(GitHubApiClient.class),
+                mock(EventService.class), mock(IssuePollingService.class));
+
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        Map<Long, ApprovalController.ReviewScore> reviewScores =
+                (Map<Long, ApprovalController.ReviewScore>) model.getAttribute("reviewScores");
+        assertThat(reviewScores.get(1L).criteria()).isEmpty();
     }
 }

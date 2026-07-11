@@ -66,7 +66,7 @@ class FollowUpServiceTest {
                 List.of(findings),
                 "advice",
                 "{\"passed\":true}",
-                1000, 500, "claude-sonnet-4-6", null);
+                1000, 500, "claude-sonnet-4-6", null, List.of());
     }
 
     // === Mode routing ===

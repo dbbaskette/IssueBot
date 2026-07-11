@@ -18,15 +18,19 @@ public class ReviewPromptBuilder {
      * @param issueBody       The GitHub issue body with requirements/acceptance criteria
      * @param changedFiles    List of files changed in the implementation
      * @param diff            Full diff vs. base branch
+     * @param criteria        Acceptance criteria parsed from the issue body (issue #61);
+     *                        when empty, the prompt is identical to the no-criteria case
      * @param securityReview  Whether to include security review dimension
      * @param threshold       Minimum score (0.0-1.0) each dimension must meet for the review to pass
      * @return The complete review prompt string
      */
     public String buildReviewPrompt(String issueTitle, String issueBody,
                                       List<String> changedFiles, String diff,
+                                      List<String> criteria,
                                       boolean securityReview, double threshold) {
         // Locale.ROOT: the prompt must always render "0.70", never "0,70"
         String thresholdText = String.format(java.util.Locale.ROOT, "%.2f", threshold);
+        List<String> effectiveCriteria = criteria != null ? criteria : List.of();
         StringBuilder prompt = new StringBuilder();
 
         prompt.append("""
@@ -49,6 +53,10 @@ public class ReviewPromptBuilder {
 
         for (String file : changedFiles) {
             prompt.append("- `").append(file).append("`\n");
+        }
+
+        if (!effectiveCriteria.isEmpty()) {
+            prompt.append(buildCriteriaSection(effectiveCriteria));
         }
 
         prompt.append("""
@@ -84,6 +92,11 @@ public class ReviewPromptBuilder {
             prompt.append(buildSecuritySection());
         }
 
+        String criteriaResponseFormatAddition = effectiveCriteria.isEmpty()
+                ? "" : buildCriteriaResponseFormatAddition();
+        String criteriaRuleAddition = effectiveCriteria.isEmpty()
+                ? "" : "- Set \"passed\" to false if ANY acceptance criterion verdict is \"unmet\"";
+
         prompt.append("""
 
                 ## Response Format
@@ -99,21 +112,36 @@ public class ReviewPromptBuilder {
                 "file": "src/main/java/Example.java", "line": 42, \
                 "finding": "Description of issue", "suggestion": "How to fix it"}], \
                 "advice": "Overall advice for the implementing agent"}
-
+                %s
                 **Rules for pass/fail:**
                 - Set "passed" to true ONLY if ALL scores are >= %s AND there are no high-severity findings
                 - Set "passed" to false if ANY score is below %s OR there are high-severity findings
-
+                %s
                 **Valid categories:** spec_compliance, correctness, code_quality, test_coverage, \
                 architecture_fit, regressions, security
                 **Valid severities:** high, medium, low
-                """.formatted(thresholdText, thresholdText));
+                """.formatted(criteriaResponseFormatAddition, thresholdText, thresholdText, criteriaRuleAddition));
 
         if (!securityReview) {
             prompt.append("\nOmit securityScore from the response (set to 1.0) since security review is not enabled.\n");
         }
 
         return prompt.toString();
+    }
+
+    private String buildCriteriaSection(List<String> criteria) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n## Acceptance Criteria (score each)\n\n");
+        for (int i = 0; i < criteria.size(); i++) {
+            sb.append(i + 1).append(". ").append(criteria.get(i)).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private String buildCriteriaResponseFormatAddition() {
+        return "Also include a \"criteria\" array with one verdict entry per acceptance criterion "
+                + "listed above, in the same order: "
+                + "\"criteria\": [{\"text\": \"...\", \"verdict\": \"met\" | \"unmet\" | \"unclear\", \"note\": \"why\"}]";
     }
 
     private String buildSecuritySection() {

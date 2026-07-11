@@ -119,7 +119,7 @@ class IntegrationWorkflowTest {
                 true, "All looks good",
                 0.9, 0.9, 0.85, 0.8, 0.9, 0.95, 1.0,
                 List.of(), "No issues found",
-                "{\"passed\":true}", 500, 300, "claude-sonnet-4-6", null);
+                "{\"passed\":true}", 500, 300, "claude-sonnet-4-6", null, List.of());
     }
 
     private CodeReviewResult failedReview() {
@@ -130,7 +130,7 @@ class IntegrationWorkflowTest {
                         "high", "test_coverage", "src/Service.java", 42,
                         "No tests for method", "Add unit test")),
                 "Add tests",
-                "{\"passed\":false}", 500, 300, "claude-sonnet-4-6", null);
+                "{\"passed\":false}", 500, 300, "claude-sonnet-4-6", null, List.of());
     }
 
     private void setupCommonMocks(TrackedIssue issue, ObjectNode issueDetails) throws Exception {
@@ -176,7 +176,7 @@ class IntegrationWorkflowTest {
 
         // Review passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -187,6 +187,48 @@ class IntegrationWorkflowTest {
         // Passing review delegates non-blocking findings routing to FollowUpService
         verify(followUpService).handleNonBlockingFindings(
                 eq(issue), any(), any(CodeReviewResult.class), eq(99));
+    }
+
+    // === Test 1b: Acceptance criteria parsed from the issue body are wired
+    //     through processIssue into reviewCode (issue #61) ===
+    @SuppressWarnings("unchecked")
+    @Test
+    void processIssue_passesParsedCriteriaToReviewCode() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        issueDetails.put("body", """
+                Users can't log in when password contains special characters.
+
+                ## Acceptance criteria
+
+                - [ ] Special characters are accepted in passwords
+                - [ ] Login failures are logged
+                """);
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any()))
+                .thenReturn(successResult());
+
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 300);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        var criteriaCaptor = ArgumentCaptor.forClass(List.class);
+        verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), (List<String>) criteriaCaptor.capture(),
+                anyBoolean(), anyDouble(), any());
+        assertEquals(List.of(
+                "Special characters are accepted in passwords",
+                "Login failures are logged"), criteriaCaptor.getValue());
     }
 
     // === Test 2: Review failure triggers re-implementation ===
@@ -214,7 +256,7 @@ class IntegrationWorkflowTest {
 
         // First review fails, second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -247,7 +289,7 @@ class IntegrationWorkflowTest {
 
         // Review fails
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(failedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(failedReview());
 
         // No more review iterations
         when(iterationManager.canReviewIterate(issue)).thenReturn(false);
@@ -334,7 +376,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(true))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -363,7 +405,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -429,7 +471,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -456,7 +498,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -496,7 +538,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean())).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
