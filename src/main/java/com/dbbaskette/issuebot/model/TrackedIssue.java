@@ -81,6 +81,23 @@ public class TrackedIssue {
     @Column(name = "claude_session_id", length = 64)
     private String claudeSessionId;
 
+    @Column(name = "plan_first_override")
+    private Boolean planFirstOverride;
+
+    @Lob
+    @Column(name = "implementation_plan")
+    private String implementationPlan;
+
+    @Column(name = "plan_approved", nullable = false)
+    private boolean planApproved = false;
+
+    @Column(name = "plan_rejections", nullable = false)
+    private int planRejections = 0;
+
+    @Lob
+    @Column(name = "plan_feedback")
+    private String planFeedback;
+
     public TrackedIssue() {}
 
     public TrackedIssue(WatchedRepo repo, int issueNumber, String issueTitle) {
@@ -159,6 +176,21 @@ public class TrackedIssue {
     public String getClaudeSessionId() { return claudeSessionId; }
     public void setClaudeSessionId(String claudeSessionId) { this.claudeSessionId = claudeSessionId; }
 
+    public Boolean getPlanFirstOverride() { return planFirstOverride; }
+    public void setPlanFirstOverride(Boolean planFirstOverride) { this.planFirstOverride = planFirstOverride; }
+
+    public String getImplementationPlan() { return implementationPlan; }
+    public void setImplementationPlan(String implementationPlan) { this.implementationPlan = implementationPlan; }
+
+    public boolean isPlanApproved() { return planApproved; }
+    public void setPlanApproved(boolean planApproved) { this.planApproved = planApproved; }
+
+    public int getPlanRejections() { return planRejections; }
+    public void setPlanRejections(int planRejections) { this.planRejections = planRejections; }
+
+    public String getPlanFeedback() { return planFeedback; }
+    public void setPlanFeedback(String planFeedback) { this.planFeedback = planFeedback; }
+
     /**
      * Effective spend ceiling for this issue (#66): the per-issue override wins over
      * the repo default; null means unlimited. Single source of truth for budget
@@ -166,6 +198,14 @@ public class TrackedIssue {
      */
     public BigDecimal effectiveBudgetUsd() {
         return budgetOverrideUsd != null ? budgetOverrideUsd : repo.getIssueBudgetUsd();
+    }
+
+    /**
+     * Effective plan-first setting for this issue (#64): the per-issue override wins
+     * over the repo default, mirroring {@link #effectiveBudgetUsd()}'s precedence.
+     */
+    public boolean effectivePlanFirst() {
+        return planFirstOverride != null ? planFirstOverride : repo.isPlanFirst();
     }
 
     public List<Integer> getBlockerNumbers() {

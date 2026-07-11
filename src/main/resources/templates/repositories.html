@@ -108,6 +108,10 @@
                         <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
                         <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
                     </div>
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="plan-first" name="planFirst" value="true">
+                        <label for="plan-first">Plan first — approve a plan before implementation</label>
+                    </div>
                 </div>
 
                 <!-- Safety -->
@@ -231,6 +235,7 @@
                                              data-follow-up-mode=${repo.followUpMode.name()},
                                              data-decomposition-mode=${repo.decompositionMode.name()},
                                              data-pre-screen-enabled=${repo.preScreenEnabled},
+                                             data-plan-first=${repo.planFirst},
                                              data-allowed-paths=${repo.allowedPaths},
                                              data-verification-commands=${repo.verificationCommands},
                                              data-implementation-model=${repo.implementationModel},

@@ -60,12 +60,20 @@ class RepositoryControllerTest {
                                  String followUpMode, String decompositionMode, boolean preScreenEnabled,
                                  BigDecimal reviewPassThreshold, String verificationCommands,
                                  BigDecimal issueBudgetUsd) {
+            return addOrUpdate(implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, reviewPassThreshold, verificationCommands, issueBudgetUsd, false);
+        }
+
+        WatchedRepo addOrUpdate(String implementationModel, String reviewModel,
+                                 String followUpMode, String decompositionMode, boolean preScreenEnabled,
+                                 BigDecimal reviewPassThreshold, String verificationCommands,
+                                 BigDecimal issueBudgetUsd, boolean planFirst) {
             org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
             controller.addOrUpdate(model, null, "acme", "widgets", "main", "AUTONOMOUS",
                     5, false, 15, false, false, 2, reviewPassThreshold, true, true, null,
                     verificationCommands,
                     implementationModel, reviewModel,
-                    followUpMode, decompositionMode, preScreenEnabled, issueBudgetUsd, null);
+                    followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd, null);
             ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
             verify(repos).save(captor.capture());
             return captor.getValue();
@@ -150,6 +158,24 @@ class RepositoryControllerTest {
                 false, new BigDecimal("0.70"), "# just a comment\n\n   \n# another\n");
 
         assertThat(saved.getVerificationCommands()).isNull();
+    }
+
+    @Test
+    void addOrUpdateStoresPlanFirst() {
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), null, null, true);
+
+        assertThat(saved.isPlanFirst()).isTrue();
+    }
+
+    @Test
+    void addOrUpdateDefaultsPlanFirstToFalse() {
+        // Unchecked checkbox posts nothing; @RequestParam(defaultValue = "false") applies —
+        // same binding pattern as preScreenEnabled/autoMerge.
+        WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
+                false, new BigDecimal("0.70"), null, null, false);
+
+        assertThat(saved.isPlanFirst()).isFalse();
     }
 
     @Test

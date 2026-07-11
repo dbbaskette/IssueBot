@@ -54,6 +54,11 @@
                 <div class="label"><i class="ti ti-git-fork"></i> Awaiting Split OK</div>
                 <div class="value" th:text="${awaitingDecomposition}">0</div>
             </a>
+            <a class="metric-tile is-link accent"
+               hx-get="/issues?status=AWAITING_PLAN_APPROVAL" hx-target="#content" hx-push-url="true">
+                <div class="label"><i class="ti ti-clipboard-check"></i> Awaiting Plan OK</div>
+                <div class="value" th:text="${awaitingPlanApproval}">0</div>
+            </a>
             <a class="metric-tile is-link"
                hx-get="/repositories" hx-target="#content" hx-push-url="true">
                 <div class="label"><i class="ti ti-folders"></i> Watched Repos</div>

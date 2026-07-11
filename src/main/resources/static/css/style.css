@@ -554,6 +554,11 @@ main {
     color: var(--warn);
     border-color: rgba(180,83,9,0.3);
 }
+.status-awaiting_plan_approval {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: rgba(180,83,9,0.3);
+}
 
 /* CI status badges (approval cards) */
 .ci-passed {

@@ -72,6 +72,9 @@ public class WatchedRepo {
     @Column(name = "pre_screen_enabled", nullable = false)
     private boolean preScreenEnabled = true;
 
+    @Column(name = "plan_first", nullable = false)
+    private boolean planFirst = false;
+
     @Column(name = "allowed_paths")
     @Lob
     private String allowedPaths;
@@ -163,6 +166,9 @@ public class WatchedRepo {
 
     public boolean isPreScreenEnabled() { return preScreenEnabled; }
     public void setPreScreenEnabled(boolean preScreenEnabled) { this.preScreenEnabled = preScreenEnabled; }
+
+    public boolean isPlanFirst() { return planFirst; }
+    public void setPlanFirst(boolean planFirst) { this.planFirst = planFirst; }
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }

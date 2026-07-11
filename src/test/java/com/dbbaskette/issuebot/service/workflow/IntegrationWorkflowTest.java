@@ -52,6 +52,7 @@ class IntegrationWorkflowTest {
     private NotificationService notificationService;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
+    private PlanFirstService planFirstService;
     private FollowUpService followUpService;
     private IssueGuidanceRepository guidanceRepository;
     private ObjectMapper objectMapper;
@@ -72,6 +73,7 @@ class IntegrationWorkflowTest {
         notificationService = mock(NotificationService.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
+        planFirstService = mock(PlanFirstService.class);
         followUpService = mock(FollowUpService.class);
         guidanceRepository = mock(IssueGuidanceRepository.class);
         objectMapper = new ObjectMapper();
@@ -82,6 +84,7 @@ class IntegrationWorkflowTest {
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
                 decompositionService,
+                planFirstService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
@@ -482,6 +485,119 @@ class IntegrationWorkflowTest {
 
         // Implementation still ran after decomposition failed
         verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    // === Plan-first mode (#64) ===
+
+    @Test
+    void planFirst_stopsAtAwaitingPlanApproval_withoutImplementation() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Simulate the real service: store the plan, park the issue, report success
+        when(planFirstService.proposePlan(eq(issue), any(), any())).thenAnswer(inv -> {
+            issue.setImplementationPlan("1. Touch FooService\n2. Add tests");
+            issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+            issue.setCurrentPhase(null);
+            return true;
+        });
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueStatus.AWAITING_PLAN_APPROVAL, issue.getStatus());
+        verify(planFirstService).proposePlan(eq(issue), any(), any());
+        // No implementation tokens spent before approval
+        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(iterationManager, never()).canIterate(any());
+    }
+
+    @Test
+    void planFirst_plannerFailure_proceedsWithImplementation() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Planner failed — proposePlan reports false and the workflow must fall through
+        when(planFirstService.proposePlan(eq(issue), any(), any())).thenReturn(false);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 400);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void planApproved_implementationPromptContainsApprovedPlan() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.setPlanApproved(true);
+        issue.setImplementationPlan("1. Touch FooService\n2. Add FooServiceTest");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 401);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        // Approved → the plan gate is skipped entirely and the plan is injected into the prompt
+        verify(planFirstService, never()).proposePlan(any(), any(), any());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        assertTrue(promptCaptor.getValue().contains("## Approved Plan"));
+        assertTrue(promptCaptor.getValue().contains("1. Touch FooService"));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void planFirstDisabled_neverInvokesPlanner_andPromptHasNoPlanSection() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 402);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        verifyNoInteractions(planFirstService);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        assertFalse(promptCaptor.getValue().contains("## Approved Plan"));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 

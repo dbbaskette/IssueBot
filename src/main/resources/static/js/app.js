@@ -484,6 +484,7 @@
     setValue('follow-up-mode', 'ROLLING_BACKLOG');
     setValue('decomposition-mode', 'PROPOSE');
     setChecked('pre-screen-enabled', true);
+    setChecked('plan-first', false);
     setChecked('auto-merge', false);
     setChecked('security-review', false);
     setValue('allowed-paths', '');
@@ -511,6 +512,7 @@
     setValue('follow-up-mode', ds.followUpMode);
     setValue('decomposition-mode', ds.decompositionMode);
     setChecked('pre-screen-enabled', ds.preScreenEnabled);
+    setChecked('plan-first', ds.planFirst);
     setChecked('auto-merge', ds.autoMerge);
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));
