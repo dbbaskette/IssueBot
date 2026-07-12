@@ -210,8 +210,19 @@ class IssueDetailLayoutRenderTest {
 
         assertThat(html).contains("id=\"retry-modal\"");
         assertThat(html).contains("modal-backdrop");
-        // The retry modal is physically after the grid's Goal/Timeline content, not interleaved
-        // inside .detail-grid-left/-right — see the MODALS comment in issue-detail.html.
-        assertThat(html.indexOf(">Goal<")).isLessThan(html.indexOf("id=\"retry-modal\""));
+        // The retry modal is physically after the ENTIRE grid — including the right
+        // column's terminal panel — not interleaved inside .detail-grid-left/-right.
+        // Anchoring on the grid-right marker (the last grid content) catches a modal
+        // accidentally nested anywhere inside the grid, which the old >Goal< anchor
+        // (left column, early) could not. See the MODALS comment in issue-detail.html.
+        int gridRight = html.indexOf("detail-grid-right");
+        int retryModal = html.indexOf("id=\"retry-modal\"");
+        assertThat(gridRight).isGreaterThan(-1);
+        assertThat(gridRight).isLessThan(retryModal);
+        // And no modal markup appears between the grid's start and the grid-right marker.
+        // Anchor on the real element's class attribute — a template comment also
+        // mentions "detail-grid" and must not be matched.
+        String insideGrid = html.substring(html.indexOf("class=\"detail-grid\""), gridRight);
+        assertThat(insideGrid).doesNotContain("modal-backdrop");
     }
 }
