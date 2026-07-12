@@ -13,7 +13,21 @@
         </div>
     </div>
 
+    <!-- Filters + search (#87) — one form; the hidden "page" field lets the SSE-triggered
+         /issues/table refresh (below) stay on whatever page the operator is viewing. A filter
+         or search change must NOT carry that stale page number into its own request (a filtered
+         result set may have fewer pages) — app.js's htmx:configRequest listener resets "page"
+         to 0 whenever the request was triggered by one of these fields directly, but leaves it
+         alone for the tbody's own SSE-triggered request and for pager link clicks (which pass
+         their own explicit page param). -->
     <form id="filter-form" class="filter-bar" onsubmit="return false">
+        <input type="hidden" name="page" th:value="${currentPage}">
+        <input type="search" name="q" th:value="${searchQuery}"
+               placeholder="Search title or #issue number"
+               aria-label="Search issues by title or number"
+               hx-get="/issues" hx-target="#content" hx-include="#filter-form"
+               hx-trigger="input changed delay:400ms, search"
+               hx-indicator="#issue-refresh-indicator">
         <select hx-get="/issues" hx-target="#content" name="status" hx-include="#filter-form"
                 hx-indicator="#issue-refresh-indicator">
             <option value="">All Statuses</option>
@@ -26,31 +40,96 @@
         </select>
     </form>
 
-    <div class="panel" hx-ext="sse" sse-connect="/api/events/stream">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Repo</th>
-                    <th>#</th>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Phase</th>
-                    <th>Iteration</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="issue-table-body"
-                   hx-ext="morph"
-                   hx-get="/issues/table"
-                   hx-include="#filter-form"
-                   hx-trigger="sse:issue-update"
-                   hx-swap="morph:innerHTML"
-                   hx-indicator="#issue-refresh-indicator"
-                   hx-on::after-swap="htmx.process(this)">
-                <tr th:replace="~{issues :: table-rows}"></tr>
-            </tbody>
-        </table>
+    <!-- Bulk action bar (#87) — hidden until ≥1 row is checked (app.js toggles this).
+         Start/Retry submit the shared #bulk-form directly (each guards eligibility
+         server-side and reports a "started N, skipped M" summary); Close goes through
+         a confirm modal first since it's destructive (skips the workflow entirely). -->
+    <div id="bulk-action-bar" class="bulk-action-bar" hidden>
+        <span id="bulk-selected-count" class="bulk-count">0 selected</span>
+        <button type="submit" form="bulk-form" formaction="/issues/bulk/start" formmethod="post"
+                class="btn btn-primary btn-sm">Start selected</button>
+        <button type="submit" form="bulk-form" formaction="/issues/bulk/retry" formmethod="post"
+                class="btn btn-outline btn-sm">Retry selected</button>
+        <button type="button" class="btn btn-danger btn-sm" data-modal-open="bulk-close-modal">Close selected</button>
+    </div>
+
+    <!-- The checkboxes below carry name="ids" and post to whichever /issues/bulk/* endpoint
+         the clicked action-bar/modal button's formaction points at (form="bulk-form" on those
+         buttons associates them with this form despite living outside it, per the HTML5 form
+         attribute — the least-JS way to collect a bulk selection into a real POST).
+         The hidden status/repoId/q/page inputs echo the operator's current view context so
+         the post-action redirect lands back on the exact filtered/searched page they acted
+         from (#87 review) — the endpoints only use them for the redirect, never to decide
+         which ids get processed. -->
+    <form id="bulk-form" method="post" action="/issues/bulk/start">
+        <input type="hidden" name="status" th:value="${selectedStatus}">
+        <input type="hidden" name="repoId" th:value="${selectedRepoId}">
+        <input type="hidden" name="q" th:value="${searchQuery}">
+        <input type="hidden" name="page" th:value="${currentPage}">
+        <div class="panel" hx-ext="sse" sse-connect="/api/events/stream">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="checkbox-col"><input type="checkbox" id="select-all-issues" aria-label="Select all issues on this page"></th>
+                        <th>Repo</th>
+                        <th>#</th>
+                        <th>Title</th>
+                        <th>Status</th>
+                        <th>Phase</th>
+                        <th>Iteration</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="issue-table-body"
+                       hx-ext="morph"
+                       hx-get="/issues/table"
+                       hx-include="#filter-form"
+                       hx-trigger="sse:issue-update"
+                       hx-swap="morph:innerHTML"
+                       hx-indicator="#issue-refresh-indicator"
+                       hx-on::after-swap="htmx.process(this)">
+                    <tr th:replace="~{issues :: table-rows}"></tr>
+                </tbody>
+            </table>
+        </div>
+    </form>
+
+    <!-- Pager (#87) — server-side, 25 rows/page. Links carry the active filters/search so
+         paging never loses them; omitted entirely (rather than disabled) when there's nowhere
+         to go, and hidden altogether when everything fits on one page. -->
+    <div class="pager" th:if="${totalPages > 1}">
+        <a th:if="${hasPrevious}" class="btn btn-ghost btn-sm"
+           th:attr="hx-get=@{/issues(status=${selectedStatus},repoId=${selectedRepoId},q=${searchQuery},page=${currentPage - 1})}"
+           hx-target="#content">
+            <i class="ti ti-chevron-left" aria-hidden="true"></i> Prev
+        </a>
+        <span class="pager-info" th:text="'Page ' + (${currentPage} + 1) + ' of ' + ${totalPages}">Page 1 of 1</span>
+        <a th:if="${hasNext}" class="btn btn-ghost btn-sm"
+           th:attr="hx-get=@{/issues(status=${selectedStatus},repoId=${selectedRepoId},q=${searchQuery},page=${currentPage + 1})}"
+           hx-target="#content">
+            Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
+        </a>
+    </div>
+
+    <!-- Bulk Close confirm modal (accessible dialog, shared — mirrors repositories.html's
+         remove-repo-modal pattern). Start/Retry act directly with no confirmation since
+         they're non-destructive (queued/failed work simply starts running). -->
+    <div id="bulk-close-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="bulk-close-modal-title">
+            <h3 id="bulk-close-modal-title" style="margin:0 0 0.5rem">Close selected issues?</h3>
+            <p class="text-sm" style="margin:0 0 1rem">
+                Selected issues are marked completed WITHOUT running the workflow — no
+                implementation, no PR. Use this for issues you're handling yourself or no
+                longer want IssueBot to touch. Issues that can't be closed (in progress or
+                awaiting approval) are skipped.
+            </p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                <button type="submit" form="bulk-form" formaction="/issues/bulk/close" formmethod="post"
+                        class="btn btn-danger btn-sm">Close issues</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -65,6 +144,11 @@
                  aria-label='Open issue #' + ${issue.issueNumber} + ' ' + ${issue.issueTitle}"
         hx-target="#content"
         hx-push-url="true">
+        <td class="checkbox-col">
+            <input type="checkbox" class="bulk-select" name="ids" th:value="${issue.id}"
+                   onclick="event.stopPropagation()"
+                   th:attr="aria-label='Select issue #' + ${issue.issueNumber}">
+        </td>
         <td th:text="${issue.repo.fullName()}">owner/repo</td>
         <td th:text="${'#' + issue.issueNumber}">#1</td>
         <td th:text="${issue.issueTitle}">Issue title</td>
@@ -96,10 +180,24 @@
                     hx-target="#content"
                     hx-disabled-elt="this"
                     onclick="event.stopPropagation()">Start</button>
+            <!-- hx-include carries the filter bar's status/repoId/q/page along with the POST
+                 purely so the endpoint's redirect can land back on this exact view (#87
+                 review). app.js's page-reset configRequest hook only fires for triggers
+                 INSIDE #filter-form, so this button's included page value is untouched. -->
+            <button type="button"
+                    th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                    class="btn btn-outline btn-sm"
+                    title="Retry with defaults — open the issue for model/budget options"
+                    th:attr="hx-post='/issues/' + ${issue.id} + '/retry-quick',
+                             aria-label='Retry issue #' + ${issue.issueNumber} + ' with defaults'"
+                    hx-target="#content"
+                    hx-include="#filter-form"
+                    hx-disabled-elt="this"
+                    onclick="event.stopPropagation()">Retry</button>
         </td>
     </tr>
     <tr th:if="${#lists.isEmpty(issues)}">
-        <td colspan="8" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
+        <td colspan="9" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
     </tr>
 </th:block>
 </body>

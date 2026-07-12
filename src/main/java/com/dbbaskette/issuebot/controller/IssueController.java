@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -28,14 +29,28 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 @Controller
 @RequestMapping("/issues")
 public class IssueController {
 
     private static final Logger log = LoggerFactory.getLogger(IssueController.class);
+
+    /** Server-side page size for the issue queue (#87) — fixed, no per-user override. */
+    static final int PAGE_SIZE = 25;
+
+    /**
+     * Upper bound on a single bulk request's id list (#87 review) — the UI can only submit
+     * one page's worth (25), so anything past a generous margin is a malformed or hostile
+     * request, and each bulk retry/start does per-issue GitHub API work that shouldn't be
+     * unbounded. Over the cap: flash an error, process nothing.
+     */
+    static final int MAX_BULK_IDS = 200;
 
     private final TrackedIssueRepository issueRepository;
     private final WatchedRepoRepository repoRepository;
@@ -89,16 +104,23 @@ public class IssueController {
     public String list(Model model,
                        @RequestParam(required = false) String status,
                        @RequestParam(required = false) Long repoId,
+                       @RequestParam(required = false) String q,
+                       @RequestParam(defaultValue = "0") int page,
                        @RequestHeader(value = "HX-Request", required = false) String hx) {
-        List<TrackedIssue> issues = filterIssues(status, repoId);
+        Page<TrackedIssue> issuePage = searchIssues(status, repoId, q, page);
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issues");
-        model.addAttribute("issues", issues);
+        model.addAttribute("issues", issuePage.getContent());
         model.addAttribute("repos", repoRepository.findAll());
         model.addAttribute("statuses", IssueStatus.values());
         model.addAttribute("selectedStatus", status);
         model.addAttribute("selectedRepoId", repoId);
+        model.addAttribute("searchQuery", q);
+        model.addAttribute("currentPage", issuePage.getNumber());
+        model.addAttribute("totalPages", Math.max(issuePage.getTotalPages(), 1));
+        model.addAttribute("hasPrevious", issuePage.hasPrevious());
+        model.addAttribute("hasNext", issuePage.hasNext());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         return ViewResolver.view("issues", hx != null);
@@ -106,30 +128,48 @@ public class IssueController {
 
     /**
      * HTMX fragment endpoint — returns just the issue table body rows for SSE-triggered refresh.
-     * Accepts the same filter params as the list endpoint so active filters are honoured.
+     * Accepts the same filter/search/page params as the list endpoint so the operator's active
+     * view (including whichever page they're on) is honoured rather than snapping back to page 1.
      */
     @GetMapping("/table")
     public String table(Model model,
                         @RequestParam(required = false) String status,
-                        @RequestParam(required = false) Long repoId) {
-        model.addAttribute("issues", filterIssues(status, repoId));
+                        @RequestParam(required = false) Long repoId,
+                        @RequestParam(required = false) String q,
+                        @RequestParam(defaultValue = "0") int page) {
+        model.addAttribute("issues", searchIssues(status, repoId, q, page).getContent());
         return "issues :: table-rows";
     }
 
-    private List<TrackedIssue> filterIssues(String status, Long repoId) {
-        if (status != null && !status.isBlank() && repoId != null) {
-            try {
-                IssueStatus s = IssueStatus.valueOf(status);
-                return repoRepository.findById(repoId)
-                        .map(r -> issueRepository.findByRepoAndStatus(r, s)).orElseGet(List::of);
-            } catch (IllegalArgumentException e) { return List.of(); }
-        } else if (status != null && !status.isBlank()) {
-            try { return issueRepository.findByStatus(IssueStatus.valueOf(status)); }
-            catch (IllegalArgumentException e) { return List.of(); }
-        } else if (repoId != null) {
-            return repoRepository.findById(repoId).map(issueRepository::findByRepo).orElseGet(List::of);
+    /**
+     * Shared paged/filtered query behind both {@link #list} and {@link #table} (#87).
+     * An unparseable status (e.g. a stale/tampered query param) tolerantly yields an empty
+     * page rather than a 500, mirroring the old {@code filterIssues}'s behavior. The search
+     * box is a single free-text field matching either an exact issue number or a title
+     * substring — see {@link TrackedIssueRepository#search} for how those are combined.
+     *
+     * A stale/overshooting page param (rows deleted since render, a bookmarked deep page,
+     * or a post-action redirect echoing a page the shrunken result set no longer has) is
+     * clamped to the LAST page rather than rendering an empty page with a broken pager
+     * (#87 review) — one extra count-only round trip in the rare overshoot case.
+     */
+    private Page<TrackedIssue> searchIssues(String status, Long repoId, String q, int page) {
+        int safePage = Math.max(page, 0);
+        IssueStatus statusEnum;
+        try {
+            statusEnum = (status != null && !status.isBlank()) ? IssueStatus.valueOf(status) : null;
+        } catch (IllegalArgumentException e) {
+            return Page.empty(PageRequest.of(safePage, PAGE_SIZE));
         }
-        return issueRepository.findAll();
+        String search = normalize(q);
+        Page<TrackedIssue> result = issueRepository.search(statusEnum, repoId, search,
+                PageRequest.of(safePage, PAGE_SIZE));
+        int totalPages = result.getTotalPages();
+        if (totalPages > 0 && safePage >= totalPages) {
+            result = issueRepository.search(statusEnum, repoId, search,
+                    PageRequest.of(totalPages - 1, PAGE_SIZE));
+        }
+        return result;
     }
 
     @GetMapping("/{id}")
@@ -167,11 +207,61 @@ public class IssueController {
                         @RequestParam(required = false, defaultValue = "false") boolean continueSession,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        String error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
+                budgetOverrideUsd, planFirstOverride, continueSession);
+        if (error != null) {
+            redirectAttributes.addFlashAttribute("error", error);
+        } else {
+            redirectAttributes.addFlashAttribute("success", "Issue retry started");
+        }
+        return "redirect:/issues/" + id;
+    }
 
+    /**
+     * Per-row "Retry with defaults" quick action (#87) — the row-Start pattern applied to
+     * FAILED/COOLDOWN rows: no instructions, no model/budget/plan-first overrides, no session
+     * continuation, so it reuses {@link #performRetry} exactly as a blank submission of the
+     * full retry modal would. Full options (instructions, overrides, session continuation)
+     * still live on the issue detail page. Stays on the queue rather than navigating to the
+     * issue, unlike the full retry endpoint — the row action is meant to be a no-navigation
+     * shortcut (see the row's {@code event.stopPropagation()} in issues.html).
+     *
+     * The status/repoId/q/page params are the operator's CURRENT view context (posted via
+     * the button's {@code hx-include="#filter-form"}) and are only echoed back into the
+     * redirect so the queue re-renders exactly where they were (#87 review) — they play no
+     * part in the retry itself.
+     */
+    @PostMapping("/{id}/retry-quick")
+    public String retryQuick(@PathVariable Long id,
+                             @RequestParam(required = false) String status,
+                             @RequestParam(required = false) Long repoId,
+                             @RequestParam(required = false) String q,
+                             @RequestParam(required = false) Integer page,
+                             RedirectAttributes redirectAttributes) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        String error = performRetry(issue, null, null, null, null, null, false);
+        if (error != null) {
+            redirectAttributes.addFlashAttribute("error", error);
+        } else {
+            redirectAttributes.addFlashAttribute("success", "Retry started with defaults");
+        }
+        return issuesRedirect(status, repoId, q, page);
+    }
+
+    /**
+     * Core retry logic shared by {@link #retry} (operator overrides from the modal) and
+     * {@link #retryQuick} (the per-row defaults-only action) and bulk retry (#87) — same
+     * status gate, same stale-PR cleanup, same concurrency/repo gate, same session-clearing
+     * default, so every call site behaves identically for the same inputs. Returns an error
+     * message if the retry could not proceed (wrong status, gate blocked), or {@code null} on
+     * success (the workflow has already been kicked off asynchronously by the time this
+     * returns).
+     */
+    private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
+                                String reviewModelOverride, BigDecimal budgetOverrideUsd,
+                                String planFirstOverride, boolean continueSession) {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot retry issue in " + issue.getStatus() + " status");
-            return "redirect:/issues/" + id;
+            return "Cannot retry issue in " + issue.getStatus() + " status";
         }
 
         // Fetch open IssueBot PRs once for both cleanup and gate check
@@ -191,8 +281,7 @@ public class IssueController {
         // Enforce the same gating as the polling service (using filtered list)
         String gateReason = checkGate(issue, remainingPRs);
         if (gateReason != null) {
-            redirectAttributes.addFlashAttribute("error", gateReason);
-            return "redirect:/issues/" + id;
+            return gateReason;
         }
 
         issue.setStatus(IssueStatus.IN_PROGRESS);
@@ -242,9 +331,7 @@ public class IssueController {
         }
 
         workflowService.processIssueAsync(issue, trimmedInstructions);
-
-        redirectAttributes.addFlashAttribute("success", "Issue retry started");
-        return "redirect:/issues/" + id;
+        return null;
     }
 
     @PostMapping("/{id}/start")
@@ -255,18 +342,30 @@ public class IssueController {
                         @RequestParam(required = false) String planFirstOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        String error = performStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride);
+        if (error != null) {
+            redirectAttributes.addFlashAttribute("error", error);
+        } else {
+            redirectAttributes.addFlashAttribute("success", "Issue started");
+        }
+        return "redirect:/issues/" + id;
+    }
 
+    /**
+     * Core start logic shared by {@link #start} and bulk start (#87) — same QUEUED-only
+     * gate and same concurrency/repo/PR gate for every call site. Returns an error message
+     * if the issue could not be started, or {@code null} on success.
+     */
+    private String performStart(TrackedIssue issue, String implModelOverride, String reviewModelOverride,
+                                BigDecimal budgetOverrideUsd, String planFirstOverride) {
         if (issue.getStatus() != IssueStatus.QUEUED) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot start issue in " + issue.getStatus() + " status (must be QUEUED)");
-            return "redirect:/issues/" + id;
+            return "Cannot start issue in " + issue.getStatus() + " status (must be QUEUED)";
         }
 
         // Enforce the same gating as the polling service
         String gateReason = checkGate(issue, null);
         if (gateReason != null) {
-            redirectAttributes.addFlashAttribute("error", gateReason);
-            return "redirect:/issues/" + id;
+            return gateReason;
         }
 
         issue.setStatus(IssueStatus.IN_PROGRESS);
@@ -282,25 +381,33 @@ public class IssueController {
                 issue.getRepo(), issue);
 
         workflowService.processIssueAsync(issue);
-
-        redirectAttributes.addFlashAttribute("success", "Issue started");
-        return "redirect:/issues/" + id;
+        return null;
     }
 
     @PostMapping("/{id}/complete")
     public String markComplete(@PathVariable Long id, RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        String error = performMarkComplete(issue);
+        if (error != null) {
+            redirectAttributes.addFlashAttribute("error", error);
+        } else {
+            redirectAttributes.addFlashAttribute("success", "Issue marked as completed");
+        }
+        return "redirect:/issues/" + id;
+    }
 
+    /**
+     * Core mark-complete logic shared by {@link #markComplete} and bulk close (#87). Returns
+     * an error message if the issue could not be closed, or {@code null} on success.
+     */
+    private String performMarkComplete(TrackedIssue issue) {
         if (issue.getStatus() == IssueStatus.COMPLETED) {
-            redirectAttributes.addFlashAttribute("error", "Issue is already completed");
-            return "redirect:/issues/" + id;
+            return "Issue is already completed";
         }
 
         if (issue.getStatus() == IssueStatus.IN_PROGRESS || issue.getStatus() == IssueStatus.AWAITING_APPROVAL) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot mark issue as completed while it is " + issue.getStatus()
-                            + ". Wait for the workflow to finish or retry after it fails.");
-            return "redirect:/issues/" + id;
+            return "Cannot mark issue as completed while it is " + issue.getStatus()
+                    + ". Wait for the workflow to finish or retry after it fails.";
         }
 
         issue.setStatus(IssueStatus.COMPLETED);
@@ -312,9 +419,139 @@ public class IssueController {
         eventService.log("MANUAL_COMPLETE",
                 "Manually marked issue #" + issue.getIssueNumber() + " as completed",
                 issue.getRepo(), issue);
+        return null;
+    }
 
-        redirectAttributes.addFlashAttribute("success", "Issue marked as completed");
-        return "redirect:/issues/" + id;
+    // === Bulk actions (#87) =================================================
+
+    @PostMapping("/bulk/start")
+    public String bulkStart(@RequestParam(required = false) List<Long> ids,
+                            @RequestParam(required = false) String status,
+                            @RequestParam(required = false) Long repoId,
+                            @RequestParam(required = false) String q,
+                            @RequestParam(required = false) Integer page,
+                            RedirectAttributes redirectAttributes) {
+        return handleBulk(ids, issue -> performStart(issue, null, null, null, null), "Started",
+                status, repoId, q, page, redirectAttributes);
+    }
+
+    @PostMapping("/bulk/retry")
+    public String bulkRetry(@RequestParam(required = false) List<Long> ids,
+                            @RequestParam(required = false) String status,
+                            @RequestParam(required = false) Long repoId,
+                            @RequestParam(required = false) String q,
+                            @RequestParam(required = false) Integer page,
+                            RedirectAttributes redirectAttributes) {
+        return handleBulk(ids, issue -> performRetry(issue, null, null, null, null, null, false), "Retried",
+                status, repoId, q, page, redirectAttributes);
+    }
+
+    @PostMapping("/bulk/close")
+    public String bulkClose(@RequestParam(required = false) List<Long> ids,
+                            @RequestParam(required = false) String status,
+                            @RequestParam(required = false) Long repoId,
+                            @RequestParam(required = false) String q,
+                            @RequestParam(required = false) Integer page,
+                            RedirectAttributes redirectAttributes) {
+        return handleBulk(ids, this::performMarkComplete, "Closed",
+                status, repoId, q, page, redirectAttributes);
+    }
+
+    /**
+     * Shared bulk plumbing: guards (nothing selected, over the {@link #MAX_BULK_IDS} cap),
+     * per-id application, summary flash, and the context-preserving redirect back to the
+     * exact queue view the operator acted from (#87 review). The status/repoId/q/page params
+     * come from hidden inputs in issues.html's bulk form and are only echoed into the
+     * redirect — they never filter which ids get processed.
+     */
+    private String handleBulk(List<Long> ids, Function<TrackedIssue, String> action, String verb,
+                              String status, Long repoId, String q, Integer page,
+                              RedirectAttributes redirectAttributes) {
+        String redirect = issuesRedirect(status, repoId, q, page);
+        if (ids == null || ids.isEmpty()) {
+            redirectAttributes.addFlashAttribute("error", "No issues selected");
+            return redirect;
+        }
+        if (ids.size() > MAX_BULK_IDS) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Too many issues selected (max " + MAX_BULK_IDS + ")");
+            return redirect;
+        }
+        BulkOutcome outcome = applyBulk(ids, action);
+        flashBulkResult(redirectAttributes, verb, outcome);
+        return redirect;
+    }
+
+    /**
+     * Applies {@code action} to every id, tolerating missing issues (deleted between page
+     * render and submit) as a skip. Ineligibility (wrong status) and gate rejection (e.g. the
+     * per-repo "one active issue" gate, deliberately — see the class-level note in the issue)
+     * both surface identically here: {@code action} returns a non-null message either way, and
+     * that issue is left exactly as {@link #performStart}/{@link #performRetry}/
+     * {@link #performMarkComplete} left it (untouched on rejection). Selecting several issues
+     * from the SAME repo for bulk start/retry is expected to start only the first and leave
+     * the rest QUEUED for the poller to pick up later — that's the existing per-repo
+     * concurrency gate doing its job, not a bug in this bulk plumbing.
+     */
+    private BulkOutcome applyBulk(List<Long> ids, Function<TrackedIssue, String> action) {
+        BulkOutcome outcome = new BulkOutcome();
+        for (Long id : ids) {
+            TrackedIssue issue = issueRepository.findById(id).orElse(null);
+            if (issue == null) {
+                outcome.skipped++;
+                continue;
+            }
+            String error = action.apply(issue);
+            if (error == null) {
+                outcome.succeeded++;
+            } else {
+                outcome.skipped++;
+            }
+        }
+        return outcome;
+    }
+
+    private void flashBulkResult(RedirectAttributes redirectAttributes, String verb, BulkOutcome outcome) {
+        String message = outcome.skipped == 0
+                ? verb + " " + outcome.succeeded + (outcome.succeeded == 1 ? " issue" : " issues")
+                : verb + " " + outcome.succeeded + ", skipped " + outcome.skipped + " (not eligible)";
+        redirectAttributes.addFlashAttribute(outcome.succeeded > 0 ? "success" : "error", message);
+    }
+
+    /** Per-bulk-request tally of successes vs. skips, for the summarized flash message. */
+    private static final class BulkOutcome {
+        int succeeded = 0;
+        int skipped = 0;
+    }
+
+    /**
+     * Builds the post-action redirect back to the queue, echoing the operator's current
+     * filter/search/page so a row or bulk action never snaps the view back to an unfiltered
+     * page 1 (#87 review). Blank/absent/default values are omitted, so the plain case stays
+     * exactly "redirect:/issues". String-built with form-encoding for the free-text q
+     * (URLEncoder encodes spaces as '+', which Spring decodes back on the redirected GET) —
+     * deliberately not UriComponentsBuilder, whose encode() leaves '&'/'=' inside query
+     * values untouched. An overshooting stale page is fine: {@link #searchIssues} clamps it.
+     */
+    private static String issuesRedirect(String status, Long repoId, String q, Integer page) {
+        StringBuilder sb = new StringBuilder("redirect:/issues");
+        char sep = '?';
+        if (status != null && !status.isBlank()) {
+            sb.append(sep).append("status=").append(URLEncoder.encode(status.trim(), StandardCharsets.UTF_8));
+            sep = '&';
+        }
+        if (repoId != null) {
+            sb.append(sep).append("repoId=").append(repoId);
+            sep = '&';
+        }
+        if (q != null && !q.isBlank()) {
+            sb.append(sep).append("q=").append(URLEncoder.encode(q.trim(), StandardCharsets.UTF_8));
+            sep = '&';
+        }
+        if (page != null && page > 0) {
+            sb.append(sep).append("page=").append(page);
+        }
+        return sb.toString();
     }
 
     @PostMapping("/{id}/cancel")

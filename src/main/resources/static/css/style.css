@@ -1378,6 +1378,46 @@ details summary:hover { color: var(--text-primary); }
 }
 
 /* ============================================================
+   Bulk action bar + checkbox column (#87)
+   ============================================================ */
+.bulk-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 1.25rem;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--radius-md);
+}
+.bulk-action-bar[hidden] { display: none; }
+.bulk-action-bar .bulk-count {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-right: auto;
+}
+
+.checkbox-col { width: 2.5rem; text-align: center; }
+.checkbox-col input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--accent); }
+
+/* ============================================================
+   Pager (#87)
+   ============================================================ */
+.pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin: 1.25rem 0;
+}
+.pager-info {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    Alerts / toasts
    ============================================================ */
 .alert,
@@ -1701,6 +1741,11 @@ details summary:hover { color: var(--text-primary); }
         padding: 0.6rem 0.8rem;
         font-size: 0.88rem;
     }
+    .filter-bar input[type="hidden"] { display: none; }
+
+    .bulk-action-bar { flex-wrap: wrap; }
+    .bulk-action-bar .bulk-count { flex: 1 1 100%; margin-right: 0; }
+    .pager { flex-wrap: wrap; }
 
     .events-feed li {
         flex-direction: column;
