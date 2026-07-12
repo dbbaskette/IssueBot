@@ -498,7 +498,7 @@
 
                     <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
                         <summary class="text-sm">Diff</summary>
-                        <div class="diff-viewer" data-diff th:text="${iter.diff}">diff content</div>
+                        <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff content</div>
                     </details>
 
                     <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">

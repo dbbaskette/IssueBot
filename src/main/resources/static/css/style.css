@@ -1848,6 +1848,77 @@ details summary:hover { color: var(--text-primary); }
     opacity: 0.8;
 }
 
+/* Hunk headers (@@ ... @@) — styled as a subtle separator between chunks */
+.diff-line.hunk {
+    display: block;
+    margin-top: 0.4rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed rgba(255,255,255,0.16);
+    color: var(--text-tertiary);
+    opacity: 0.85;
+}
+
+/* ============================================================
+   Per-file diff viewer (#85) — file list header + collapsible sections,
+   built client-side by initDiffViewers() in app.js from the raw unified
+   diff. Falls back to the flat .diff-viewer rendering above when parsing
+   finds no per-file boundaries.
+   ============================================================ */
+.diff-viewer-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+}
+
+.diff-file-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.diff-file {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    margin-bottom: 0;
+}
+
+.diff-file summary.diff-file-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.9rem;
+    background: var(--glass-bg);
+}
+
+.diff-file-path {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    word-break: break-all;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.diff-count-group { display: flex; gap: 0.4rem; flex-shrink: 0; margin-left: auto; }
+
+.diff-count {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.1rem 0.45rem;
+    border-radius: var(--radius-pill);
+}
+
+.diff-count-add { color: var(--ok); background: var(--ok-soft); }
+.diff-count-del { color: var(--danger); background: var(--danger-soft); }
+/* Binary entries have no meaningful +/− counts — one neutral badge instead */
+.diff-count-binary { color: var(--text-secondary); background: var(--row-hover); }
+
+.diff-file-body {
+    border-radius: 0;
+    border: none;
+    border-top: 1px solid var(--glass-border);
+    max-height: 500px;
+}
+
 /* ============================================================
    Cost report — chart wrap, sortable headers, range pills
    ============================================================ */
