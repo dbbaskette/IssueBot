@@ -31,7 +31,8 @@ class IssueControllerTest {
     void tableHonorsStatusFilter() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
-        when(issues.findByStatus(IssueStatus.FAILED)).thenReturn(List.of());
+        when(issues.search(eq(IssueStatus.FAILED), isNull(), isNull(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
 
         IssueController c = new IssueController(issues, repos,
                 mock(IterationRepository.class), mock(EventRepository.class),
@@ -43,11 +44,111 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        String view = c.table(model, "FAILED", null);
+        String view = c.table(model, "FAILED", null, null, 0);
 
-        verify(issues).findByStatus(IssueStatus.FAILED);
-        verify(issues, never()).findAll();
+        verify(issues).search(eq(IssueStatus.FAILED), isNull(), isNull(), any());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("issues :: table-rows");
+    }
+
+    @Test
+    void tableHonorsSearchAndPageParams() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(issues.search(isNull(), eq(7L), eq("login"), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+
+        IssueController c = new IssueController(issues, repos,
+                mock(IterationRepository.class), mock(EventRepository.class),
+                mock(CostTrackingRepository.class), mock(IssuePollingService.class),
+                mock(IssueWorkflowService.class), mock(EventService.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class),
+                mock(IssueDecompositionService.class), mock(PlanFirstService.class),
+                mock(WorkflowCancellationService.class),
+                mock(IssueGuidanceRepository.class), new ObjectMapper());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        c.table(model, null, 7L, "login", 2);
+
+        ArgumentCaptor<org.springframework.data.domain.Pageable> pageableCaptor =
+                ArgumentCaptor.forClass(org.springframework.data.domain.Pageable.class);
+        verify(issues).search(isNull(), eq(7L), eq("login"), pageableCaptor.capture());
+        org.assertj.core.api.Assertions.assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(IssueController.PAGE_SIZE);
+    }
+
+    @Test
+    void tableTreatsBlankSearchAsNull() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(issues.search(any(), any(), any(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+
+        IssueController c = new IssueController(issues, repos,
+                mock(IterationRepository.class), mock(EventRepository.class),
+                mock(CostTrackingRepository.class), mock(IssuePollingService.class),
+                mock(IssueWorkflowService.class), mock(EventService.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class),
+                mock(IssueDecompositionService.class), mock(PlanFirstService.class),
+                mock(WorkflowCancellationService.class),
+                mock(IssueGuidanceRepository.class), new ObjectMapper());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        c.table(model, null, null, "   ", 0);
+
+        verify(issues).search(isNull(), isNull(), isNull(), any());
+    }
+
+    @Test
+    void tableTreatsUnparseableStatusAsEmptyResult() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+
+        IssueController c = new IssueController(issues, repos,
+                mock(IterationRepository.class), mock(EventRepository.class),
+                mock(CostTrackingRepository.class), mock(IssuePollingService.class),
+                mock(IssueWorkflowService.class), mock(EventService.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class),
+                mock(IssueDecompositionService.class), mock(PlanFirstService.class),
+                mock(WorkflowCancellationService.class),
+                mock(IssueGuidanceRepository.class), new ObjectMapper());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
+
+        verify(issues, never()).search(any(), any(), any(), any());
+        org.assertj.core.api.Assertions.assertThat((List<?>) model.getAttribute("issues")).isEmpty();
+    }
+
+    @Test
+    void listExposesPagerMetadata() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Something");
+        org.springframework.data.domain.Page<TrackedIssue> page = new org.springframework.data.domain.PageImpl<>(
+                List.of(issue), org.springframework.data.domain.PageRequest.of(1, IssueController.PAGE_SIZE), 60);
+        when(issues.search(any(), any(), any(), any())).thenReturn(page);
+        when(repos.findAll()).thenReturn(List.of());
+
+        IssueController c = new IssueController(issues, repos,
+                mock(IterationRepository.class), mock(EventRepository.class),
+                mock(CostTrackingRepository.class), mock(IssuePollingService.class),
+                mock(IssueWorkflowService.class), mock(EventService.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class),
+                mock(IssueDecompositionService.class), mock(PlanFirstService.class),
+                mock(WorkflowCancellationService.class),
+                mock(IssueGuidanceRepository.class), new ObjectMapper());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        c.list(model, null, null, null, 1, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("currentPage")).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("totalPages")).isEqualTo(3);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("hasPrevious")).isEqualTo(true);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("hasNext")).isEqualTo(true);
+        @SuppressWarnings("unchecked")
+        List<TrackedIssue> resultIssues = (List<TrackedIssue>) model.getAttribute("issues");
+        org.assertj.core.api.Assertions.assertThat(resultIssues).containsExactly(issue);
     }
 
     /**
@@ -626,5 +727,275 @@ class IssueControllerTest {
         f.controller.detail(model, 1L, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isSameAs(second);
+    }
+
+    // === Per-row "Retry with defaults" quick action (#87) ===================
+
+    @Test
+    void retryQuickStartsEligibleIssue_sameAsFullRetryWithNoOverrides() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        String view = f.controller.retryQuick(1L, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        // Stays on the queue rather than navigating to the issue detail page (#87) —
+        // the row action is a no-navigation shortcut.
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void retryQuickRejectsIneligibleStatus() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+
+        String view = f.controller.retryQuick(1L, f.redirectAttributes);
+
+        verify(f.issues, never()).save(any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Cannot retry issue in QUEUED"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    /**
+     * Proves retry-quick reuses {@code performRetry} exactly as a blank submission of the
+     * full retry modal would — any previously-stored overrides/session id are cleared, not
+     * carried forward, since retry-quick passes null/false for every optional param.
+     */
+    @Test
+    void retryQuickClearsPreviousOverridesAndSession_sameAsBlankFullRetry() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setImplModelOverride("old-model");
+        f.issue.setReviewModelOverride("old-review-model");
+        f.issue.setBudgetOverrideUsd(new java.math.BigDecimal("9.00"));
+        f.issue.setClaudeSessionId("sess-old");
+
+        f.controller.retryQuick(1L, f.redirectAttributes);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(f.issues).save(captor.capture());
+        TrackedIssue saved = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(saved.getImplModelOverride()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getReviewModelOverride()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getBudgetOverrideUsd()).isNull();
+        org.assertj.core.api.Assertions.assertThat(saved.getClaudeSessionId()).isNull();
+    }
+
+    @Test
+    void retryQuickRespectsGate_sameAsFullRetry() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        when(f.properties.getMaxConcurrentIssues()).thenReturn(0); // already at capacity
+
+        String view = f.controller.retryQuick(1L, f.redirectAttributes);
+
+        verify(f.issues, never()).save(any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Global concurrency limit"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    // === Bulk actions (#87) ===================================================
+
+    private static IssueController newBulkController(TrackedIssueRepository issues, WatchedRepoRepository repos,
+                                                       GitHubApiClient gitHubApiClient, IssueBotProperties properties,
+                                                       EventService eventService, IssueWorkflowService workflowService) {
+        return new IssueController(issues, repos,
+                mock(IterationRepository.class), mock(EventRepository.class),
+                mock(CostTrackingRepository.class), mock(IssuePollingService.class),
+                workflowService, eventService,
+                gitHubApiClient, properties, mock(IssueDecompositionService.class), mock(PlanFirstService.class),
+                mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper());
+    }
+
+    @Test
+    void bulkStartStartsEligibleAndSkipsIneligible() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
+        IssueBotProperties properties = mock(IssueBotProperties.class);
+        EventService eventService = mock(EventService.class);
+        IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
+        when(properties.getMaxConcurrentIssues()).thenReturn(5);
+
+        WatchedRepo repo1 = new WatchedRepo("acme", "widgets");
+        WatchedRepo repo2 = new WatchedRepo("acme", "gadgets");
+        TrackedIssue queued = new TrackedIssue(repo1, 1, "Queued issue");
+        queued.setId(1L);
+        queued.setStatus(IssueStatus.QUEUED);
+        TrackedIssue failed = new TrackedIssue(repo2, 2, "Failed issue"); // ineligible for bulk start
+        failed.setId(2L);
+        failed.setStatus(IssueStatus.FAILED);
+
+        when(issues.findById(1L)).thenReturn(Optional.of(queued));
+        when(issues.findById(2L)).thenReturn(Optional.of(failed));
+        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+
+        IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkStart(List.of(1L, 2L), ra);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issues, times(1)).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getId()).isEqualTo(1L);
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        verify(workflowService, times(1)).processIssueAsync(queued);
+        verify(ra).addFlashAttribute(eq("success"), eq("Started 1, skipped 1 (not eligible)"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void bulkRetryOnlyRetriesFailedAndCooldown() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
+        IssueBotProperties properties = mock(IssueBotProperties.class);
+        EventService eventService = mock(EventService.class);
+        IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
+        when(properties.getMaxConcurrentIssues()).thenReturn(5);
+
+        WatchedRepo repoA = new WatchedRepo("acme", "widgets");
+        WatchedRepo repoB = new WatchedRepo("acme", "gadgets");
+        WatchedRepo repoC = new WatchedRepo("acme", "gizmos");
+        TrackedIssue failed = new TrackedIssue(repoA, 1, "Failed issue");
+        failed.setId(1L);
+        failed.setStatus(IssueStatus.FAILED);
+        TrackedIssue cooldown = new TrackedIssue(repoB, 2, "Cooling down issue");
+        cooldown.setId(2L);
+        cooldown.setStatus(IssueStatus.COOLDOWN);
+        TrackedIssue queued = new TrackedIssue(repoC, 3, "Queued issue"); // ineligible for bulk retry
+        queued.setId(3L);
+        queued.setStatus(IssueStatus.QUEUED);
+
+        when(issues.findById(1L)).thenReturn(Optional.of(failed));
+        when(issues.findById(2L)).thenReturn(Optional.of(cooldown));
+        when(issues.findById(3L)).thenReturn(Optional.of(queued));
+        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        try {
+            when(gitHubApiClient.listOpenPullRequests(any(), any(), any())).thenReturn(List.of());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkRetry(List.of(1L, 2L, 3L), ra);
+
+        verify(issues, times(2)).save(any());
+        org.assertj.core.api.Assertions.assertThat(failed.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        org.assertj.core.api.Assertions.assertThat(cooldown.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        org.assertj.core.api.Assertions.assertThat(queued.getStatus()).isEqualTo(IssueStatus.QUEUED); // untouched
+        verify(ra).addFlashAttribute(eq("success"), eq("Retried 2, skipped 1 (not eligible)"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void bulkCloseClosesEligibleAndSkipsInProgress() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
+        IssueBotProperties properties = mock(IssueBotProperties.class);
+        EventService eventService = mock(EventService.class);
+        IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
+
+        WatchedRepo repo1 = new WatchedRepo("acme", "widgets");
+        WatchedRepo repo2 = new WatchedRepo("acme", "gadgets");
+        TrackedIssue queued = new TrackedIssue(repo1, 1, "Queued issue"); // eligible for close
+        queued.setId(1L);
+        queued.setStatus(IssueStatus.QUEUED);
+        TrackedIssue inProgress = new TrackedIssue(repo2, 2, "Running issue"); // ineligible
+        inProgress.setId(2L);
+        inProgress.setStatus(IssueStatus.IN_PROGRESS);
+
+        when(issues.findById(1L)).thenReturn(Optional.of(queued));
+        when(issues.findById(2L)).thenReturn(Optional.of(inProgress));
+
+        IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkClose(List.of(1L, 2L), ra);
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issues, times(1)).save(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getId()).isEqualTo(1L);
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().getStatus()).isEqualTo(IssueStatus.COMPLETED);
+        org.assertj.core.api.Assertions.assertThat(inProgress.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS); // untouched
+        verify(ra).addFlashAttribute(eq("success"), eq("Closed 1, skipped 1 (not eligible)"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void bulkStartWithNullIdsFlashesNoIssuesSelected() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IssueController controller = newBulkController(issues, mock(WatchedRepoRepository.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class), mock(EventService.class),
+                mock(IssueWorkflowService.class));
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkStart(null, ra);
+
+        verify(issues, never()).save(any());
+        verify(ra).addFlashAttribute(eq("error"), eq("No issues selected"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void bulkStartWithEmptyIdsListFlashesNoIssuesSelected() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IssueController controller = newBulkController(issues, mock(WatchedRepoRepository.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class), mock(EventService.class),
+                mock(IssueWorkflowService.class));
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkStart(List.of(), ra);
+
+        verify(issues, never()).save(any());
+        verify(ra).addFlashAttribute(eq("error"), eq("No issues selected"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    /**
+     * The per-repo/global concurrency gates apply naturally to a bulk request too (per the
+     * issue's own note): starting two QUEUED issues at once, with the global cap already at
+     * capacity after the first, starts only the first and leaves the second QUEUED — the
+     * poller picks it up later. This is NOT a bug in the bulk plumbing, it's the existing
+     * gate doing its job; the bulk summary just reports it as "skipped."
+     */
+    @Test
+    void bulkStartRespectsGlobalConcurrencyGate_queuesTheExtra() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
+        IssueBotProperties properties = mock(IssueBotProperties.class);
+        EventService eventService = mock(EventService.class);
+        IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
+        when(properties.getMaxConcurrentIssues()).thenReturn(1);
+        // First checkGate call (for issue 1) sees 0 active and passes; the second (for issue 2)
+        // sees 1 active (simulating issue 1 having just started) and is gate-blocked.
+        when(issues.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L, 1L);
+
+        WatchedRepo repoA = new WatchedRepo("acme", "widgets");
+        WatchedRepo repoB = new WatchedRepo("acme", "gadgets");
+        TrackedIssue first = new TrackedIssue(repoA, 1, "First issue");
+        first.setId(1L);
+        first.setStatus(IssueStatus.QUEUED);
+        TrackedIssue second = new TrackedIssue(repoB, 2, "Second issue");
+        second.setId(2L);
+        second.setStatus(IssueStatus.QUEUED);
+
+        when(issues.findById(1L)).thenReturn(Optional.of(first));
+        when(issues.findById(2L)).thenReturn(Optional.of(second));
+        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+
+        IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkStart(List.of(1L, 2L), ra);
+
+        verify(issues, times(1)).save(any());
+        org.assertj.core.api.Assertions.assertThat(first.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        org.assertj.core.api.Assertions.assertThat(second.getStatus()).isEqualTo(IssueStatus.QUEUED); // left for the poller
+        verify(ra).addFlashAttribute(eq("success"), eq("Started 1, skipped 1 (not eligible)"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
     }
 }

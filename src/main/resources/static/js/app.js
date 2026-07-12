@@ -1525,6 +1525,7 @@
     initDiffViewers();
     initSortableTables();
     initCostCharts();
+    updateBulkActionBar();
 
     // Last-updated stamps (#83): a #content swap is an SPA navigation — the
     // whole page region (and every stamp on it) was just freshly rendered by
@@ -1567,6 +1568,59 @@
   document.body.addEventListener('htmx:sseError', function () { SseStatus.set('queue', 'reconnecting'); });
   document.body.addEventListener('htmx:sseClose', function () { SseStatus.clear('queue'); });
 
+  // --- Issue queue: pagination + bulk selection (#87) ----------------------
+  // Changing a filter/search field must reset to page 0 — the previous page
+  // number belongs to a different filtered result set and could otherwise
+  // land on an out-of-range/empty page. The tbody's own SSE-triggered
+  // refresh (hx-trigger="sse:issue-update", triggered on the tbody itself,
+  // not on a #filter-form field) and pager link clicks (which carry their
+  // own explicit page param) are deliberately left alone.
+  document.body.addEventListener('htmx:configRequest', function (evt) {
+    var triggerEl = evt.detail.elt;
+    if (triggerEl && triggerEl.closest && triggerEl.closest('#filter-form') &&
+        (triggerEl.tagName === 'SELECT' || triggerEl.tagName === 'INPUT')) {
+      evt.detail.parameters.page = '0';
+    }
+  });
+
+  // Checkbox column + action bar. Selection state is intentionally NOT
+  // preserved across a tbody refresh (SSE-triggered or page navigation) —
+  // the rows are freshly rendered, all unchecked, so the bar re-hides itself
+  // via the afterSwap hook below. That's an accepted tradeoff: a live update
+  // arriving mid-selection clears it rather than risk applying a bulk action
+  // to a row the operator can no longer see checked.
+  function bulkCheckboxes() {
+    return Array.prototype.slice.call(document.querySelectorAll('.bulk-select'));
+  }
+
+  function updateBulkActionBar() {
+    var bar = document.getElementById('bulk-action-bar');
+    if (!bar) { return; }
+    var boxes = bulkCheckboxes();
+    var checked = boxes.filter(function (b) { return b.checked; });
+    bar.hidden = checked.length === 0;
+    var countEl = document.getElementById('bulk-selected-count');
+    if (countEl) { countEl.textContent = checked.length + ' selected'; }
+    var selectAll = document.getElementById('select-all-issues');
+    if (selectAll) {
+      selectAll.checked = boxes.length > 0 && checked.length === boxes.length;
+      selectAll.indeterminate = checked.length > 0 && checked.length < boxes.length;
+    }
+  }
+  window.updateBulkActionBar = updateBulkActionBar;
+
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'select-all-issues') {
+      var checkedAll = e.target.checked;
+      bulkCheckboxes().forEach(function (b) { b.checked = checkedAll; });
+      updateBulkActionBar();
+      return;
+    }
+    if (e.target && e.target.classList && e.target.classList.contains('bulk-select')) {
+      updateBulkActionBar();
+    }
+  });
+
   // --- Init ---------------------------------------------------------------
   function init() {
     syncThemeIcon();
@@ -1574,6 +1628,7 @@
     initDiffViewers();
     initSortableTables();
     initCostCharts();
+    updateBulkActionBar();
     UpdateStamps.markAllVisible();
   }
 
