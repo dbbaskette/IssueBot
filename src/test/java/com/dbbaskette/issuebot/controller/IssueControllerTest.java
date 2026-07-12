@@ -761,13 +761,14 @@ class IssueControllerTest {
         f.controller.detail(model, 1L, null);
 
         @SuppressWarnings("unchecked")
-        List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline> timeline =
-                (List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline>)
+        List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline> timeline =
+                (List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline>)
                         model.getAttribute("timeline");
         org.assertj.core.api.Assertions.assertThat(timeline).hasSize(1);
+        org.assertj.core.api.Assertions.assertThat(timeline.get(0).iterations()).hasSize(1);
         // The in-progress iteration's Implementation stage started but hasn't completed —
         // it must show as an open "running" segment (IN_PROGRESS issue, ascending event feed).
-        org.assertj.core.api.Assertions.assertThat(timeline.get(0).segments())
+        org.assertj.core.api.Assertions.assertThat(timeline.get(0).iterations().get(0).segments())
                 .extracting(com.dbbaskette.issuebot.service.ui.TimelineAssembler.Segment::outcome)
                 .containsExactly("running");
         // The full (unpaged) ascending finder must be the one used, not the capped desc list.

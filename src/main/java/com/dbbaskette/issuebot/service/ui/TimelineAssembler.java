@@ -22,23 +22,35 @@ import java.util.Set;
  * Builds the per-iteration "loop timeline" (issue #88): for each {@link Iteration} of a
  * {@link TrackedIssue}, a small horizontal bar of stage segments (Implementation, Local Checks,
  * CI, Review) with durations, proportional widths, and an outcome, plus that iteration's total
- * cost and an overall outcome badge. Pure, side-effect-free view-model assembly — no repository
- * access here; the caller ({@code IssueController}) fetches the three input lists with one
- * query each and hands them in.
+ * cost and an overall outcome badge. Iterations are grouped into {@link RunTimeline runs}
+ * (see below). Pure view-model assembly — no repository access and no wall-clock reads ("now"
+ * is threaded in by the caller, so the same inputs always produce the same output); the caller
+ * ({@code IssueController}) fetches the three input lists with one query each and hands them in.
  *
  * <h2>Derivation strategy</h2>
- * <b>Iteration windows.</b> {@code IssueWorkflowService} logs an {@code ITERATION_STARTED} event
- * at the top of every pass through its iteration loop, but it also saves the new {@link Iteration}
- * row immediately before that log call — so {@link Iteration#getStartedAt()} is already a precise,
- * always-present anchor and is used directly instead of matching events by ordinal position or
- * message text. Each iteration's window is {@code [iteration.startedAt, nextIteration.startedAt)};
- * the last iteration's window is open-ended (no upper bound needed — there's nothing after it to
- * bleed into). {@link Iteration#getCompletedAt()} is deliberately NOT used as a window boundary:
- * the workflow stamps it right after the CI phase concludes (see the unconditional
- * {@code iteration.setCompletedAt(...)} in {@code IssueWorkflowService#processIssue} that runs
- * before checking whether CI passed), which is BEFORE PR creation and Independent Review even
- * start on a successful iteration — using it as a window end would silently truncate the Review
- * segment.
+ * <b>Runs.</b> A manual retry of a FAILED/COOLDOWN issue resets {@code currentIteration} to 0
+ * WITHOUT deleting the previous run's {@code Iteration}/{@code Event}/{@code CostTracking} rows
+ * (see {@code IssueController#performRetry}), so one issue can hold several complete runs whose
+ * iterations share duplicate {@code iterationNum} values (two different "iteration 1" rows).
+ * Sorting by {@code iterationNum} would interleave runs and corrupt window adjacency, so
+ * iterations are sorted <b>chronologically by {@link Iteration#getStartedAt()}</b> and then
+ * grouped into runs by detecting the counter reset: a later-started iteration whose
+ * {@code iterationNum} is &le; its chronological predecessor's marks the start of a new run.
+ * All runs are rendered (history is preserved honestly); the template labels them
+ * ("Run 2 · Iteration 1") only when more than one run exists.
+ *
+ * <p><b>Iteration windows.</b> {@code IssueWorkflowService} saves each new {@link Iteration} row
+ * (stamping {@code startedAt}) immediately before logging {@code ITERATION_STARTED}, so
+ * {@link Iteration#getStartedAt()} is a precise, always-present anchor. Each iteration's window
+ * is {@code [iteration.startedAt, nextIteration.startedAt)} where "next" is the next iteration
+ * <b>in chronological order across runs</b> — the last iteration of run K is bounded by run
+ * K+1's first {@code startedAt}, so one run's events can never bleed into another run's cards.
+ * Only the last iteration of the LAST run is open-ended. {@link Iteration#getCompletedAt()} is
+ * deliberately NOT used as a window boundary: the workflow stamps it right after the CI phase
+ * concludes (see the unconditional {@code iteration.setCompletedAt(...)} in
+ * {@code IssueWorkflowService#processIssue} that runs before checking whether CI passed), which
+ * is BEFORE PR creation and Independent Review even start on a successful iteration — using it
+ * as a window end would silently truncate the Review segment.
  *
  * <p><b>Stage segments.</b> Only four stage kinds are rendered per iteration — Implementation,
  * Local Checks, CI, Review — matching the issue's spec. {@code SETUP} and {@code COMPLETION} are
@@ -57,7 +69,10 @@ import java.util.Set;
  *       itself reported success — there is no structured "impl succeeded" field on
  *       {@code Iteration}, so outcome is inferred: {@code ok} if a later stage in the same
  *       iteration started (Local Checks or CI), else {@code fail} — the loop only continues past
- *       implementation on success).</li>
+ *       implementation on success). A failed session resume ({@code SESSION_RESUME_FAILED})
+ *       triggers a cold retry INSIDE the same {@code phaseImplementation} call, so a single
+ *       start/complete pair brackets both attempts — the segment honestly covers the combined
+ *       wall-clock time of the discarded resumed attempt plus the cold retry.</li>
  *   <li><b>Local Checks</b> (segment omitted entirely when the repo has no verification commands
  *       configured, i.e. no start event) — start {@code PHASE_LOCAL_CHECKS}; end
  *       {@code PHASE_LOCAL_CHECKS_COMPLETE}/{@code _FAILED}, outcome preferring the structured
@@ -82,16 +97,20 @@ import java.util.Set;
  *       terminal event type maps to {@code skipped}.</li>
  * </ul>
  *
- * <p><b>Robustness.</b> A stage with no discoverable start event is omitted — never guessed.
- * A stage with a start event but no terminal event: if this is the last iteration of an issue
- * currently {@link IssueStatus#IN_PROGRESS}, it becomes an open {@code running} segment ending at
- * "now"; otherwise (stale data — e.g. an old issue with gappy events, or a process crash) it is
- * omitted. If NO segment is derivable at all for the current running iteration, a single
- * whole-bar {@code running} placeholder segment is synthesized so the bar isn't blank.
- * Zero/negative durations (clock skew, same-millisecond events) clamp to 1 second. Widths are
- * proportional to duration within the bar, with a 6% floor per segment for label legibility
- * (always feasible since at most 4 segments exist per iteration: 4 × 6% = 24% ≤ 100%) and the
- * remainder rescaled so the bar always sums to exactly 100%.
+ * <p><b>Robustness / running iteration.</b> A stage with no discoverable start event is omitted —
+ * never guessed. A stage with a start event but no terminal event: if this is the last iteration
+ * of the last run on an issue currently {@link IssueStatus#IN_PROGRESS}, it becomes an open
+ * {@code running} segment ending at the caller-supplied "now"; otherwise (stale data — e.g. an
+ * old issue with gappy events, or a process crash) it is omitted. For the running iteration the
+ * outcome badge is always {@code RUNNING}, and the bar always ends with an open segment: when
+ * the last tracked stage has already completed (e.g. CI passed and the workflow is between
+ * stages — PR creation, or waiting on the review to log its start event), an open segment named
+ * after {@link TrackedIssue#getCurrentPhase()} is synthesized from the last segment's end to
+ * now; when NO segment is derivable at all, a single whole-bar open segment is synthesized so
+ * the bar isn't blank. Zero/negative durations (clock skew, same-millisecond events) clamp to
+ * 1 second. Widths are proportional to duration within the bar, with a 6% floor per segment for
+ * label legibility (always feasible: at most 5 segments per bar — 4 stages plus the synthesized
+ * gap — 5 × 6% = 30% ≤ 100%) and the remainder rescaled so the bar always sums to exactly 100%.
  */
 @Component
 public class TimelineAssembler {
@@ -128,8 +147,9 @@ public class TimelineAssembler {
     /**
      * One stage segment within an iteration's bar.
      *
-     * @param stageName   display label ("Implementation", "Local Checks", "CI", "Review", or the
-     *                    synthesized "Running" whole-bar placeholder)
+     * @param stageName   display label ("Implementation", "Local Checks", "CI", "Review", or —
+     *                    for the synthesized open segment on the running iteration — the display
+     *                    name of the workflow's current phase, falling back to "Running")
      * @param durationSecs wall-clock seconds spent in this stage, clamped to a minimum of 1
      * @param widthPct    this segment's share of the bar's width, 0–100, floored at 6% and
      *                    normalized so all segments in an iteration sum to exactly 100
@@ -140,33 +160,50 @@ public class TimelineAssembler {
     /**
      * The assembled timeline for one iteration.
      *
-     * @param iterationNum matches {@link Iteration#getIterationNum()}
+     * @param iterationNum matches {@link Iteration#getIterationNum()} (unique within a run,
+     *                     NOT across runs — retries reset the counter)
      * @param segments     stage segments in chronological order; empty when nothing is derivable
      * @param totalCost    sum of {@link CostTracking#getEstimatedCost()} for rows with this
-     *                     iteration's number
-     * @param outcomeBadge a short display verdict: {@code RUNNING}, {@code PASSED},
-     *                     {@code FAILED}, {@code SKIPPED}, or {@code UNKNOWN} (no segments at all)
+     *                     iteration's number (cost rows carry only the iteration number, so on a
+     *                     multi-run issue the total is shared across the runs' same-numbered
+     *                     iterations — an accepted imprecision, since CostTracking has no run
+     *                     discriminator)
+     * @param outcomeBadge a short display verdict: {@code RUNNING} (always, for the currently
+     *                     running iteration), {@code PASSED}, {@code FAILED}, {@code SKIPPED},
+     *                     or {@code UNKNOWN} (no segments at all)
      */
     public record IterationTimeline(int iterationNum, List<Segment> segments,
                                      BigDecimal totalCost, String outcomeBadge) {}
+
+    /**
+     * One run's worth of iterations (see the class javadoc's Runs section). {@code runNum} is
+     * 1-based in chronological order; the template shows it only when the issue has &gt;1 run.
+     */
+    public record RunTimeline(int runNum, List<IterationTimeline> iterations) {}
 
     /** A segment before duration-clamping/width-normalization are applied. */
     private record RawSegment(String stageName, LocalDateTime start, LocalDateTime end, String outcome) {}
 
     /**
-     * Assembles one {@link IterationTimeline} per iteration. Returns an empty list when there
-     * are no iterations yet (nothing to draw).
+     * Assembles the runs' timelines. Returns an empty list when there are no iterations yet
+     * (nothing to draw).
      *
      * @param issue      the tracked issue (its {@link IssueStatus} drives the running-segment
-     *                   detection for the last iteration)
+     *                   detection for the last iteration; {@code currentPhase} names the
+     *                   synthesized open segment)
      * @param events     ALL events for this issue, any order (sorted internally by
      *                   {@link Event#getCreatedAt()})
      * @param iterations this issue's iterations, any order (sorted internally by
-     *                   {@link Iteration#getIterationNum()})
+     *                   {@link Iteration#getStartedAt()} — chronological, NOT by iteration
+     *                   number, which repeats across runs)
      * @param costRows   this issue's cost-tracking rows, any order
+     * @param now        the caller's "now" (normally {@code LocalDateTime.now()}) — the open end
+     *                   of the running iteration's in-flight segment; threaded in rather than
+     *                   read here so assembly stays deterministic and testable
      */
-    public List<IterationTimeline> assemble(TrackedIssue issue, List<Event> events,
-                                             List<Iteration> iterations, List<CostTracking> costRows) {
+    public List<RunTimeline> assemble(TrackedIssue issue, List<Event> events,
+                                       List<Iteration> iterations, List<CostTracking> costRows,
+                                       LocalDateTime now) {
         if (iterations == null || iterations.isEmpty()) {
             return List.of();
         }
@@ -176,41 +213,110 @@ public class TimelineAssembler {
                 .sorted(Comparator.comparing(Event::getCreatedAt))
                 .toList();
 
-        List<Iteration> sortedIterations = iterations.stream()
-                .sorted(Comparator.comparingInt(Iteration::getIterationNum))
+        // Chronological across runs — iterationNum repeats between runs, startedAt never goes
+        // backwards. Tie-breaks (same startedAt) fall back to iterationNum for determinism.
+        List<Iteration> chronological = iterations.stream()
+                .sorted(Comparator.comparing(Iteration::getStartedAt,
+                                Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparingInt(Iteration::getIterationNum))
                 .toList();
+
+        List<List<Iteration>> runs = groupIntoRuns(chronological);
 
         Map<Integer, BigDecimal> costByIteration = groupCostsByIteration(costRows);
         boolean issueRunning = issue != null && issue.getStatus() == IssueStatus.IN_PROGRESS;
-        LocalDateTime now = LocalDateTime.now();
 
-        List<IterationTimeline> result = new ArrayList<>(sortedIterations.size());
-        for (int i = 0; i < sortedIterations.size(); i++) {
-            Iteration iteration = sortedIterations.get(i);
-            boolean isLast = i == sortedIterations.size() - 1;
-            LocalDateTime windowStart = iteration.getStartedAt();
-            LocalDateTime windowEnd = isLast ? null : sortedIterations.get(i + 1).getStartedAt();
+        List<RunTimeline> result = new ArrayList<>(runs.size());
+        for (int r = 0; r < runs.size(); r++) {
+            List<Iteration> run = runs.get(r);
+            boolean lastRun = r == runs.size() - 1;
+            // The last iteration of run K is bounded by run K+1's first startedAt so a finished
+            // run's window can never swallow the next run's events.
+            LocalDateTime nextRunStart = lastRun ? null : runs.get(r + 1).get(0).getStartedAt();
 
-            List<Event> windowEvents = sortedEvents.stream()
-                    .filter(e -> windowStart == null || !e.getCreatedAt().isBefore(windowStart))
-                    .filter(e -> windowEnd == null || e.getCreatedAt().isBefore(windowEnd))
-                    .toList();
+            List<IterationTimeline> iterationTimelines = new ArrayList<>(run.size());
+            for (int i = 0; i < run.size(); i++) {
+                Iteration iteration = run.get(i);
+                boolean lastInRun = i == run.size() - 1;
+                LocalDateTime windowStart = iteration.getStartedAt();
+                LocalDateTime windowEnd = lastInRun ? nextRunStart : run.get(i + 1).getStartedAt();
 
-            boolean runningIteration = isLast && issueRunning;
-            List<RawSegment> raw = buildRawSegments(iteration, windowEvents, runningIteration, now);
+                List<Event> windowEvents = sortedEvents.stream()
+                        .filter(e -> windowStart == null || !e.getCreatedAt().isBefore(windowStart))
+                        .filter(e -> windowEnd == null || e.getCreatedAt().isBefore(windowEnd))
+                        .toList();
 
-            if (raw.isEmpty() && runningIteration) {
-                LocalDateTime start = windowStart != null ? windowStart : now;
-                raw = List.of(new RawSegment("Running", start, now, RUNNING));
+                boolean runningIteration = lastRun && lastInRun && issueRunning;
+                List<RawSegment> raw = buildRawSegments(iteration, windowEvents, runningIteration, now);
+
+                if (runningIteration) {
+                    // The running bar must always end open: either nothing is derivable yet
+                    // (whole-bar placeholder), or every tracked stage has already completed and
+                    // the workflow is between stages (CI passed, review not yet logged) — either
+                    // way an open segment named after the current phase is appended.
+                    if (raw.isEmpty()) {
+                        LocalDateTime start = windowStart != null ? windowStart : now;
+                        raw = List.of(new RawSegment(phaseLabel(issue), start, now, RUNNING));
+                    } else if (!RUNNING.equals(raw.get(raw.size() - 1).outcome())) {
+                        raw = new ArrayList<>(raw);
+                        raw.add(new RawSegment(phaseLabel(issue),
+                                raw.get(raw.size() - 1).end(), now, RUNNING));
+                    }
+                }
+
+                List<Segment> segments = normalize(raw);
+                BigDecimal cost = costByIteration.getOrDefault(iteration.getIterationNum(), BigDecimal.ZERO);
+                String badge = runningIteration ? "RUNNING" : outcomeBadge(segments);
+
+                iterationTimelines.add(new IterationTimeline(
+                        iteration.getIterationNum(), segments, cost, badge));
             }
-
-            List<Segment> segments = normalize(raw);
-            BigDecimal cost = costByIteration.getOrDefault(iteration.getIterationNum(), BigDecimal.ZERO);
-            String badge = outcomeBadge(segments, runningIteration);
-
-            result.add(new IterationTimeline(iteration.getIterationNum(), segments, cost, badge));
+            result.add(new RunTimeline(r + 1, iterationTimelines));
         }
         return result;
+    }
+
+    /**
+     * Splits chronologically ordered iterations into runs: the counter restarting (an iteration
+     * whose {@code iterationNum} is &le; its predecessor's) marks a retry, i.e. a new run.
+     */
+    private static List<List<Iteration>> groupIntoRuns(List<Iteration> chronological) {
+        List<List<Iteration>> runs = new ArrayList<>();
+        List<Iteration> current = new ArrayList<>();
+        int previousNum = Integer.MIN_VALUE;
+        for (Iteration iteration : chronological) {
+            if (!current.isEmpty() && iteration.getIterationNum() <= previousNum) {
+                runs.add(current);
+                current = new ArrayList<>();
+            }
+            current.add(iteration);
+            previousNum = iteration.getIterationNum();
+        }
+        if (!current.isEmpty()) {
+            runs.add(current);
+        }
+        return runs;
+    }
+
+    /**
+     * Display name for the synthesized open segment on the running iteration, from the
+     * workflow's own structured {@link TrackedIssue#getCurrentPhase()} (the values written by
+     * {@code IssueWorkflowService}'s {@code setCurrentPhase} calls). Falls back to "Running"
+     * when unset/unknown — never guesses a stage.
+     */
+    private static String phaseLabel(TrackedIssue issue) {
+        String phase = issue == null ? null : issue.getCurrentPhase();
+        if (phase == null) return "Running";
+        return switch (phase) {
+            case "SETUP" -> "Setup";
+            case "IMPLEMENTATION" -> "Implementation";
+            case "LOCAL_CHECKS" -> "Local Checks";
+            case "CI_VERIFICATION" -> "CI";
+            case "PR_CREATION" -> "PR Creation";
+            case "INDEPENDENT_REVIEW" -> "Review";
+            case "COMPLETION" -> "Completion";
+            default -> "Running";
+        };
     }
 
     // =====================================================
@@ -431,11 +537,9 @@ public class TimelineAssembler {
         return result;
     }
 
-    private static String outcomeBadge(List<Segment> segments, boolean runningIteration) {
+    /** Badge for a NON-running iteration (the running one is unconditionally "RUNNING"). */
+    private static String outcomeBadge(List<Segment> segments) {
         if (segments.isEmpty()) return "UNKNOWN";
-        if (runningIteration && segments.stream().anyMatch(s -> RUNNING.equals(s.outcome()))) {
-            return "RUNNING";
-        }
         String lastOutcome = segments.get(segments.size() - 1).outcome();
         return switch (lastOutcome) {
             case OK -> "PASSED";

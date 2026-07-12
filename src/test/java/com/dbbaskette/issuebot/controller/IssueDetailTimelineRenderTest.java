@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline;
+import com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler.Segment;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,8 +31,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Renders the real issue-detail.html "content" fragment through Thymeleaf (no Spring context,
  * no database) to verify the loop-timeline card (issue #88): segments render with widths and
- * outcome classes when a timeline is present, and the card is entirely absent when there are
- * no iterations yet — mirroring {@link IssueDetailGoalCardRenderTest}'s approach.
+ * outcome classes when a timeline is present, run labels appear only for multi-run issues, and
+ * the card is entirely absent when there are no iterations yet — mirroring
+ * {@link IssueDetailGoalCardRenderTest}'s approach.
  */
 class IssueDetailTimelineRenderTest {
 
@@ -56,7 +58,7 @@ class IssueDetailTimelineRenderTest {
         webExchange = webApplication.buildExchange(request, response);
     }
 
-    private WebContext baseContext(TrackedIssue issue, List<IterationTimeline> timeline) {
+    private WebContext baseContext(TrackedIssue issue, List<RunTimeline> timeline) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", null);
@@ -69,6 +71,11 @@ class IssueDetailTimelineRenderTest {
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
         return context;
+    }
+
+    /** Wraps iterations into the single-run shape most fixtures need. */
+    private static List<RunTimeline> singleRun(IterationTimeline... iterations) {
+        return List.of(new RunTimeline(1, List.of(iterations)));
     }
 
     private String render(WebContext context) {
@@ -121,7 +128,7 @@ class IssueDetailTimelineRenderTest {
                 new Segment("CI", 90, 60.0, "fail")
         ), new BigDecimal("0.4321"), "FAILED");
 
-        String html = render(baseContext(issue(IssueStatus.FAILED), List.of(it)));
+        String html = render(baseContext(issue(IssueStatus.FAILED), singleRun(it)));
 
         assertThat(html).contains(">Timeline<");
         assertThat(html).contains("Iteration 1");
@@ -142,13 +149,47 @@ class IssueDetailTimelineRenderTest {
     }
 
     @Test
+    void singleRun_showsPlainIterationLabels_withoutRunPrefix() {
+        IterationTimeline it = new IterationTimeline(1, List.of(
+                new Segment("Implementation", 60, 100.0, "ok")
+        ), BigDecimal.ZERO, "PASSED");
+
+        String html = render(baseContext(issue(IssueStatus.COMPLETED), singleRun(it)));
+
+        assertThat(html).contains("Iteration 1");
+        assertThat(html).doesNotContain("Run 1");
+    }
+
+    /**
+     * Multi-run issue (a retry after failure — see TimelineAssembler's Runs javadoc): every
+     * iteration label carries its run prefix so the two "iteration 1" cards are distinguishable.
+     */
+    @Test
+    void multipleRuns_labelsIterationsWithRunPrefix() {
+        IterationTimeline run1Iter1 = new IterationTimeline(1, List.of(
+                new Segment("Implementation", 60, 100.0, "fail")
+        ), BigDecimal.ZERO, "FAILED");
+        IterationTimeline run2Iter1 = new IterationTimeline(1, List.of(
+                new Segment("Implementation", 45, 100.0, "ok")
+        ), BigDecimal.ZERO, "PASSED");
+        List<RunTimeline> timeline = List.of(
+                new RunTimeline(1, List.of(run1Iter1)),
+                new RunTimeline(2, List.of(run2Iter1)));
+
+        String html = render(baseContext(issue(IssueStatus.COMPLETED), timeline));
+
+        assertThat(html).contains("Run 1 · Iteration 1");
+        assertThat(html).contains("Run 2 · Iteration 1");
+    }
+
+    @Test
     void narrowSegment_underEightPercent_hidesLabelText() {
         IterationTimeline it = new IterationTimeline(1, List.of(
                 new Segment("Local Checks", 2, 6.0, "ok"),
                 new Segment("Implementation", 500, 94.0, "ok")
         ), BigDecimal.ZERO, "PASSED");
 
-        String html = render(baseContext(issue(IssueStatus.COMPLETED), List.of(it)));
+        String html = render(baseContext(issue(IssueStatus.COMPLETED), singleRun(it)));
 
         // The narrow (6%) segment must not render its label text...
         assertThat(html).doesNotContain("Local Checks 2s");
@@ -164,7 +205,7 @@ class IssueDetailTimelineRenderTest {
                 new Segment("Implementation", 30, 100.0, "running")
         ), BigDecimal.ZERO, "RUNNING");
 
-        String html = render(baseContext(issue(IssueStatus.IN_PROGRESS), List.of(it)));
+        String html = render(baseContext(issue(IssueStatus.IN_PROGRESS), singleRun(it)));
 
         assertThat(html).contains("outcome-running");
         assertThat(html).contains("status-in_progress");
@@ -175,7 +216,7 @@ class IssueDetailTimelineRenderTest {
     void iterationWithNoSegments_showsPlaceholderTextInsteadOfEmptyBar() {
         IterationTimeline it = new IterationTimeline(1, List.of(), BigDecimal.ZERO, "UNKNOWN");
 
-        String html = render(baseContext(issue(IssueStatus.FAILED), List.of(it)));
+        String html = render(baseContext(issue(IssueStatus.FAILED), singleRun(it)));
 
         assertThat(html).contains("No stage data available for this iteration.");
         assertThat(html).doesNotContain("timeline-bar\"");

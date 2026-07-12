@@ -862,11 +862,11 @@ public class IssueController {
 
         // Loop timeline (#88): needs the FULL per-issue event and cost history (one query each,
         // bounded — no per-iteration N+1) rather than the capped/desc "events" list above, which
-        // only feeds the Activity Log panel.
+        // only feeds the Activity Log panel. "now" is threaded in so the assembler stays pure.
         List<Event> allEvents = eventRepository.findByIssueOrderByCreatedAtAsc(issue);
         List<CostTracking> costRows = costRepository.findByIssue(issue);
-        List<TimelineAssembler.IterationTimeline> timeline =
-                timelineAssembler.assemble(issue, allEvents, iterations, costRows);
+        List<TimelineAssembler.RunTimeline> timeline = timelineAssembler.assemble(
+                issue, allEvents, iterations, costRows, java.time.LocalDateTime.now());
 
         boolean completed = issue.getStatus() == IssueStatus.COMPLETED;
         model.addAttribute("activePage", "issues");
