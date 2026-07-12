@@ -386,6 +386,142 @@ code {
 :root[data-theme="dark"] .badge { color: #2a0512; }
 
 /* ============================================================
+   Notification bell (#89)
+   ============================================================ */
+.notif-bell-wrap {
+    position: relative;
+}
+
+.notif-bell-btn {
+    position: relative;
+    padding: 0.45rem 0.6rem;
+}
+
+.notif-badge {
+    position: absolute;
+    top: -0.3rem;
+    right: -0.3rem;
+}
+
+.notif-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    /* Anchored to the wrap's LEFT edge, not right — the bell sits near the
+       left side of the narrow (240px) sidebar, so a right-anchored panel
+       wider than the space behind it would overflow past the viewport's
+       left edge (verified against a live render: it did). Opening
+       rightward into the wide main content area instead always has room. */
+    left: 0;
+    width: 340px;
+    max-width: calc(100vw - 2rem);
+    max-height: 420px;
+    overflow-y: auto;
+    z-index: 200;
+    background: var(--glass-bg-strong);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--glass-shadow);
+    backdrop-filter: blur(var(--blur));
+    -webkit-backdrop-filter: blur(var(--blur));
+    animation: modal-fade 0.15s var(--ease-out);
+}
+.notif-panel[hidden] { display: none; }
+
+.notif-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem 0.6rem;
+    position: sticky;
+    top: 0;
+    background: var(--glass-bg-strong);
+    border-bottom: 1px solid var(--hairline);
+}
+
+.notif-panel-title {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.notif-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.notif-item {
+    border-bottom: 1px solid var(--hairline);
+}
+.notif-item:last-child { border-bottom: none; }
+
+.notif-item.is-unread {
+    background: var(--accent-soft);
+}
+
+.notif-item-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.7rem 1rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background 0.15s var(--ease-out);
+}
+a.notif-item-content:hover {
+    background: var(--row-hover);
+}
+
+.notif-item-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    margin-top: 0.1rem;
+}
+.notif-item-icon.sev-info { color: var(--info); }
+.notif-item-icon.sev-warn { color: var(--warn); }
+.notif-item-icon.sev-error { color: var(--danger); }
+
+.notif-item-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.notif-item-title {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+
+.notif-item-detail {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.notif-item-time {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+}
+
+.notif-empty {
+    padding: 1.25rem 1rem;
+    text-align: center;
+    margin: 0;
+}
+
+/* ============================================================
    Main content area  (<main id="content">)
    ============================================================ */
 main {

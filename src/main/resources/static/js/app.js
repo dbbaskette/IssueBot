@@ -47,6 +47,62 @@
     return !!sb && sb.classList.contains('open');
   }
 
+  // --- Notification bell (#89) ---------------------------------------------
+  // Simple show/hide dropdown (no existing dropdown convention in this app to
+  // mirror — the closest is the accessible-modal pattern below, which is
+  // overkill for a small panel like this). The panel's own hx-get/hx-post
+  // reload its content on every open/mark-read; this layer only owns
+  // hidden/aria-expanded, ESC-to-close, click-outside-to-close, and syncing
+  // the bell's badge from the swapped-in fragment's data-unread-count.
+  function notifBellBtn() { return document.getElementById('notif-bell-btn'); }
+  function notifPanel() { return document.getElementById('notif-panel'); }
+
+  function notifPanelIsOpen() {
+    var panel = notifPanel();
+    return !!panel && !panel.hidden;
+  }
+
+  function openNotifPanel() {
+    var panel = notifPanel(), btn = notifBellBtn();
+    if (!panel || !btn) { return; }
+    panel.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeNotifPanel() {
+    var panel = notifPanel(), btn = notifBellBtn();
+    if (!panel || !btn) { return; }
+    panel.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleNotifPanel() {
+    if (notifPanelIsOpen()) { closeNotifPanel(); } else { openNotifPanel(); }
+  }
+
+  // The unread count on the bell badge lives OUTSIDE #notif-panel (in the
+  // button itself), so a swap of the panel's content — from opening it or
+  // from "Mark all read" — can't update it via normal HTMX targeting. The
+  // panel fragment carries the fresh count in data-unread-count for exactly
+  // this: read it after every swap and reflect it on the badge.
+  function syncNotifBadge(panelElement) {
+    var btn = notifBellBtn();
+    if (!btn || !panelElement) { return; }
+    var content = panelElement.querySelector('#notif-panel-content');
+    var count = content ? parseInt(content.getAttribute('data-unread-count'), 10) || 0 : 0;
+    var badge = btn.querySelector('.notif-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'badge notif-badge';
+        btn.appendChild(badge);
+      }
+      badge.textContent = String(count);
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+
   // --- Clipboard helper ---------------------------------------------------
   // Copies `text` to the clipboard and, if `btn` is given, briefly flips its
   // contents to a "Copied" confirmation before restoring the original markup.
@@ -220,6 +276,24 @@
     // Close the mobile menu when a nav link is clicked.
     if (e.target.closest('.sidebar ul li a') && menuIsOpen()) {
       setMenu(false);
+    }
+    if (e.target.closest('#notif-bell-btn')) {
+      // htmx's own click listener on this same button fires the hx-get
+      // independently — this only owns the open/closed visual state.
+      toggleNotifPanel();
+      return;
+    }
+    // Click outside the bell/panel closes it.
+    if (notifPanelIsOpen() && !e.target.closest('.notif-bell-wrap')) {
+      closeNotifPanel();
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && notifPanelIsOpen()) {
+      closeNotifPanel();
+      var btn = notifBellBtn();
+      if (btn) { btn.focus(); }
     }
   });
 
@@ -1541,6 +1615,9 @@
       UpdateStamps.markAllVisible();
     } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
       markUpdated(SWAP_TARGET_STAMPS[target.id]);
+    }
+    if (target && target.id === 'notif-panel') {
+      syncNotifBadge(target);
     }
   });
 

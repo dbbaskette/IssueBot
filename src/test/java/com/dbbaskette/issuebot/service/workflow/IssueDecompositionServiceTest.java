@@ -199,7 +199,7 @@ class IssueDecompositionServiceTest {
         verify(gitHubApi, never()).closeIssue(anyString(), anyString(), anyInt());
         verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(42), eq(List.of("issuebot-parent")));
         verify(gitHubApi).removeLabel("owner", "repo", 42, "agent-ready");
-        verify(notificationService).info(eq("Issue Decomposed"), anyString());
+        verify(notificationService).info(eq("Issue Decomposed"), anyString(), eq(issue));
     }
 
     @Test

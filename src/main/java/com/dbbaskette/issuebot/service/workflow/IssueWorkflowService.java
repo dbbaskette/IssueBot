@@ -952,17 +952,17 @@ public class IssueWorkflowService {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
             notificationService.info("PR Ready for Review",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
-                            + " — PR created, awaiting approval");
+                            + " — PR created, awaiting approval", trackedIssue);
         } else if (repo.isAutoMerge() && !merged) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
             notificationService.warn("Auto-Merge Failed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
-                            + " — PR #" + prNumber + " created but merge failed, needs manual merge");
+                            + " — PR #" + prNumber + " created but merge failed, needs manual merge", trackedIssue);
         } else {
             trackedIssue.setStatus(IssueStatus.COMPLETED);
             notificationService.info("Issue Completed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
-                            + " — PR #" + prNumber + (merged ? " created & merged" : " created"));
+                            + " — PR #" + prNumber + (merged ? " created & merged" : " created"), trackedIssue);
         }
         issueRepository.save(trackedIssue);
 

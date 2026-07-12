@@ -209,7 +209,7 @@ public class IssuePollingService {
         eventService.log("ISSUE_DEQUEUED",
                 "No open IssueBot PR — starting issue #" + next.getIssueNumber(), repo, next);
         notificationService.info("Issue Dequeued",
-                repo.fullName() + " #" + next.getIssueNumber() + " — gate cleared, starting work");
+                repo.fullName() + " #" + next.getIssueNumber() + " — gate cleared, starting work", next);
 
         workflowService.processIssueAsync(next);
     }
@@ -291,7 +291,7 @@ public class IssuePollingService {
                     repo, tracked);
             notificationService.info("Issue Queued",
                     repo.fullName() + " #" + issueNumber + ": " + title
-                            + " (waiting for open PR to merge)");
+                            + " (waiting for open PR to merge)", tracked);
             return WebhookOutcome.QUEUED;
         }
 
@@ -304,7 +304,7 @@ public class IssuePollingService {
                     repo, tracked);
             notificationService.info("Issue Discovered",
                     repo.fullName() + " #" + issueNumber + ": " + title
-                            + " (queued — manual start required)");
+                            + " (queued — manual start required)", tracked);
             return WebhookOutcome.QUEUED;
         }
 
@@ -318,7 +318,7 @@ public class IssuePollingService {
                 "Detected agent-ready issue #" + issueNumber + ": " + title,
                 repo, tracked);
         notificationService.info("New Issue Detected",
-                repo.fullName() + " #" + issueNumber + ": " + title);
+                repo.fullName() + " #" + issueNumber + ": " + title, tracked);
 
         // Start workflow
         workflowService.processIssueAsync(tracked);
@@ -367,7 +367,7 @@ public class IssuePollingService {
                 "Issue #" + issueNumber + " queued via webhook — at max concurrent issues (" + maxConcurrent + ")",
                 repo, tracked);
         notificationService.info("Issue Queued",
-                repo.fullName() + " #" + issueNumber + ": " + title + " (at capacity, waiting for a slot)");
+                repo.fullName() + " #" + issueNumber + ": " + title + " (at capacity, waiting for a slot)", tracked);
         return WebhookOutcome.QUEUED;
     }
 
@@ -421,7 +421,7 @@ public class IssuePollingService {
                                 .collect(Collectors.joining(", ")),
                 repo, tracked);
         notificationService.info("Issue Blocked",
-                repo.fullName() + " #" + issueNumber + " waiting on dependencies");
+                repo.fullName() + " #" + issueNumber + " waiting on dependencies", tracked);
         return true;
     }
 
