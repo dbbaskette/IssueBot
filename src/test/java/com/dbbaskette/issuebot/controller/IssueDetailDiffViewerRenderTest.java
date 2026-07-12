@@ -60,6 +60,8 @@ class IssueDetailDiffViewerRenderTest {
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         context.setVariable("iterations", iterations);
+        // Iteration History (#90) reads this newest-first view; mirrors IssueController.
+        context.setVariable("iterationsNewestFirst", iterations.reversed());
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
         context.setVariable("phaseIndex", -1);

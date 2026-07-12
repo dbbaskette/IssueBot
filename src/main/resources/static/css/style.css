@@ -2245,3 +2245,89 @@ details summary:hover { color: var(--text-primary); }
 .data-table th.sort-asc::after { content: '\2191'; opacity: 0.9; }
 .data-table th.sort-desc::after { content: '\2193'; opacity: 0.9; }
 .data-table th.is-sortable:hover { color: var(--accent); }
+
+/* ============================================================
+   Issue detail — two-column layout, sticky terminal (#90)
+   Mobile-first: single column by default. At >=1100px, splits into
+   a primary column (header/banners/decision cards/goal/timeline/
+   pipeline/guide) and a narrower sticky column holding only the live
+   terminal. Iteration History and Activity Log are NOT grid children
+   — they stay full-width below the grid in both layouts. Modals are
+   also outside the grid entirely (position:fixed backdrops, so their
+   DOM position doesn't affect layout either way) — see the MODALS
+   comment in issue-detail.html for why that placement is load-bearing.
+   ============================================================ */
+.detail-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.detail-grid-left,
+.detail-grid-right {
+    min-width: 0; /* stops wide pre-formatted content (terminal/diffs) from blowing out the column */
+}
+
+@media (min-width: 1100px) {
+    /* :has() gates the column split on an actual terminal being present — the
+       terminal only renders while IN_PROGRESS (see .live-terminal-panel's th:if),
+       so most issues (queued/completed/failed) would otherwise reserve a wide,
+       permanently-empty right column for nothing. Without :has() support the
+       grid simply stays single-column, which is still a correct, readable
+       fallback (progressive enhancement, not a functional dependency). */
+    .detail-grid:has(.live-terminal-panel) {
+        grid-template-columns: 1fr minmax(420px, 40%);
+    }
+
+    .detail-grid:has(.live-terminal-panel) .detail-grid-right {
+        /* 2rem mirrors main's own top padding ("Main content area" rule above) so the
+           stuck panel keeps the same breathing room from the viewport edge it had
+           before scrolling, instead of jamming flush against the browser chrome. */
+        position: sticky;
+        top: 2rem;
+        align-self: start;
+    }
+}
+
+/* ============================================================
+   Iteration History — collapsed-by-default entries (#90)
+   Mirrors the per-file diff viewer's <details> summary treatment
+   (.diff-file / .diff-file-summary above) for a consistent pattern.
+   ============================================================ */
+.iteration-entry {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.iteration-entry summary.iteration-entry-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.7rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--glass-bg);
+}
+
+.iteration-entry-summary .iteration-entry-num {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.iteration-entry-summary .iteration-entry-time { margin-left: auto; }
+
+.iteration-entry-body {
+    padding: 0.9rem 1rem 1rem;
+    border-top: 1px solid var(--glass-border);
+}
+.iteration-entry-body > details:last-child,
+.iteration-entry-body > .review-scores:last-child {
+    margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+    .detail-grid { gap: 1rem; }
+}

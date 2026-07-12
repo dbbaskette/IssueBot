@@ -878,6 +878,9 @@ public class IssueController {
         model.addAttribute("issue", issue);
         model.addAttribute("iterations", iterations);
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
+        // Iteration History (#90) reads newest-first; "iterations" above stays ascending
+        // since latestIteration and the timeline assembler both depend on that order.
+        model.addAttribute("iterationsNewestFirst", iterations.reversed());
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
         model.addAttribute("timeline", timeline);
