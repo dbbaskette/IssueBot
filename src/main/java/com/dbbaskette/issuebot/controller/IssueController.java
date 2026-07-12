@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.model.CostTracking;
 import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
@@ -12,6 +13,7 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
@@ -67,6 +69,7 @@ public class IssueController {
     private final WorkflowCancellationService cancellationService;
     private final IssueGuidanceRepository guidanceRepository;
     private final ObjectMapper objectMapper;
+    private final TimelineAssembler timelineAssembler;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -82,7 +85,8 @@ public class IssueController {
                             PlanFirstService planFirstService,
                             WorkflowCancellationService cancellationService,
                             IssueGuidanceRepository guidanceRepository,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            TimelineAssembler timelineAssembler) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -98,6 +102,7 @@ public class IssueController {
         this.cancellationService = cancellationService;
         this.guidanceRepository = guidanceRepository;
         this.objectMapper = objectMapper;
+        this.timelineAssembler = timelineAssembler;
     }
 
     @GetMapping
@@ -855,6 +860,14 @@ public class IssueController {
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
 
+        // Loop timeline (#88): needs the FULL per-issue event and cost history (one query each,
+        // bounded — no per-iteration N+1) rather than the capped/desc "events" list above, which
+        // only feeds the Activity Log panel.
+        List<Event> allEvents = eventRepository.findByIssueOrderByCreatedAtAsc(issue);
+        List<CostTracking> costRows = costRepository.findByIssue(issue);
+        List<TimelineAssembler.IterationTimeline> timeline =
+                timelineAssembler.assemble(issue, allEvents, iterations, costRows);
+
         boolean completed = issue.getStatus() == IssueStatus.COMPLETED;
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
@@ -863,6 +876,7 @@ public class IssueController {
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
+        model.addAttribute("timeline", timeline);
         model.addAttribute("phaseIndex", phaseIndex(issue));
         model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());

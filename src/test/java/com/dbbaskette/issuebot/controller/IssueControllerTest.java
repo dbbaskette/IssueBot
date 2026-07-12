@@ -41,7 +41,7 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -67,7 +67,7 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -93,7 +93,7 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -113,7 +113,7 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -140,7 +140,7 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -167,6 +167,7 @@ class IssueControllerTest {
         final PlanFirstService planFirstService = mock(PlanFirstService.class);
         final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
         final IterationRepository iterationRepository = mock(IterationRepository.class);
+        final EventRepository eventRepository = mock(EventRepository.class);
         final CostTrackingRepository costRepository = mock(CostTrackingRepository.class);
         final EventService eventService = mock(EventService.class);
         final IssueGuidanceRepository guidanceRepository = mock(IssueGuidanceRepository.class);
@@ -190,11 +191,12 @@ class IssueControllerTest {
             }
 
             controller = new IssueController(issues, repos,
-                    iterationRepository, mock(EventRepository.class),
+                    iterationRepository, eventRepository,
                     costRepository, mock(IssuePollingService.class),
                     mock(IssueWorkflowService.class), eventService,
                     gitHubApiClient, properties, decompositionService, planFirstService,
-                    cancellationService, guidanceRepository, new ObjectMapper());
+                    cancellationService, guidanceRepository, new ObjectMapper(),
+                    new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
         }
     }
 
@@ -732,6 +734,46 @@ class IssueControllerTest {
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isSameAs(second);
     }
 
+    // === Loop timeline (#88) ===================================================
+
+    @Test
+    void detailExposesEmptyTimeline_whenNoIterations() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        org.assertj.core.api.Assertions.assertThat(
+                (List<?>) model.getAttribute("timeline")).isEmpty();
+    }
+
+    @Test
+    void detailAssemblesTimeline_fromFullPerIssueEventAndCostHistory_notTheCappedActivityLogList() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        Iteration iteration = new Iteration(f.issue, 1);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(iteration));
+        when(f.eventRepository.findByIssueOrderByCreatedAtAsc(f.issue)).thenReturn(List.of(
+                new com.dbbaskette.issuebot.model.Event("PHASE_IMPLEMENTATION", "Starting implementation phase")));
+        when(f.costRepository.findByIssue(f.issue)).thenReturn(List.of());
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        @SuppressWarnings("unchecked")
+        List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline> timeline =
+                (List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline>)
+                        model.getAttribute("timeline");
+        org.assertj.core.api.Assertions.assertThat(timeline).hasSize(1);
+        // The in-progress iteration's Implementation stage started but hasn't completed —
+        // it must show as an open "running" segment (IN_PROGRESS issue, ascending event feed).
+        org.assertj.core.api.Assertions.assertThat(timeline.get(0).segments())
+                .extracting(com.dbbaskette.issuebot.service.ui.TimelineAssembler.Segment::outcome)
+                .containsExactly("running");
+        // The full (unpaged) ascending finder must be the one used, not the capped desc list.
+        verify(f.eventRepository).findByIssueOrderByCreatedAtAsc(f.issue);
+    }
+
     // === Per-row "Retry with defaults" quick action (#87) ===================
 
     @Test
@@ -806,7 +848,7 @@ class IssueControllerTest {
                 mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                 workflowService, eventService,
                 gitHubApiClient, properties, mock(IssueDecompositionService.class), mock(PlanFirstService.class),
-                mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper());
+                mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
     }
 
     @Test
