@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -32,17 +33,20 @@ public class CostController {
     private final WatchedRepoRepository repoRepository;
     private final IssuePollingService pollingService;
     private final ObjectMapper objectMapper;
+    private final NotificationRepository notificationRepository;
 
     public CostController(CostTrackingRepository costRepository,
                            TrackedIssueRepository issueRepository,
                            WatchedRepoRepository repoRepository,
                            IssuePollingService pollingService,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           NotificationRepository notificationRepository) {
         this.costRepository = costRepository;
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.pollingService = pollingService;
         this.objectMapper = objectMapper;
+        this.notificationRepository = notificationRepository;
     }
 
     @GetMapping("/costs")
@@ -54,6 +58,7 @@ public class CostController {
         model.addAttribute("selectedRange", range);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         // Global totals
         BigDecimal totalCost = costRepository.totalCost();

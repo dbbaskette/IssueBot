@@ -33,7 +33,7 @@ class RepositoryControllerTest {
                     issues, mock(IterationRepository.class),
                     mock(CostTrackingRepository.class), mock(EventRepository.class),
                     lessons,
-                    mock(IssuePollingService.class));
+                    mock(IssuePollingService.class), mock(NotificationRepository.class));
         }
 
         WatchedRepo addOrUpdate(String implementationModel, String reviewModel) {

@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
@@ -36,6 +37,7 @@ public class SetupController {
     private final WatchedRepoRepository repoRepository;
     private final WebhookController webhookController;
     private final WebhookDeliveryLog webhookDeliveryLog;
+    private final NotificationRepository notificationRepository;
 
     public SetupController(ClaudeCodeService claudeCodeService,
                             IssueBotProperties properties,
@@ -44,7 +46,8 @@ public class SetupController {
                             GitHubApiClient gitHubApiClient,
                             WatchedRepoRepository repoRepository,
                             WebhookController webhookController,
-                            WebhookDeliveryLog webhookDeliveryLog) {
+                            WebhookDeliveryLog webhookDeliveryLog,
+                            NotificationRepository notificationRepository) {
         this.claudeCodeService = claudeCodeService;
         this.properties = properties;
         this.pollingService = pollingService;
@@ -53,6 +56,7 @@ public class SetupController {
         this.repoRepository = repoRepository;
         this.webhookController = webhookController;
         this.webhookDeliveryLog = webhookDeliveryLog;
+        this.notificationRepository = notificationRepository;
     }
 
     /** Row of the Webhooks table on the setup page: a watched repo and when it last sent a webhook event. */
@@ -73,6 +77,7 @@ public class SetupController {
         model.addAttribute("contentTemplate", "setup");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         model.addAttribute("webhookPath", "/webhooks/github");
         model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());

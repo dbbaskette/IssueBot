@@ -149,4 +149,38 @@ class NotificationServiceTest {
         verify(notificationRepository).save(any(Notification.class));
         verify(eventService, never()).log(anyString(), anyString());
     }
+
+    @Test
+    void persist_clampsOverlongTitleAndDetail_insteadOfDroppingTheRow() {
+        // PR #102 review: over-long values must be truncated to the V22 column widths BEFORE
+        // the insert — otherwise the DB rejects the row and the failure-swallow path silently
+        // drops the notification from history.
+        String longTitle = "T".repeat(NotificationService.MAX_TITLE_LENGTH + 55);
+        String longDetail = "D".repeat(NotificationService.MAX_DETAIL_LENGTH + 500);
+
+        notificationService.warn(longTitle, longDetail);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(captor.capture());
+        Notification saved = captor.getValue();
+        assertThat(saved.getTitle())
+                .hasSize(NotificationService.MAX_TITLE_LENGTH)
+                .isEqualTo(longTitle.substring(0, NotificationService.MAX_TITLE_LENGTH));
+        assertThat(saved.getDetail())
+                .hasSize(NotificationService.MAX_DETAIL_LENGTH)
+                .isEqualTo(longDetail.substring(0, NotificationService.MAX_DETAIL_LENGTH));
+    }
+
+    @Test
+    void persist_leavesWithinLimitValuesUntouched() {
+        String title = "T".repeat(NotificationService.MAX_TITLE_LENGTH);
+        String detail = "D".repeat(NotificationService.MAX_DETAIL_LENGTH);
+
+        notificationService.info(title, detail);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(captor.capture());
+        assertThat(captor.getValue().getTitle()).isEqualTo(title);
+        assertThat(captor.getValue().getDetail()).isEqualTo(detail);
+    }
 }

@@ -1,7 +1,6 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -12,16 +11,21 @@ import org.springframework.web.bind.annotation.ModelAttribute;
  * usage permits invoking methods on model attributes — this isn't a SpEL {@code T(...)} type
  * expression (which newer Thymeleaf restricts), just an ordinary property/method access on a
  * bean already in the model, so no expression-restriction workaround is needed.
+ *
+ * <p>Only ZERO-COST attributes belong here: {@code @ModelAttribute} methods on a
+ * {@code @ControllerAdvice} run for EVERY handler invocation app-wide — including SSE stream
+ * subscriptions, webhook posts, and the 30s fragment polls — not just page renders. The bell's
+ * unread count (a database COUNT) started life here and was moved into the layout-rendering
+ * page controllers, alongside their {@code pendingApprovals} count, for exactly that reason
+ * (PR #102 review).
  */
 @ControllerAdvice
 public class UiModelAdvice {
 
     private final IssueBotProperties properties;
-    private final NotificationRepository notificationRepository;
 
-    public UiModelAdvice(IssueBotProperties properties, NotificationRepository notificationRepository) {
+    public UiModelAdvice(IssueBotProperties properties) {
         this.properties = properties;
-        this.notificationRepository = notificationRepository;
     }
 
     @ModelAttribute("humanize")
@@ -34,20 +38,10 @@ public class UiModelAdvice {
      * "Dashboard Notifications" toggle {@code NotificationService#sendDashboardEvent} already
      * checks for the toast/event stream. Persistence itself is unconditional (see
      * {@code NotificationService} javadoc); only the bell's visibility is gated here.
+     * A plain in-memory property read — no query — so it is safe in this advice.
      */
     @ModelAttribute("dashboardNotificationsEnabled")
     public boolean dashboardNotificationsEnabled() {
         return properties.getNotifications().isDashboard();
-    }
-
-    /**
-     * Unread-count badge on the bell (#89) — a cheap {@code COUNT(*)} query on every page
-     * render. Acceptable: the notifications table is small (top-20 panel, no unbounded growth
-     * concern for this query) and this mirrors the existing per-render {@code pendingApprovals}
-     * count each controller already computes.
-     */
-    @ModelAttribute("unreadNotificationCount")
-    public long unreadNotificationCount() {
-        return notificationRepository.countByReadAtIsNull();
     }
 }

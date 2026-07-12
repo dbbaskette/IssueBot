@@ -70,6 +70,7 @@ public class IssueController {
     private final IssueGuidanceRepository guidanceRepository;
     private final ObjectMapper objectMapper;
     private final TimelineAssembler timelineAssembler;
+    private final NotificationRepository notificationRepository;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -86,7 +87,8 @@ public class IssueController {
                             WorkflowCancellationService cancellationService,
                             IssueGuidanceRepository guidanceRepository,
                             ObjectMapper objectMapper,
-                            TimelineAssembler timelineAssembler) {
+                            TimelineAssembler timelineAssembler,
+                            NotificationRepository notificationRepository) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -103,6 +105,7 @@ public class IssueController {
         this.guidanceRepository = guidanceRepository;
         this.objectMapper = objectMapper;
         this.timelineAssembler = timelineAssembler;
+        this.notificationRepository = notificationRepository;
     }
 
     @GetMapping
@@ -128,6 +131,7 @@ public class IssueController {
         model.addAttribute("hasNext", issuePage.hasNext());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         return ViewResolver.view("issues", hx != null);
     }
 
@@ -881,6 +885,7 @@ public class IssueController {
         model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         BigDecimal effectiveBudget = issue.effectiveBudgetUsd();
         model.addAttribute("issueSpent", totalCost);
         model.addAttribute("effectiveBudget", effectiveBudget);

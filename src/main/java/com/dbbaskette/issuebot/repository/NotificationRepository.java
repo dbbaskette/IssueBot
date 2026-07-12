@@ -14,6 +14,14 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     List<Notification> findTop20ByOrderByCreatedAtDesc();
 
+    /**
+     * Unread count for the bell badge. Called once per full page render by the layout-rendering
+     * page controllers (alongside their {@code pendingApprovals} count) — NOT app-wide via
+     * {@code @ControllerAdvice}, which would fire it on every request including SSE streams and
+     * fragment polls (PR #102 review). The notifications table grows without bound (rows are
+     * stamped read, never deleted), so this is backed by {@code idx_notifications_read_at} (V23)
+     * rather than relying on the table staying small.
+     */
     long countByReadAtIsNull();
 
     /**

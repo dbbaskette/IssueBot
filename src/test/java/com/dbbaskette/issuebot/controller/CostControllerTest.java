@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -69,7 +70,8 @@ class CostControllerTest {
         when(costRepo.sumCostByDay(any(LocalDateTime.class)))
                 .thenReturn(List.<Object[]>of(new Object[]{LocalDate.of(2026, 6, 1), new BigDecimal("3.5")}));
 
-        CostController controller = new CostController(costRepo, issueRepo, repoRepo, polling, new ObjectMapper());
+        CostController controller = new CostController(costRepo, issueRepo, repoRepo, polling, new ObjectMapper(),
+                mock(NotificationRepository.class));
 
         Model model = new ExtendedModelMap();
         controller.costs(model, null, "7d");

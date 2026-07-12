@@ -110,19 +110,33 @@ public class NotificationService {
         persist(Notification.Severity.ERROR, title, message, null);
     }
 
+    /** Column limits from the V22 migration — over-long inputs are clamped, not dropped. */
+    static final int MAX_TITLE_LENGTH = 200;
+    static final int MAX_DETAIL_LENGTH = 1000;
+
     /**
      * Best-effort persistence for the notification-bell history (#89) — unconditional (not
      * gated by the dashboard toggle, see class javadoc) and never allowed to propagate: a
      * database failure here must not take down desktop/toast delivery, which already happened
-     * by the time this runs.
+     * by the time this runs. Title/detail are clamped to their column widths up front (PR #102
+     * review) so an over-long message — e.g. a long issue title concatenated into the detail —
+     * persists truncated instead of tripping the failure path and vanishing from the history.
      */
     private void persist(Notification.Severity severity, String title, String message, TrackedIssue issue) {
         try {
             Long issueId = issue != null ? issue.getId() : null;
-            notificationRepository.save(new Notification(severity, title, message, issueId));
+            notificationRepository.save(new Notification(severity,
+                    clamp(title, MAX_TITLE_LENGTH), clamp(message, MAX_DETAIL_LENGTH), issueId));
         } catch (Exception e) {
             log.warn("Failed to persist notification '{}': {}", title, e.getMessage());
         }
+    }
+
+    private static String clamp(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 
     private boolean checkSystemTraySupport() {
