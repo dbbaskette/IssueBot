@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -31,14 +32,17 @@ public class SettingsController {
     private final IssueBotProperties properties;
     private final IssuePollingService pollingService;
     private final TrackedIssueRepository issueRepository;
+    private final NotificationRepository notificationRepository;
     private Path configPath = Path.of(System.getProperty("user.home"), ".issuebot", "config.yml");
 
     public SettingsController(IssueBotProperties properties,
                                IssuePollingService pollingService,
-                               TrackedIssueRepository issueRepository) {
+                               TrackedIssueRepository issueRepository,
+                               NotificationRepository notificationRepository) {
         this.properties = properties;
         this.pollingService = pollingService;
         this.issueRepository = issueRepository;
+        this.notificationRepository = notificationRepository;
     }
 
     @GetMapping
@@ -280,6 +284,7 @@ public class SettingsController {
         model.addAttribute("config", properties);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         String implementationModel = properties.getClaudeCode().getImplementationModel();
         String reviewModel = properties.getClaudeCode().getReviewModel();

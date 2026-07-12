@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,8 @@ class SettingsControllerTest {
 
     private SettingsController controller(IssueBotProperties properties, Path configFile) {
         SettingsController controller = new SettingsController(properties,
-                mock(IssuePollingService.class), mock(TrackedIssueRepository.class));
+                mock(IssuePollingService.class), mock(TrackedIssueRepository.class),
+                mock(NotificationRepository.class));
         controller.setConfigPathForTests(configFile);
         return controller;
     }

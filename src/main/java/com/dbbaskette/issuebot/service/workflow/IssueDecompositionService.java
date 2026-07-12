@@ -144,7 +144,7 @@ public class IssueDecompositionService {
                     "Proposed split into " + subIssues.size() + " sub-issues — awaiting approval",
                     repo, trackedIssue);
             notificationService.info("Decomposition Proposed",
-                    repo.fullName() + " #" + issueNumber + " — approve or reject in the dashboard");
+                    repo.fullName() + " #" + issueNumber + " — approve or reject in the dashboard", trackedIssue);
             return true;
         }
 
@@ -180,7 +180,7 @@ public class IssueDecompositionService {
 
         notificationService.info("Issue Decomposed",
                 repo.fullName() + " #" + issueNumber + " split into "
-                        + createdNumbers.size() + " sub-issues");
+                        + createdNumbers.size() + " sub-issues", trackedIssue);
 
         log.info("Successfully decomposed {} #{} into {} sub-issues: {}",
                 repo.fullName(), issueNumber, createdNumbers.size(), createdNumbers);
@@ -300,7 +300,7 @@ public class IssueDecompositionService {
 
         notificationService.info("Issue Decomposed",
                 repo.fullName() + " #" + issueNumber + " split into "
-                        + createdNumbers.size() + " sub-issues");
+                        + createdNumbers.size() + " sub-issues", issue);
     }
 
     /**

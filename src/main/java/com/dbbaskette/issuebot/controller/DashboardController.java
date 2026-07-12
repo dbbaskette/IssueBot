@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -26,17 +27,20 @@ public class DashboardController {
     private final CostTrackingRepository costRepository;
     private final EventService eventService;
     private final IssuePollingService pollingService;
+    private final NotificationRepository notificationRepository;
 
     public DashboardController(TrackedIssueRepository issueRepository,
                                 WatchedRepoRepository repoRepository,
                                 CostTrackingRepository costRepository,
                                 EventService eventService,
-                                IssuePollingService pollingService) {
+                                IssuePollingService pollingService,
+                                NotificationRepository notificationRepository) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.costRepository = costRepository;
         this.eventService = eventService;
         this.pollingService = pollingService;
+        this.notificationRepository = notificationRepository;
     }
 
     @GetMapping("/")
@@ -46,6 +50,7 @@ public class DashboardController {
         model.addAttribute("contentTemplate", "dashboard");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         populateMetrics(model);
 

@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -57,19 +58,22 @@ public class ApprovalController {
     private final GitHubApiClient gitHubApi;
     private final EventService eventService;
     private final IssuePollingService pollingService;
+    private final NotificationRepository notificationRepository;
 
     public ApprovalController(TrackedIssueRepository issueRepository,
                                IterationRepository iterationRepository,
                                IterationManager iterationManager,
                                GitHubApiClient gitHubApi,
                                EventService eventService,
-                               IssuePollingService pollingService) {
+                               IssuePollingService pollingService,
+                               NotificationRepository notificationRepository) {
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
         this.iterationManager = iterationManager;
         this.gitHubApi = gitHubApi;
         this.eventService = eventService;
         this.pollingService = pollingService;
+        this.notificationRepository = notificationRepository;
     }
 
     @GetMapping
@@ -196,6 +200,7 @@ public class ApprovalController {
         model.addAttribute("ciStatuses", ciStatuses);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", (long) approvals.size());
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
     }
 

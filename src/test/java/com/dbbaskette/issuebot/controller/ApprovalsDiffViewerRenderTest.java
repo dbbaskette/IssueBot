@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -95,7 +96,8 @@ class ApprovalsDiffViewerRenderTest {
 
         ApprovalController controller = new ApprovalController(issues, iterations,
                 mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class));
+                mock(EventService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class));
 
         Model model = new ExtendedModelMap();
         controller.list(model, null);
@@ -121,7 +123,8 @@ class ApprovalsDiffViewerRenderTest {
 
         ApprovalController controller = new ApprovalController(issues, iterations,
                 mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class));
+                mock(EventService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class));
 
         Model model = new ExtendedModelMap();
         controller.list(model, null);

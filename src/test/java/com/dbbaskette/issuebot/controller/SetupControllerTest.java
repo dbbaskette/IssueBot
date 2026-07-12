@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.security.WebhookSignatureVerifier;
@@ -38,7 +39,8 @@ class SetupControllerTest {
         when(claude.checkAuthentication()).thenReturn(true);
         lenient().when(repoRepository.findAll()).thenReturn(List.of());
         return new SetupController(claude, props, mock(IssuePollingService.class),
-                mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks, webhookDeliveryLog);
+                mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks, webhookDeliveryLog,
+                mock(NotificationRepository.class));
     }
 
     @Test

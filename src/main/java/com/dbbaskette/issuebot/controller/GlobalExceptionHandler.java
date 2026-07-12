@@ -103,6 +103,10 @@ public class GlobalExceptionHandler {
         model.addAttribute("backLabel", backLabel != null ? backLabel : "Back to Dashboard");
         model.addAttribute("agentRunning", true);
         model.addAttribute("pendingApprovals", 0L);
+        // Static 0 like pendingApprovals above — the error page must never hit the database,
+        // and @ControllerAdvice @ModelAttribute methods don't run for @ExceptionHandler views
+        // anyway (the bell is hidden here since dashboardNotificationsEnabled is also absent).
+        model.addAttribute("unreadNotificationCount", 0L);
         return ViewResolver.view("error", request.getHeader("HX-Request") != null);
     }
 }

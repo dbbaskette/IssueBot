@@ -86,7 +86,7 @@ class PlanFirstServiceTest {
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(42),
                 contains("Proposed Implementation Plan"));
         verify(eventService).log(eq("PLAN_PROPOSED"), anyString(), eq(issue.getRepo()), eq(issue));
-        verify(notificationService).info(eq("Plan Proposed"), anyString());
+        verify(notificationService).info(eq("Plan Proposed"), anyString(), eq(issue));
     }
 
     @Test
@@ -160,7 +160,7 @@ class PlanFirstServiceTest {
         verify(issueRepository).save(issue);
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(42), contains("approved"));
         verify(eventService).log(eq("PLAN_APPROVED"), anyString(), eq(issue.getRepo()), eq(issue));
-        verify(notificationService).info(eq("Plan Approved"), anyString());
+        verify(notificationService).info(eq("Plan Approved"), anyString(), eq(issue));
     }
 
     @Test

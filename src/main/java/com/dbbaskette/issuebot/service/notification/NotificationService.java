@@ -1,6 +1,9 @@
 package com.dbbaskette.issuebot.service.notification;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.model.Notification;
+import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +11,16 @@ import org.springframework.stereotype.Service;
 
 import java.awt.*;
 
+/**
+ * The single funnel for user-facing notifications: desktop tray, dashboard toast/event, and
+ * (#89) a persistent {@link Notification} row backing the notification bell's history panel.
+ *
+ * <p>Persistence is best-effort and unconditional — it happens on every call regardless of the
+ * "Dashboard Notifications" toggle ({@link IssueBotProperties.NotificationConfig#isDashboard()}),
+ * which only gates the toast/event stream and (in the UI) the bell's visibility. A failed insert
+ * is logged and swallowed so a database hiccup never prevents a notification from reaching the
+ * operator through the channels that still work.
+ */
 @Service
 public class NotificationService {
 
@@ -15,11 +28,14 @@ public class NotificationService {
 
     private final IssueBotProperties properties;
     private final EventService eventService;
+    private final NotificationRepository notificationRepository;
     private final boolean systemTraySupported;
 
-    public NotificationService(IssueBotProperties properties, EventService eventService) {
+    public NotificationService(IssueBotProperties properties, EventService eventService,
+                                NotificationRepository notificationRepository) {
         this.properties = properties;
         this.eventService = eventService;
+        this.notificationRepository = notificationRepository;
         this.systemTraySupported = checkSystemTraySupport();
     }
 
@@ -63,18 +79,64 @@ public class NotificationService {
     }
 
     public void info(String title, String message) {
+        info(title, message, null);
+    }
+
+    /**
+     * Issue-aware overload (#89) — stamps {@code issue_id} on the persisted row so the
+     * notification-bell panel can deep link to {@code /issues/{id}}. Only wired up at call sites
+     * where a {@link TrackedIssue} is already in scope; the 2-arg overload above still covers
+     * system-level notifications with no associated issue.
+     */
+    public void info(String title, String message, TrackedIssue issue) {
         sendDesktopNotification(title, message, TrayIcon.MessageType.INFO);
         sendDashboardEvent("NOTIFICATION_INFO", title + ": " + message);
+        persist(Notification.Severity.INFO, title, message, issue);
     }
 
     public void warn(String title, String message) {
+        warn(title, message, null);
+    }
+
+    public void warn(String title, String message, TrackedIssue issue) {
         sendDesktopNotification(title, message, TrayIcon.MessageType.WARNING);
         sendDashboardEvent("NOTIFICATION_WARN", title + ": " + message);
+        persist(Notification.Severity.WARN, title, message, issue);
     }
 
     public void error(String title, String message) {
         sendDesktopNotification(title, message, TrayIcon.MessageType.ERROR);
         sendDashboardEvent("NOTIFICATION_ERROR", title + ": " + message);
+        persist(Notification.Severity.ERROR, title, message, null);
+    }
+
+    /** Column limits from the V22 migration — over-long inputs are clamped, not dropped. */
+    static final int MAX_TITLE_LENGTH = 200;
+    static final int MAX_DETAIL_LENGTH = 1000;
+
+    /**
+     * Best-effort persistence for the notification-bell history (#89) — unconditional (not
+     * gated by the dashboard toggle, see class javadoc) and never allowed to propagate: a
+     * database failure here must not take down desktop/toast delivery, which already happened
+     * by the time this runs. Title/detail are clamped to their column widths up front (PR #102
+     * review) so an over-long message — e.g. a long issue title concatenated into the detail —
+     * persists truncated instead of tripping the failure path and vanishing from the history.
+     */
+    private void persist(Notification.Severity severity, String title, String message, TrackedIssue issue) {
+        try {
+            Long issueId = issue != null ? issue.getId() : null;
+            notificationRepository.save(new Notification(severity,
+                    clamp(title, MAX_TITLE_LENGTH), clamp(message, MAX_DETAIL_LENGTH), issueId));
+        } catch (Exception e) {
+            log.warn("Failed to persist notification '{}': {}", title, e.getMessage());
+        }
+    }
+
+    private static String clamp(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 
     private boolean checkSystemTraySupport() {

@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -30,7 +31,42 @@ class DashboardControllerTest {
 
     private static DashboardController controller(TrackedIssueRepository issues, CostTrackingRepository costs) {
         return new DashboardController(issues, mock(WatchedRepoRepository.class), costs,
-                mock(EventService.class), mock(IssuePollingService.class));
+                mock(EventService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class));
+    }
+
+    @Test
+    void dashboard_fullPageRender_populatesUnreadNotificationCount() {
+        // The bell's unread count is added per page render by layout-rendering controllers
+        // (alongside pendingApprovals) rather than app-wide via UiModelAdvice (PR #102 review).
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        CostTrackingRepository costs = mock(CostTrackingRepository.class);
+        NotificationRepository notifications = mock(NotificationRepository.class);
+        when(notifications.countByReadAtIsNull()).thenReturn(4L);
+        DashboardController controller = new DashboardController(issues,
+                mock(WatchedRepoRepository.class), costs,
+                mock(EventService.class), mock(IssuePollingService.class), notifications);
+
+        Model model = new ExtendedModelMap();
+        controller.dashboard(model, null);
+
+        assertThat(model.getAttribute("unreadNotificationCount")).isEqualTo(4L);
+    }
+
+    @Test
+    void liveFragment_doesNotQueryUnreadNotificationCount() {
+        // The 10s dashboard-live fragment poll must not pay the COUNT — only full page
+        // renders (which actually render the bell in layout.html's header) do.
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        CostTrackingRepository costs = mock(CostTrackingRepository.class);
+        NotificationRepository notifications = mock(NotificationRepository.class);
+        DashboardController controller = new DashboardController(issues,
+                mock(WatchedRepoRepository.class), costs,
+                mock(EventService.class), mock(IssuePollingService.class), notifications);
+
+        controller.live(new ExtendedModelMap());
+
+        verifyNoInteractions(notifications);
     }
 
     @Test

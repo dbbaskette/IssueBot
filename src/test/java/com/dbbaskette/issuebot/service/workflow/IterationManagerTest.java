@@ -231,7 +231,7 @@ class IterationManagerTest {
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(1),
                 argThat(comment -> comment.contains("Budget Exceeded")));
         verify(eventService).log(eq("BUDGET_EXCEEDED"), anyString(), any(), eq(issue));
-        verify(notificationService).warn(eq("Budget Exceeded"), anyString());
+        verify(notificationService).warn(eq("Budget Exceeded"), anyString(), eq(issue));
     }
 
     @Test
@@ -248,7 +248,7 @@ class IterationManagerTest {
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(1),
                 argThat(comment -> comment.contains("Plan Rejected Twice")));
         verify(eventService).log(eq("PLAN_REJECTED_TWICE"), anyString(), any(), eq(issue));
-        verify(notificationService).warn(eq("Plan Rejected Twice"), anyString());
+        verify(notificationService).warn(eq("Plan Rejected Twice"), anyString(), eq(issue));
     }
 
     @Test

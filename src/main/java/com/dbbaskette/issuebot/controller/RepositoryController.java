@@ -41,6 +41,7 @@ public class RepositoryController {
     private final EventRepository eventRepository;
     private final RepoLessonRepository lessonRepository;
     private final IssuePollingService pollingService;
+    private final NotificationRepository notificationRepository;
 
     public RepositoryController(WatchedRepoRepository repoRepository,
                                  TrackedIssueRepository issueRepository,
@@ -48,7 +49,8 @@ public class RepositoryController {
                                  CostTrackingRepository costRepository,
                                  EventRepository eventRepository,
                                  RepoLessonRepository lessonRepository,
-                                 IssuePollingService pollingService) {
+                                 IssuePollingService pollingService,
+                                 NotificationRepository notificationRepository) {
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
@@ -56,6 +58,7 @@ public class RepositoryController {
         this.eventRepository = eventRepository;
         this.lessonRepository = lessonRepository;
         this.pollingService = pollingService;
+        this.notificationRepository = notificationRepository;
     }
 
     @GetMapping
@@ -251,6 +254,7 @@ public class RepositoryController {
         model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
         if (error != null) model.addAttribute("error", error);
     }

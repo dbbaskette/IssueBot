@@ -291,7 +291,7 @@ public class IterationManager {
         enterCooldown(trackedIssue);
 
         notificationService.warn(notificationTitle,
-                repo.fullName() + " #" + issueNumber + " — " + notificationDetail);
+                repo.fullName() + " #" + issueNumber + " — " + notificationDetail, trackedIssue);
 
         eventService.log(eventType, eventMessage, repo, trackedIssue);
     }

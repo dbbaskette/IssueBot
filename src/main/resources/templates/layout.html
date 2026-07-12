@@ -29,7 +29,28 @@
     <nav class="sidebar" id="sidebar" aria-label="Main navigation">
         <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
             <h1>IssueBot</h1>
-            <span id="sse-status" class="sse-dot" data-state="none" title="No live stream on this page"></span>
+            <div style="display:flex;align-items:center;gap:0.6rem">
+                <span id="sse-status" class="sse-dot" data-state="none" title="No live stream on this page"></span>
+                <!--
+                  Notification bell (#89) — gated by the same "Dashboard Notifications" toggle
+                  that already governs the toast/event stream (UiModelAdvice#dashboardNotificationsEnabled);
+                  persistence itself is unconditional, only the bell's visibility is gated. The
+                  panel is loaded lazily: every click re-fires the GET so the list is always
+                  current, never pre-rendered on the full page load.
+                -->
+                <div class="notif-bell-wrap" th:if="${dashboardNotificationsEnabled}">
+                    <button id="notif-bell-btn" class="btn btn-ghost notif-bell-btn" type="button"
+                            aria-label="Notifications" aria-haspopup="true" aria-expanded="false"
+                            aria-controls="notif-panel"
+                            hx-get="/notifications/panel" hx-target="#notif-panel" hx-swap="innerHTML">
+                        <i class="ti ti-bell" aria-hidden="true"></i>
+                        <span class="badge notif-badge"
+                              th:if="${unreadNotificationCount != null and unreadNotificationCount > 0}"
+                              th:text="${unreadNotificationCount}">0</span>
+                    </button>
+                    <div id="notif-panel" class="notif-panel" role="region" aria-label="Notifications" hidden></div>
+                </div>
+            </div>
         </header>
         <ul>
             <li><a th:classappend="${activePage == 'dashboard' ? 'active' : ''}" th:attr="aria-current=${activePage == 'dashboard'} ? 'page' : null" href="/" hx-get="/" hx-target="#content" hx-push-url="true">Dashboard</a></li>

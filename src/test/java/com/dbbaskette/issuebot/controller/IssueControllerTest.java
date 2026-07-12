@@ -41,7 +41,8 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -67,7 +68,8 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -93,7 +95,8 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -113,7 +116,8 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -140,7 +144,8 @@ class IssueControllerTest {
                 mock(GitHubApiClient.class), mock(IssueBotProperties.class),
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
-                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -196,7 +201,8 @@ class IssueControllerTest {
                     mock(IssueWorkflowService.class), eventService,
                     gitHubApiClient, properties, decompositionService, planFirstService,
                     cancellationService, guidanceRepository, new ObjectMapper(),
-                    new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                    new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
         }
     }
 
@@ -849,7 +855,8 @@ class IssueControllerTest {
                 mock(CostTrackingRepository.class), mock(IssuePollingService.class),
                 workflowService, eventService,
                 gitHubApiClient, properties, mock(IssueDecompositionService.class), mock(PlanFirstService.class),
-                mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler());
+                mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
+                    mock(NotificationRepository.class));
     }
 
     @Test

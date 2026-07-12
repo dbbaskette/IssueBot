@@ -110,7 +110,7 @@ public class PlanFirstService {
         eventService.log("PLAN_PROPOSED",
                 "Proposed an implementation plan — awaiting approval", repo, trackedIssue);
         notificationService.info("Plan Proposed",
-                repo.fullName() + " #" + issueNumber + " — approve or reject in the dashboard");
+                repo.fullName() + " #" + issueNumber + " — approve or reject in the dashboard", trackedIssue);
         return true;
     }
 
@@ -150,7 +150,7 @@ public class PlanFirstService {
         eventService.log("PLAN_APPROVED",
                 "Plan approved — queued, resumes on the next poll cycle (~60s)", repo, issue);
         notificationService.info("Plan Approved",
-                repo.fullName() + " #" + issueNumber + " — queued for implementation");
+                repo.fullName() + " #" + issueNumber + " — queued for implementation", issue);
     }
 
     /**
@@ -193,7 +193,7 @@ public class PlanFirstService {
         eventService.log("PLAN_REJECTED",
                 "Plan rejected — regenerating with feedback, queued (~60s)", issue.getRepo(), issue);
         notificationService.info("Plan Rejected",
-                issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " — regenerating plan");
+                issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " — regenerating plan", issue);
         return RejectOutcome.REGENERATING;
     }
 
