@@ -284,6 +284,7 @@ public class SettingsController {
         model.addAttribute("config", properties);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         String implementationModel = properties.getClaudeCode().getImplementationModel();

@@ -10,6 +10,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -94,10 +95,11 @@ class ApprovalsDiffViewerRenderTest {
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iter));
 
-        ApprovalController controller = new ApprovalController(issues, iterations,
+        ApprovalController controller = new ApprovalController(issues,
                 mock(IterationManager.class), mock(GitHubApiClient.class),
                 mock(EventService.class), mock(IssuePollingService.class),
-                mock(NotificationRepository.class));
+                mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
         Model model = new ExtendedModelMap();
         controller.list(model, null);
@@ -121,10 +123,11 @@ class ApprovalsDiffViewerRenderTest {
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
 
-        ApprovalController controller = new ApprovalController(issues, iterations,
+        ApprovalController controller = new ApprovalController(issues,
                 mock(IterationManager.class), mock(GitHubApiClient.class),
                 mock(EventService.class), mock(IssuePollingService.class),
-                mock(NotificationRepository.class));
+                mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
         Model model = new ExtendedModelMap();
         controller.list(model, null);

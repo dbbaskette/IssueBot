@@ -1613,6 +1613,14 @@
     var target = evt.detail && evt.detail.target;
     if (target && target.id === 'content') {
       UpdateStamps.markAllVisible();
+      // Deep-link anchors (e.g. the dashboard's "awaiting X" tiles linking to
+      // /inbox#split-proposals, #91) — an htmx swap is a pushState navigation, not a
+      // real page load, so the browser never auto-scrolls to the URL's #fragment on
+      // its own. Do it ourselves once the freshly-swapped content is in the DOM.
+      if (location.hash) {
+        var hashTarget = document.getElementById(location.hash.slice(1));
+        if (hashTarget) hashTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
       markUpdated(SWAP_TARGET_STAMPS[target.id]);
     }

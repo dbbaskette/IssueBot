@@ -97,8 +97,12 @@
                 <div class="label"><i class="ti ti-ban"></i> Blocked</div>
                 <div class="value" th:text="${blocked}">0</div>
             </a>
-            <a class="metric-tile is-link danger" href="/issues?status=FAILED"
-               hx-get="/issues?status=FAILED" hx-target="#content" hx-push-url="true">
+            <!--/* Deep-links to the Needs You inbox's needs-human group (#91) rather than the
+                   filtered queue — FAILED issues always need a human decision (retry or leave
+                   it), so the inbox (with failure reason + retry link) is the better landing
+                   spot than a bare filtered table. */-->
+            <a class="metric-tile is-link danger" href="/inbox#needs-human"
+               hx-get="/inbox#needs-human" hx-target="#content" hx-push-url="/inbox#needs-human">
                 <div class="label"><i class="ti ti-alert-triangle"></i> Failed</div>
                 <div class="value" th:text="${failed}">0</div>
             </a>
@@ -107,13 +111,15 @@
                 <div class="label"><i class="ti ti-git-branch"></i> Decomposed</div>
                 <div class="value" th:text="${decomposed}">0</div>
             </a>
-            <a class="metric-tile is-link accent" href="/issues?status=AWAITING_DECOMPOSITION"
-               hx-get="/issues?status=AWAITING_DECOMPOSITION" hx-target="#content" hx-push-url="true">
+            <!--/* Deep-links to the Needs You inbox (#91) — both groups are exactly the
+                   "awaiting X approval" checkpoints the inbox exists to collect in one place. */-->
+            <a class="metric-tile is-link accent" href="/inbox#split-proposals"
+               hx-get="/inbox#split-proposals" hx-target="#content" hx-push-url="/inbox#split-proposals">
                 <div class="label"><i class="ti ti-git-fork"></i> Awaiting Split OK</div>
                 <div class="value" th:text="${awaitingDecomposition}">0</div>
             </a>
-            <a class="metric-tile is-link accent" href="/issues?status=AWAITING_PLAN_APPROVAL"
-               hx-get="/issues?status=AWAITING_PLAN_APPROVAL" hx-target="#content" hx-push-url="true">
+            <a class="metric-tile is-link accent" href="/inbox#plan-approvals"
+               hx-get="/inbox#plan-approvals" hx-target="#content" hx-push-url="/inbox#plan-approvals">
                 <div class="label"><i class="ti ti-clipboard-check"></i> Awaiting Plan OK</div>
                 <div class="value" th:text="${awaitingPlanApproval}">0</div>
             </a>

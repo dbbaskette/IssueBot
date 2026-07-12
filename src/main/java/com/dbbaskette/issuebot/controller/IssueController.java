@@ -13,12 +13,12 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -131,6 +131,7 @@ public class IssueController {
         model.addAttribute("hasNext", issuePage.hasNext());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         return ViewResolver.view("issues", hx != null);
     }
@@ -625,17 +626,19 @@ public class IssueController {
     }
 
     @PostMapping("/{id}/decomposition/approve")
-    public String approveDecomposition(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+    public String approveDecomposition(@PathVariable Long id,
+                                       @RequestParam(required = false) String returnTo,
+                                       RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);
         if (issue == null) {
             redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return "redirect:/issues";
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
         }
 
         if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION) {
             redirectAttributes.addFlashAttribute("error",
                     "Cannot approve decomposition for issue in " + issue.getStatus() + " status");
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         try {
@@ -643,25 +646,27 @@ public class IssueController {
         } catch (Exception e) {
             log.warn("Failed to approve decomposition for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         redirectAttributes.addFlashAttribute("success", "Split approved — sub-issues created");
-        return "redirect:/issues/" + id;
+        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
     }
 
     @PostMapping("/{id}/decomposition/reject")
-    public String rejectDecomposition(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+    public String rejectDecomposition(@PathVariable Long id,
+                                      @RequestParam(required = false) String returnTo,
+                                      RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);
         if (issue == null) {
             redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return "redirect:/issues";
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
         }
 
         if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION) {
             redirectAttributes.addFlashAttribute("error",
                     "Cannot reject decomposition for issue in " + issue.getStatus() + " status");
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         try {
@@ -669,25 +674,27 @@ public class IssueController {
         } catch (Exception e) {
             log.warn("Failed to reject decomposition for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         redirectAttributes.addFlashAttribute("success", "Proposal rejected — issue escalated");
-        return "redirect:/issues/" + id;
+        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
     }
 
     @PostMapping("/{id}/plan/approve")
-    public String approvePlan(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+    public String approvePlan(@PathVariable Long id,
+                              @RequestParam(required = false) String returnTo,
+                              RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);
         if (issue == null) {
             redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return "redirect:/issues";
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
         }
 
         if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
             redirectAttributes.addFlashAttribute("error",
                     "Cannot approve plan for issue in " + issue.getStatus() + " status");
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         try {
@@ -695,34 +702,35 @@ public class IssueController {
         } catch (Exception e) {
             log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         redirectAttributes.addFlashAttribute("success",
                 "Plan approved — queued, implementation resumes on the next poll cycle (~60s)");
-        return "redirect:/issues/" + id;
+        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
     }
 
     @PostMapping("/{id}/plan/reject")
     public String rejectPlan(@PathVariable Long id,
                              @RequestParam(required = false) String feedback,
+                             @RequestParam(required = false) String returnTo,
                              RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);
         if (issue == null) {
             redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return "redirect:/issues";
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
         }
 
         if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
             redirectAttributes.addFlashAttribute("error",
                     "Cannot reject plan for issue in " + issue.getStatus() + " status");
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         if (feedback == null || feedback.isBlank()) {
             redirectAttributes.addFlashAttribute("error",
                     "Feedback is required when rejecting a plan — it drives the next plan");
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         // Branch on the service's returned outcome — the service mutates a fresh
@@ -733,7 +741,7 @@ public class IssueController {
         } catch (Exception e) {
             log.warn("Failed to reject plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return "redirect:/issues/" + id;
+            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
         }
 
         if (outcome == PlanFirstService.RejectOutcome.ESCALATED) {
@@ -743,7 +751,7 @@ public class IssueController {
             redirectAttributes.addFlashAttribute("success",
                     "Plan rejected — a new plan is queued and regenerates on the next poll cycle (~60s)");
         }
-        return "redirect:/issues/" + id;
+        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
     }
 
     private static String normalize(String s) {
@@ -888,6 +896,7 @@ public class IssueController {
         model.addAttribute("phaseCompleted", completed);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
+        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         BigDecimal effectiveBudget = issue.effectiveBudgetUsd();
         model.addAttribute("issueSpent", totalCost);
@@ -895,12 +904,10 @@ public class IssueController {
         model.addAttribute("budgetPct", budgetPct(totalCost, effectiveBudget));
 
         if (issue.getStatus() == IssueStatus.AWAITING_DECOMPOSITION && issue.getDecompositionProposal() != null) {
-            try {
-                List<Map<String, Object>> proposal = objectMapper.readValue(
-                        issue.getDecompositionProposal(), new TypeReference<List<Map<String, Object>>>() {});
+            List<Map<String, Object>> proposal = DecompositionProposalParser.parseOrNull(
+                    objectMapper, issue.getDecompositionProposal(), issue.getId());
+            if (proposal != null) {
                 model.addAttribute("decompositionProposal", proposal);
-            } catch (Exception e) {
-                log.warn("Failed to parse decomposition proposal for issue {}: {}", issue.getId(), e.getMessage());
             }
         }
     }
