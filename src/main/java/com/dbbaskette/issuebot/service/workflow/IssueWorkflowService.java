@@ -163,6 +163,10 @@ public class IssueWorkflowService {
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
+        // Workflow entry point for both a fresh start and a retry (IssueController.retry sets
+        // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
+        // drives the dashboard's elapsed-time display — #86).
+        trackedIssue.setStartedAt(LocalDateTime.now());
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
         trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));

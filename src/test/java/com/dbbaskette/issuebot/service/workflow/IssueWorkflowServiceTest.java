@@ -95,6 +95,40 @@ class IssueWorkflowServiceTest {
         );
     }
 
+    // === processIssue: startedAt (#86 — Now Running strip) ===
+
+    @Test
+    void processIssue_setsStartedAt_whenWorkflowStarts() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+
+        java.time.LocalDateTime before = java.time.LocalDateTime.now();
+        workflowService.processIssue(issue);
+        java.time.LocalDateTime after = java.time.LocalDateTime.now();
+
+        assertNotNull(issue.getStartedAt());
+        assertFalse(issue.getStartedAt().isBefore(before));
+        assertFalse(issue.getStartedAt().isAfter(after));
+    }
+
+    @Test
+    void processIssue_reenteringOnRetry_overwritesStaleStartedAt() {
+        // Mirrors the retry path: IssueController.retry flips status to IN_PROGRESS and calls
+        // processIssueAsync -> processIssue again, which must re-stamp startedAt rather than
+        // leaving the previous run's (now stale) value in place.
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        java.time.LocalDateTime staleStartedAt = java.time.LocalDateTime.now().minusDays(1);
+        issue.setStartedAt(staleStartedAt);
+
+        workflowService.processIssue(issue);
+
+        assertNotNull(issue.getStartedAt());
+        assertTrue(issue.getStartedAt().isAfter(staleStartedAt));
+    }
+
     @Test
     void phasePrCreation_createsPr_persistsPrNumber() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
