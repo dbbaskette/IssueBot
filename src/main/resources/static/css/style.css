@@ -1909,6 +1909,8 @@ details summary:hover { color: var(--text-primary); }
 
 .diff-count-add { color: var(--ok); background: var(--ok-soft); }
 .diff-count-del { color: var(--danger); background: var(--danger-soft); }
+/* Binary entries have no meaningful +/− counts — one neutral badge instead */
+.diff-count-binary { color: var(--text-secondary); background: var(--row-hover); }
 
 .diff-file-body {
     border-radius: 0;

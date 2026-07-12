@@ -312,7 +312,7 @@
     el.textContent = '';
     var frag = document.createDocumentFragment();
     // .diff-line is display:block, so each line is its own row — no \n needed.
-    raw.split('\n').forEach(function (lineText) {
+    splitDiffLines(raw).forEach(function (lineText) {
       frag.appendChild(buildDiffLineSpan(lineText));
     });
     el.appendChild(frag);
@@ -326,7 +326,80 @@
     return path;
   }
 
-  // Parses a raw unified diff into per-file sections: [{ path, adds, dels, lines }].
+  // JGit quotes paths in diff output (QuotedString.GIT_PATH, on by default)
+  // whenever they contain specials — parens, brackets, braces, !, #,
+  // apostrophe, backtick, <>, quotes, backslashes — or any non-ASCII byte:
+  //   diff --git "a/handler(v2).js" "b/handler(v2).js"
+  //   +++ "b/caf\303\251.txt"
+  // Inside the quotes, `"` and `\` are backslash-escaped and non-ASCII bytes
+  // appear as octal \NNN escapes carrying raw UTF-8 bytes (é is \303\251).
+  // Returns the decoded path; unquoted input is returned unchanged.
+  function unquoteGitPath(s) {
+    if (s.length < 2 || s.charAt(0) !== '"' || s.charAt(s.length - 1) !== '"') {
+      return s;
+    }
+    var hasOctal = false;
+    // Single left-to-right pass so an escaped backslash can never be re-read
+    // as the start of an octal escape (in "\\303" the 303 is literal text).
+    var bytes = s.slice(1, -1).replace(/\\([0-7]{1,3}|[\s\S])/g, function (all, seq) {
+      if (seq.charAt(0) >= '0' && seq.charAt(0) <= '7') {
+        hasOctal = true;
+        return String.fromCharCode(parseInt(seq, 8) & 0xFF);
+      }
+      if (seq === 't') { return '\t'; }
+      if (seq === 'n') { return '\n'; }
+      if (seq === 'r') { return '\r'; }
+      return seq; // \" -> ", \\ -> \, anything else kept literally
+    });
+    if (!hasOctal) { return bytes; }
+    // Octal escapes are raw UTF-8 BYTES (every char here is <= 0xFF):
+    // percent-encode each byte and let decodeURIComponent reassemble
+    // multi-byte sequences into actual characters.
+    try {
+      return decodeURIComponent(bytes.replace(/[\s\S]/g, function (ch) {
+        var code = ch.charCodeAt(0);
+        return '%' + (code < 16 ? '0' : '') + code.toString(16).toUpperCase();
+      }));
+    } catch (e) {
+      return bytes; // not valid UTF-8 — best effort: show the raw bytes
+    }
+  }
+
+  // Splits raw diff text into lines, stripping the trailing \r that CRLF
+  // repo content would otherwise leak into every rendered line (and into the
+  // trailing path capture of the "diff --git" header parsing).
+  function splitDiffLines(raw) {
+    return raw.split('\n').map(function (l) { return l.replace(/\r$/, ''); });
+  }
+
+  // Splits the two path tokens out of a "diff --git <a> <b>" header line,
+  // handling JGit's quoted-path form (each side is quoted independently).
+  // Returns [tokenA, tokenB] (still quoted/prefixed) or null.
+  function splitDiffGitHeaderPaths(lineText) {
+    var rest = lineText.slice(11); // after 'diff --git '
+    var m;
+    if (rest.charAt(0) === '"') {
+      // Quoted a-side ends at its first unescaped quote.
+      m = /^("(?:[^"\\]|\\[\s\S])*") ([\s\S]+)$/.exec(rest);
+      return m ? [m[1], m[2]] : null;
+    }
+    if (rest.charAt(rest.length - 1) === '"') {
+      // Unquoted a-side, quoted b-side anchored at end of line. Unquoted git
+      // paths never contain '"' (a quote triggers quoting), so the b token
+      // starts at the first quote.
+      m = /^([\s\S]+?) ("(?:[^"\\]|\\[\s\S])*")$/.exec(rest);
+      return m ? [m[1], m[2]] : null;
+    }
+    // Both unquoted. The greedy split on the LAST " b/" is inherently
+    // ambiguous when the a-path itself contains " b/" — this header is only
+    // load-bearing for entries with no ---/+++ lines (binary, rename- or
+    // mode-only), so a wrong split there is an accepted cosmetic risk.
+    m = /^(a\/.+) (b\/.+)$/.exec(rest);
+    return m ? [m[1], m[2]] : null;
+  }
+
+  // Parses a raw unified diff into per-file sections:
+  // [{ path, adds, dels, binary, lines }].
   // Returns null if no "diff --git " boundaries are found (caller should fall
   // back to the flat renderer).
   function parseDiffFiles(raw) {
@@ -352,24 +425,35 @@
         path: deleted ? (path + ' (deleted)') : path,
         adds: current.adds,
         dels: current.dels,
+        // "Binary files ... differ" with no hunks: counts are meaningless,
+        // render a single neutral "binary" badge instead of "+0 −0".
+        binary: current.sawBinaryLine && !current.sawHunk,
         lines: current.lines
       });
     }
 
-    raw.split('\n').forEach(function (lineText) {
+    splitDiffLines(raw).forEach(function (lineText) {
       if (lineText.indexOf('diff --git ') === 0) {
         finishCurrent();
-        current = { adds: 0, dels: 0, lines: [lineText], plusPath: null, minusPath: null, headerPathA: null, headerPathB: null };
-        var m = /^diff --git a\/(.+) b\/(.+)$/.exec(lineText);
-        if (m) { current.headerPathA = m[1]; current.headerPathB = m[2]; }
+        current = { adds: 0, dels: 0, lines: [lineText], plusPath: null, minusPath: null,
+                    headerPathA: null, headerPathB: null, sawBinaryLine: false, sawHunk: false };
+        var tokens = splitDiffGitHeaderPaths(lineText);
+        if (tokens) {
+          current.headerPathA = stripDiffPathPrefix(unquoteGitPath(tokens[0]));
+          current.headerPathB = stripDiffPathPrefix(unquoteGitPath(tokens[1]));
+        }
         return;
       }
       if (!current) { return; } // content before any file header — shouldn't happen for JGit output
       current.lines.push(lineText);
       if (lineText.indexOf('+++') === 0) {
-        current.plusPath = lineText.slice(3).trim();
+        current.plusPath = unquoteGitPath(lineText.slice(3).trim());
       } else if (lineText.indexOf('---') === 0) {
-        current.minusPath = lineText.slice(3).trim();
+        current.minusPath = unquoteGitPath(lineText.slice(3).trim());
+      } else if (lineText.indexOf('@@') === 0) {
+        current.sawHunk = true;
+      } else if (lineText.indexOf('Binary files ') === 0) {
+        current.sawBinaryLine = true;
       } else if (lineText.charAt(0) === '+') {
         current.adds++;
       } else if (lineText.charAt(0) === '-') {
@@ -396,14 +480,21 @@
 
     var counts = document.createElement('span');
     counts.className = 'diff-count-group';
-    var addSpan = document.createElement('span');
-    addSpan.className = 'diff-count diff-count-add';
-    addSpan.textContent = '+' + file.adds;
-    var delSpan = document.createElement('span');
-    delSpan.className = 'diff-count diff-count-del';
-    delSpan.textContent = '−' + file.dels;
-    counts.appendChild(addSpan);
-    counts.appendChild(delSpan);
+    if (file.binary) {
+      var binSpan = document.createElement('span');
+      binSpan.className = 'diff-count diff-count-binary';
+      binSpan.textContent = 'binary';
+      counts.appendChild(binSpan);
+    } else {
+      var addSpan = document.createElement('span');
+      addSpan.className = 'diff-count diff-count-add';
+      addSpan.textContent = '+' + file.adds;
+      var delSpan = document.createElement('span');
+      delSpan.className = 'diff-count diff-count-del';
+      delSpan.textContent = '−' + file.dels;
+      counts.appendChild(addSpan);
+      counts.appendChild(delSpan);
+    }
     summary.appendChild(counts);
 
     details.appendChild(summary);
