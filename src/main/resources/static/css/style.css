@@ -1430,6 +1430,59 @@ details summary:hover { color: var(--text-primary); }
 .budget-bar-fill.over { background: var(--danger); }
 
 /* ============================================================
+   Now Running strip — live per-issue cards on the dashboard (#86)
+   ============================================================ */
+.running-strip-title {
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 0.75rem;
+}
+.running-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+.running-card {
+    margin-bottom: 0;
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.running-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+.running-card-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    min-width: 0;
+}
+.running-card-title:hover strong { color: var(--accent); }
+.running-card-title strong {
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.running-meta {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.running-meta i { margin-right: 0.25rem; }
+.running-card-actions { margin-top: auto; }
+
+/* ============================================================
    Utility classes
    ============================================================ */
 .mb-1 { margin-bottom: 0.5rem; }

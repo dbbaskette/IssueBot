@@ -439,7 +439,7 @@
     </script>
 
     <!-- === GUIDE CARD (mid-loop steering, #63) === -->
-    <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3">
+    <div th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel" class="panel mb-3">
         <div class="panel-header">
             <h3>Guide</h3>
             <span class="text-sm text-muted">Steer this run without stopping it</span>

@@ -14,6 +14,79 @@
          hx-ext="morph"
          hx-swap="morph:outerHTML"
          hx-target="this">
+        <!--/* === NOW RUNNING STRIP (#86) === one card per IN_PROGRESS issue, entirely absent
+               when nothing runs. Lives inside this "live" fragment so it refreshes on the
+               dashboard's existing 10s poll — no new SSE work. spend/budgetPct/elapsed are all
+               precomputed server-side in DashboardController#buildRunningIssues so this markup
+               never does arithmetic. */-->
+        <div class="running-strip mb-3" th:if="${not #lists.isEmpty(runningIssues)}">
+            <h3 class="running-strip-title">Now Running</h3>
+            <div class="running-grid">
+                <div class="running-card panel" th:each="rv : ${runningIssues}">
+                    <div class="running-card-header">
+                        <a class="running-card-title" th:href="@{'/issues/' + ${rv.issue().id}}"
+                           th:hx-get="@{'/issues/' + ${rv.issue().id}}" hx-target="#content" hx-push-url="true">
+                            <span class="text-sm text-muted" th:text="${rv.issue().repo.fullName()}">owner/repo</span>
+                            <strong th:text="${'#' + rv.issue().issueNumber + ' — ' + rv.issue().issueTitle}">#1 — Title</strong>
+                        </a>
+                        <span class="status status-in_progress"
+                              th:text="${rv.issue().currentPhase != null ? humanize.phase(rv.issue().currentPhase) : 'Starting'}">Phase</span>
+                    </div>
+                    <div class="running-card-body">
+                        <div class="running-meta text-sm text-muted">
+                            <span><i class="ti ti-clock" aria-hidden="true"></i> <span th:text="${rv.elapsed()}">0m</span></span>
+                            <span><i class="ti ti-repeat" aria-hidden="true"></i>
+                                <span th:text="${rv.issue().currentIteration + '/' + rv.issue().repo.maxIterations}">0/3</span></span>
+                            <span th:if="${rv.issue().resolvedImplModel != null}"><i class="ti ti-cpu" aria-hidden="true"></i>
+                                <span th:text="${rv.issue().resolvedImplModel}">model</span></span>
+                        </div>
+                        <div class="mb-1" th:if="${rv.effectiveBudget() != null}">
+                            <div class="flex-between mb-1">
+                                <span class="text-sm">Spend</span>
+                                <span class="text-sm"
+                                      th:text="${'$' + #numbers.formatDecimal(rv.spend(), 1, 2) + ' of $' + #numbers.formatDecimal(rv.effectiveBudget(), 1, 2)}">$0.00 of $0.00</span>
+                            </div>
+                            <div class="budget-bar-track">
+                                <div class="budget-bar-fill"
+                                     th:classappend="${rv.budgetPct() >= 100 ? 'over' : (rv.budgetPct() >= 80 ? 'warning' : '')}"
+                                     th:style="'width:' + ${rv.budgetPct()} + '%'"></div>
+                            </div>
+                        </div>
+                        <div class="mb-1" th:unless="${rv.effectiveBudget() != null}">
+                            <span class="text-sm text-muted"
+                                  th:text="'$' + ${#numbers.formatDecimal(rv.spend(), 1, 2)} + ' spent · unlimited budget'">$0.00 spent</span>
+                        </div>
+                    </div>
+                    <div class="running-card-actions flex gap-1">
+                        <a class="btn btn-ghost btn-sm" th:href="@{'/issues/' + ${rv.issue().id} + '#guide-panel'}"
+                           th:hx-get="@{'/issues/' + ${rv.issue().id}}" hx-target="#content" hx-push-url="true">
+                            <i class="ti ti-message-circle" aria-hidden="true"></i> Guide
+                        </a>
+                        <button type="button" class="btn btn-danger btn-sm"
+                                th:attr="data-modal-open=${'stop-modal-' + rv.issue().id}">
+                            <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stop confirm modals — one per running issue, unique ids so multiple cards coexist -->
+        <div th:each="rv : ${runningIssues}"
+             th:id="${'stop-modal-' + rv.issue().id}" class="modal-backdrop" data-modal hidden>
+            <div class="modal glass-card" role="dialog" aria-modal="true"
+                 th:attr="aria-labelledby=${'stop-modal-' + rv.issue().id + '-title'}">
+                <h3 th:id="${'stop-modal-' + rv.issue().id + '-title'}" style="margin:0 0 0.5rem">Stop Issue</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
+                <form th:action="@{'/issues/' + ${rv.issue().id} + '/cancel'}" method="post">
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                        <button type="submit" class="btn btn-danger btn-sm">Stop Issue</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div class="metrics-grid">
             <a class="metric-tile is-link ok" href="/issues?status=COMPLETED"
                hx-get="/issues?status=COMPLETED" hx-target="#content" hx-push-url="true">

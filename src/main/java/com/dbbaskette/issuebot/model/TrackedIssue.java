@@ -44,6 +44,9 @@ public class TrackedIssue {
     @Column(name = "cooldown_until")
     private LocalDateTime cooldownUntil;
 
+    @Column(name = "started_at")
+    private LocalDateTime startedAt;
+
     @Column(name = "current_phase")
     private String currentPhase;
 
@@ -139,6 +142,16 @@ public class TrackedIssue {
 
     public LocalDateTime getCooldownUntil() { return cooldownUntil; }
     public void setCooldownUntil(LocalDateTime cooldownUntil) { this.cooldownUntil = cooldownUntil; }
+
+    /**
+     * When the workflow last entered {@link IssueStatus#IN_PROGRESS} (#86 — Now Running strip).
+     * Set at the top of {@code IssueWorkflowService#processIssue}, which is the single entry
+     * point for both a fresh start and a retry (the controller flips status to IN_PROGRESS too,
+     * but processIssue re-enters and overwrites this regardless, so it's always fresh for the
+     * current run). Drives the dashboard's elapsed-time display.
+     */
+    public LocalDateTime getStartedAt() { return startedAt; }
+    public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
 
     public String getCurrentPhase() { return currentPhase; }
     public void setCurrentPhase(String currentPhase) { this.currentPhase = currentPhase; }
