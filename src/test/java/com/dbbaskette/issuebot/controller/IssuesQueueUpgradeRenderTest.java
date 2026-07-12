@@ -166,4 +166,33 @@ class IssuesQueueUpgradeRenderTest {
         assertThat(html).contains("id=\"bulk-close-modal\"");
         assertThat(html).contains("formaction=\"/issues/bulk/close\"");
     }
+
+    // === Review follow-ups (#87): view context rides along with actions ===
+
+    /**
+     * The bulk form carries the operator's current filter/search/page as hidden inputs so
+     * the bulk endpoints' redirect can land back on the exact view they acted from.
+     */
+    @Test
+    void bulkForm_carriesCurrentViewContextAsHiddenInputs() {
+        String html = renderContent(List.of(), "cache fix", 1, 3, true, true);
+
+        // Anchor on the bulk form: its first children are the four hidden context inputs
+        // (the filter bar has same-named fields, so an unanchored match could pass vacuously).
+        assertThat(html).containsPattern("id=\"bulk-form\"[\\s\\S]{0,600}name=\"status\"");
+        assertThat(html).containsPattern("id=\"bulk-form\"[\\s\\S]{0,600}name=\"repoId\"");
+        assertThat(html).containsPattern("id=\"bulk-form\"[\\s\\S]{0,600}name=\"q\" value=\"cache fix\"");
+        assertThat(html).containsPattern("id=\"bulk-form\"[\\s\\S]{0,600}name=\"page\" value=\"1\"");
+    }
+
+    /** The per-row Retry includes the filter form so its redirect preserves the view too. */
+    @Test
+    void retryButton_includesFilterFormForContextPreservingRedirect() {
+        TrackedIssue failed = issue(1, "Broken thing", IssueStatus.FAILED);
+        String html = renderContent(List.of(failed), null, 0, 1, false, false);
+
+        // Same tag: static hx-include renders before the th:attr-generated hx-post,
+        // and [^>]* keeps the match inside one element.
+        assertThat(html).containsPattern("hx-include=\"#filter-form\"[^>]*hx-post=\"/issues/1/retry-quick\"");
+    }
 }

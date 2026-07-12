@@ -163,6 +163,44 @@ class TrackedIssueRepositorySearchTest {
         assertThat(allIds).doesNotHaveDuplicates();
     }
 
+    /**
+     * SQL LIKE wildcards typed into the search box must be treated as literal characters
+     * (#87 review): a raw "%" would match every title and "_" any single character. The
+     * public {@link TrackedIssueRepository#search} escapes them before binding.
+     */
+    @Test
+    void searchTreatsPercentAsLiteral_notWildcard() {
+        WatchedRepo r = repo("acme", "widgets");
+        issue(r, 1, "Improve 50% of the cache", IssueStatus.QUEUED);
+        issue(r, 2, "Improve 50 things", IssueStatus.QUEUED); // would match "50%" if % were a wildcard
+
+        Page<TrackedIssue> page = issueRepository.search(null, null, "50%", PageRequest.of(0, 25));
+
+        assertThat(page.getContent()).extracting(TrackedIssue::getIssueNumber).containsExactly(1);
+    }
+
+    @Test
+    void searchTreatsUnderscoreAsLiteral_notWildcard() {
+        WatchedRepo r = repo("acme", "widgets");
+        issue(r, 1, "Rename the 5_% variable", IssueStatus.QUEUED);
+        issue(r, 2, "Rename 55 variables", IssueStatus.QUEUED); // raw "5_%" pattern would match "55 ..."
+
+        Page<TrackedIssue> page = issueRepository.search(null, null, "5_%", PageRequest.of(0, 25));
+
+        assertThat(page.getContent()).extracting(TrackedIssue::getIssueNumber).containsExactly(1);
+    }
+
+    @Test
+    void searchTreatsBackslashAsLiteral() {
+        WatchedRepo r = repo("acme", "widgets");
+        issue(r, 1, "Fix the C:\\temp path handling", IssueStatus.QUEUED);
+        issue(r, 2, "Fix the Ctemp path handling", IssueStatus.QUEUED);
+
+        Page<TrackedIssue> page = issueRepository.search(null, null, "C:\\temp", PageRequest.of(0, 25));
+
+        assertThat(page.getContent()).extracting(TrackedIssue::getIssueNumber).containsExactly(1);
+    }
+
     @Test
     void blankSearchString_isTreatedAsNoFilter() {
         WatchedRepo r = repo("acme", "widgets");

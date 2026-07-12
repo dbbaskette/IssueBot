@@ -56,8 +56,16 @@
     <!-- The checkboxes below carry name="ids" and post to whichever /issues/bulk/* endpoint
          the clicked action-bar/modal button's formaction points at (form="bulk-form" on those
          buttons associates them with this form despite living outside it, per the HTML5 form
-         attribute — the least-JS way to collect a bulk selection into a real POST). -->
+         attribute — the least-JS way to collect a bulk selection into a real POST).
+         The hidden status/repoId/q/page inputs echo the operator's current view context so
+         the post-action redirect lands back on the exact filtered/searched page they acted
+         from (#87 review) — the endpoints only use them for the redirect, never to decide
+         which ids get processed. -->
     <form id="bulk-form" method="post" action="/issues/bulk/start">
+        <input type="hidden" name="status" th:value="${selectedStatus}">
+        <input type="hidden" name="repoId" th:value="${selectedRepoId}">
+        <input type="hidden" name="q" th:value="${searchQuery}">
+        <input type="hidden" name="page" th:value="${currentPage}">
         <div class="panel" hx-ext="sse" sse-connect="/api/events/stream">
             <table class="data-table">
                 <thead>
@@ -172,6 +180,10 @@
                     hx-target="#content"
                     hx-disabled-elt="this"
                     onclick="event.stopPropagation()">Start</button>
+            <!-- hx-include carries the filter bar's status/repoId/q/page along with the POST
+                 purely so the endpoint's redirect can land back on this exact view (#87
+                 review). app.js's page-reset configRequest hook only fires for triggers
+                 INSIDE #filter-form, so this button's included page value is untouched. -->
             <button type="button"
                     th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                     class="btn btn-outline btn-sm"
@@ -179,6 +191,7 @@
                     th:attr="hx-post='/issues/' + ${issue.id} + '/retry-quick',
                              aria-label='Retry issue #' + ${issue.issueNumber} + ' with defaults'"
                     hx-target="#content"
+                    hx-include="#filter-form"
                     hx-disabled-elt="this"
                     onclick="event.stopPropagation()">Retry</button>
         </td>

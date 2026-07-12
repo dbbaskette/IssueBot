@@ -54,8 +54,11 @@ class IssueControllerTest {
     void tableHonorsSearchAndPageParams() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        // A properly-paged in-range result (page 2 of 4) so the out-of-range clamp
+        // (#87 review) does not fire a second re-query and break the single-call verify.
         when(issues.search(isNull(), eq(7L), eq("login"), any()))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of()));
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(),
+                        org.springframework.data.domain.PageRequest.of(2, IssueController.PAGE_SIZE), 100));
 
         IssueController c = new IssueController(issues, repos,
                 mock(IterationRepository.class), mock(EventRepository.class),
@@ -735,7 +738,7 @@ class IssueControllerTest {
     void retryQuickStartsEligibleIssue_sameAsFullRetryWithNoOverrides() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
-        String view = f.controller.retryQuick(1L, f.redirectAttributes);
+        String view = f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -750,7 +753,7 @@ class IssueControllerTest {
     void retryQuickRejectsIneligibleStatus() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
-        String view = f.controller.retryQuick(1L, f.redirectAttributes);
+        String view = f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
 
         verify(f.issues, never()).save(any());
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Cannot retry issue in QUEUED"));
@@ -770,7 +773,7 @@ class IssueControllerTest {
         f.issue.setBudgetOverrideUsd(new java.math.BigDecimal("9.00"));
         f.issue.setClaudeSessionId("sess-old");
 
-        f.controller.retryQuick(1L, f.redirectAttributes);
+        f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
@@ -786,7 +789,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.FAILED);
         when(f.properties.getMaxConcurrentIssues()).thenReturn(0); // already at capacity
 
-        String view = f.controller.retryQuick(1L, f.redirectAttributes);
+        String view = f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
 
         verify(f.issues, never()).save(any());
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Global concurrency limit"));
@@ -832,7 +835,7 @@ class IssueControllerTest {
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
 
-        String view = controller.bulkStart(List.of(1L, 2L), ra);
+        String view = controller.bulkStart(List.of(1L, 2L), null, null, null, null, ra);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(issues, times(1)).save(captor.capture());
@@ -879,7 +882,7 @@ class IssueControllerTest {
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
 
-        String view = controller.bulkRetry(List.of(1L, 2L, 3L), ra);
+        String view = controller.bulkRetry(List.of(1L, 2L, 3L), null, null, null, null, ra);
 
         verify(issues, times(2)).save(any());
         org.assertj.core.api.Assertions.assertThat(failed.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
@@ -913,7 +916,7 @@ class IssueControllerTest {
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
 
-        String view = controller.bulkClose(List.of(1L, 2L), ra);
+        String view = controller.bulkClose(List.of(1L, 2L), null, null, null, null, ra);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(issues, times(1)).save(captor.capture());
@@ -932,7 +935,7 @@ class IssueControllerTest {
                 mock(IssueWorkflowService.class));
         RedirectAttributes ra = mock(RedirectAttributes.class);
 
-        String view = controller.bulkStart(null, ra);
+        String view = controller.bulkStart(null, null, null, null, null, ra);
 
         verify(issues, never()).save(any());
         verify(ra).addFlashAttribute(eq("error"), eq("No issues selected"));
@@ -947,7 +950,7 @@ class IssueControllerTest {
                 mock(IssueWorkflowService.class));
         RedirectAttributes ra = mock(RedirectAttributes.class);
 
-        String view = controller.bulkStart(List.of(), ra);
+        String view = controller.bulkStart(List.of(), null, null, null, null, ra);
 
         verify(issues, never()).save(any());
         verify(ra).addFlashAttribute(eq("error"), eq("No issues selected"));
@@ -990,12 +993,141 @@ class IssueControllerTest {
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
 
-        String view = controller.bulkStart(List.of(1L, 2L), ra);
+        String view = controller.bulkStart(List.of(1L, 2L), null, null, null, null, ra);
 
         verify(issues, times(1)).save(any());
         org.assertj.core.api.Assertions.assertThat(first.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
         org.assertj.core.api.Assertions.assertThat(second.getStatus()).isEqualTo(IssueStatus.QUEUED); // left for the poller
         verify(ra).addFlashAttribute(eq("success"), eq("Started 1, skipped 1 (not eligible)"));
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    // === Review follow-ups (#87): context-preserving redirects, bulk cap, page clamp ===
+
+    /**
+     * A row Retry taken from a filtered/searched/paged view must land the operator back on
+     * that exact view — the redirect echoes status, repoId, q (form-encoded), and page.
+     */
+    @Test
+    void retryQuickRedirectPreservesFilterSearchAndPage() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        String view = f.controller.retryQuick(1L, "FAILED", 7L, "login bug", 2, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view)
+                .isEqualTo("redirect:/issues?status=FAILED&repoId=7&q=login+bug&page=2");
+    }
+
+    /** Blank/default context values are omitted — the plain case stays exactly "redirect:/issues". */
+    @Test
+    void retryQuickRedirectOmitsBlankAndDefaultContextValues() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+
+        String view = f.controller.retryQuick(1L, "", null, "   ", 0, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void bulkStartRedirectPreservesFilterSearchAndPage() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
+        IssueBotProperties properties = mock(IssueBotProperties.class);
+        when(properties.getMaxConcurrentIssues()).thenReturn(5);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue queued = new TrackedIssue(repo, 1, "Queued issue");
+        queued.setId(1L);
+        queued.setStatus(IssueStatus.QUEUED);
+        when(issues.findById(1L)).thenReturn(Optional.of(queued));
+        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+
+        IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties,
+                mock(EventService.class), mock(IssueWorkflowService.class));
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+
+        String view = controller.bulkStart(List.of(1L), "QUEUED", null, "cache fix", 3, ra);
+
+        verify(ra).addFlashAttribute(eq("success"), anyString());
+        org.assertj.core.api.Assertions.assertThat(view)
+                .isEqualTo("redirect:/issues?status=QUEUED&q=cache+fix&page=3");
+    }
+
+    /** The cap must hold even when the request fails the guards — no processing, context kept. */
+    @Test
+    void bulkStartRejectsOverTwoHundredIds_processesNothing() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IssueController controller = newBulkController(issues, mock(WatchedRepoRepository.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class), mock(EventService.class),
+                mock(IssueWorkflowService.class));
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+        List<Long> ids = java.util.stream.LongStream.rangeClosed(1, 201).boxed().toList();
+
+        String view = controller.bulkStart(ids, "FAILED", null, null, null, ra);
+
+        verify(issues, never()).findById(anyLong());
+        verify(issues, never()).save(any());
+        verify(ra).addFlashAttribute(eq("error"), eq("Too many issues selected (max 200)"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues?status=FAILED");
+    }
+
+    @Test
+    void bulkRetryRejectsOverTwoHundredIds() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IssueController controller = newBulkController(issues, mock(WatchedRepoRepository.class),
+                mock(GitHubApiClient.class), mock(IssueBotProperties.class), mock(EventService.class),
+                mock(IssueWorkflowService.class));
+        RedirectAttributes ra = mock(RedirectAttributes.class);
+        List<Long> ids = java.util.stream.LongStream.rangeClosed(1, 201).boxed().toList();
+
+        controller.bulkRetry(ids, null, null, null, null, ra);
+
+        verify(issues, never()).findById(anyLong());
+        verify(ra).addFlashAttribute(eq("error"), eq("Too many issues selected (max 200)"));
+    }
+
+    /**
+     * A stale/overshooting page param (60 rows = 3 pages, request page 99) is clamped to the
+     * LAST page: the controller re-queries at totalPages-1 and the pager reflects that page,
+     * instead of rendering an empty table with "Page 100 of 3" (#87 review). The mock repo
+     * behaves like the real one: any in-range request returns that page's slice, any
+     * out-of-range request returns an empty slice carrying the true total.
+     */
+    @Test
+    void listClampsOutOfRangePageToLastPage() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        when(repos.findAll()).thenReturn(List.of());
+        when(issues.search(isNull(), isNull(), isNull(), any())).thenAnswer(inv -> {
+            org.springframework.data.domain.Pageable p = inv.getArgument(3);
+            int total = 60; // 3 pages of 25
+            if (p.getPageNumber() >= 3) {
+                return new org.springframework.data.domain.PageImpl<TrackedIssue>(List.of(), p, total);
+            }
+            int startNum = p.getPageNumber() * IssueController.PAGE_SIZE;
+            int count = Math.min(IssueController.PAGE_SIZE, total - startNum);
+            List<TrackedIssue> slice = new java.util.ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                slice.add(new TrackedIssue(repo, startNum + i + 1, "Issue " + (startNum + i + 1)));
+            }
+            return new org.springframework.data.domain.PageImpl<>(slice, p, total);
+        });
+
+        IssueController c = newBulkController(issues, repos, mock(GitHubApiClient.class),
+                mock(IssueBotProperties.class), mock(EventService.class), mock(IssueWorkflowService.class));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        c.list(model, null, null, null, 99, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("currentPage")).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("totalPages")).isEqualTo(3);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("hasNext")).isEqualTo(false);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("hasPrevious")).isEqualTo(true);
+        @SuppressWarnings("unchecked")
+        List<TrackedIssue> content = (List<TrackedIssue>) model.getAttribute("issues");
+        org.assertj.core.api.Assertions.assertThat(content).hasSize(10); // the real last page
     }
 }
