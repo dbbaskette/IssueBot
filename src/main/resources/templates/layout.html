@@ -57,9 +57,21 @@
             <li><a th:classappend="${activePage == 'repositories' ? 'active' : ''}" th:attr="aria-current=${activePage == 'repositories'} ? 'page' : null" href="/repositories" hx-get="/repositories" hx-target="#content" hx-push-url="true">Repositories</a></li>
             <li><a th:classappend="${activePage == 'issues' ? 'active' : ''}" th:attr="aria-current=${activePage == 'issues'} ? 'page' : null" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">Issue Queue</a></li>
             <li>
+                <!--
+                  Needs You inbox (#91) — every checkpoint that blocks on the operator, one
+                  place. The badge absorbs what used to be the Approvals nav badge (below):
+                  needsYouCount sums PR approvals, plan approvals, split proposals, and
+                  needs-human (FAILED/COOLDOWN) rather than just AWAITING_APPROVAL.
+                -->
+                <a th:classappend="${activePage == 'inbox' ? 'active' : ''}" th:attr="aria-current=${activePage == 'inbox'} ? 'page' : null" href="/inbox" hx-get="/inbox" hx-target="#content" hx-push-url="true">
+                    <i class="ti ti-inbox" aria-hidden="true"></i>
+                    Needs You
+                    <span th:if="${needsYouCount != null and needsYouCount > 0}" class="badge" th:text="${needsYouCount}">0</span>
+                </a>
+            </li>
+            <li>
                 <a th:classappend="${activePage == 'approvals' ? 'active' : ''}" th:attr="aria-current=${activePage == 'approvals'} ? 'page' : null" href="/approvals" hx-get="/approvals" hx-target="#content" hx-push-url="true">
                     Approvals
-                    <span th:if="${pendingApprovals != null and pendingApprovals > 0}" class="badge" th:text="${pendingApprovals}">0</span>
                 </a>
             </li>
             <li><a th:classappend="${activePage == 'costs' ? 'active' : ''}" th:attr="aria-current=${activePage == 'costs'} ? 'page' : null" href="/costs" hx-get="/costs" hx-target="#content" hx-push-url="true">Cost Report</a></li>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="content">
+    <div th:replace="~{layout :: toasts}"></div>
+
+    <div class="page-header">
+        <h2>Needs You</h2>
+    </div>
+
+    <!-- === EMPTY STATE === -->
+    <div th:if="${totalCount == 0}">
+        <div class="glass-card text-muted" style="text-align:center;padding:3rem">
+            <p style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem">
+                Nothing needs you — the loop is running itself.
+            </p>
+            <p class="text-sm"
+               th:text="${activeCount + ' active · ' + queuedCount + ' queued'}">0 active · 0 queued</p>
+        </div>
+    </div>
+
+    <div th:if="${totalCount > 0}">
+
+        <!-- === PR APPROVALS === -->
+        <div id="approvals" class="panel mb-3">
+            <div class="panel-header">
+                <h3>PR Approvals <span class="badge" th:text="${#lists.size(approvals)}">0</span></h3>
+            </div>
+            <div class="panel-body">
+                <p class="text-muted text-sm" th:if="${#lists.isEmpty(approvals)}">Nothing here right now.</p>
+
+                <div th:each="issue : ${approvals}" class="glass-card mb-2" style="padding:1rem">
+                    <div class="flex-between mb-1">
+                        <div>
+                            <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                        </div>
+                        <span class="status status-awaiting_approval">AWAITING APPROVAL</span>
+                    </div>
+
+                    <div class="mb-2 flex gap-1" style="align-items:center;flex-wrap:wrap">
+                        <a th:if="${prUrls.containsKey(issue.id)}" th:href="${prUrls.get(issue.id)}"
+                           target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+                            <i class="ti ti-external-link" aria-hidden="true"></i>
+                            <span th:if="${issue.prNumber != null}" th:text="'View PR #' + ${issue.prNumber}">View PR</span>
+                            <span th:unless="${issue.prNumber != null}">View Pull Request</span>
+                        </a>
+                        <span th:if="${ciStatuses.containsKey(issue.id)}" th:with="ci=${ciStatuses.get(issue.id)}"
+                              class="status" th:classappend="${'ci-' + ci}">
+                            <i class="ti" th:classappend="${ci == 'passed' ? 'ti-circle-check' : (ci == 'failed' ? 'ti-circle-x' : (ci == 'pending' ? 'ti-clock' : 'ti-help-circle'))}" aria-hidden="true"></i>
+                            <span th:switch="${ci}">
+                                <span th:case="'passed'">CI Passed</span>
+                                <span th:case="'failed'">CI Failed</span>
+                                <span th:case="'pending'">CI Pending</span>
+                                <span th:case="*">CI Unknown</span>
+                            </span>
+                        </span>
+                    </div>
+
+                    <div th:if="${reviewScores.containsKey(issue.id)}" th:with="rev=${reviewScores.get(issue.id)}"
+                         class="mb-2 text-sm" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+                        <span class="status"
+                              th:classappend="${rev.passed ? 'status-completed' : 'status-failed'}"
+                              th:text="${rev.passed ? 'REVIEW PASSED' : 'REVIEW FAILED'}">RESULT</span>
+                        <span class="badge" th:if="${rev.overall > 0}"
+                              th:text="${'Overall ' + #numbers.formatDecimal(rev.overall, 1, 1) + '/10'}">Overall 0/10</span>
+                        <span class="badge" th:if="${rev.findingCount > 0}"
+                              th:text="${rev.findingCount + (rev.findingCount == 1 ? ' finding' : ' findings')}">0 findings</span>
+                    </div>
+
+                    <div class="form-actions flex gap-1" style="align-items:center">
+                        <button type="button" class="btn btn-primary btn-sm"
+                                th:attr="data-modal-open=${'approve-modal-' + issue.id}">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm"
+                                th:attr="data-reject-toggle=${issue.id}">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject
+                        </button>
+                    </div>
+
+                    <div th:id="${'reject-form-' + issue.id}" hidden class="mt-2 glass-card" style="padding:1rem">
+                        <form th:action="@{'/approvals/' + ${issue.id} + '/reject'}" method="post">
+                            <input type="hidden" name="returnTo" value="inbox">
+                            <label class="text-sm" style="font-weight:600;display:block;margin-bottom:0.4rem"
+                                   th:for="${'feedback-' + issue.id}">Rejection Feedback</label>
+                            <textarea th:id="${'feedback-' + issue.id}" name="feedback" rows="3"
+                                      th:attr="data-reject-textarea=${issue.id}"
+                                      class="modal-textarea"
+                                      placeholder="Describe what needs to change..." required></textarea>
+                            <div class="modal-actions">
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                        th:attr="data-reject-cancel=${issue.id}">Cancel</button>
+                                <button type="submit" class="btn btn-danger btn-sm">Submit Rejection</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- === PLAN APPROVALS === -->
+        <div id="plan-approvals" class="panel mb-3">
+            <div class="panel-header">
+                <h3>Plan Approvals <span class="badge" th:text="${#lists.size(planApprovals)}">0</span></h3>
+            </div>
+            <div class="panel-body">
+                <p class="text-muted text-sm" th:if="${#lists.isEmpty(planApprovals)}">Nothing here right now.</p>
+
+                <div th:each="issue : ${planApprovals}" class="glass-card mb-2" style="padding:1rem">
+                    <div class="flex-between mb-1">
+                        <div>
+                            <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                        </div>
+                        <span class="status status-awaiting_plan_approval">AWAITING PLAN APPROVAL</span>
+                    </div>
+
+                    <div class="mb-2">
+                        <!--/* Model output is untrusted — rendered as preformatted text via th:text,
+                               never injected as HTML. */-->
+                        <pre class="code-output plan-text" th:text="${planExcerpts.get(issue.id)}">plan excerpt</pre>
+                        <details th:if="${planTruncated.get(issue.id)}">
+                            <summary class="text-sm">Show full plan</summary>
+                            <pre class="code-output plan-text" th:text="${issue.implementationPlan}">full plan</pre>
+                        </details>
+                    </div>
+
+                    <div class="form-actions flex gap-1">
+                        <button type="button" class="btn btn-primary btn-sm"
+                                th:attr="data-modal-open=${'approve-plan-modal-' + issue.id}">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve plan
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm"
+                                th:attr="data-modal-open=${'reject-plan-modal-' + issue.id}">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- === SPLIT PROPOSALS === -->
+        <div id="split-proposals" class="panel mb-3">
+            <div class="panel-header">
+                <h3>Split Proposals <span class="badge" th:text="${#lists.size(splitProposals)}">0</span></h3>
+            </div>
+            <div class="panel-body">
+                <p class="text-muted text-sm" th:if="${#lists.isEmpty(splitProposals)}">Nothing here right now.</p>
+
+                <div th:each="issue : ${splitProposals}" class="glass-card mb-2" style="padding:1rem">
+                    <div class="flex-between mb-1">
+                        <div>
+                            <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                        </div>
+                        <span class="status status-awaiting_decomposition">AWAITING SPLIT</span>
+                    </div>
+
+                    <ol class="decomposition-proposal-list mb-2"
+                        th:if="${not #lists.isEmpty(proposalTitles.get(issue.id))}">
+                        <li th:each="title : ${proposalTitles.get(issue.id)}" th:text="${title}">Sub-issue title</li>
+                    </ol>
+                    <p class="text-sm text-muted mb-2" th:if="${#lists.isEmpty(proposalTitles.get(issue.id))}">
+                        Proposal details unavailable here — open the issue for the full breakdown.
+                    </p>
+
+                    <div class="form-actions flex gap-1">
+                        <button type="button" class="btn btn-primary btn-sm"
+                                th:attr="data-modal-open=${'approve-decomposition-modal-' + issue.id}">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve split
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm"
+                                th:attr="data-modal-open=${'reject-decomposition-modal-' + issue.id}">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- === NEEDS HUMAN (FAILED / COOLDOWN) === -->
+        <div id="needs-human" class="panel mb-3">
+            <div class="panel-header">
+                <h3>Needs Human <span class="badge" th:text="${#lists.size(needsHuman)}">0</span></h3>
+            </div>
+            <div class="panel-body">
+                <p class="text-muted text-sm" th:if="${#lists.isEmpty(needsHuman)}">Nothing here right now.</p>
+
+                <div th:each="issue : ${needsHuman}" class="glass-card mb-2" style="padding:1rem">
+                    <div class="flex-between mb-1">
+                        <div>
+                            <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                        </div>
+                        <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
+                              th:text="${issue.status}">FAILED</span>
+                    </div>
+
+                    <p class="text-sm mb-1" th:if="${issue.lastFailureReason != null}"
+                       th:text="${issue.lastFailureReason}">failure reason</p>
+                    <p class="text-sm text-muted mb-1"
+                       th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
+                       th:text="${'Cooldown until ' + #temporals.format(issue.cooldownUntil, 'yyyy-MM-dd HH:mm')}">
+                        Cooldown until</p>
+
+                    <a class="btn btn-ghost btn-sm" th:href="@{'/issues/' + ${issue.id}}"
+                       th:hx-get="@{'/issues/' + ${issue.id}}" hx-target="#content" hx-push-url="true">
+                        <i class="ti ti-arrow-right" aria-hidden="true"></i> Open issue for retry options
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!--
+      === Modals (#91) — top-level, one set per issue across the approvals/plan/split groups.
+      Deliberately NOT inside any polled fragment: this page has no auto-refresh (unlike the
+      Approvals/dashboard pages), so there is no morph/swap that could snap an open modal shut —
+      see approvals.html and dashboard.html for the precedent this follows.
+    -->
+
+    <!-- Approve (PR) confirmation modals -->
+    <div th:each="issue : ${approvals}"
+         th:id="${'approve-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true"
+             th:attr="aria-labelledby=${'approve-modal-' + issue.id + '-title'}">
+            <h3 th:id="${'approve-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">
+                Approving marks
+                <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                as completed. Make sure you have reviewed the pull request and the review score above.
+                This cannot be undone here.
+            </p>
+            <form th:action="@{'/approvals/' + ${issue.id} + '/approve'}" method="post">
+                <input type="hidden" name="returnTo" value="inbox">
+                <div class="checkbox-field" th:if="${issue.prNumber != null}">
+                    <input type="checkbox" th:id="${'merge-checkbox-' + issue.id}" name="merge" value="true" checked>
+                    <label th:for="${'merge-checkbox-' + issue.id}">
+                        Squash-merge PR <span th:text="'#' + ${issue.prNumber}"></span> on GitHub
+                    </label>
+                </div>
+                <p class="text-sm text-muted" th:if="${issue.prNumber != null}" style="margin:0.5rem 0 1rem">
+                    With the box checked, the PR is squash-merged; unchecked, the PR stays open for you to merge manually.
+                </p>
+                <p class="text-sm text-muted" th:unless="${issue.prNumber != null}" style="margin:0.5rem 0 1rem">
+                    No PR recorded — nothing to merge.
+                </p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="ti ti-check" aria-hidden="true"></i> Confirm Approve
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Approve/Reject plan modals -->
+    <th:block th:each="issue : ${planApprovals}">
+        <div th:id="${'approve-plan-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
+            <div class="modal glass-card" role="dialog" aria-modal="true"
+                 th:attr="aria-labelledby=${'approve-plan-modal-' + issue.id + '-title'}">
+                <h3 th:id="${'approve-plan-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve Plan</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">
+                    Starts implementation using this plan for
+                    <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>.
+                    Queued, implementation resumes on the next poll cycle (~60s).
+                </p>
+                <form th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
+                    <input type="hidden" name="returnTo" value="inbox">
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Approve plan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div th:id="${'reject-plan-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
+            <div class="modal glass-card" role="dialog" aria-modal="true"
+                 th:attr="aria-labelledby=${'reject-plan-modal-' + issue.id + '-title'}">
+                <h3 th:id="${'reject-plan-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Reject Plan</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">
+                    Feedback for the next plan (required). After 2 rejections the issue escalates to needs-human.
+                </p>
+                <form th:action="@{'/issues/' + ${issue.id} + '/plan/reject'}" method="post">
+                    <input type="hidden" name="returnTo" value="inbox">
+                    <textarea name="feedback" rows="4" class="modal-textarea" required data-modal-autofocus
+                              placeholder="e.g. The plan misses the caching layer — include how invalidation is handled"></textarea>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
+                        <button type="submit" class="btn btn-danger btn-sm">Reject plan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </th:block>
+
+    <!-- Approve/Reject split modals -->
+    <th:block th:each="issue : ${splitProposals}">
+        <div th:id="${'approve-decomposition-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
+            <div class="modal glass-card" role="dialog" aria-modal="true"
+                 th:attr="aria-labelledby=${'approve-decomposition-modal-' + issue.id + '-title'}">
+                <h3 th:id="${'approve-decomposition-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve Split</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">
+                    Creates the sub-issues labeled agent-ready for
+                    <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>;
+                    this issue stays open as a tracker.
+                </p>
+                <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/approve'}" method="post">
+                    <input type="hidden" name="returnTo" value="inbox">
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Approve split</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div th:id="${'reject-decomposition-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
+            <div class="modal glass-card" role="dialog" aria-modal="true"
+                 th:attr="aria-labelledby=${'reject-decomposition-modal-' + issue.id + '-title'}">
+                <h3 th:id="${'reject-decomposition-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Reject Split</h3>
+                <p class="text-sm text-muted" style="margin:0 0 1rem">
+                    Escalates to needs-human; no sub-issues are created.
+                </p>
+                <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/reject'}" method="post">
+                    <input type="hidden" name="returnTo" value="inbox">
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                        <button type="submit" class="btn btn-danger btn-sm">Reject &amp; escalate</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </th:block>
+</div>
+</body>
+</html>

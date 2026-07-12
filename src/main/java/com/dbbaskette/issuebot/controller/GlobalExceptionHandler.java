@@ -106,6 +106,7 @@ public class GlobalExceptionHandler {
         // Static 0 like pendingApprovals above — the error page must never hit the database,
         // and @ControllerAdvice @ModelAttribute methods don't run for @ExceptionHandler views
         // anyway (the bell is hidden here since dashboardNotificationsEnabled is also absent).
+        model.addAttribute("needsYouCount", 0L);
         model.addAttribute("unreadNotificationCount", 0L);
         return ViewResolver.view("error", request.getHeader("HX-Request") != null);
     }

@@ -381,7 +381,7 @@ class IssueControllerTest {
     void approveEndpointGuardsStatus() throws Exception {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
 
-        f.controller.approveDecomposition(1L, f.redirectAttributes);
+        f.controller.approveDecomposition(1L, null, f.redirectAttributes);
 
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
         verify(f.decompositionService, never()).approveProposal(any());
@@ -391,9 +391,68 @@ class IssueControllerTest {
     void approveEndpointCallsService() throws Exception {
         Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
 
-        String view = f.controller.approveDecomposition(1L, f.redirectAttributes);
+        String view = f.controller.approveDecomposition(1L, null, f.redirectAttributes);
 
         verify(f.decompositionService).approveProposal(f.issue);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void rejectDecompositionEndpointGuardsStatus() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        f.controller.rejectDecomposition(1L, null, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        verify(f.decompositionService, never()).rejectProposal(any());
+    }
+
+    @Test
+    void rejectDecompositionEndpointCallsService() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
+
+        String view = f.controller.rejectDecomposition(1L, null, f.redirectAttributes);
+
+        verify(f.decompositionService).rejectProposal(f.issue);
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("escalated"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    // === returnTo (#91 Needs You inbox) ===
+
+    @Test
+    void approveDecompositionWithReturnToInboxRedirectsToInbox() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
+
+        String view = f.controller.approveDecomposition(1L, "inbox", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/inbox");
+    }
+
+    @Test
+    void rejectDecompositionWithReturnToInboxRedirectsToInbox() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
+
+        String view = f.controller.rejectDecomposition(1L, "inbox", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/inbox");
+    }
+
+    @Test
+    void approveDecompositionWithArbitraryReturnToValueIsNotHonored() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
+
+        String view = f.controller.approveDecomposition(1L, "https://evil.example.com", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void approveDecompositionWithoutReturnToKeepsOriginalBehavior() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_DECOMPOSITION);
+
+        String view = f.controller.approveDecomposition(1L, null, f.redirectAttributes);
+
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
     }
 
@@ -403,7 +462,7 @@ class IssueControllerTest {
     void approvePlanEndpointGuardsStatus() {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
 
-        f.controller.approvePlan(1L, f.redirectAttributes);
+        f.controller.approvePlan(1L, null, f.redirectAttributes);
 
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
         verify(f.planFirstService, never()).approvePlan(any());
@@ -413,7 +472,7 @@ class IssueControllerTest {
     void approvePlanEndpointCallsService() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
 
-        String view = f.controller.approvePlan(1L, f.redirectAttributes);
+        String view = f.controller.approvePlan(1L, null, f.redirectAttributes);
 
         verify(f.planFirstService).approvePlan(f.issue);
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("next poll cycle"));
@@ -426,7 +485,7 @@ class IssueControllerTest {
         doThrow(new IllegalStateException("Issue is not awaiting plan approval: PENDING"))
                 .when(f.planFirstService).approvePlan(any());
 
-        f.controller.approvePlan(1L, f.redirectAttributes);
+        f.controller.approvePlan(1L, null, f.redirectAttributes);
 
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("not awaiting plan approval"));
     }
@@ -435,7 +494,7 @@ class IssueControllerTest {
     void rejectPlanEndpointGuardsStatus() {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
 
-        f.controller.rejectPlan(1L, "some feedback", f.redirectAttributes);
+        f.controller.rejectPlan(1L, "some feedback", null, f.redirectAttributes);
 
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
         verify(f.planFirstService, never()).rejectPlan(any(), anyString());
@@ -445,7 +504,7 @@ class IssueControllerTest {
     void rejectPlanEndpointRequiresFeedback() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
 
-        f.controller.rejectPlan(1L, "   ", f.redirectAttributes);
+        f.controller.rejectPlan(1L, "   ", null, f.redirectAttributes);
 
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Feedback is required"));
         verify(f.planFirstService, never()).rejectPlan(any(), anyString());
@@ -457,10 +516,61 @@ class IssueControllerTest {
         when(f.planFirstService.rejectPlan(any(), anyString()))
                 .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
 
-        String view = f.controller.rejectPlan(1L, "  Consider the caching layer  ", f.redirectAttributes);
+        String view = f.controller.rejectPlan(1L, "  Consider the caching layer  ", null, f.redirectAttributes);
 
         verify(f.planFirstService).rejectPlan(f.issue, "Consider the caching layer");
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("regenerates"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    // === returnTo (#91 Needs You inbox) ===
+
+    @Test
+    void approvePlanWithReturnToInboxRedirectsToInbox() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+
+        String view = f.controller.approvePlan(1L, "inbox", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/inbox");
+    }
+
+    @Test
+    void approvePlanWithoutReturnToKeepsOriginalBehavior() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+
+        String view = f.controller.approvePlan(1L, null, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void approvePlanWithArbitraryReturnToValueIsNotHonored() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+
+        String view = f.controller.approvePlan(1L, "somethingElse", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void rejectPlanWithReturnToInboxRedirectsToInbox() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(f.planFirstService.rejectPlan(any(), anyString()))
+                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
+
+        String view = f.controller.rejectPlan(1L, "feedback", "inbox", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/inbox");
+    }
+
+    @Test
+    void rejectPlanWithoutReturnToKeepsOriginalBehavior() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(f.planFirstService.rejectPlan(any(), anyString()))
+                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
+
+        String view = f.controller.rejectPlan(1L, "feedback", null, f.redirectAttributes);
+
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
     }
 
@@ -477,7 +587,7 @@ class IssueControllerTest {
         when(f.planFirstService.rejectPlan(any(), anyString()))
                 .thenReturn(PlanFirstService.RejectOutcome.ESCALATED);
 
-        f.controller.rejectPlan(1L, "Still wrong", f.redirectAttributes);
+        f.controller.rejectPlan(1L, "Still wrong", null, f.redirectAttributes);
 
         org.assertj.core.api.Assertions.assertThat(f.issue.getPlanRejections()).isZero(); // stale copy untouched
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("escalated to needs-human"));
