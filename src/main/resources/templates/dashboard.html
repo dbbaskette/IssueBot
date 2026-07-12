@@ -71,22 +71,6 @@
             </div>
         </div>
 
-        <!-- Stop confirm modals — one per running issue, unique ids so multiple cards coexist -->
-        <div th:each="rv : ${runningIssues}"
-             th:id="${'stop-modal-' + rv.issue().id}" class="modal-backdrop" data-modal hidden>
-            <div class="modal glass-card" role="dialog" aria-modal="true"
-                 th:attr="aria-labelledby=${'stop-modal-' + rv.issue().id + '-title'}">
-                <h3 th:id="${'stop-modal-' + rv.issue().id + '-title'}" style="margin:0 0 0.5rem">Stop Issue</h3>
-                <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
-                <form th:action="@{'/issues/' + ${rv.issue().id} + '/cancel'}" method="post">
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
-                        <button type="submit" class="btn btn-danger btn-sm">Stop Issue</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
         <div class="metrics-grid">
             <a class="metric-tile is-link ok" href="/issues?status=COMPLETED"
                hx-get="/issues?status=COMPLETED" hx-target="#content" hx-push-url="true">
@@ -188,6 +172,33 @@
                 </ul>
                 <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events yet. Configure a repository and label an issue <code>agent-ready</code> to get started.</p>
             </div>
+        </div>
+    </div>
+
+    <!--/* === Stop confirm modals (one per running issue, unique ids) === Deliberately OUTSIDE
+           the polled #dashboard-live fragment above: the template always emits [hidden] on the
+           backdrop, so if these lived inside the fragment the 10s morph swap would resync
+           [hidden] onto an open dialog and snap it shut mid-interaction (and leave app.js's
+           activeModal/lastFocused pointing at a replaced node). Same reason issue-detail keeps
+           all its modals outside its polled #live-status fragment. Trade-off: modals only
+           update on a full page/content render, while the cards' Stop buttons refresh every
+           poll — so a card for an issue that STARTED running since the last full render shows
+           a Stop button with no matching modal; app.js openModal null-checks and no-ops, and
+           the button works after the next navigation. A modal for an issue that FINISHED
+           mid-poll still posts to /issues/{id}/cancel, which safely rejects non-running
+           issues with a flash message. */-->
+    <div th:each="rv : ${runningIssues}"
+         th:id="${'stop-modal-' + rv.issue().id}" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true"
+             th:attr="aria-labelledby=${'stop-modal-' + rv.issue().id + '-title'}">
+            <h3 th:id="${'stop-modal-' + rv.issue().id + '-title'}" style="margin:0 0 0.5rem">Stop Issue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
+            <form th:action="@{'/issues/' + ${rv.issue().id} + '/cancel'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Stop Issue</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

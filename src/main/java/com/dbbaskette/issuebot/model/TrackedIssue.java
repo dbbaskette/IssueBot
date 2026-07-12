@@ -149,6 +149,9 @@ public class TrackedIssue {
      * point for both a fresh start and a retry (the controller flips status to IN_PROGRESS too,
      * but processIssue re-enters and overwrites this regardless, so it's always fresh for the
      * current run). Drives the dashboard's elapsed-time display.
+     * Caveat: on retry there is a brief window where the controller has already flipped status
+     * to IN_PROGRESS but the async workflow hasn't re-stamped this yet, so it can momentarily
+     * hold the previous run's start time (or null).
      */
     public LocalDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(LocalDateTime startedAt) { this.startedAt = startedAt; }
