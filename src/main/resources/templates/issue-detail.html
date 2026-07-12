@@ -134,6 +134,47 @@
         </div>
     </div>
 
+    <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
+    <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
+        <div class="panel-header">
+            <h3>Timeline</h3>
+            <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
+        </div>
+        <div class="panel-body">
+            <!--/* Iterations are grouped into runs (a manual retry resets the iteration counter
+                   without deleting the previous run's rows — see TimelineAssembler's Runs
+                   javadoc). The "Run N ·" prefix only appears when the issue actually has
+                   multiple runs. */-->
+            <th:block th:each="run : ${timeline}">
+            <div class="timeline-iteration" th:each="it : ${run.iterations()}">
+                <div class="flex-between mb-1">
+                    <strong th:text="${(#lists.size(timeline) > 1 ? 'Run ' + run.runNum() + ' · ' : '') + 'Iteration ' + it.iterationNum()}">Iteration 1</strong>
+                    <span class="status"
+                          th:classappend="${it.outcomeBadge() == 'PASSED' ? 'status-completed' : (it.outcomeBadge() == 'FAILED' ? 'status-failed' : (it.outcomeBadge() == 'RUNNING' ? 'status-in_progress' : 'status-pending'))}"
+                          th:text="${it.outcomeBadge()}">PASSED</span>
+                </div>
+                <div class="timeline-bar" th:if="${not #lists.isEmpty(it.segments())}">
+                    <div th:each="seg : ${it.segments()}"
+                         class="timeline-segment"
+                         th:classappend="'outcome-' + ${seg.outcome()}"
+                         th:style="'width:' + ${#numbers.formatDecimal(seg.widthPct(), 1, 2, 'POINT')} + '%'"
+                         th:title="${seg.stageName() + ' — ' + seg.durationSecs() + 's (' + seg.outcome() + ')'}">
+                        <span class="timeline-segment-label" th:if="${seg.widthPct() >= 8}"
+                              th:text="${seg.stageName() + ' ' + seg.durationSecs() + 's'}">Stage 10s</span>
+                    </div>
+                </div>
+                <p class="text-sm text-muted" th:if="${#lists.isEmpty(it.segments())}">
+                    No stage data available for this iteration.
+                </p>
+                <div class="flex-between mt-1">
+                    <span class="text-sm text-muted"
+                          th:text="'Cost: $' + ${#numbers.formatDecimal(it.totalCost(), 1, 4)}">Cost: $0.0000</span>
+                </div>
+            </div>
+            </th:block>
+        </div>
+    </div>
+
     <!-- === Retry Modal (accessible dialog) === -->
     <div th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
          id="retry-modal" class="modal-backdrop" data-modal hidden>

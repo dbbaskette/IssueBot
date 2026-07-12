@@ -13,5 +13,13 @@ public interface EventRepository extends JpaRepository<Event, Long> {
 
     List<Event> findByIssueOrderByCreatedAtDesc(TrackedIssue issue, Pageable pageable);
 
+    /**
+     * ALL events for an issue, oldest first — unlike the capped/paged desc finder above,
+     * this backs the loop timeline (#88), which needs every {@code PHASE_*} event across every
+     * iteration (a single issue can easily log 10+ events per iteration) to derive accurate
+     * per-stage segment boundaries.
+     */
+    List<Event> findByIssueOrderByCreatedAtAsc(TrackedIssue issue);
+
     void deleteByRepo(WatchedRepo repo);
 }
