@@ -388,6 +388,110 @@ class ApprovalControllerTest {
         assertThat(outcome).doesNotContain("evil.example.com");
     }
 
+    /**
+     * merge=true AND returnTo=inbox together (#91 review follow-up): the merge must actually
+     * happen and the issue complete exactly as on the Approvals page — returnTo only changes
+     * where the operator lands afterwards, never the action semantics.
+     */
+    @Test
+    void approveWithMergeAndReturnToInboxMergesCompletesAndRedirectsToInbox() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        issue.setPrNumber(55);
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+
+        ApprovalController controller = controller(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        String outcome = controller.approve(model, 1L, true, "inbox", null, redirectAttributes);
+
+        verify(gitHubApi).mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash"));
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
+        verify(issues).save(issue);
+        assertThat(outcome).isEqualTo("redirect:/inbox");
+        verify(redirectAttributes).addFlashAttribute(eq("message"), contains("Approved"));
+    }
+
+    /**
+     * The merge-failure early return must honor returnTo too — otherwise acting from the inbox
+     * on a conflicted PR would dump the operator on the Approvals page mid-error.
+     */
+    @Test
+    void approveMergeFailureWithReturnToInboxRedirectsToInboxWithErrorFlash() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        issue.setPrNumber(55);
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(gitHubApi.mergePullRequest(anyString(), anyString(), anyInt(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("merge conflict"));
+
+        ApprovalController controller = controller(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        String outcome = controller.approve(model, 1L, true, "inbox", null, redirectAttributes);
+
+        assertThat(outcome).isEqualTo("redirect:/inbox");
+        verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL); // NOT completed
+        verify(issues, never()).save(any());
+    }
+
+    /** The no-PR-recorded guard's early return must honor returnTo as well. */
+    @Test
+    void approveMergeWithoutPrNumberAndReturnToInboxRedirectsToInboxWithErrorFlash() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        // no PR number recorded
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+
+        ApprovalController controller = controller(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+
+        Model model = new ExtendedModelMap();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        String outcome = controller.approve(model, 1L, true, "inbox", null, redirectAttributes);
+
+        assertThat(outcome).isEqualTo("redirect:/inbox");
+        verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
+        verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        verify(issues, never()).save(any());
+    }
+
     @Test
     void rejectWithReturnToInboxRedirectsToInboxAndFlashesMessage() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
