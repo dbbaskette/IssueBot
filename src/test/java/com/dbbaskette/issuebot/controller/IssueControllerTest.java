@@ -740,6 +740,36 @@ class IssueControllerTest {
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isSameAs(second);
     }
 
+    /**
+     * Iteration History (#90) reads a separate newest-first view so the operator sees the
+     * most recent attempt first without disturbing {@code latestIteration} (last element) or
+     * the timeline assembler, both of which depend on the ascending "iterations" attribute.
+     */
+    @Test
+    void detailExposesIterationsNewestFirst_forIterationHistoryDisplayOrder() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        Iteration first = new Iteration(f.issue, 1);
+        Iteration second = new Iteration(f.issue, 2);
+        Iteration third = new Iteration(f.issue, 3);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(first, second, third));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null);
+
+        @SuppressWarnings("unchecked")
+        List<Iteration> newestFirst = (List<Iteration>) model.getAttribute("iterationsNewestFirst");
+        org.assertj.core.api.Assertions.assertThat(newestFirst)
+                .extracting(Iteration::getIterationNum)
+                .containsExactly(3, 2, 1);
+        // The ascending attribute used elsewhere (timeline assembler, latestIteration) is untouched.
+        @SuppressWarnings("unchecked")
+        List<Iteration> ascending = (List<Iteration>) model.getAttribute("iterations");
+        org.assertj.core.api.Assertions.assertThat(ascending)
+                .extracting(Iteration::getIterationNum)
+                .containsExactly(1, 2, 3);
+    }
+
     // === Loop timeline (#88) ===================================================
 
     @Test

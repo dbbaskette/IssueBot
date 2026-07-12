@@ -63,6 +63,7 @@ class IssueDetailTimelineRenderTest {
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", null);
         context.setVariable("iterations", List.of());
+        context.setVariable("iterationsNewestFirst", List.of());
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
         context.setVariable("timeline", timeline);
@@ -100,6 +101,7 @@ class IssueDetailTimelineRenderTest {
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", null);
         context.setVariable("iterations", List.of());
+        context.setVariable("iterationsNewestFirst", List.of());
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
         // Deliberately no "timeline" variable at all — must not NPE.

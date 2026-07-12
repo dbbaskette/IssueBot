@@ -63,6 +63,7 @@ class IssueDetailPipelineStampRenderTest {
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", null);
         context.setVariable("iterations", List.of());
+        context.setVariable("iterationsNewestFirst", List.of());
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
         context.setVariable("phaseIndex", -1);

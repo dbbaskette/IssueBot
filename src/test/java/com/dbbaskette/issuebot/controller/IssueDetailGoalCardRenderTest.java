@@ -64,7 +64,10 @@ class IssueDetailGoalCardRenderTest {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", latestIteration);
-        context.setVariable("iterations", latestIteration == null ? List.of() : List.of(latestIteration));
+        List<Iteration> iterations = latestIteration == null ? List.of() : List.of(latestIteration);
+        context.setVariable("iterations", iterations);
+        // Iteration History (#90) reads this newest-first view; mirrors IssueController.
+        context.setVariable("iterationsNewestFirst", iterations.reversed());
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
         context.setVariable("phaseIndex", -1);

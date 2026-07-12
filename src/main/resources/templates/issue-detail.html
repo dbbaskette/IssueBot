@@ -4,178 +4,343 @@
 <div th:fragment="content" th:if="${issue}">
     <div th:replace="~{layout :: toasts}"></div>
 
-    <div class="page-header">
-        <div>
-            <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
-            <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
-            <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
-                <a class="repo-link" target="_blank" rel="noopener"
-                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${issue.issueNumber}"
-                   th:title="${'Open issue #' + issue.issueNumber + ' on GitHub'}">
-                    <i class="ti ti-brand-github" aria-hidden="true"></i>
-                    <span th:text="${'Issue #' + issue.issueNumber}">Issue #1</span>
-                    <i class="ti ti-external-link" aria-hidden="true"></i>
-                </a>
-                <a class="repo-link" target="_blank" rel="noopener"
-                   th:if="${issue.prNumber != null and issue.prNumber > 0}"
-                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/pull/' + ${issue.prNumber}"
-                   th:title="${'Open PR #' + issue.prNumber + ' on GitHub'}">
-                    <i class="ti ti-git-pull-request" aria-hidden="true"></i>
-                    <span th:text="${'PR #' + issue.prNumber}">PR #1</span>
-                    <i class="ti ti-external-link" aria-hidden="true"></i>
-                </a>
-                <a class="repo-link" target="_blank" rel="noopener"
-                   th:if="${issue.branchName != null}"
-                   th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/tree/' + ${issue.branchName}"
-                   th:title="${'Open branch ' + issue.branchName + ' on GitHub'}">
-                    <i class="ti ti-git-branch" aria-hidden="true"></i>
-                    <span th:text="${issue.branchName}">branch-name</span>
-                    <i class="ti ti-external-link" aria-hidden="true"></i>
-                </a>
-            </div>
-        </div>
-        <div class="flex gap-1" style="align-items:center">
-            <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
-            <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                    type="button" class="btn btn-ghost btn-sm"
-                    data-modal-open="retry-modal">
-                <i class="ti ti-refresh" aria-hidden="true"></i>
-                <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
-            </button>
-            <button th:if="${issue.status.name() == 'QUEUED'}"
-                    type="button" class="btn btn-primary btn-sm"
-                    data-modal-open="start-modal">
-                <i class="ti ti-player-play" aria-hidden="true"></i> Start
-            </button>
-            <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
-                    type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
-                <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
-            </button>
-            <button th:if="${issue.status.name() == 'IN_PROGRESS'}"
-                    type="button" class="btn btn-danger btn-sm" data-modal-open="cancel-modal">
-                <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
-            </button>
-        </div>
-    </div>
+    <!-- === Two-column layout (#90): LEFT carries header/banners/decision cards/goal/
+           timeline/pipeline/guide; RIGHT is the sticky live terminal. Single column
+           below 1100px (see .detail-grid in style.css) — terminal is not sticky there.
+           Iteration History and Activity Log are deliberately NOT grid children: they
+           stay full-width below the grid in both layouts. Modals live entirely outside
+           this grid (see the MODALS block further down) — a modal-backdrop is
+           position:fixed so its DOM position doesn't matter for layout, and keeping
+           them out of both the grid and the #live-status polled fragment preserves the
+           hard-won invariant from PRs 96/99 (a poll re-render must never force-close an
+           open dialog). -->
+    <div class="detail-grid">
+        <div class="detail-grid-left">
 
-    <!-- === LAST FAILURE BANNER === -->
-    <div class="alert alert-danger" role="alert"
-         th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
-        <strong>Last failure:</strong> <span th:text="${issue.lastFailureReason}"></span>
-        <span th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
-              th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
-    </div>
-
-    <!-- === GOAL CARD === -->
-    <div class="panel mb-3 goal-card">
-        <div class="panel-header">
-            <h3>Goal</h3>
-            <span class="text-sm text-muted">Done when all of these hold:</span>
-        </div>
-        <div class="panel-body">
-            <div class="flex-between mb-1" th:if="${issue.repo.ciEnabled}">
-                <span class="text-sm">CI checks pass</span>
-                <span class="status"
-                      th:classappend="${latestIteration != null and latestIteration.ciResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
-                      th:text="${(latestIteration != null and latestIteration.ciResult != null) ? latestIteration.ciResult : '—'}">—</span>
-            </div>
-            <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push only</div>
-
-            <div class="flex-between mb-1" th:if="${issue.repo.verificationCommands != null}">
-                <span class="text-sm">Local checks pass</span>
-                <span class="status"
-                      th:classappend="${latestIteration != null and latestIteration.localCheckResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
-                      th:text="${(latestIteration != null and latestIteration.localCheckResult != null) ? latestIteration.localCheckResult : '—'}">—</span>
-            </div>
-
-            <div class="flex-between mb-1">
-                <span class="text-sm">Independent review passes
-                    <span class="text-muted" th:text="${'(all dimensions ≥ ' + #numbers.formatPercent(issue.repo.reviewPassThreshold, 1, 0) + ', no high-severity findings)'}">(all dimensions ≥ 70%, no high-severity findings)</span>
-                </span>
-                <span class="status"
-                      th:classappend="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'status-completed' : 'status-failed') : 'status-pending'}"
-                      th:text="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'PASSED' : 'CHANGES REQUESTED') : '—'}">—</span>
-            </div>
-
-            <div class="flex-between mb-1">
-                <span class="text-sm">Iteration budget</span>
-                <span class="text-sm"
-                      th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
-            </div>
-
-            <!--/* Cost budget progress bar — only shown when an effective budget (issue
-                   override, else repo default) is configured; unlimited issues show nothing here.
-                   budgetPct is a clamped 0–100 integer computed in IssueController#budgetPct so
-                   the template never divides (a $0.00 budget would render width:NaN%).
-                   Parser-level comment: stripped from output so the render tests can assert
-                   on the absence of these words. */-->
-            <div class="mb-1" th:if="${effectiveBudget != null}">
-                <div class="flex-between mb-1">
-                    <span class="text-sm">Cost budget</span>
-                    <span class="text-sm"
-                          th:text="${'$' + #numbers.formatDecimal(issueSpent, 1, 2) + ' of $' + #numbers.formatDecimal(effectiveBudget, 1, 2)}">$1.84 of $5.00</span>
-                </div>
-                <div class="budget-bar-track">
-                    <div class="budget-bar-fill"
-                         th:classappend="${budgetPct >= 100 ? 'over' : (budgetPct >= 80 ? 'warning' : '')}"
-                         th:style="'width:' + ${budgetPct} + '%'"></div>
-                </div>
-            </div>
-
-            <div class="text-sm text-muted" th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
-                Waiting for plan approval
-            </div>
-
-            <div class="text-sm text-muted">
-                On exhaustion: escalates to needs-human with 24 h cooldown<span
-                        th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                        th:text="' — currently ' + ${issue.status}"></span>
-            </div>
-        </div>
-    </div>
-
-    <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
-    <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
-        <div class="panel-header">
-            <h3>Timeline</h3>
-            <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
-        </div>
-        <div class="panel-body">
-            <!--/* Iterations are grouped into runs (a manual retry resets the iteration counter
-                   without deleting the previous run's rows — see TimelineAssembler's Runs
-                   javadoc). The "Run N ·" prefix only appears when the issue actually has
-                   multiple runs. */-->
-            <th:block th:each="run : ${timeline}">
-            <div class="timeline-iteration" th:each="it : ${run.iterations()}">
-                <div class="flex-between mb-1">
-                    <strong th:text="${(#lists.size(timeline) > 1 ? 'Run ' + run.runNum() + ' · ' : '') + 'Iteration ' + it.iterationNum()}">Iteration 1</strong>
-                    <span class="status"
-                          th:classappend="${it.outcomeBadge() == 'PASSED' ? 'status-completed' : (it.outcomeBadge() == 'FAILED' ? 'status-failed' : (it.outcomeBadge() == 'RUNNING' ? 'status-in_progress' : 'status-pending'))}"
-                          th:text="${it.outcomeBadge()}">PASSED</span>
-                </div>
-                <div class="timeline-bar" th:if="${not #lists.isEmpty(it.segments())}">
-                    <div th:each="seg : ${it.segments()}"
-                         class="timeline-segment"
-                         th:classappend="'outcome-' + ${seg.outcome()}"
-                         th:style="'width:' + ${#numbers.formatDecimal(seg.widthPct(), 1, 2, 'POINT')} + '%'"
-                         th:title="${seg.stageName() + ' — ' + seg.durationSecs() + 's (' + seg.outcome() + ')'}">
-                        <span class="timeline-segment-label" th:if="${seg.widthPct() >= 8}"
-                              th:text="${seg.stageName() + ' ' + seg.durationSecs() + 's'}">Stage 10s</span>
+            <div class="page-header">
+                <div>
+                    <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
+                    <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
+                    <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
+                        <a class="repo-link" target="_blank" rel="noopener"
+                           th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${issue.issueNumber}"
+                           th:title="${'Open issue #' + issue.issueNumber + ' on GitHub'}">
+                            <i class="ti ti-brand-github" aria-hidden="true"></i>
+                            <span th:text="${'Issue #' + issue.issueNumber}">Issue #1</span>
+                            <i class="ti ti-external-link" aria-hidden="true"></i>
+                        </a>
+                        <a class="repo-link" target="_blank" rel="noopener"
+                           th:if="${issue.prNumber != null and issue.prNumber > 0}"
+                           th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/pull/' + ${issue.prNumber}"
+                           th:title="${'Open PR #' + issue.prNumber + ' on GitHub'}">
+                            <i class="ti ti-git-pull-request" aria-hidden="true"></i>
+                            <span th:text="${'PR #' + issue.prNumber}">PR #1</span>
+                            <i class="ti ti-external-link" aria-hidden="true"></i>
+                        </a>
+                        <a class="repo-link" target="_blank" rel="noopener"
+                           th:if="${issue.branchName != null}"
+                           th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/tree/' + ${issue.branchName}"
+                           th:title="${'Open branch ' + issue.branchName + ' on GitHub'}">
+                            <i class="ti ti-git-branch" aria-hidden="true"></i>
+                            <span th:text="${issue.branchName}">branch-name</span>
+                            <i class="ti ti-external-link" aria-hidden="true"></i>
+                        </a>
                     </div>
                 </div>
-                <p class="text-sm text-muted" th:if="${#lists.isEmpty(it.segments())}">
-                    No stage data available for this iteration.
-                </p>
-                <div class="flex-between mt-1">
-                    <span class="text-sm text-muted"
-                          th:text="'Cost: $' + ${#numbers.formatDecimal(it.totalCost(), 1, 4)}">Cost: $0.0000</span>
+                <div class="flex gap-1" style="align-items:center">
+                    <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
+                    <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                            type="button" class="btn btn-ghost btn-sm"
+                            data-modal-open="retry-modal">
+                        <i class="ti ti-refresh" aria-hidden="true"></i>
+                        <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
+                    </button>
+                    <button th:if="${issue.status.name() == 'QUEUED'}"
+                            type="button" class="btn btn-primary btn-sm"
+                            data-modal-open="start-modal">
+                        <i class="ti ti-player-play" aria-hidden="true"></i> Start
+                    </button>
+                    <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
+                            type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
+                        <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
+                    </button>
+                    <button th:if="${issue.status.name() == 'IN_PROGRESS'}"
+                            type="button" class="btn btn-danger btn-sm" data-modal-open="cancel-modal">
+                        <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+                    </button>
                 </div>
             </div>
-            </th:block>
+
+            <!-- === LAST FAILURE BANNER === -->
+            <div class="alert alert-danger" role="alert"
+                 th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
+                <strong>Last failure:</strong> <span th:text="${issue.lastFailureReason}"></span>
+                <span th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
+                      th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
+            </div>
+
+            <!-- === BLOCKED-BY INFO PANEL === -->
+            <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
+                <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+                    <h3>Blocked By</h3>
+                    <span class="status status-blocked">WAITING</span>
+                </div>
+                <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
+                <div class="flex gap-1" style="flex-wrap:wrap">
+                    <a th:each="num : ${issue.blockerNumbers}"
+                       class="status status-blocked" target="_blank" rel="noopener"
+                       th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
+                       th:title="${'Open issue #' + num + ' on GitHub'}"
+                       th:text="${'#' + num}">
+                        #5
+                    </a>
+                </div>
+            </div>
+
+            <!-- === DECOMPOSITION PROPOSAL CARD === -->
+            <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}" class="panel mb-3">
+                <div class="panel-header">
+                    <h3>Proposed Split</h3>
+                    <div class="flex gap-1">
+                        <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-decomposition-modal">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve split
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-decomposition-modal">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <ol class="decomposition-proposal-list">
+                        <li th:each="sub : ${decompositionProposal}">
+                            <strong th:text="${sub['title']}">Sub-issue title</strong>
+                            <div class="text-sm text-muted" th:text="${sub['description']}">Sub-issue description</div>
+                        </li>
+                    </ol>
+                </div>
+            </div>
+
+            <!-- === PROPOSED PLAN CARD (plan-first mode, #64) === -->
+            <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}" class="panel mb-3">
+                <div class="panel-header">
+                    <h3>Proposed Plan</h3>
+                    <div class="flex gap-1">
+                        <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-plan-modal">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve plan
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-plan-modal">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject with feedback
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <!--/* Model output is untrusted — rendered as preformatted text via th:text,
+                           never injected as HTML. */-->
+                    <pre class="code-output plan-text" th:text="${issue.implementationPlan}">plan text</pre>
+                </div>
+            </div>
+
+            <!-- === GOAL CARD === -->
+            <div class="panel mb-3 goal-card">
+                <div class="panel-header">
+                    <h3>Goal</h3>
+                    <span class="text-sm text-muted">Done when all of these hold:</span>
+                </div>
+                <div class="panel-body">
+                    <div class="flex-between mb-1" th:if="${issue.repo.ciEnabled}">
+                        <span class="text-sm">CI checks pass</span>
+                        <span class="status"
+                              th:classappend="${latestIteration != null and latestIteration.ciResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
+                              th:text="${(latestIteration != null and latestIteration.ciResult != null) ? latestIteration.ciResult : '—'}">—</span>
+                    </div>
+                    <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push only</div>
+
+                    <div class="flex-between mb-1" th:if="${issue.repo.verificationCommands != null}">
+                        <span class="text-sm">Local checks pass</span>
+                        <span class="status"
+                              th:classappend="${latestIteration != null and latestIteration.localCheckResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
+                              th:text="${(latestIteration != null and latestIteration.localCheckResult != null) ? latestIteration.localCheckResult : '—'}">—</span>
+                    </div>
+
+                    <div class="flex-between mb-1">
+                        <span class="text-sm">Independent review passes
+                            <span class="text-muted" th:text="${'(all dimensions ≥ ' + #numbers.formatPercent(issue.repo.reviewPassThreshold, 1, 0) + ', no high-severity findings)'}">(all dimensions ≥ 70%, no high-severity findings)</span>
+                        </span>
+                        <span class="status"
+                              th:classappend="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'status-completed' : 'status-failed') : 'status-pending'}"
+                              th:text="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'PASSED' : 'CHANGES REQUESTED') : '—'}">—</span>
+                    </div>
+
+                    <div class="flex-between mb-1">
+                        <span class="text-sm">Iteration budget</span>
+                        <span class="text-sm"
+                              th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
+                    </div>
+
+                    <!--/* Cost budget progress bar — only shown when an effective budget (issue
+                           override, else repo default) is configured; unlimited issues show nothing here.
+                           budgetPct is a clamped 0–100 integer computed in IssueController#budgetPct so
+                           the template never divides (a $0.00 budget would render width:NaN%).
+                           Parser-level comment: stripped from output so the render tests can assert
+                           on the absence of these words. */-->
+                    <div class="mb-1" th:if="${effectiveBudget != null}">
+                        <div class="flex-between mb-1">
+                            <span class="text-sm">Cost budget</span>
+                            <span class="text-sm"
+                                  th:text="${'$' + #numbers.formatDecimal(issueSpent, 1, 2) + ' of $' + #numbers.formatDecimal(effectiveBudget, 1, 2)}">$1.84 of $5.00</span>
+                        </div>
+                        <div class="budget-bar-track">
+                            <div class="budget-bar-fill"
+                                 th:classappend="${budgetPct >= 100 ? 'over' : (budgetPct >= 80 ? 'warning' : '')}"
+                                 th:style="'width:' + ${budgetPct} + '%'"></div>
+                        </div>
+                    </div>
+
+                    <div class="text-sm text-muted" th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
+                        Waiting for plan approval
+                    </div>
+
+                    <div class="text-sm text-muted">
+                        On exhaustion: escalates to needs-human with 24 h cooldown<span
+                                th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                                th:text="' — currently ' + ${issue.status}"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
+            <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
+                <div class="panel-header">
+                    <h3>Timeline</h3>
+                    <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
+                </div>
+                <div class="panel-body">
+                    <!--/* Iterations are grouped into runs (a manual retry resets the iteration counter
+                           without deleting the previous run's rows — see TimelineAssembler's Runs
+                           javadoc). The "Run N ·" prefix only appears when the issue actually has
+                           multiple runs. */-->
+                    <th:block th:each="run : ${timeline}">
+                    <div class="timeline-iteration" th:each="it : ${run.iterations()}">
+                        <div class="flex-between mb-1">
+                            <strong th:text="${(#lists.size(timeline) > 1 ? 'Run ' + run.runNum() + ' · ' : '') + 'Iteration ' + it.iterationNum()}">Iteration 1</strong>
+                            <span class="status"
+                                  th:classappend="${it.outcomeBadge() == 'PASSED' ? 'status-completed' : (it.outcomeBadge() == 'FAILED' ? 'status-failed' : (it.outcomeBadge() == 'RUNNING' ? 'status-in_progress' : 'status-pending'))}"
+                                  th:text="${it.outcomeBadge()}">PASSED</span>
+                        </div>
+                        <div class="timeline-bar" th:if="${not #lists.isEmpty(it.segments())}">
+                            <div th:each="seg : ${it.segments()}"
+                                 class="timeline-segment"
+                                 th:classappend="'outcome-' + ${seg.outcome()}"
+                                 th:style="'width:' + ${#numbers.formatDecimal(seg.widthPct(), 1, 2, 'POINT')} + '%'"
+                                 th:title="${seg.stageName() + ' — ' + seg.durationSecs() + 's (' + seg.outcome() + ')'}">
+                                <span class="timeline-segment-label" th:if="${seg.widthPct() >= 8}"
+                                      th:text="${seg.stageName() + ' ' + seg.durationSecs() + 's'}">Stage 10s</span>
+                            </div>
+                        </div>
+                        <p class="text-sm text-muted" th:if="${#lists.isEmpty(it.segments())}">
+                            No stage data available for this iteration.
+                        </p>
+                        <div class="flex-between mt-1">
+                            <span class="text-sm text-muted"
+                                  th:text="'Cost: $' + ${#numbers.formatDecimal(it.totalCost(), 1, 4)}">Cost: $0.0000</span>
+                        </div>
+                    </div>
+                    </th:block>
+                </div>
+            </div>
+
+            <!-- === LIVE-REFRESHED STATUS SECTION (metrics + phase pipeline) === -->
+            <div th:replace="~{issue-detail :: live-status}"></div>
+
+            <!-- === GUIDE CARD (mid-loop steering, #63) === -->
+            <div th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel" class="panel mb-3">
+                <div class="panel-header">
+                    <h3>Guide</h3>
+                    <span class="text-sm text-muted">Steer this run without stopping it</span>
+                </div>
+                <div class="panel-body">
+                    <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post">
+                        <textarea name="guidance" rows="3" class="modal-textarea" required
+                                  placeholder="e.g. Check the retry logic in FooService — the bug is probably there"></textarea>
+                        <p class="text-sm text-muted" style="margin:0.5rem 0 0">
+                            Queued guidance is injected at the next iteration boundary; it won't interrupt the current Claude run.
+                        </p>
+                        <div class="modal-actions">
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="ti ti-send" aria-hidden="true"></i> Send guidance
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- === RIGHT COLUMN: LIVE TERMINAL (sticky ≥1100px; outside HTMX swap) === -->
+        <div class="detail-grid-right">
+            <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3 live-terminal-panel" id="live-terminal-panel">
+                <div class="panel-header">
+                    <h3>Claude Code Session</h3>
+                    <div class="flex gap-1 terminal-toolbar" style="align-items:center;flex-wrap:wrap">
+                        <span class="terminal-trim-note text-sm text-muted" id="terminal-trim-note" hidden></span>
+                        <!--/* Filter box (#84): substring-hides non-matching lines live, both existing
+                               and future ones — see IssueBotTerminal.applyFilter/_appendLine in app.js. */-->
+                        <div class="terminal-filter-group">
+                            <i class="ti ti-filter" aria-hidden="true"></i>
+                            <input type="text" id="terminal-filter" class="terminal-filter-input"
+                                   data-terminal-filter placeholder="Filter output…"
+                                   aria-label="Filter terminal output">
+                            <button type="button" class="terminal-filter-clear" id="terminal-filter-clear"
+                                    data-terminal-filter-clear title="Clear filter" aria-label="Clear filter">
+                                <i class="ti ti-x" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-ghost btn-sm" id="terminal-scroll-lock"
+                                data-terminal-scroll-lock aria-pressed="false" title="Follow new output">
+                            <i class="ti ti-arrow-down-circle" aria-hidden="true"></i> Following
+                        </button>
+                        <button type="button" class="btn btn-ghost btn-sm" id="terminal-copy"
+                                data-terminal-copy title="Copy terminal output">
+                            <i class="ti ti-copy" aria-hidden="true"></i> Copy
+                        </button>
+                        <!--/* Download (#84): client-side Blob of every buffered line's dataset.raw —
+                               see IssueBotTerminal.download in app.js. */-->
+                        <button type="button" class="btn btn-ghost btn-sm" id="terminal-download"
+                                data-terminal-download th:title="${'Download issue-' + issue.id + '-terminal.txt'}">
+                            <i class="ti ti-download" aria-hidden="true"></i> Download
+                        </button>
+                        <span class="status-dot running"></span>
+                        <span class="text-sm text-muted">Streaming</span>
+                    </div>
+                </div>
+                <div class="panel-body terminal-well" style="padding:0;position:relative">
+                    <div id="live-terminal" class="live-terminal" aria-live="polite" role="log">
+                        <div class="terminal-line term-system" data-raw="Waiting for Claude Code output...">Waiting for Claude Code output...</div>
+                    </div>
+                    <button type="button" class="terminal-jump-btn" id="terminal-jump" data-terminal-jump hidden>
+                        <i class="ti ti-arrow-down" aria-hidden="true"></i> Jump to bottom
+                    </button>
+                </div>
+            </div>
+            <script th:if="${issue.status.name() == 'IN_PROGRESS'}" th:inline="javascript">
+            (function() {
+                var issueId = /*[[${issue.id}]]*/ 0;
+                if (window.IssueBotTerminal && typeof window.IssueBotTerminal.init === 'function') {
+                    window.IssueBotTerminal.init(issueId);
+                }
+            })();
+            </script>
         </div>
     </div>
 
-    <!-- === Retry Modal (accessible dialog) === -->
+    <!-- === MODALS (accessible dialogs) — deliberately kept outside .detail-grid and
+           outside the #live-status polled fragment. A modal-backdrop is position:fixed
+           so it doesn't participate in either column's flow; keeping it out of the 5s
+           morph swap is what matters (see the comment on .detail-grid above and
+           DashboardRunningStripRenderTest, which documents the same invariant for the
+           dashboard's Now Running strip). === -->
+
+    <!-- === Retry Modal === -->
     <div th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
          id="retry-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="retry-modal-title">
@@ -227,7 +392,7 @@
         </div>
     </div>
 
-    <!-- === Start Modal (accessible dialog) === -->
+    <!-- === Start Modal === -->
     <div th:if="${issue.status.name() == 'QUEUED'}"
          id="start-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="start-modal-title">
@@ -299,48 +464,7 @@
         </div>
     </div>
 
-    <!-- === BLOCKED-BY INFO PANEL === -->
-    <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Blocked By</h3>
-            <span class="status status-blocked">WAITING</span>
-        </div>
-        <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
-        <div class="flex gap-1" style="flex-wrap:wrap">
-            <a th:each="num : ${issue.blockerNumbers}"
-               class="status status-blocked" target="_blank" rel="noopener"
-               th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
-               th:title="${'Open issue #' + num + ' on GitHub'}"
-               th:text="${'#' + num}">
-                #5
-            </a>
-        </div>
-    </div>
-
-    <!-- === DECOMPOSITION PROPOSAL CARD === -->
-    <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}" class="panel mb-3">
-        <div class="panel-header">
-            <h3>Proposed Split</h3>
-            <div class="flex gap-1">
-                <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-decomposition-modal">
-                    <i class="ti ti-check" aria-hidden="true"></i> Approve split
-                </button>
-                <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-decomposition-modal">
-                    <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
-                </button>
-            </div>
-        </div>
-        <div class="panel-body">
-            <ol class="decomposition-proposal-list">
-                <li th:each="sub : ${decompositionProposal}">
-                    <strong th:text="${sub['title']}">Sub-issue title</strong>
-                    <div class="text-sm text-muted" th:text="${sub['description']}">Sub-issue description</div>
-                </li>
-            </ol>
-        </div>
-    </div>
-
-    <!-- === Approve Decomposition Modal (accessible dialog) === -->
+    <!-- === Approve Decomposition Modal === -->
     <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}"
          id="approve-decomposition-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="approve-decomposition-modal-title">
@@ -355,7 +479,7 @@
         </div>
     </div>
 
-    <!-- === Reject Decomposition Modal (accessible dialog) === -->
+    <!-- === Reject Decomposition Modal === -->
     <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}"
          id="reject-decomposition-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="reject-decomposition-modal-title">
@@ -370,27 +494,7 @@
         </div>
     </div>
 
-    <!-- === PROPOSED PLAN CARD (plan-first mode, #64) === -->
-    <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}" class="panel mb-3">
-        <div class="panel-header">
-            <h3>Proposed Plan</h3>
-            <div class="flex gap-1">
-                <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-plan-modal">
-                    <i class="ti ti-check" aria-hidden="true"></i> Approve plan
-                </button>
-                <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-plan-modal">
-                    <i class="ti ti-x" aria-hidden="true"></i> Reject with feedback
-                </button>
-            </div>
-        </div>
-        <div class="panel-body">
-            <!--/* Model output is untrusted — rendered as preformatted text via th:text,
-                   never injected as HTML. */-->
-            <pre class="code-output plan-text" th:text="${issue.implementationPlan}">plan text</pre>
-        </div>
-    </div>
-
-    <!-- === Approve Plan Modal (accessible dialog) === -->
+    <!-- === Approve Plan Modal === -->
     <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}"
          id="approve-plan-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="approve-plan-modal-title">
@@ -405,7 +509,7 @@
         </div>
     </div>
 
-    <!-- === Reject Plan Modal (accessible dialog) === -->
+    <!-- === Reject Plan Modal === -->
     <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}"
          id="reject-plan-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="reject-plan-modal-title">
@@ -422,152 +526,93 @@
         </div>
     </div>
 
-    <!-- === LIVE-REFRESHED STATUS SECTION === -->
-    <div th:replace="~{issue-detail :: live-status}"></div>
-
-    <!-- === LIVE TERMINAL (outside HTMX swap) === -->
-    <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3 live-terminal-panel" id="live-terminal-panel">
-        <div class="panel-header">
-            <h3>Claude Code Session</h3>
-            <div class="flex gap-1 terminal-toolbar" style="align-items:center;flex-wrap:wrap">
-                <span class="terminal-trim-note text-sm text-muted" id="terminal-trim-note" hidden></span>
-                <!--/* Filter box (#84): substring-hides non-matching lines live, both existing
-                       and future ones — see IssueBotTerminal.applyFilter/_appendLine in app.js. */-->
-                <div class="terminal-filter-group">
-                    <i class="ti ti-filter" aria-hidden="true"></i>
-                    <input type="text" id="terminal-filter" class="terminal-filter-input"
-                           data-terminal-filter placeholder="Filter output…"
-                           aria-label="Filter terminal output">
-                    <button type="button" class="terminal-filter-clear" id="terminal-filter-clear"
-                            data-terminal-filter-clear title="Clear filter" aria-label="Clear filter">
-                        <i class="ti ti-x" aria-hidden="true"></i>
-                    </button>
-                </div>
-                <button type="button" class="btn btn-ghost btn-sm" id="terminal-scroll-lock"
-                        data-terminal-scroll-lock aria-pressed="false" title="Follow new output">
-                    <i class="ti ti-arrow-down-circle" aria-hidden="true"></i> Following
-                </button>
-                <button type="button" class="btn btn-ghost btn-sm" id="terminal-copy"
-                        data-terminal-copy title="Copy terminal output">
-                    <i class="ti ti-copy" aria-hidden="true"></i> Copy
-                </button>
-                <!--/* Download (#84): client-side Blob of every buffered line's dataset.raw —
-                       see IssueBotTerminal.download in app.js. */-->
-                <button type="button" class="btn btn-ghost btn-sm" id="terminal-download"
-                        data-terminal-download th:title="${'Download issue-' + issue.id + '-terminal.txt'}">
-                    <i class="ti ti-download" aria-hidden="true"></i> Download
-                </button>
-                <span class="status-dot running"></span>
-                <span class="text-sm text-muted">Streaming</span>
-            </div>
-        </div>
-        <div class="panel-body terminal-well" style="padding:0;position:relative">
-            <div id="live-terminal" class="live-terminal" aria-live="polite" role="log">
-                <div class="terminal-line term-system" data-raw="Waiting for Claude Code output...">Waiting for Claude Code output...</div>
-            </div>
-            <button type="button" class="terminal-jump-btn" id="terminal-jump" data-terminal-jump hidden>
-                <i class="ti ti-arrow-down" aria-hidden="true"></i> Jump to bottom
-            </button>
-        </div>
-    </div>
-    <script th:if="${issue.status.name() == 'IN_PROGRESS'}" th:inline="javascript">
-    (function() {
-        var issueId = /*[[${issue.id}]]*/ 0;
-        if (window.IssueBotTerminal && typeof window.IssueBotTerminal.init === 'function') {
-            window.IssueBotTerminal.init(issueId);
-        }
-    })();
-    </script>
-
-    <!-- === GUIDE CARD (mid-loop steering, #63) === -->
-    <div th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel" class="panel mb-3">
-        <div class="panel-header">
-            <h3>Guide</h3>
-            <span class="text-sm text-muted">Steer this run without stopping it</span>
-        </div>
-        <div class="panel-body">
-            <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post">
-                <textarea name="guidance" rows="3" class="modal-textarea" required
-                          placeholder="e.g. Check the retry logic in FooService — the bug is probably there"></textarea>
-                <p class="text-sm text-muted" style="margin:0.5rem 0 0">
-                    Queued guidance is injected at the next iteration boundary; it won't interrupt the current Claude run.
-                </p>
-                <div class="modal-actions">
-                    <button type="submit" class="btn btn-primary btn-sm">
-                        <i class="ti ti-send" aria-hidden="true"></i> Send guidance
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- === ITERATION HISTORY === -->
+    <!-- === ITERATION HISTORY (full width, below the grid) === -->
     <div class="panel mb-3">
         <div class="panel-header">
             <h3>Iteration History</h3>
         </div>
         <div class="panel-body">
-            <ul class="iteration-timeline" th:if="${not #lists.isEmpty(iterations)}">
-                <li th:each="iter : ${iterations}"
+            <!--/* Newest-first (#90): iterationsNewestFirst is a reversed view of the same
+                   ascending "iterations" list used by latestIteration/the Timeline card above
+                   (see IssueController#populateDetailModel) — the operator's most recent
+                   attempt is what matters most on a running or freshly-failed issue, so it
+                   leads rather than requiring a scroll to the bottom. Each entry is a
+                   collapsed-by-default <details> (no "open" attribute) — the summary carries
+                   the badges an operator needs at a glance; the body (diffs, raw output, raw
+                   review JSON) is unchanged, just relocated inside. */-->
+            <ul class="iteration-timeline" th:if="${not #lists.isEmpty(iterationsNewestFirst)}">
+                <li th:each="iter : ${iterationsNewestFirst}"
                     th:classappend="${iter.ciResult == 'PASSED' ? 'passed' : (iter.completedAt != null ? 'failed' : 'active')}">
-                    <div class="flex-between mb-1">
-                        <strong th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</strong>
-                        <span class="text-sm text-muted" th:if="${iter.completedAt != null}" th:text="${#temporals.format(iter.startedAt, 'MMM d HH:mm') + ' — ' + #temporals.format(iter.completedAt, 'HH:mm')}">time</span>
-                        <span class="text-sm text-muted" th:if="${iter.completedAt == null}" th:text="${#temporals.format(iter.startedAt, 'MMM d HH:mm') + ' — running...'}">time</span>
-                    </div>
+                    <details class="iteration-entry">
+                        <summary class="iteration-entry-summary">
+                            <span class="iteration-entry-num" th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</span>
 
-                    <div th:if="${iter.localCheckResult != null}" class="mb-1">
-                        <span class="text-sm">Local Checks: </span>
-                        <span class="status" th:classappend="${iter.localCheckResult == 'PASSED' ? 'status-completed' : 'status-failed'}" th:text="${iter.localCheckResult}">RESULT</span>
-                    </div>
+                            <span class="text-sm text-muted" th:if="${iter.implModel != null and not #strings.isEmpty(iter.implModel)}"
+                                  th:text="${iter.implModel}">claude-opus-4-8</span>
 
-                    <div th:if="${iter.ciResult != null}" class="mb-1">
-                        <span class="text-sm">CI: </span>
-                        <span class="status" th:classappend="${iter.ciResult == 'PASSED' ? 'status-completed' : 'status-failed'}" th:text="${iter.ciResult}">RESULT</span>
-                    </div>
+                            <span class="status" th:if="${iter.localCheckResult != null}"
+                                  th:classappend="${iter.localCheckResult == 'PASSED' ? 'status-completed' : 'status-failed'}"
+                                  th:text="${'Local: ' + iter.localCheckResult}">Local: PASSED</span>
 
-                    <div th:if="${iter.claudeSessionId != null and not #strings.isEmpty(iter.claudeSessionId)}" class="mb-1">
-                        <span class="text-sm text-muted">Claude session: </span>
-                        <code class="text-sm" th:text="${#strings.substring(iter.claudeSessionId, 0, T(java.lang.Math).min(8, iter.claudeSessionId.length())) + '…'}"
-                              th:title="${iter.claudeSessionId}">sess-1234…</code>
-                    </div>
+                            <span class="status" th:if="${iter.ciResult != null}"
+                                  th:classappend="${iter.ciResult == 'PASSED' ? 'status-completed' : 'status-failed'}"
+                                  th:text="${'CI: ' + iter.ciResult}">CI: PASSED</span>
 
-                    <details th:if="${iter.selfAssessment != null}">
-                        <summary class="text-sm">Self-Assessment</summary>
-                        <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
-                    </details>
+                            <span class="status" th:if="${iter.reviewPassed != null}"
+                                  th:classappend="${iter.reviewPassed ? 'status-completed' : 'status-failed'}"
+                                  th:text="${'Review: ' + (iter.reviewPassed ? 'PASSED' : 'FAILED')}">Review: PASSED</span>
 
-                    <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
-                        <summary class="text-sm">Diff</summary>
-                        <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff content</div>
-                    </details>
+                            <span class="text-sm text-muted" th:if="${iter.claudeSessionId != null and not #strings.isEmpty(iter.claudeSessionId)}">
+                                Claude session:
+                                <code class="text-sm" th:text="${#strings.substring(iter.claudeSessionId, 0, T(java.lang.Math).min(8, iter.claudeSessionId.length())) + '…'}"
+                                      th:title="${iter.claudeSessionId}">sess-1234…</code>
+                            </span>
 
-                    <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">
-                        <summary class="text-sm">Claude Code Output</summary>
-                        <pre class="code-output" th:text="${iter.claudeOutput}">output</pre>
-                    </details>
+                            <span class="text-sm text-muted iteration-entry-time" th:if="${iter.completedAt != null}"
+                                  th:text="${#temporals.format(iter.startedAt, 'MMM d HH:mm') + ' — ' + #temporals.format(iter.completedAt, 'HH:mm')}">time</span>
+                            <span class="text-sm text-muted iteration-entry-time" th:if="${iter.completedAt == null}"
+                                  th:text="${#temporals.format(iter.startedAt, 'MMM d HH:mm') + ' — running...'}">time</span>
+                        </summary>
 
-                    <!-- Review Scores -->
-                    <div th:if="${iter.reviewPassed != null}" class="review-scores mt-1">
-                        <div class="flex-between mb-1">
-                            <span class="text-sm">Independent Review:</span>
-                            <span class="status" th:classappend="${iter.reviewPassed ? 'status-completed' : 'status-failed'}"
-                                  th:text="${iter.reviewPassed ? 'PASSED' : 'FAILED'}">RESULT</span>
+                        <div class="iteration-entry-body">
+                            <details th:if="${iter.selfAssessment != null}">
+                                <summary class="text-sm">Self-Assessment</summary>
+                                <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
+                            </details>
+
+                            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
+                                <summary class="text-sm">Diff</summary>
+                                <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff content</div>
+                            </details>
+
+                            <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">
+                                <summary class="text-sm">Claude Code Output</summary>
+                                <pre class="code-output" th:text="${iter.claudeOutput}">output</pre>
+                            </details>
+
+                            <!-- Review Scores -->
+                            <div th:if="${iter.reviewPassed != null}" class="review-scores mt-1">
+                                <div class="flex-between mb-1">
+                                    <span class="text-sm">Independent Review:</span>
+                                    <span class="status" th:classappend="${iter.reviewPassed ? 'status-completed' : 'status-failed'}"
+                                          th:text="${iter.reviewPassed ? 'PASSED' : 'FAILED'}">RESULT</span>
+                                </div>
+                                <div th:if="${iter.reviewModel != null}" class="text-sm text-muted mb-1"
+                                     th:text="'Model: ' + ${iter.reviewModel}">model</div>
+                                <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}">
+                                    <summary class="text-sm">Raw JSON</summary>
+                                    <pre class="code-output" th:text="${iter.reviewJson}">review json</pre>
+                                </details>
+                            </div>
                         </div>
-                        <div th:if="${iter.reviewModel != null}" class="text-sm text-muted mb-1"
-                             th:text="'Model: ' + ${iter.reviewModel}">model</div>
-                        <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}">
-                            <summary class="text-sm">Review Details</summary>
-                            <pre class="code-output" th:text="${iter.reviewJson}">review json</pre>
-                        </details>
-                    </div>
+                    </details>
                 </li>
             </ul>
-            <p class="text-muted" th:if="${#lists.isEmpty(iterations)}">No iterations yet.</p>
+            <p class="text-muted" th:if="${#lists.isEmpty(iterationsNewestFirst)}">No iterations yet.</p>
         </div>
     </div>
 
-    <!-- === ACTIVITY LOG === -->
+    <!-- === ACTIVITY LOG (full width, below the grid) === -->
     <div class="panel">
         <div class="panel-header">
             <h3>Activity Log</h3>
