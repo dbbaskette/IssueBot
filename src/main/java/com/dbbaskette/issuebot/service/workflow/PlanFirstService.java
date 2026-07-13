@@ -79,14 +79,20 @@ public class PlanFirstService {
         String plan;
         try {
             ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
-            if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
+            // Prefer the final synthesized answer over getOutput(), which concatenates the
+            // model's intermediate exploration narration into the "plan".
+            String planText = result != null && result.getFinalResult() != null
+                    && !result.getFinalResult().isBlank()
+                    ? result.getFinalResult()
+                    : (result != null ? result.getOutput() : null);
+            if (planText == null || planText.isBlank()) {
                 log.warn("Plan proposal returned empty response for {} #{}, proceeding without a plan",
                         repo.fullName(), issueNumber);
                 eventService.log("PLAN_FAILED",
                         "Planner returned no output — proceeding without a plan", repo, trackedIssue);
                 return false;
             }
-            plan = result.getOutput();
+            plan = planText;
         } catch (Exception e) {
             log.warn("Plan proposal failed for {} #{}: {}", repo.fullName(), issueNumber, e.getMessage());
             eventService.log("PLAN_FAILED",

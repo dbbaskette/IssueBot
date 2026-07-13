@@ -105,19 +105,38 @@ class SuperpowersMethodologyServiceTest {
     // === generatePlan ===
 
     @Test
-    void generatePlan_onSuccess_storesPlanAndPostsComment() {
+    void generatePlan_onSuccess_storesTheFinalResult_notTheNarration() {
         TrackedIssue issue = issue();
         ClaudeCodeResult ok = new ClaudeCodeResult();
         ok.setSuccess(true);
-        ok.setOutput("## Spec\nThe design.\n\n## Plan\n1. First task.");
+        // output = the whole streamed transcript (narration + doc); finalResult = clean doc only.
+        ok.setOutput("Let me look at the codebase. Perfect! ## Spec\nThe design.\n\n## Plan\n1. First task.");
+        ok.setFinalResult("## Spec\nThe design.\n\n## Plan\n1. First task.");
         when(claudeCode.executePlanning(any(), any(), any(), any(), any())).thenReturn(ok);
 
         service.generatePlan(issue, details(), Path.of("/tmp/repo"));
 
         assertThat(issue.getImplementationPlan()).contains("## Spec").contains("## Plan");
+        // The narration must NOT leak into the stored/posted plan.
+        assertThat(issue.getImplementationPlan()).doesNotContain("Let me look at").doesNotContain("Perfect!");
         verify(issueRepository).save(issue);
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(42), contains("Design & Implementation Plan"));
         verify(eventService).log(eq("PLAN_GENERATED"), any(), any(), any());
+    }
+
+    @Test
+    void generatePlan_fallsBackToOutput_whenFinalResultBlank() {
+        TrackedIssue issue = issue();
+        ClaudeCodeResult ok = new ClaudeCodeResult();
+        ok.setSuccess(true);
+        ok.setOutput("## Spec\nThe design.");
+        ok.setFinalResult("   "); // blank → fall back so a plan is never silently dropped
+        when(claudeCode.executePlanning(any(), any(), any(), any(), any())).thenReturn(ok);
+
+        service.generatePlan(issue, details(), Path.of("/tmp/repo"));
+
+        assertThat(issue.getImplementationPlan()).contains("## Spec");
+        verify(issueRepository).save(issue);
     }
 
     @Test

@@ -7,6 +7,11 @@ public class ClaudeCodeResult {
 
     private boolean success;
     private String output;
+    // The terminal stream-json `result` event's text ONLY — the model's final synthesized
+    // answer, without the intermediate "let me look at X" narration that `output` accumulates
+    // across every assistant turn. Use this when the CLI's answer is itself the deliverable
+    // (e.g. a plan document), not for implementation runs (where files, not text, are the output).
+    private String finalResult;
     private List<String> filesChanged = new ArrayList<>();
     private long inputTokens;
     private long outputTokens;
@@ -22,6 +27,9 @@ public class ClaudeCodeResult {
 
     public String getOutput() { return output; }
     public void setOutput(String output) { this.output = output; }
+
+    public String getFinalResult() { return finalResult; }
+    public void setFinalResult(String finalResult) { this.finalResult = finalResult; }
 
     public List<String> getFilesChanged() { return filesChanged; }
     public void setFilesChanged(List<String> filesChanged) { this.filesChanged = filesChanged; }
