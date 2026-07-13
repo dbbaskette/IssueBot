@@ -41,7 +41,14 @@
     --glass-shadow: 0 8px 26px -14px rgba(71,85,105,.40);
     --text-primary: #1e293b;
     --text-secondary: #475569;
-    --text-tertiary: #94a3b8;
+    /* WCAG AA fix: #94a3b8 was ~2.4:1 on --page-bg (fails the 4.5:1 text
+       floor). #5f6b7a hits ~5.0:1 on --page-bg / ~5.3:1 on the glass
+       surfaces while staying visibly lighter than --text-secondary (~7:1),
+       preserving the hierarchy. Does NOT apply inside the always-dark
+       terminal/diff wells (.terminal-well/.diff-viewer/etc.) — those use
+       fixed hex values independent of this token; see the note above
+       .terminal-line.term-system. */
+    --text-tertiary: #5f6b7a;
     --accent: #2563eb;
     --accent-soft: rgba(37,99,235,.12);
     --accent-border: rgba(37,99,235,.50);
@@ -404,14 +411,19 @@ code {
 }
 
 .notif-panel {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    /* Anchored to the wrap's LEFT edge, not right — the bell sits near the
-       left side of the narrow (240px) sidebar, so a right-anchored panel
-       wider than the space behind it would overflow past the viewport's
-       left edge (verified against a live render: it did). Opening
-       rightward into the wide main content area instead always has room. */
-    left: 0;
+    /* `fixed`, not `absolute`: .notif-bell-wrap lives inside .sidebar, and
+       .sidebar sets overflow-y:auto + overflow-x:hidden for its own
+       scrolling nav list. An absolutely-positioned child can never escape
+       an ancestor's overflow clip, so at 340px wide (vs. the 240px
+       sidebar) this panel was getting cut off at the sidebar's right
+       edge — confirmed against a live render. `fixed` positions it
+       against the viewport instead, sidestepping the clip entirely, and
+       still opens rightward into the wide main content area where there's
+       always room (a right-anchored panel from this bell, which sits near
+       the sidebar's right edge, would run off the viewport's left side). */
+    position: fixed;
+    top: 3.5rem;
+    left: 12rem;
     width: 340px;
     max-width: calc(100vw - 2rem);
     max-height: 420px;
@@ -2125,19 +2137,24 @@ details summary:hover { color: var(--text-primary); }
 }
 .terminal-filter-clear:hover { color: var(--text-primary); background: var(--row-hover); }
 
-/* Diff header lines (e.g. +++/---) rendered neutral, not added/removed colored */
+/* Diff header lines (e.g. +++/---) rendered neutral, not added/removed colored.
+   Fixed hex, not var(--text-tertiary): .diff-line always sits inside .diff-viewer,
+   which stays dark in both themes (see --term-bg note above), but the token now
+   holds a dark-on-light value for the light theme — using it here would go
+   near-invisible on the dark well. #94a3b8 @ 0.8 opacity ≈ 5.0:1 on --term-bg. */
 .diff-line.diff-header {
-    color: var(--text-tertiary);
+    color: #94a3b8;
     opacity: 0.8;
 }
 
-/* Hunk headers (@@ ... @@) — styled as a subtle separator between chunks */
+/* Hunk headers (@@ ... @@) — styled as a subtle separator between chunks.
+   Fixed hex for the same reason as .diff-header above: always on --term-bg. */
 .diff-line.hunk {
     display: block;
     margin-top: 0.4rem;
     padding-top: 0.5rem;
     border-top: 1px dashed rgba(255,255,255,0.16);
-    color: var(--text-tertiary);
+    color: #94a3b8;
     opacity: 0.85;
 }
 
