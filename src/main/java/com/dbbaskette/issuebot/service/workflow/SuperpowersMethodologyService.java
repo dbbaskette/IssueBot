@@ -119,11 +119,16 @@ public class SuperpowersMethodologyService {
         try {
             ClaudeCodeResult result = claudeCode.executePlanning(prompt, repoPath,
                     trackedIssue.getResolvedImplModel(), trackedIssue.getId(), null);
-            if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
-                log.warn("Superpowers plan pass returned empty output for {} #{}, implementing without a stored plan",
-                        repo.fullName(), issueNumber);
+            // Must be a genuinely SUCCESSFUL run, not just non-blank output. executePlanning
+            // passes issueId, so the process is cancellable (operator Stop) — a killed run can
+            // leave partial assistant text that is non-blank but is NOT a real plan. Accepting
+            // it would persist garbage and post it as a public GitHub comment.
+            if (result == null || !result.isSuccess()
+                    || result.getOutput() == null || result.getOutput().isBlank()) {
+                log.warn("Superpowers plan pass did not complete for {} #{} (success={}), implementing without a stored plan",
+                        repo.fullName(), issueNumber, result != null && result.isSuccess());
                 eventService.log("PLAN_FAILED",
-                        "Design/plan pass returned no output — implementing without a stored plan",
+                        "Design/plan pass did not complete (failed, cancelled, or empty) — implementing without a stored plan",
                         repo, trackedIssue);
                 return;
             }

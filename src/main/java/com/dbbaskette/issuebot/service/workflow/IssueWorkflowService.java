@@ -246,6 +246,8 @@ public class IssueWorkflowService {
         // leaves the plan empty, so the issue still implements.
         if (repo.isSuperpowersMethodology()
                 && (trackedIssue.getImplementationPlan() == null || trackedIssue.getImplementationPlan().isBlank())) {
+            sseService.broadcastClaudeLog(trackedIssue.getId(),
+                    "[system] Running design + implementation-plan pass (superpowers methodology)...");
             superpowersService.generatePlan(trackedIssue, issueDetails, repoPath);
         }
 
