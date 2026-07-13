@@ -1304,6 +1304,7 @@
     setValue('decomposition-mode', ds.decompositionMode);
     setChecked('pre-screen-enabled', ds.preScreenEnabled);
     setChecked('plan-first', ds.planFirst);
+    setChecked('superpowers-methodology', ds.superpowersMethodology);
     setChecked('auto-merge', ds.autoMerge);
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));

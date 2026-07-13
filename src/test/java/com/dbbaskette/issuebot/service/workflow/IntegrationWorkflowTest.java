@@ -53,6 +53,7 @@ class IntegrationWorkflowTest {
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
     private PlanFirstService planFirstService;
+    private SuperpowersMethodologyService superpowersService;
     private FollowUpService followUpService;
     private IssueGuidanceRepository guidanceRepository;
     private com.dbbaskette.issuebot.repository.RepoLessonRepository lessonRepository;
@@ -76,6 +77,7 @@ class IntegrationWorkflowTest {
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
         planFirstService = mock(PlanFirstService.class);
+        superpowersService = mock(SuperpowersMethodologyService.class);
         followUpService = mock(FollowUpService.class);
         guidanceRepository = mock(IssueGuidanceRepository.class);
         lessonRepository = mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class);
@@ -89,6 +91,7 @@ class IntegrationWorkflowTest {
                 eventService, sseService, notificationService, iterationManager,
                 decompositionService,
                 planFirstService,
+                superpowersService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
@@ -758,6 +761,73 @@ class IntegrationWorkflowTest {
         verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(promptCaptor.getValue().contains("## Approved Plan"));
         assertTrue(promptCaptor.getValue().contains("1. Touch FooService"));
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void superpowersMethodology_generatesPlanThenImplementsWithTddPreamble() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setSuperpowersMethodology(true);
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        // Autonomous pass: store a plan on the issue (no approval gate, unlike plan-first)
+        doAnswer(inv -> {
+            issue.setImplementationPlan("1. Touch FooService\n2. Add FooServiceTest");
+            return null;
+        }).when(superpowersService).generatePlan(eq(issue), any(), any());
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 402);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        verify(superpowersService).generatePlan(eq(issue), any(), any());
+        // No plan-first gate — implementation runs in the same pass.
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        // Generated plan is fed in even without operator approval...
+        assertTrue(promptCaptor.getValue().contains("## Approved Plan"));
+        assertTrue(promptCaptor.getValue().contains("1. Touch FooService"));
+        // ...and the TDD/executing-plans preamble leads the prompt.
+        assertTrue(promptCaptor.getValue().contains("test-driven development"));
+        assertTrue(promptCaptor.getValue().contains("finish with real, committed CODE changes"));
+    }
+
+    @Test
+    void superpowersMethodology_skipsPlanPassWhenAPlanAlreadyExists() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setSuperpowersMethodology(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.setImplementationPlan("existing plan from a prior attempt"); // retry/resume
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 403);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        // A plan already exists — don't re-plan on every attempt.
+        verify(superpowersService, never()).generatePlan(any(), any(), any());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 

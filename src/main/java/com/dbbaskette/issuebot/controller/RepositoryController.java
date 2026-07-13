@@ -92,6 +92,7 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "PROPOSE") String decompositionMode,
                                @RequestParam(defaultValue = "false") boolean preScreenEnabled,
                                @RequestParam(defaultValue = "false") boolean planFirst,
+                               @RequestParam(defaultValue = "false") boolean superpowersMethodology,
                                @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
                                @RequestParam(required = false) String customInstructions,
                                @RequestParam(required = false, defaultValue = "false") boolean lessonsEnabled,
@@ -145,6 +146,7 @@ public class RepositoryController {
         }
         repo.setPreScreenEnabled(preScreenEnabled);
         repo.setPlanFirst(planFirst);
+        repo.setSuperpowersMethodology(superpowersMethodology);
         repo.setIssueBudgetUsd(normalizeBudget(issueBudgetUsd));
         repo.setCustomInstructions(normalize(customInstructions));
         repo.setLessonsEnabled(lessonsEnabled);

@@ -73,6 +73,20 @@ public class ClaudeCodeService {
     }
 
     /**
+     * Design/spec + implementation-plan pass (superpowers methodology). Runs on the given
+     * (strong) implementation model — a good spec needs it — but makes no code changes, and
+     * never resumes a session. Uses the implementation budget so it has room to read the
+     * codebase and write a thorough plan.
+     */
+    public ClaudeCodeResult executePlanning(String prompt, Path workingDirectory,
+                                             String model, Long issueId, Consumer<String> lineCallback) {
+        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
+        return executeTask(prompt, workingDirectory, model,
+                config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
+                null, null, issueId, lineCallback);
+    }
+
+    /**
      * Execute a Claude Code task with explicit model configuration. {@code resumeSessionId}
      * is optional (null/blank means a fresh session) — see {@link #buildCommand}.
      */
