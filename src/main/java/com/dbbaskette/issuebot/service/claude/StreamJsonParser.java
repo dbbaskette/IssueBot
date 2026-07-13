@@ -64,8 +64,13 @@ public class StreamJsonParser {
                         }
                     }
                     case "result" -> {
-                        // Final result
-                        fullOutput.append(node.path("result").asText(""));
+                        // Final result. Appended to fullOutput (kept for callers that parse the
+                        // whole transcript, e.g. review), AND captured on its own as finalResult
+                        // — the clean synthesized answer without the streamed narration. Last
+                        // result event wins.
+                        String resultText = node.path("result").asText("");
+                        fullOutput.append(resultText);
+                        result.setFinalResult(resultText);
                         // Session-level usage
                         JsonNode usage = node.path("usage");
                         if (!usage.isMissingNode()) {

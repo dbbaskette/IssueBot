@@ -79,14 +79,17 @@ public class PlanFirstService {
         String plan;
         try {
             ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
-            if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
+            // Prefer the final synthesized answer over the full transcript, which concatenates
+            // the model's intermediate exploration narration into the "plan".
+            String planText = result != null ? result.getFinalResultOrOutput() : null;
+            if (planText == null || planText.isBlank()) {
                 log.warn("Plan proposal returned empty response for {} #{}, proceeding without a plan",
                         repo.fullName(), issueNumber);
                 eventService.log("PLAN_FAILED",
                         "Planner returned no output — proceeding without a plan", repo, trackedIssue);
                 return false;
             }
-            plan = result.getOutput();
+            plan = planText;
         } catch (Exception e) {
             log.warn("Plan proposal failed for {} #{}: {}", repo.fullName(), issueNumber, e.getMessage());
             eventService.log("PLAN_FAILED",
@@ -204,7 +207,9 @@ public class PlanFirstService {
         StringBuilder sb = new StringBuilder();
         sb.append("You are planning, NOT implementing. Read the codebase as needed, then produce a ")
           .append("concise implementation plan: files to touch, approach, risks, test plan. ")
-          .append("Make NO code changes. Respond with the plan as markdown.\n\n");
+          .append("Make NO code changes. Explore as much as you need, but your FINAL message must ")
+          .append("be ONLY the plan as clean markdown — do NOT narrate your exploration (\"let me ")
+          .append("look at...\") in it; it is stored and posted verbatim as the plan.\n\n");
         sb.append("## Issue\n");
         sb.append("Title: ").append(title).append("\n");
         sb.append("Body:\n").append(body).append("\n\n");

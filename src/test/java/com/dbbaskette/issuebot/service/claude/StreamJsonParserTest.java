@@ -35,6 +35,25 @@ class StreamJsonParserTest {
     }
 
     @Test
+    void finalResult_holdsOnlyTheTerminalAnswer_notTheIntermediateNarration() {
+        // Two assistant turns of exploration narration, then the synthesized answer.
+        String json = """
+                {"type":"assistant","message":{"content":[{"type":"text","text":"Let me look at the codebase."}]}}
+                {"type":"assistant","message":{"content":[{"type":"text","text":"Perfect! Now let me check the tests."}]}}
+                {"type":"result","result":"# Spec\\nThe design.\\n\\n# Plan\\n1. First task."}
+                """;
+        ClaudeCodeResult result = parser.parse(json);
+
+        // finalResult is the clean document only — no "Let me look at" / "Perfect!" narration.
+        assertEquals("# Spec\nThe design.\n\n# Plan\n1. First task.", result.getFinalResult());
+        assertFalse(result.getFinalResult().contains("Let me look at"));
+        assertFalse(result.getFinalResult().contains("Perfect!"));
+        // getOutput() still carries the whole transcript (callers that parse it are unchanged).
+        assertTrue(result.getOutput().contains("Let me look at the codebase."));
+        assertTrue(result.getOutput().contains("# Spec"));
+    }
+
+    @Test
     void parseNonJsonLines() {
         String output = "Some random text\nnot json at all\n";
         ClaudeCodeResult result = parser.parse(output);

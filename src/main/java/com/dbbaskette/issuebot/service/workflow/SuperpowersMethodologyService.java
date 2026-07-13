@@ -62,7 +62,11 @@ public class SuperpowersMethodologyService {
                test-driven development — each task names the test to write first.
             4. Frequent commits: size tasks so each is one small, coherent commit.
 
-            Output the spec, then the numbered task plan, as markdown.""";
+            Explore as much as you need, but your FINAL message must be ONLY the finished
+            document: the spec followed by the numbered task plan, as clean markdown. Do NOT
+            narrate your exploration ("let me look at...", "now I'll check...") in that final
+            message, and do NOT restate these instructions — it is stored and posted verbatim
+            as the plan.""";
 
     /**
      * Implementation-pass preamble: execute the plan with TDD + {@code executing-plans}
@@ -123,8 +127,10 @@ public class SuperpowersMethodologyService {
             // passes issueId, so the process is cancellable (operator Stop) — a killed run can
             // leave partial assistant text that is non-blank but is NOT a real plan. Accepting
             // it would persist garbage and post it as a public GitHub comment.
-            if (result == null || !result.isSuccess()
-                    || result.getOutput() == null || result.getOutput().isBlank()) {
+            // Use the CLI's FINAL synthesized answer (the spec+plan document), not the whole
+            // transcript — which concatenates every intermediate "let me look at X" narration turn.
+            String planText = result != null ? result.getFinalResultOrOutput() : null;
+            if (result == null || !result.isSuccess() || planText == null || planText.isBlank()) {
                 log.warn("Superpowers plan pass did not complete for {} #{} (success={}), implementing without a stored plan",
                         repo.fullName(), issueNumber, result != null && result.isSuccess());
                 eventService.log("PLAN_FAILED",
@@ -132,7 +138,7 @@ public class SuperpowersMethodologyService {
                         repo, trackedIssue);
                 return;
             }
-            plan = result.getOutput();
+            plan = planText;
         } catch (Exception e) {
             log.warn("Superpowers plan pass failed for {} #{}: {}", repo.fullName(), issueNumber, e.getMessage());
             eventService.log("PLAN_FAILED",
