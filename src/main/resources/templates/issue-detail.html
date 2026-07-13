@@ -120,8 +120,8 @@
                 </div>
             </div>
 
-            <!-- === PROPOSED PLAN CARD (plan-first mode, #64) === -->
-            <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}" class="panel mb-3">
+            <!-- === PROPOSED PLAN CARD (plan-first mode, #64) — awaiting approval === -->
+            <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and planHtml != null}" class="panel mb-3">
                 <div class="panel-header">
                     <h3>Proposed Plan</h3>
                     <div class="flex gap-1">
@@ -134,11 +134,24 @@
                     </div>
                 </div>
                 <div class="panel-body">
-                    <!--/* Model output is untrusted — rendered as preformatted text via th:text,
-                           never injected as HTML. */-->
-                    <pre class="code-output plan-text" th:text="${issue.implementationPlan}">plan text</pre>
+                    <!--/* planHtml is markdown rendered by MarkdownRenderer with escapeHtml+sanitizeUrls,
+                           so the model's literal HTML can't execute — safe to emit via th:utext. */-->
+                    <div class="plan-doc markdown-body" th:utext="${planHtml}">plan</div>
                 </div>
             </div>
+
+            <!-- === DESIGN & PLAN DOC (any other status that has a stored plan, e.g. the
+                     autonomous superpowers methodology, or a completed issue) — collapsible === -->
+            <details th:if="${planHtml != null and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
+                     class="panel mb-3 plan-doc-panel">
+                <summary class="panel-header">
+                    <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
+                    <span class="text-sm text-muted">click to expand</span>
+                </summary>
+                <div class="panel-body">
+                    <div class="plan-doc markdown-body" th:utext="${planHtml}">plan</div>
+                </div>
+            </details>
 
             <!-- === GOAL CARD === -->
             <div class="panel mb-3 goal-card">

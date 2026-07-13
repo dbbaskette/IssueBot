@@ -225,4 +225,37 @@ class IssueDetailLayoutRenderTest {
         String insideGrid = html.substring(html.indexOf("class=\"detail-grid\""), gridRight);
         assertThat(insideGrid).doesNotContain("modal-backdrop");
     }
+
+    // === Design & Plan doc: rendered markdown, visible for any issue that has a plan ===
+
+    @Test
+    void planDocPanel_rendersMarkdown_forAnyStatusWithAPlan() {
+        WebContext ctx = baseContext(issue(10L, 10, IssueStatus.COMPLETED), List.of());
+        ctx.setVariable("planHtml", "<h1>Design</h1><p>the approach</p>");
+        String html = render(ctx, "content");
+
+        // Collapsible doc panel (not the approval card) with the rendered markdown injected.
+        assertThat(html).contains("Implementation Plan");
+        assertThat(html).contains("<h1>Design</h1>");
+        assertThat(html).doesNotContain("Proposed Plan");
+        assertThat(html).doesNotContain("Approve plan");
+    }
+
+    @Test
+    void approvalCard_rendersMarkdownAndButtons_whenAwaitingPlanApproval() {
+        WebContext ctx = baseContext(issue(11L, 11, IssueStatus.AWAITING_PLAN_APPROVAL), List.of());
+        ctx.setVariable("planHtml", "<p>the plan</p>");
+        String html = render(ctx, "content");
+
+        assertThat(html).contains("Proposed Plan");
+        assertThat(html).contains("Approve plan");
+        assertThat(html).contains("<p>the plan</p>");
+    }
+
+    @Test
+    void noPlanPanel_whenIssueHasNoPlan() {
+        String html = renderContent(issue(12L, 12, IssueStatus.COMPLETED), List.of()); // planHtml unset → null
+        assertThat(html).doesNotContain("Design &amp; Implementation Plan");
+        assertThat(html).doesNotContain("Proposed Plan");
+    }
 }
