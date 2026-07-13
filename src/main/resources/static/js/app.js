@@ -67,6 +67,12 @@
     if (!panel || !btn) { return; }
     panel.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
+    // The panel now renders at <body> level (far from the bell in the DOM), so
+    // forward-Tab from the bell would otherwise walk the whole sidebar/content
+    // before reaching it. Move focus into the panel (tabindex="-1" container) on
+    // open; ESC/close returns focus to the bell. Content loads async via HTMX —
+    // focusing the container is stable across the innerHTML swap.
+    panel.focus();
   }
 
   function closeNotifPanel() {

@@ -111,7 +111,7 @@
          backdrop-filter containing block + overflow-x:hidden. Kept out of #content so
          HTMX SPA swaps never wipe it. Controlled by #notif-bell-btn via its id. -->
     <div id="notif-panel" class="notif-panel" role="region" aria-label="Notifications"
-         th:if="${dashboardNotificationsEnabled}" hidden></div>
+         tabindex="-1" th:if="${dashboardNotificationsEnabled}" hidden></div>
     <script th:src="@{/js/app.js}" defer></script>
 
     <!--
