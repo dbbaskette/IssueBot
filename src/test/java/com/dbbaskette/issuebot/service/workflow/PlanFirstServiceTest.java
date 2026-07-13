@@ -90,6 +90,42 @@ class PlanFirstServiceTest {
     }
 
     @Test
+    void proposePlan_storesTheFinalResult_notTheExplorationNarration() {
+        TrackedIssue issue = createIssue();
+        ObjectNode issueDetails = createIssueDetails();
+
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("Let me look at the repo. Perfect! 1. Add a Pageable param");
+        result.setFinalResult("1. Add a Pageable param\n2. Update the repository query");
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(result);
+
+        planFirstService.proposePlan(issue, issueDetails, Path.of("/tmp/repo"));
+
+        assertNotNull(issue.getImplementationPlan());
+        assertTrue(issue.getImplementationPlan().contains("Pageable"));
+        assertFalse(issue.getImplementationPlan().contains("Let me look at"));
+        assertFalse(issue.getImplementationPlan().contains("Perfect!"));
+    }
+
+    @Test
+    void proposePlan_fallsBackToOutput_whenFinalResultBlank() {
+        TrackedIssue issue = createIssue();
+        ObjectNode issueDetails = createIssueDetails();
+
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("1. Add a Pageable param");
+        result.setFinalResult("  "); // blank → fall back so a plan is never silently dropped
+        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(result);
+
+        boolean proposed = planFirstService.proposePlan(issue, issueDetails, Path.of("/tmp/repo"));
+
+        assertTrue(proposed);
+        assertTrue(issue.getImplementationPlan().contains("Pageable"));
+    }
+
+    @Test
     void proposePlan_plannerFailure_fallsThroughWithoutBlockingIssue() {
         TrackedIssue issue = createIssue();
         ObjectNode issueDetails = createIssueDetails();

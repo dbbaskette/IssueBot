@@ -79,12 +79,9 @@ public class PlanFirstService {
         String plan;
         try {
             ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
-            // Prefer the final synthesized answer over getOutput(), which concatenates the
-            // model's intermediate exploration narration into the "plan".
-            String planText = result != null && result.getFinalResult() != null
-                    && !result.getFinalResult().isBlank()
-                    ? result.getFinalResult()
-                    : (result != null ? result.getOutput() : null);
+            // Prefer the final synthesized answer over the full transcript, which concatenates
+            // the model's intermediate exploration narration into the "plan".
+            String planText = result != null ? result.getFinalResultOrOutput() : null;
             if (planText == null || planText.isBlank()) {
                 log.warn("Plan proposal returned empty response for {} #{}, proceeding without a plan",
                         repo.fullName(), issueNumber);
@@ -210,7 +207,9 @@ public class PlanFirstService {
         StringBuilder sb = new StringBuilder();
         sb.append("You are planning, NOT implementing. Read the codebase as needed, then produce a ")
           .append("concise implementation plan: files to touch, approach, risks, test plan. ")
-          .append("Make NO code changes. Respond with the plan as markdown.\n\n");
+          .append("Make NO code changes. Explore as much as you need, but your FINAL message must ")
+          .append("be ONLY the plan as clean markdown — do NOT narrate your exploration (\"let me ")
+          .append("look at...\") in it; it is stored and posted verbatim as the plan.\n\n");
         sb.append("## Issue\n");
         sb.append("Title: ").append(title).append("\n");
         sb.append("Body:\n").append(body).append("\n\n");

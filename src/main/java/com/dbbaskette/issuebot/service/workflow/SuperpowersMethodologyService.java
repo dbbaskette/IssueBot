@@ -127,14 +127,9 @@ public class SuperpowersMethodologyService {
             // passes issueId, so the process is cancellable (operator Stop) — a killed run can
             // leave partial assistant text that is non-blank but is NOT a real plan. Accepting
             // it would persist garbage and post it as a public GitHub comment.
-            // Use the CLI's FINAL synthesized answer (the spec+plan document), not getOutput()
-            // — which concatenates every intermediate "let me look at X" narration turn and would
-            // post that whole transcript as the plan. Fall back to the transcript only if the
-            // final result is somehow blank.
-            String planText = result != null && result.getFinalResult() != null
-                    && !result.getFinalResult().isBlank()
-                    ? result.getFinalResult()
-                    : (result != null ? result.getOutput() : null);
+            // Use the CLI's FINAL synthesized answer (the spec+plan document), not the whole
+            // transcript — which concatenates every intermediate "let me look at X" narration turn.
+            String planText = result != null ? result.getFinalResultOrOutput() : null;
             if (result == null || !result.isSuccess() || planText == null || planText.isBlank()) {
                 log.warn("Superpowers plan pass did not complete for {} #{} (success={}), implementing without a stored plan",
                         repo.fullName(), issueNumber, result != null && result.isSuccess());

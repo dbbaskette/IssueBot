@@ -31,6 +31,16 @@ public class ClaudeCodeResult {
     public String getFinalResult() { return finalResult; }
     public void setFinalResult(String finalResult) { this.finalResult = finalResult; }
 
+    /**
+     * The final synthesized answer when present, else the full transcript. Prefer this whenever
+     * the CLI's textual answer is itself the deliverable (e.g. a plan document) so intermediate
+     * exploration narration doesn't leak in; the fallback ensures a plan is never silently lost
+     * if a run somehow produced no terminal result event.
+     */
+    public String getFinalResultOrOutput() {
+        return (finalResult != null && !finalResult.isBlank()) ? finalResult : output;
+    }
+
     public List<String> getFilesChanged() { return filesChanged; }
     public void setFilesChanged(List<String> filesChanged) { this.filesChanged = filesChanged; }
 
