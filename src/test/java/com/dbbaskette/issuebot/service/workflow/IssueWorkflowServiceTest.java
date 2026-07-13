@@ -969,4 +969,65 @@ class IssueWorkflowServiceTest {
         assertEquals(10000 + 3, broadcast.length(), "cap is 10,000 chars plus the \"...\" overflow marker");
         assertEquals("a".repeat(10000) + "...", broadcast);
     }
+
+    // === Terminal QoL — suppress noisy `[system] init` lines ===
+
+    @Test
+    void streamClaudeLog_systemInitSubtype_doesNotBroadcast() {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "system");
+        node.put("subtype", "init");
+        node.put("session_id", "abc-123");
+
+        workflowService.streamClaudeLog(7L, node.toString());
+
+        verify(sseService, never()).broadcastClaudeLog(anyLong(), anyString());
+    }
+
+    @Test
+    void streamClaudeLog_systemWithRealMessage_broadcastsMessage() {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "system");
+        node.put("message", "compacting context");
+
+        workflowService.streamClaudeLog(7L, node.toString());
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
+        assertEquals("[system] compacting context", captor.getValue());
+    }
+
+    @Test
+    void streamClaudeLog_systemWithNoSubtypeOrMessage_doesNotBroadcast() {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "system");
+
+        workflowService.streamClaudeLog(7L, node.toString());
+
+        verify(sseService, never()).broadcastClaudeLog(anyLong(), anyString());
+    }
+
+    @Test
+    void streamClaudeLog_assistantTextLine_stillBroadcasts() {
+        String line = assistantLine(20);
+
+        workflowService.streamClaudeLog(7L, line);
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
+        assertEquals("a".repeat(20), captor.getValue());
+    }
+
+    @Test
+    void streamClaudeLog_toolUseLine_stillBroadcasts() {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("type", "tool_use");
+        node.put("name", "Bash");
+
+        workflowService.streamClaudeLog(7L, node.toString());
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
+        assertEquals("[tool_use] Bash", captor.getValue());
+    }
 }

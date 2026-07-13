@@ -1612,6 +1612,16 @@
     // through htmx's normal fetch+swap cycle) marks just that region's key.
     var target = evt.detail && evt.detail.target;
     if (target && target.id === 'content') {
+      // Re-trigger footgun (mirrors the fix already applied to issues.html's
+      // #issue-table-body): htmx does not reliably wire up a *nested* self-morphing
+      // polling element's own hx-trigger when it first arrives as part of this larger
+      // #content swap — it only "just worked" when the same fragment (issue-detail's
+      // #live-status) was rendered as part of a full page load. Left unprocessed, its
+      // 5s poll never starts and Live Progress reads as stuck on SETUP forever even
+      // though the workflow has moved on. Explicitly reprocessing the freshly-swapped
+      // subtree is idempotent for everything already wired up correctly, so this is a
+      // safe no-op everywhere else.
+      if (window.htmx && typeof window.htmx.process === 'function') { window.htmx.process(target); }
       UpdateStamps.markAllVisible();
       // Deep-link anchors (e.g. the dashboard's "awaiting X" tiles linking to
       // /inbox#split-proposals, #91) — an htmx swap is a pushState navigation, not a
