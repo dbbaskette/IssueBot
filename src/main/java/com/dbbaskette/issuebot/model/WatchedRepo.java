@@ -75,6 +75,9 @@ public class WatchedRepo {
     @Column(name = "plan_first", nullable = false)
     private boolean planFirst = false;
 
+    @Column(name = "superpowers_methodology", nullable = false)
+    private boolean superpowersMethodology = false;
+
     @Column(name = "allowed_paths")
     @Lob
     private String allowedPaths;
@@ -176,6 +179,9 @@ public class WatchedRepo {
 
     public boolean isPlanFirst() { return planFirst; }
     public void setPlanFirst(boolean planFirst) { this.planFirst = planFirst; }
+
+    public boolean isSuperpowersMethodology() { return superpowersMethodology; }
+    public void setSuperpowersMethodology(boolean superpowersMethodology) { this.superpowersMethodology = superpowersMethodology; }
 
     public String getAllowedPaths() { return allowedPaths; }
     public void setAllowedPaths(String allowedPaths) { this.allowedPaths = allowedPaths; }

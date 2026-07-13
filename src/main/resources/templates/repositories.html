@@ -130,6 +130,10 @@
                             <input type="checkbox" id="plan-first" name="planFirst" value="true">
                             <label for="plan-first">Plan first — approve a plan before implementation</label>
                         </div>
+                        <div class="checkbox-field">
+                            <input type="checkbox" id="superpowers-methodology" name="superpowersMethodology" value="true">
+                            <label for="superpowers-methodology">Superpowers methodology — auto design + plan, then implement test-first (no approval gate)</label>
+                        </div>
                     </div>
 
                     <!-- Safety -->
@@ -264,6 +268,7 @@
                                              data-decomposition-mode=${repo.decompositionMode.name()},
                                              data-pre-screen-enabled=${repo.preScreenEnabled},
                                              data-plan-first=${repo.planFirst},
+                                             data-superpowers-methodology=${repo.superpowersMethodology},
                                              data-allowed-paths=${repo.allowedPaths},
                                              data-verification-commands=${repo.verificationCommands},
                                              data-implementation-model=${repo.implementationModel},

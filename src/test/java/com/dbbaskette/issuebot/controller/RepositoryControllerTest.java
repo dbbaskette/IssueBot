@@ -87,7 +87,7 @@ class RepositoryControllerTest {
                     5, false, 15, false, false, 2, reviewPassThreshold, true, true, null,
                     verificationCommands,
                     implementationModel, reviewModel,
-                    followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd,
+                    followUpMode, decompositionMode, preScreenEnabled, planFirst, false, issueBudgetUsd,
                     customInstructions, lessonsEnabled, null);
             ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
             verify(repos).save(captor.capture());

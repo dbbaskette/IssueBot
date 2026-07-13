@@ -66,6 +66,7 @@ public class IssueWorkflowService {
     private final IterationManager iterationManager;
     private final IssueDecompositionService decompositionService;
     private final PlanFirstService planFirstService;
+    private final SuperpowersMethodologyService superpowersService;
     private final FollowUpService followUpService;
     private final ModelResolver modelResolver;
     private final WorkflowCancellationService cancellationService;
@@ -89,6 +90,7 @@ public class IssueWorkflowService {
                                  IterationManager iterationManager,
                                  IssueDecompositionService decompositionService,
                                  PlanFirstService planFirstService,
+                                 SuperpowersMethodologyService superpowersService,
                                  FollowUpService followUpService,
                                  ModelResolver modelResolver,
                                  WorkflowCancellationService cancellationService,
@@ -111,6 +113,7 @@ public class IssueWorkflowService {
         this.iterationManager = iterationManager;
         this.decompositionService = decompositionService;
         this.planFirstService = planFirstService;
+        this.superpowersService = superpowersService;
         this.followUpService = followUpService;
         this.modelResolver = modelResolver;
         this.cancellationService = cancellationService;
@@ -233,6 +236,17 @@ public class IssueWorkflowService {
             }
             log.info("Plan proposal failed for {} #{}, proceeding with implementation",
                     repo.fullName(), issueNumber);
+        }
+
+        // === Superpowers methodology (autonomous): design+plan up front, then implement ===
+        // Opt-in per repo. No approval gate — the plan is generated, recorded, and
+        // implementation proceeds immediately (execution follows TDD via the methodology
+        // baked into the implementation prompt). Skipped once a plan already exists so a
+        // retry/resume doesn't re-plan. Never blocks: generatePlan swallows failures and
+        // leaves the plan empty, so the issue still implements.
+        if (repo.isSuperpowersMethodology()
+                && (trackedIssue.getImplementationPlan() == null || trackedIssue.getImplementationPlan().isBlank())) {
+            superpowersService.generatePlan(trackedIssue, issueDetails, repoPath);
         }
 
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
@@ -699,7 +713,10 @@ public class IssueWorkflowService {
         Long issueId = trackedIssue.getId();
         String resumeId = trackedIssue.getClaudeSessionId();
         boolean resumed = resumeId != null && !resumeId.isBlank();
-        String approvedPlan = trackedIssue.isPlanApproved() ? trackedIssue.getImplementationPlan() : null;
+        // The stored plan feeds implementation when the operator approved it (plan-first, #64)
+        // OR when the repo runs the autonomous superpowers methodology (no approval gate).
+        boolean superpowers = repo.isSuperpowersMethodology();
+        String approvedPlan = (trackedIssue.isPlanApproved() || superpowers) ? trackedIssue.getImplementationPlan() : null;
         // Repo custom instructions (#69) — cheap and predictable to include in every
         // prompt (cold and resumed alike) rather than tracking which sessions saw it.
         String repoInstructions = repo.getCustomInstructions();
@@ -714,6 +731,13 @@ public class IssueWorkflowService {
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
                 previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
                 repoInstructions, lessons);
+
+        // Superpowers methodology (autonomous): lead the implementation prompt with the
+        // TDD + executing-plans discipline so the agent executes the plan (above) test-first
+        // and finishes with committed code rather than another design doc.
+        if (superpowers) {
+            prompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + prompt;
+        }
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -750,6 +774,9 @@ public class IssueWorkflowService {
             String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
                     previousAssessment, previousCiLogs, false, null, approvedPlan,
                     repoInstructions, lessons);
+            if (superpowers) {
+                coldPrompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + coldPrompt;
+            }
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));

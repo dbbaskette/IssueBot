@@ -89,6 +89,7 @@ class IntegrationWorkflowTest {
                 eventService, sseService, notificationService, iterationManager,
                 decompositionService,
                 planFirstService,
+                mock(SuperpowersMethodologyService.class),
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
