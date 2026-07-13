@@ -426,7 +426,10 @@ code {
     left: 12rem;
     width: 340px;
     max-width: calc(100vw - 2rem);
-    max-height: 420px;
+    /* Clamp to the viewport on short screens (landscape phones); the panel is
+       position:fixed so page scroll can't reveal content below the fold —
+       only its own overflow-y can. */
+    max-height: min(420px, calc(100vh - 4.5rem));
     overflow-y: auto;
     z-index: 200;
     background: var(--glass-bg-strong);
@@ -1776,6 +1779,16 @@ details summary:hover { color: var(--text-primary); }
    ============================================================ */
 @media (max-width: 768px) {
     :root { --sidebar-width: 0px; }
+
+    /* The bell lives inside the slide-in sidebar drawer on mobile; the desktop
+       left:12rem anchor would push the fixed panel off the right edge. Pin it to
+       the viewport instead so it's fully visible when the drawer is open. */
+    .notif-panel {
+        left: 1rem;
+        right: 1rem;
+        width: auto;
+        max-width: none;
+    }
 
     .mobile-menu-btn {
         display: flex;
