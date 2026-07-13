@@ -14,6 +14,7 @@ import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
+import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
@@ -71,6 +72,7 @@ public class IssueController {
     private final ObjectMapper objectMapper;
     private final TimelineAssembler timelineAssembler;
     private final NotificationRepository notificationRepository;
+    private final MarkdownRenderer markdownRenderer;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -88,7 +90,8 @@ public class IssueController {
                             IssueGuidanceRepository guidanceRepository,
                             ObjectMapper objectMapper,
                             TimelineAssembler timelineAssembler,
-                            NotificationRepository notificationRepository) {
+                            NotificationRepository notificationRepository,
+                            MarkdownRenderer markdownRenderer) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -106,6 +109,7 @@ public class IssueController {
         this.objectMapper = objectMapper;
         this.timelineAssembler = timelineAssembler;
         this.notificationRepository = notificationRepository;
+        this.markdownRenderer = markdownRenderer;
     }
 
     @GetMapping
@@ -884,6 +888,9 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        // Design + implementation plan rendered to safe HTML for the dashboard (any status,
+        // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
+        model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));
         model.addAttribute("iterations", iterations);
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         // Iteration History (#90) reads newest-first; "iterations" above stays ascending
