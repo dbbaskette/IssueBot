@@ -48,7 +48,12 @@
                               th:if="${unreadNotificationCount != null and unreadNotificationCount > 0}"
                               th:text="${unreadNotificationCount}">0</span>
                     </button>
-                    <div id="notif-panel" class="notif-panel" role="region" aria-label="Notifications" hidden></div>
+                    <!-- #notif-panel is intentionally NOT here: it lives at <body> level
+                         (just after </main>) so its position:fixed resolves against the
+                         viewport. Inside .sidebar it would be trapped by the sidebar's
+                         backdrop-filter (which makes .sidebar the containing block for
+                         fixed descendants) and clipped by its overflow-x:hidden. The bell
+                         still controls it by id via aria-controls / hx-target. -->
                 </div>
             </div>
         </header>
@@ -101,6 +106,12 @@
     <main id="content">
         <div th:replace="~{${contentTemplate} :: content}"></div>
     </main>
+    <!-- Notification panel at <body> level (NOT inside .sidebar): position:fixed here
+         resolves against the viewport, so it can't be clipped by the sidebar's
+         backdrop-filter containing block + overflow-x:hidden. Kept out of #content so
+         HTMX SPA swaps never wipe it. Controlled by #notif-bell-btn via its id. -->
+    <div id="notif-panel" class="notif-panel" role="region" aria-label="Notifications"
+         tabindex="-1" th:if="${dashboardNotificationsEnabled}" hidden></div>
     <script th:src="@{/js/app.js}" defer></script>
 
     <!--

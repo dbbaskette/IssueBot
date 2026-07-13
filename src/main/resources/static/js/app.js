@@ -67,6 +67,12 @@
     if (!panel || !btn) { return; }
     panel.hidden = false;
     btn.setAttribute('aria-expanded', 'true');
+    // The panel now renders at <body> level (far from the bell in the DOM), so
+    // forward-Tab from the bell would otherwise walk the whole sidebar/content
+    // before reaching it. Move focus into the panel (tabindex="-1" container) on
+    // open; ESC/close returns focus to the bell. Content loads async via HTMX —
+    // focusing the container is stable across the innerHTML swap.
+    panel.focus();
   }
 
   function closeNotifPanel() {
@@ -283,8 +289,10 @@
       toggleNotifPanel();
       return;
     }
-    // Click outside the bell/panel closes it.
-    if (notifPanelIsOpen() && !e.target.closest('.notif-bell-wrap')) {
+    // Click outside the bell/panel closes it. The panel now lives at <body> level
+    // (outside .notif-bell-wrap), so it must be excluded explicitly — otherwise a
+    // click inside the panel (e.g. a notification link) would self-close it.
+    if (notifPanelIsOpen() && !e.target.closest('.notif-bell-wrap') && !e.target.closest('#notif-panel')) {
       closeNotifPanel();
     }
   });
