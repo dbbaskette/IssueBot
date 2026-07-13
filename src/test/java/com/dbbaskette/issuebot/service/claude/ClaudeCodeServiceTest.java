@@ -55,6 +55,26 @@ class ClaudeCodeServiceTest {
         assertTrue(command.contains("--dangerously-skip-permissions"));
     }
 
+    /**
+     * Every headless invocation must isolate itself from the operator's user-level
+     * Claude Code settings (~/.claude/settings.json) by loading only project/local
+     * setting sources. Otherwise personal plugins/hooks — e.g. a superpowers
+     * SessionStart hook — are injected into the coding agent and derail it into
+     * brainstorming/spec-writing instead of editing files, producing empty commits.
+     * Regression guard for that fix; must hold for impl, review, and utility paths.
+     */
+    @Test
+    void buildCommand_isolatesFromUserSettingSources() {
+        List<String> command = service.buildCommand("prompt text", "claude-opus-4-8", 30, null, null);
+        int idx = command.indexOf("--setting-sources");
+        assertTrue(idx >= 0, "must pass --setting-sources to skip user-level plugins/hooks");
+        assertEquals("project,local", command.get(idx + 1));
+        // Inspect the flag's value, not the whole arg list: the operator's "user"
+        // setting source must never appear in the comma-separated sources.
+        assertFalse(command.get(idx + 1).contains("user"),
+                "must not load the operator's user setting source");
+    }
+
     @Test
     void buildCommand_includesSystemPromptWhenProvided() {
         List<String> command = service.buildCommand("prompt", "claude-opus-4-8", 30, "Be concise", null);

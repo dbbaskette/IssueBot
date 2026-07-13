@@ -237,6 +237,15 @@ public class ClaudeCodeService {
         command.add("--verbose");
         command.add("--dangerously-skip-permissions");
 
+        // Hermetic settings: load only the target repo's own settings (project/local),
+        // NOT the operator's user-level ~/.claude/settings.json. Without this, personal
+        // plugins/hooks (e.g. a superpowers SessionStart hook) are injected into every
+        // headless invocation and derail the coding agent into brainstorming/spec-writing
+        // instead of editing files — producing empty commits. OAuth/keychain auth is
+        // unaffected by setting-source selection. See buildCommand tests.
+        command.add("--setting-sources");
+        command.add("project,local");
+
         if (systemPrompt != null && !systemPrompt.isBlank()) {
             command.add("--append-system-prompt");
             command.add(systemPrompt);
