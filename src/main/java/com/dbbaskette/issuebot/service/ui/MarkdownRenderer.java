@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.ui;
 import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
+import org.commonmark.renderer.html.DefaultUrlSanitizer;
 import org.commonmark.renderer.html.HtmlRenderer;
 import org.springframework.stereotype.Component;
 
@@ -13,12 +14,18 @@ import java.util.List;
  *
  * <p>Security: the source is LLM output that ends up in a web page, so raw HTML is NOT trusted.
  * {@code escapeHtml(true)} makes any literal {@code <script>}/{@code <img onerror=...>} in the
- * markdown render as text rather than live markup, and {@code sanitizeUrls(true)} strips
- * {@code javascript:}-style link/image URLs. Callers still emit the result via {@code th:utext}
- * (unescaped) — that's safe precisely because those two settings make the produced HTML safe.
+ * markdown render as text rather than live markup. URL sanitizing is restricted to an explicit
+ * {@code http/https/mailto} allow-list — note commonmark's DEFAULT sanitizer also permits
+ * {@code data:}, which would let a {@code data:text/html;base64,...} link execute, so we pass a
+ * custom {@link DefaultUrlSanitizer} that drops it (and {@code javascript:}). Callers emit the
+ * result via {@code th:utext} (unescaped) — safe precisely because of these settings.
  */
 @Component
 public class MarkdownRenderer {
+
+    // Explicit allow-list — deliberately EXCLUDES commonmark's default `data`, which is an XSS
+    // vector (data:text/html). Anything not on this list is stripped from href/src.
+    private static final List<String> SAFE_URL_PROTOCOLS = List.of("http", "https", "mailto");
 
     private final Parser parser;
     private final HtmlRenderer renderer;
@@ -29,7 +36,8 @@ public class MarkdownRenderer {
         this.renderer = HtmlRenderer.builder()
                 .extensions(extensions)
                 .escapeHtml(true)     // literal HTML in the markdown is escaped, not executed
-                .sanitizeUrls(true)   // drop javascript:/data: link & image URLs
+                .sanitizeUrls(true)
+                .urlSanitizer(new DefaultUrlSanitizer(SAFE_URL_PROTOCOLS)) // http/https/mailto only
                 .build();
     }
 

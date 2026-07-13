@@ -62,6 +62,19 @@ class MarkdownRendererTest {
     }
 
     @Test
+    void sanitizesDataUrls_notJustJavascript() {
+        // commonmark's DEFAULT sanitizer allows data:, which is a live XSS vector
+        // (data:text/html) — our custom allow-list must strip it from links AND images.
+        String html = renderer.toHtml(
+                "[a](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==) "
+                + "![b](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)");
+        assertThat(html).doesNotContain("data:text/html");
+        // http/https/mailto remain allowed.
+        assertThat(renderer.toHtml("[ok](https://example.com)")).contains("https://example.com");
+        assertThat(renderer.toHtml("[m](mailto:x@example.com)")).contains("mailto:x@example.com");
+    }
+
+    @Test
     void nullOrBlankInput_returnsNull_soTemplatesCanGate() {
         assertThat(renderer.toHtml(null)).isNull();
         assertThat(renderer.toHtml("   ")).isNull();
