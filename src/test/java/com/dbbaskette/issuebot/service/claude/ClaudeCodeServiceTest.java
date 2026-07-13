@@ -69,7 +69,9 @@ class ClaudeCodeServiceTest {
         int idx = command.indexOf("--setting-sources");
         assertTrue(idx >= 0, "must pass --setting-sources to skip user-level plugins/hooks");
         assertEquals("project,local", command.get(idx + 1));
-        assertFalse(command.contains("user"),
+        // Inspect the flag's value, not the whole arg list: the operator's "user"
+        // setting source must never appear in the comma-separated sources.
+        assertFalse(command.get(idx + 1).contains("user"),
                 "must not load the operator's user setting source");
     }
 
