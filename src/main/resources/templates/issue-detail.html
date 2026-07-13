@@ -632,13 +632,22 @@
 </div>
 
 <!-- === FRAGMENT: auto-refreshed status section (metrics + phase pipeline) === -->
+<!--/* hx-on::after-swap="htmx.process(this)" (the same re-trigger fix already used by
+       issues.html's #issue-table-body): htmx does not reliably (re-)initialize a
+       self-morphing element's own hx-trigger polling when this fragment first arrives
+       nested inside a larger #content swap (e.g. clicking into an issue from the queue) —
+       the trigger only "just worked" when the fragment was part of a full page load. Left
+       unfixed, the poll never starts and Live Progress reads as permanently stuck on
+       SETUP even though the workflow is well past it. Forcing a reprocess after every
+       swap (including the first) guarantees the 5s poll is actually alive. */-->
 <div th:fragment="live-status" id="live-status"
      th:if="${issue}"
      hx-ext="morph"
      th:attr="hx-get=${issue.status.name() == 'IN_PROGRESS' ? '/issues/' + issue.id + '/live-status' : ''}"
      th:hx-trigger="${issue.status.name() == 'IN_PROGRESS' ? 'every 5s' : 'none'}"
      hx-target="#live-status"
-     hx-swap="morph:outerHTML">
+     hx-swap="morph:outerHTML"
+     hx-on::after-swap="htmx.process(this)">
 
     <!--/* Last-updated stamp (#83) lives INSIDE this fragment so its presence follows the
            fragment's own lifecycle: once the issue leaves IN_PROGRESS, the next poll

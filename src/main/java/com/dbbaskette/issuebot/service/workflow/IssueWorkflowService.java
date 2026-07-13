@@ -1624,7 +1624,17 @@ public class IssueWorkflowService {
                     text = "[result] " + resultText;
                 }
                 case "system" -> {
-                    text = "[system] " + node.path("message").asText(node.path("text").asText("init"));
+                    // Claude CLI emits a "system"/"init" event at session start with no
+                    // useful payload; the "Launching Claude Code…" line already told the
+                    // operator the session started, so suppress it instead of spamming
+                    // the terminal with dozens of literal "[system] init" lines.
+                    String subtype = node.path("subtype").asText("");
+                    if ("init".equals(subtype)) {
+                        text = null;
+                    } else {
+                        String message = node.path("message").asText(node.path("text").asText(""));
+                        text = (message.isBlank() || "init".equals(message)) ? null : "[system] " + message;
+                    }
                 }
                 case "stderr" -> {
                     text = "[stderr] " + node.path("text").asText("");
