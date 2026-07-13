@@ -6,6 +6,10 @@
 
 An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI, runs an independent code review with a separate model, and delivers pull requests.
 
+## Why It Exists
+
+Filing a good issue is the easy part; the work between a well-specified issue and a merged pull request is not — it's the context-loading, editing, CI-waiting, and self-review that rarely fits in the gaps of a working day. IssueBot treats that entire stretch as a single autonomous loop: label an issue `agent-ready` and it clones the repo, implements the change, pushes and watches CI, opens a PR, and sets a second, independent model against its own work before anything merges. The design rests on three ideas — **separate the builder from the reviewer**, so the code that ships has already survived an adversarial read; **keep a human on the gates that matter** (plan approval, PR review, merge) rather than in the keystroke-by-keystroke loop; and **run entirely on your machine**, so your source and your API tokens never leave it. It's meant to be pointed at real repositories and left to work.
+
 ## How It Works
 
 IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. Both roles are configurable from the dashboard at the global, per-repo, and per-issue level (defaults: Opus 4.8 for implementation, Sonnet 5 for review).
