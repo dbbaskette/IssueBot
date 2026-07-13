@@ -105,6 +105,29 @@ class NotificationBellRenderTest {
         assertThat(html).doesNotContain("id=\"notif-bell-btn\"");
     }
 
+    /**
+     * The bell stays inside the sidebar, but #notif-panel MUST render outside it (at
+     * body level). Inside .sidebar the sidebar's backdrop-filter becomes the containing
+     * block for the panel's position:fixed, and its overflow-x:hidden then clips the
+     * panel at the sidebar's right edge — the reported "notifications are hidden" bug,
+     * which an earlier absolute→fixed swap did not actually fix. Regression guard.
+     */
+    @Test
+    void notifPanel_rendersOutsideTheSidebar_notClippedByItsBackdropFilterAndOverflow() {
+        String html = renderFullDashboardPage(true, 3L);
+
+        int sidebarStart = html.indexOf("class=\"sidebar\"");
+        int sidebarEnd = html.indexOf("</nav>", sidebarStart);
+        assertThat(sidebarStart).isGreaterThan(0);
+        assertThat(sidebarEnd).isGreaterThan(sidebarStart);
+
+        String sidebarMarkup = html.substring(sidebarStart, sidebarEnd);
+        assertThat(sidebarMarkup).contains("id=\"notif-bell-btn\"");     // bell is in the sidebar
+        assertThat(sidebarMarkup).doesNotContain("id=\"notif-panel\"");  // panel is NOT
+        // ...but the panel still exists, rendered after the sidebar closes.
+        assertThat(html.indexOf("id=\"notif-panel\"")).isGreaterThan(sidebarEnd);
+    }
+
     @Test
     void bell_showsUnreadBadge_whenCountPositive() {
         String html = renderFullDashboardPage(true, 5L);

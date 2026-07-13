@@ -283,8 +283,10 @@
       toggleNotifPanel();
       return;
     }
-    // Click outside the bell/panel closes it.
-    if (notifPanelIsOpen() && !e.target.closest('.notif-bell-wrap')) {
+    // Click outside the bell/panel closes it. The panel now lives at <body> level
+    // (outside .notif-bell-wrap), so it must be excluded explicitly — otherwise a
+    // click inside the panel (e.g. a notification link) would self-close it.
+    if (notifPanelIsOpen() && !e.target.closest('.notif-bell-wrap') && !e.target.closest('#notif-panel')) {
       closeNotifPanel();
     }
   });

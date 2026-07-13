@@ -411,16 +411,15 @@ code {
 }
 
 .notif-panel {
-    /* `fixed`, not `absolute`: .notif-bell-wrap lives inside .sidebar, and
-       .sidebar sets overflow-y:auto + overflow-x:hidden for its own
-       scrolling nav list. An absolutely-positioned child can never escape
-       an ancestor's overflow clip, so at 340px wide (vs. the 240px
-       sidebar) this panel was getting cut off at the sidebar's right
-       edge — confirmed against a live render. `fixed` positions it
-       against the viewport instead, sidestepping the clip entirely, and
-       still opens rightward into the wide main content area where there's
-       always room (a right-anchored panel from this bell, which sits near
-       the sidebar's right edge, would run off the viewport's left side). */
+    /* `fixed`, anchored to the viewport, opening rightward from the bell into
+       the wide main content area (top:3.5rem/left:12rem — a right-anchored panel
+       from this bell near the sidebar's left edge would run off-screen).
+       CRITICAL: this only works because #notif-panel is rendered at <body> level,
+       NOT inside .sidebar. .sidebar has backdrop-filter, which makes it the
+       containing block for any position:fixed descendant — so a panel nested in
+       the sidebar would resolve `fixed` against the sidebar and be clipped by its
+       overflow-x:hidden (the original bug, which an earlier `absolute`->`fixed`
+       swap did NOT fix). See the placement comments in layout.html. */
     position: fixed;
     top: 3.5rem;
     left: 12rem;
