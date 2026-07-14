@@ -95,4 +95,33 @@ class ClaudeCodeServiceTest {
         assertFalse(reviewCommand.contains("--resume"));
         assertFalse(utilityCommand.contains("--resume"));
     }
+
+    // === Non-zero-exit error reporting: surface the real cause, not the init event ===
+
+    @Test
+    void describeExitFailure_usesResultEventError_notTheInitEventHead() {
+        String stdout = "{\"type\":\"system\",\"subtype\":\"init\",\"tools\":[\"Bash\",\"Read\"]}\n"
+                + "{\"type\":\"result\",\"is_error\":true,\"result\":\"Not logged in\"}";
+        // finalResult is what StreamJsonParser extracts from the result event.
+        String msg = ClaudeCodeService.describeExitFailure(1, "Not logged in", "", stdout);
+
+        assertTrue(msg.contains("exited with code 1"), msg);
+        assertTrue(msg.contains("Not logged in"), msg);
+        assertFalse(msg.contains("subtype"), "must not report the useless init event");
+    }
+
+    @Test
+    void describeExitFailure_prefersStderr() {
+        String msg = ClaudeCodeService.describeExitFailure(1, "some result", "boom on stderr", "init head");
+        assertTrue(msg.contains("boom on stderr"), msg);
+    }
+
+    @Test
+    void describeExitFailure_noStderrOrResult_usesStdoutTailNotHead() {
+        String stdout = "INIT_HEAD_LINE" + "x".repeat(600) + "REAL_ERROR_TAIL";
+        String msg = ClaudeCodeService.describeExitFailure(1, null, "", stdout);
+
+        assertTrue(msg.contains("REAL_ERROR_TAIL"), msg);
+        assertFalse(msg.contains("INIT_HEAD_LINE"), "must use the tail (the error), not the init head");
+    }
 }
