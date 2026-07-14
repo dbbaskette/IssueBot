@@ -62,12 +62,22 @@ class OrphanedRunRecoveryTest {
     }
 
     @Test
-    void onlyTouchesInProgress_neverTheHumanWaitStates() {
-        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of());
+    void onlyTouchesInProgress_humanWaitStatesSurviveUntouched() {
+        // A human-wait issue that co-exists in the DB must NOT be reset — its pending decision
+        // would be lost. Recovery is scoped by the query (IN_PROGRESS only), never fetch-all-filter.
+        TrackedIssue awaitingApproval = new TrackedIssue(repo, 50, "Waiting on human");
+        awaitingApproval.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        TrackedIssue orphan = new TrackedIssue(repo, 96, "Sub-task");
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
 
         recovery.requeueOrphanedRuns();
 
-        verify(issueRepository).findByStatus(IssueStatus.IN_PROGRESS);
+        // The orphan was reset; the awaiting issue was never fetched, saved, or mutated.
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(IssueStatus.AWAITING_PLAN_APPROVAL, awaitingApproval.getStatus());
+        verify(issueRepository).save(orphan);
+        verify(issueRepository, never()).save(awaitingApproval);
         verify(issueRepository, never()).findByStatus(IssueStatus.AWAITING_APPROVAL);
         verify(issueRepository, never()).findByStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         verify(issueRepository, never()).findByStatus(IssueStatus.AWAITING_DECOMPOSITION);
