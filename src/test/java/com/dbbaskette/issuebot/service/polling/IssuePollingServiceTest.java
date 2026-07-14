@@ -359,6 +359,43 @@ class IssuePollingServiceTest {
     }
 
     @Test
+    void pollRepo_lowestAlreadyTracked_startsNextLowest() {
+        // If the earliest part is already tracked (in flight / done), the next-lowest starts —
+        // ascending order still holds among the eligible issues.
+        properties.setMaxConcurrentIssues(3);
+        testRepo.setAutoStart(true);
+
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(eq(testRepo), any())).thenReturn(List.of());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList())).thenReturn(List.of());
+        when(issueRepository.findByRepoAndIssueNumber(eq(testRepo), eq(96)))
+                .thenReturn(Optional.of(new TrackedIssue(testRepo, 96, "2/4"))); // already tracked → skipped
+        when(issueRepository.findByRepoAndIssueNumber(eq(testRepo), eq(97))).thenReturn(Optional.empty());
+        when(issueRepository.findByRepoAndIssueNumber(eq(testRepo), eq(98))).thenReturn(Optional.empty());
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("issuebot-parent"), anyString()))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(dependencyResolver.resolve(eq(testRepo), anyInt()))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        ObjectNode p4 = objectMapper.createObjectNode(); p4.put("number", 98); p4.put("title", "4/4");
+        ObjectNode p3 = objectMapper.createObjectNode(); p3.put("number", 97); p3.put("title", "3/4");
+        ObjectNode p2 = objectMapper.createObjectNode(); p2.put("number", 96); p2.put("title", "2/4");
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("agent-ready"), anyString()))
+                .thenReturn(List.of(p4, p3, p2));
+
+        pollingService.pollForIssues();
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(workflowService, atLeastOnce()).processIssueAsync(captor.capture());
+        assertEquals(97, captor.getAllValues().get(0).getIssueNumber(),
+                "next-lowest eligible part starts when the lowest is already tracked");
+        assertTrue(captor.getAllValues().stream().noneMatch(i -> i.getIssueNumber() == 96),
+                "the already-tracked #96 must never be dispatched");
+    }
+
+    @Test
     void evaluateSingleIssueFromWebhook_underCapacityButRepoGateBusy_returnsQueued() {
         properties.setMaxConcurrentIssues(3);
         when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
