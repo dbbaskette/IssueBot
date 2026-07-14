@@ -272,10 +272,16 @@ public class IterationManager {
     /**
      * Shared escalation logic: mark FAILED, label, comment, cooldown, notify, log.
      */
+    // last_failure_reason is VARCHAR(2000). Bound EVERY escalation's detail defensively so a
+    // verbose (model-controlled) reason can never overflow the column — an overflow throws on
+    // save() and is only caught by the top-level handler, which would then skip the needs-human
+    // label, escalation comment, and cooldown this method exists to guarantee.
+    private static final int MAX_FAILURE_REASON_CHARS = 1900;
+
     private void escalateFailure(TrackedIssue trackedIssue, String notificationTitle,
                                    String notificationDetail, String eventType,
                                    String eventMessage, String issueComment) {
-        trackedIssue.setLastFailureReason(notificationDetail);
+        trackedIssue.setLastFailureReason(truncate(notificationDetail, MAX_FAILURE_REASON_CHARS));
 
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
@@ -392,7 +398,8 @@ public class IterationManager {
 
         // Prefer the human-readable findings; fall back to the last iteration's raw JSON.
         if (richFindings != null && !richFindings.isBlank()) {
-            sb.append("### Why the review blocked\n").append(richFindings.strip()).append("\n\n");
+            // Bound the (model-controlled) findings for a readable comment.
+            sb.append("### Why the review blocked\n").append(truncate(richFindings.strip(), 6000)).append("\n\n");
         } else if (!iterations.isEmpty() && iterations.get(iterations.size() - 1).getReviewJson() != null) {
             sb.append("### Last Review Findings\n");
             sb.append("```json\n").append(truncate(iterations.get(iterations.size() - 1).getReviewJson(), 1000))

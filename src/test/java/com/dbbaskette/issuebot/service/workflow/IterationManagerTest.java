@@ -264,4 +264,24 @@ class IterationManagerTest {
         assertTrue(issue.getCooldownUntil().isAfter(LocalDateTime.now()));
         verify(issueRepository).save(issue);
     }
+
+    @Test
+    void handleMaxReviewIterationsReached_boundsFailureReasonToTheColumnLimit() {
+        // A verbose (model-controlled) blocker summary must never overflow last_failure_reason
+        // (VARCHAR(2000)); overflow would throw on save() and skip the escalation this guarantees.
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setMaxReviewIterations(2);
+        TrackedIssue issue = new TrackedIssue(repo, 98, "Thread-safety");
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
+
+        String huge = "Why: " + "x".repeat(5000);
+        iterationManager.handleMaxReviewIterationsReached(issue, huge, "findings " + "y".repeat(5000));
+
+        assertNotNull(issue.getLastFailureReason());
+        assertTrue(issue.getLastFailureReason().length() <= 2000,
+                "must fit VARCHAR(2000), was " + issue.getLastFailureReason().length());
+        assertTrue(issue.getLastFailureReason().startsWith("Independent review could not be satisfied"));
+        assertEquals(IssueStatus.COOLDOWN, issue.getStatus()); // escalate → FAILED, then enterCooldown
+        verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(98), any());
+    }
 }
