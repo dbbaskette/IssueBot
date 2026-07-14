@@ -1036,6 +1036,13 @@ public class IssueWorkflowService {
         sseService.broadcastClaudeLog(issueId, "[system] Launching "
                 + trackedIssue.getResolvedReviewModel() + " for independent review...");
 
+        // Claim the review-iteration slot up front (mirrors the implementation-iteration counter,
+        // which increments before the work runs) so the dashboard shows "review rounds N/max" while
+        // the review is IN FLIGHT, not 0 until it finishes. An invocation that fails after this
+        // escalates immediately (see the caller), so the consumed slot is harmless.
+        trackedIssue.setCurrentReviewIteration(trackedIssue.getCurrentReviewIteration() + 1);
+        issueRepository.save(trackedIssue);
+
         // Retry the REVIEW (not the implementation) on an invocation failure: a crashed/empty/
         // unparseable review never judged the code, so re-implementing would waste an iteration
         // "fixing" a non-problem. Bounded, so a persistent environment issue still escalates.
@@ -1063,6 +1070,10 @@ public class IssueWorkflowService {
                 log.error("Independent review failed", e);
                 eventService.log("PHASE_REVIEW_FAILED",
                         "Review invocation error: " + e.getMessage(), repo, trackedIssue);
+                // Roll back the slot we optimistically claimed at the top — a thrown review never
+                // produced a verdict, and the caller proceeds to completion without one.
+                trackedIssue.setCurrentReviewIteration(trackedIssue.getCurrentReviewIteration() - 1);
+                issueRepository.save(trackedIssue);
                 return null;
             }
             if (!reviewResult.invocationFailed() || attempt >= maxReviewInvocationAttempts) {
@@ -1087,10 +1098,7 @@ public class IssueWorkflowService {
             }
         }
 
-        // Consume a review-iteration slot only after the review completes successfully
-        int reviewIter = trackedIssue.getCurrentReviewIteration() + 1;
-        trackedIssue.setCurrentReviewIteration(reviewIter);
-        issueRepository.save(trackedIssue);
+        // (Review-iteration slot already claimed at the top of this method — see above.)
 
         // Track review cost
         trackCost(trackedIssue, trackedIssue.getCurrentIteration(), reviewResult.costUsd(),

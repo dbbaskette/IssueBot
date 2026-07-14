@@ -139,4 +139,71 @@ class IssueDetailLivePollRenderTest {
         assertThat(html).contains("phase-step done");
         assertThat(html).contains("phase-step active");
     }
+
+    @Test
+    void liveStatusPoll_updatesOffFragmentRegionsOutOfBand() {
+        // GET /issues/{id}/live-status returns live-status-poll: the pollable #live-status block
+        // PLUS hx-swap-oob copies of the status header and goal counters (which live elsewhere on
+        // the page), so the whole screen refreshes on the 5s poll — not just the terminal/cards.
+        String html = render(inProgressIssue(30L, 30, "IMPLEMENTATION"), "live-status-poll", 1, false);
+
+        assertThat(html).contains("id=\"live-status\"");     // the main polled block
+        assertThat(html).contains("id=\"status-actions\"");  // OOB: status header
+        assertThat(html).contains("id=\"goal-budget\"");     // OOB: iteration/review counters
+        assertThat(html).contains("hx-swap-oob=\"true\"");   // → updated in place on each poll
+    }
+
+    @Test
+    void content_offFragmentRegionsRenderInPlaceWithoutOob() {
+        // On the initial page (content fragment) the same regions render normally, WITHOUT the
+        // OOB attribute — otherwise HTMX would try to relocate/duplicate them on load.
+        String html = render(inProgressIssue(31L, 31, "IMPLEMENTATION"), "content", 1, false);
+
+        assertThat(html).contains("id=\"status-actions\"");
+        assertThat(html).contains("id=\"goal-budget\"");
+        assertThat(html).doesNotContain("hx-swap-oob");
+    }
+
+    @Test
+    void content_timelinePanelWrapperAlwaysRenders_evenWhenTimelineEmpty() {
+        // The OOB target id must exist on the initial page even before iteration 1 (empty timeline),
+        // otherwise htmx drops the later OOB timeline update (it needs a matching id in the DOM).
+        String html = render(inProgressIssue(33L, 33, "SETUP"), "content", 0, false);
+
+        assertThat(html).contains("id=\"timeline-panel\"");
+    }
+
+    @Test
+    void liveStatusPoll_withTimeline_emitsTimelinePanelOutOfBandWithContent() {
+        TrackedIssue issue = inProgressIssue(34L, 34, "IMPLEMENTATION");
+        var timeline = List.of(new com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline(1, List.of(
+                new com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline(1,
+                        List.of(new com.dbbaskette.issuebot.service.ui.TimelineAssembler.Segment("Implementation", 60, 100.0, "ok")),
+                        new BigDecimal("0.50"), "RUNNING"))));
+
+        WebContext ctx = new WebContext(webExchange, Locale.US);
+        ctx.setVariable("issue", issue);
+        ctx.setVariable("latestIteration", null);
+        ctx.setVariable("iterations", List.of());
+        ctx.setVariable("iterationsNewestFirst", List.of());
+        ctx.setVariable("totalCost", BigDecimal.ZERO);
+        ctx.setVariable("events", List.of());
+        ctx.setVariable("phaseIndex", 1);
+        ctx.setVariable("phaseCompleted", false);
+        ctx.setVariable("modelCatalog", List.of());
+        ctx.setVariable("humanize", new HumanizeHelper());
+        ctx.setVariable("timeline", timeline);
+
+        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("live-status-poll"),
+                (org.thymeleaf.templatemode.TemplateMode) null, null);
+        StringWriter w = new StringWriter();
+        templateEngine.process(spec, ctx, w);
+        String html = w.toString();
+
+        int idx = html.indexOf("id=\"timeline-panel\"");
+        assertThat(idx).isGreaterThan(-1);
+        // The OOB attr sits on the #timeline-panel element, and it carries the rendered timeline.
+        assertThat(html.substring(idx, Math.min(idx + 120, html.length()))).contains("hx-swap-oob=\"true\"");
+        assertThat(html).contains(">Timeline<");
+    }
 }

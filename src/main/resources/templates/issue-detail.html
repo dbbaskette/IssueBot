@@ -47,7 +47,8 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex gap-1" style="align-items:center">
+                <div th:fragment="status-actions(oob)" id="status-actions" class="flex gap-1" style="align-items:center"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                     <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
                     <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                             type="button" class="btn btn-ghost btn-sm"
@@ -188,7 +189,8 @@
 
                     <div class="flex-between mb-1">
                         <span class="text-sm">Iteration budget</span>
-                        <span class="text-sm"
+                        <span th:fragment="goal-budget(oob)" id="goal-budget" class="text-sm"
+                              th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}"
                               th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
                     </div>
 
@@ -224,7 +226,13 @@
             </div>
 
             <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
-            <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
+            <!--/* The #timeline-panel wrapper ALWAYS renders (even before iteration 1, when the
+                   timeline is empty) so the id exists as an hx-swap-oob target: htmx silently drops
+                   an OOB element whose id isn't already in the DOM. The .panel inside is what's
+                   conditional, so nothing is visible until there's timeline data. */-->
+            <div th:fragment="timeline-panel(oob)" id="timeline-panel"
+                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+              <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
                 <div class="panel-header">
                     <h3>Timeline</h3>
                     <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
@@ -262,6 +270,7 @@
                     </div>
                     </th:block>
                 </div>
+              </div>
             </div>
 
             <!-- === LIVE-REFRESHED STATUS SECTION (metrics + phase pipeline) === -->
@@ -783,5 +792,18 @@
         </div>
     </div>
 </div>
+
+<!--/* Poll response for GET /issues/{id}/live-status. Returns the pollable #live-status block
+       PLUS top-level hx-swap-oob copies of regions that live ELSEWHERE on the page — the status
+       header, the goal-budget counters, and the timeline — so the whole screen refreshes on the
+       5s poll, not just the SSE terminal. HTMX applies the OOB siblings in place by id and morphs
+       #live-status as the main swap. Kept separate from the `live-status` fragment (which is
+       embedded in the page) so these OOB copies never render on initial load and duplicate. */-->
+<th:block th:fragment="live-status-poll">
+    <div th:replace="~{issue-detail :: live-status}"></div>
+    <div th:replace="~{issue-detail :: status-actions(true)}"></div>
+    <div th:replace="~{issue-detail :: goal-budget(true)}"></div>
+    <div th:replace="~{issue-detail :: timeline-panel(true)}"></div>
+</th:block>
 </body>
 </html>
