@@ -327,6 +327,38 @@ class IssuePollingServiceTest {
     }
 
     @Test
+    void pollRepo_startsLowestIssueNumberFirst_notGitHubNewestFirst() {
+        // GitHub returns agent-ready issues newest-first; the poller must start the LOWEST number
+        // (earliest decomposed part, e.g. 1/X) first, not the last-created (4/X).
+        properties.setMaxConcurrentIssues(3);
+        testRepo.setAutoStart(true);
+
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(eq(testRepo), any())).thenReturn(List.of());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList())).thenReturn(List.of());
+        when(issueRepository.findByRepoAndIssueNumber(eq(testRepo), anyInt())).thenReturn(Optional.empty());
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("issuebot-parent"), anyString()))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(dependencyResolver.resolve(eq(testRepo), anyInt()))
+                .thenReturn(new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        ObjectNode p4 = objectMapper.createObjectNode(); p4.put("number", 98); p4.put("title", "4/4");
+        ObjectNode p3 = objectMapper.createObjectNode(); p3.put("number", 97); p3.put("title", "3/4");
+        ObjectNode p2 = objectMapper.createObjectNode(); p2.put("number", 96); p2.put("title", "2/4");
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("agent-ready"), anyString()))
+                .thenReturn(List.of(p4, p3, p2)); // newest-first, as GitHub returns them
+
+        pollingService.pollForIssues();
+
+        ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(workflowService, atLeastOnce()).processIssueAsync(captor.capture());
+        assertEquals(96, captor.getAllValues().get(0).getIssueNumber(),
+                "lowest-numbered part must start first, not GitHub's newest-first (#98)");
+    }
+
+    @Test
     void evaluateSingleIssueFromWebhook_underCapacityButRepoGateBusy_returnsQueued() {
         properties.setMaxConcurrentIssues(3);
         when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
