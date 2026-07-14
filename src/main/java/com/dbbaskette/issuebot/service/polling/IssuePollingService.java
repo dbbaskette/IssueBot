@@ -23,6 +23,8 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -102,19 +104,47 @@ public class IssuePollingService {
         closeCompletedParents(repo);
     }
 
-    /** Close issuebot-parent tracking issues whose sub-issues are all closed. */
+    // A decomposed sub-issue's body carries "decomposed from #<parent>" (buildSubIssueBody);
+    // used to attribute each open sub-issue back to its parent tracking issue.
+    private static final Pattern PARENT_REF = Pattern.compile("decomposed from #(\\d+)");
+
+    /**
+     * Close each {@code issuebot-parent} tracking issue once ITS OWN sub-issues are all closed.
+     * Scoped per-parent (via each sub-issue's "decomposed from #N" back-reference), so one epic's
+     * still-open sub-issues no longer hold every other epic's parent open — the previous repo-wide
+     * "any decomposed sub-issue open → keep all parents open" check.
+     */
     private void closeCompletedParents(WatchedRepo repo) {
         try {
             List<JsonNode> parents = gitHubApiClient.listIssues(repo.getOwner(), repo.getName(), "issuebot-parent", "open");
             if (parents == null || parents.isEmpty()) return;
             List<JsonNode> openSubs = gitHubApiClient.listIssues(repo.getOwner(), repo.getName(), "issuebot-decomposed", "open");
-            if (openSubs == null || !openSubs.isEmpty()) return; // any open sub → keep parents open
+
+            java.util.Set<Integer> parentsWithOpenSubs = new java.util.HashSet<>();
+            if (openSubs != null) {
+                for (JsonNode sub : openSubs) {
+                    Matcher m = PARENT_REF.matcher(sub.path("body").asText(""));
+                    if (m.find()) {
+                        parentsWithOpenSubs.add(Integer.parseInt(m.group(1)));
+                    }
+                }
+            }
+
             for (JsonNode parent : parents) {
                 int number = parent.path("number").asInt();
+                if (parentsWithOpenSubs.contains(number)) continue; // still has unfinished sub-issues
                 gitHubApiClient.addComment(repo.getOwner(), repo.getName(), number,
-                        "All sub-issues are closed — closing this tracking issue.");
+                        "All sub-issues are complete — closing this tracking issue.");
                 gitHubApiClient.closeIssue(repo.getOwner(), repo.getName(), number);
-                eventService.log("PARENT_ISSUE_CLOSED", "Closed tracking issue #" + number, repo);
+                eventService.log("PARENT_ISSUE_CLOSED",
+                        "Closed tracking issue #" + number + " — all its sub-issues are complete", repo);
+                // Reflect it in the dashboard: the parent's tracked row (DECOMPOSED) is now done.
+                issueRepository.findByRepoAndIssueNumber(repo, number).ifPresent(p -> {
+                    if (p.getStatus() == IssueStatus.DECOMPOSED) {
+                        p.setStatus(IssueStatus.COMPLETED);
+                        issueRepository.save(p);
+                    }
+                });
             }
         } catch (Exception e) {
             log.warn("Failed to check parent tracking issues for {}: {}", repo.fullName(), e.getMessage());

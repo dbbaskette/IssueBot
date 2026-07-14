@@ -173,6 +173,7 @@ class IssuePollingServiceTest {
         parent.put("number", 10);
         ObjectNode openSub = objectMapper.createObjectNode();
         openSub.put("number", 11);
+        openSub.put("body", "Auto-created by IssueBot — decomposed from #10"); // links back to parent #10
         when(gitHubApiClient.listIssues("owner", "repo", "issuebot-parent", "open"))
                 .thenReturn(List.<JsonNode>of(parent));
         when(gitHubApiClient.listIssues("owner", "repo", "issuebot-decomposed", "open"))
@@ -181,6 +182,28 @@ class IssuePollingServiceTest {
         pollingService.pollForIssues();
 
         verify(gitHubApiClient, never()).closeIssue(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void closesOnlyTheParentWhoseSubsAreDone_notEpicsWithSubsStillOpen() {
+        // Per-parent scoping: epic #10's sub-issues are all closed, but epic #20 still has an open
+        // sub (#21). #10 must close; #20 must stay open — the old repo-wide check kept BOTH open.
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+
+        ObjectNode parent10 = objectMapper.createObjectNode(); parent10.put("number", 10);
+        ObjectNode parent20 = objectMapper.createObjectNode(); parent20.put("number", 20);
+        ObjectNode openSubOf20 = objectMapper.createObjectNode();
+        openSubOf20.put("number", 21);
+        openSubOf20.put("body", "decomposed from #20");
+        when(gitHubApiClient.listIssues("owner", "repo", "issuebot-parent", "open"))
+                .thenReturn(List.<JsonNode>of(parent10, parent20));
+        when(gitHubApiClient.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(List.<JsonNode>of(openSubOf20));
+
+        pollingService.pollForIssues();
+
+        verify(gitHubApiClient).closeIssue("owner", "repo", 10);              // its subs are done
+        verify(gitHubApiClient, never()).closeIssue("owner", "repo", 20);    // still has open sub #21
     }
 
     // === evaluateSingleIssueFromWebhook tests ===
