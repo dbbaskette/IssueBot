@@ -598,6 +598,27 @@ class IntegrationWorkflowTest {
         verify(iterationManager, never()).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));
     }
 
+    @Test
+    void phaseIndependentReview_claimsReviewSlotBeforeInvokingReview_soCounterShowsInFlight() {
+        // The review-iteration counter must increment BEFORE the review runs (like the impl-iteration
+        // counter), so the dashboard shows "review rounds 1/2" while the review is in flight — not 0.
+        TrackedIssue issue = createTestIssue();
+        issue.setCurrentReviewIteration(0);
+        issue.setResolvedReviewModel("claude-sonnet-5"); // normally set by processIssue; we call the phase directly
+        com.dbbaskette.issuebot.model.Iteration iter = new com.dbbaskette.issuebot.model.Iteration(issue, 1);
+        java.util.concurrent.atomic.AtomicInteger seenAtCall = new java.util.concurrent.atomic.AtomicInteger(-1);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenAnswer(inv -> { seenAtCall.set(issue.getCurrentReviewIteration()); return passedReview(); });
+
+        workflowService.phaseIndependentReview(issue, createIssueDetails(),
+                Path.of("/tmp/repo"), "branch", 99, iter, List.of());
+
+        assertEquals(1, seenAtCall.get(),
+                "review slot claimed before the review runs, so the counter shows the in-flight round");
+        assertEquals(1, issue.getCurrentReviewIteration());
+    }
+
     // === Test 4: CI failure triggers retry ===
     @Test
     void ciFailure_triggersRetry() throws Exception {

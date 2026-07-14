@@ -139,4 +139,28 @@ class IssueDetailLivePollRenderTest {
         assertThat(html).contains("phase-step done");
         assertThat(html).contains("phase-step active");
     }
+
+    @Test
+    void liveStatusPoll_updatesOffFragmentRegionsOutOfBand() {
+        // GET /issues/{id}/live-status returns live-status-poll: the pollable #live-status block
+        // PLUS hx-swap-oob copies of the status header and goal counters (which live elsewhere on
+        // the page), so the whole screen refreshes on the 5s poll — not just the terminal/cards.
+        String html = render(inProgressIssue(30L, 30, "IMPLEMENTATION"), "live-status-poll", 1, false);
+
+        assertThat(html).contains("id=\"live-status\"");     // the main polled block
+        assertThat(html).contains("id=\"status-actions\"");  // OOB: status header
+        assertThat(html).contains("id=\"goal-budget\"");     // OOB: iteration/review counters
+        assertThat(html).contains("hx-swap-oob=\"true\"");   // → updated in place on each poll
+    }
+
+    @Test
+    void content_offFragmentRegionsRenderInPlaceWithoutOob() {
+        // On the initial page (content fragment) the same regions render normally, WITHOUT the
+        // OOB attribute — otherwise HTMX would try to relocate/duplicate them on load.
+        String html = render(inProgressIssue(31L, 31, "IMPLEMENTATION"), "content", 1, false);
+
+        assertThat(html).contains("id=\"status-actions\"");
+        assertThat(html).contains("id=\"goal-budget\"");
+        assertThat(html).doesNotContain("hx-swap-oob");
+    }
 }
