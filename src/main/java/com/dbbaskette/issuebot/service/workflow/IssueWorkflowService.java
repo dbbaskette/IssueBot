@@ -526,7 +526,11 @@ public class IssueWorkflowService {
             } else if (!reviewResult.passed()) {
                 // Review failed — check review budget
                 if (!iterationManager.canReviewIterate(trackedIssue)) {
-                    iterationManager.handleMaxReviewIterationsReached(trackedIssue);
+                    // Carry the actual blockers into the failure — otherwise "needs human"
+                    // is a dead end with nothing to act on. Concise summary → the dashboard
+                    // failure reason; full human-readable findings → the GitHub comment.
+                    iterationManager.handleMaxReviewIterationsReached(trackedIssue,
+                            summarizeReviewBlockers(reviewResult), buildReviewFeedback(reviewResult));
                     return;
                 }
 
@@ -1205,6 +1209,63 @@ public class IssueWorkflowService {
     /**
      * Build feedback string from a failed review to pass back to Opus.
      */
+    /**
+     * A concise, human-readable summary of WHY the review blocked — for the dashboard failure
+     * reason, so an exhausted review escalated to "needs human" is actionable instead of a dead
+     * end. Leads with the reviewer's overall verdict, then the highest-severity findings
+     * (file:line — finding, capped), then a count of unmet acceptance criteria. The FULL findings
+     * live in the per-iteration review JSON and the PR review comment; this is the at-a-glance
+     * "what to fix". Returns "" when the result carries nothing useful (caller falls back to the
+     * generic message).
+     */
+    String summarizeReviewBlockers(CodeReviewResult review) {
+        if (review == null) return "";
+        StringBuilder sb = new StringBuilder();
+        if (review.summary() != null && !review.summary().isBlank()) {
+            sb.append("Why: ").append(review.summary().strip());
+        }
+
+        List<CodeReviewResult.ReviewFinding> ranked = (review.findings() == null ? List.<CodeReviewResult.ReviewFinding>of() : review.findings())
+                .stream()
+                .sorted((a, b) -> Integer.compare(severityRank(a.severity()), severityRank(b.severity())))
+                .toList();
+        if (!ranked.isEmpty()) {
+            if (sb.length() > 0) sb.append("\n");
+            sb.append("Top blockers:");
+            int shown = 0;
+            for (CodeReviewResult.ReviewFinding f : ranked) {
+                if (shown >= 3) break;
+                sb.append("\n• [").append(f.severity() == null ? "?" : f.severity().toUpperCase()).append("] ");
+                if (f.file() != null && !f.file().isBlank()) {
+                    sb.append(f.file());
+                    if (f.line() != null) sb.append(":").append(f.line());
+                    sb.append(" — ");
+                }
+                sb.append(f.finding());
+                shown++;
+            }
+            if (ranked.size() > shown) sb.append("\n• …and ").append(ranked.size() - shown).append(" more");
+        }
+
+        List<CodeReviewResult.CriterionVerdict> unmet = review.criteria() == null ? List.of()
+                : review.criteria().stream().filter(c -> "unmet".equals(c.verdict())).toList();
+        if (!unmet.isEmpty()) {
+            sb.append("\nUnmet acceptance criteria: ").append(unmet.size());
+        }
+        return sb.toString();
+    }
+
+    /** Severity ordering for {@link #summarizeReviewBlockers}: lower = more urgent. */
+    private int severityRank(String severity) {
+        if (severity == null) return 3;
+        return switch (severity.toLowerCase()) {
+            case "critical" -> 0;
+            case "important", "high" -> 1;
+            case "minor", "low" -> 2;
+            default -> 3;
+        };
+    }
+
     String buildReviewFeedback(CodeReviewResult review) {
         StringBuilder fb = new StringBuilder();
         fb.append("The independent code review found issues with your implementation.\n\n");

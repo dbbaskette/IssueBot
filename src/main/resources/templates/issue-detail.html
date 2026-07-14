@@ -74,7 +74,9 @@
             <!-- === LAST FAILURE BANNER === -->
             <div class="alert alert-danger" role="alert"
                  th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
-                <strong>Last failure:</strong> <span th:text="${issue.lastFailureReason}"></span>
+                <strong>Last failure:</strong>
+                <!-- pre-line so a multi-line failure reason (e.g. review blockers) renders as a list -->
+                <span th:text="${issue.lastFailureReason}" style="white-space: pre-line;"></span>
                 <span th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
                       th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
             </div>
