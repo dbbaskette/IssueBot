@@ -1031,4 +1031,36 @@ class IssueWorkflowServiceTest {
         verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
         assertEquals("[tool_use] Bash", captor.getValue());
     }
+
+    // === Review-blocker summary (so an exhausted review's "needs human" is actionable) ===
+
+    @Test
+    void summarizeReviewBlockers_leadsWithVerdict_ranksBySeverity_capsAndCountsCriteria() {
+        List<CodeReviewResult.ReviewFinding> findings = List.of(
+                new CodeReviewResult.ReviewFinding("minor", "quality", "A.java", 1, "nit", null),
+                new CodeReviewResult.ReviewFinding("critical", "correctness", "AgentRunner.java", 88,
+                        "race on shared state", "add a lock"),
+                new CodeReviewResult.ReviewFinding("important", "tests", "B.java", 5, "missing test", null),
+                new CodeReviewResult.ReviewFinding("minor", "quality", "C.java", 2, "nit2", null));
+        List<CodeReviewResult.CriterionVerdict> criteria = List.of(
+                CodeReviewResult.CriterionVerdict.lenient("must be thread-safe", "unmet", "still races"),
+                CodeReviewResult.CriterionVerdict.lenient("javadoc updated", "met", null));
+        CodeReviewResult r = new CodeReviewResult(false, "Not thread-safe under concurrent runs",
+                0.9, 0.4, 0.8, 0.5, 0.9, 0.9, 1.0, findings, "add synchronization", "{}",
+                10, 20, "claude-sonnet-5", null, criteria);
+
+        String s = workflowService.summarizeReviewBlockers(r);
+
+        assertTrue(s.contains("Why: Not thread-safe under concurrent runs"), s);
+        assertTrue(s.contains("[CRITICAL] AgentRunner.java:88 — race on shared state"), s);
+        assertTrue(s.indexOf("[CRITICAL]") < s.indexOf("[IMPORTANT]"), "critical ranks before important");
+        assertTrue(s.contains("…and 1 more"), s);   // 4 findings, capped at 3
+        assertTrue(s.contains("Unmet acceptance criteria: 1"), s);
+    }
+
+    @Test
+    void summarizeReviewBlockers_nothingUseful_returnsEmpty() {
+        assertEquals("", workflowService.summarizeReviewBlockers(null));
+        assertEquals("", workflowService.summarizeReviewBlockers(CodeReviewResult.failed("", 0, 0, "m")));
+    }
 }

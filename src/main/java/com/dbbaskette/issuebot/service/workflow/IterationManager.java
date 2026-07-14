@@ -212,14 +212,27 @@ public class IterationManager {
     /**
      * Handle the case when max review iterations have been reached.
      */
-    public void handleMaxReviewIterationsReached(TrackedIssue trackedIssue) {
+    /**
+     * @param blockerSummary a concise, human-readable summary of what the review objected to
+     *                       (from {@code IssueWorkflowService.summarizeReviewBlockers}), appended
+     *                       to the failure reason so "needs human" is actionable; may be blank.
+     * @param richFindings   the full human-readable review findings for the GitHub escalation
+     *                       comment (replaces a raw JSON dump); may be blank.
+     */
+    public void handleMaxReviewIterationsReached(TrackedIssue trackedIssue,
+                                                  String blockerSummary, String richFindings) {
         int maxReviewIterations = trackedIssue.getRepo().getMaxReviewIterations();
-        String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations);
+        String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations, richFindings);
+
+        StringBuilder detail = new StringBuilder("Independent review could not be satisfied after ")
+                .append(maxReviewIterations).append(" iterations, needs human attention.");
+        if (blockerSummary != null && !blockerSummary.isBlank()) {
+            detail.append("\n").append(blockerSummary.strip());
+        }
 
         escalateFailure(trackedIssue,
                 "Review Budget Exhausted",
-                "Independent review could not be satisfied after "
-                        + maxReviewIterations + " iterations, needs human attention",
+                detail.toString(),
                 "MAX_REVIEW_ITERATIONS_REACHED",
                 "Review failed after " + maxReviewIterations + " iterations, entering cooldown",
                 comment);
@@ -259,10 +272,16 @@ public class IterationManager {
     /**
      * Shared escalation logic: mark FAILED, label, comment, cooldown, notify, log.
      */
+    // last_failure_reason is VARCHAR(2000). Bound EVERY escalation's detail defensively so a
+    // verbose (model-controlled) reason can never overflow the column — an overflow throws on
+    // save() and is only caught by the top-level handler, which would then skip the needs-human
+    // label, escalation comment, and cooldown this method exists to guarantee.
+    private static final int MAX_FAILURE_REASON_CHARS = 1900;
+
     private void escalateFailure(TrackedIssue trackedIssue, String notificationTitle,
                                    String notificationDetail, String eventType,
                                    String eventMessage, String issueComment) {
-        trackedIssue.setLastFailureReason(notificationDetail);
+        trackedIssue.setLastFailureReason(truncate(notificationDetail, MAX_FAILURE_REASON_CHARS));
 
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
@@ -367,24 +386,27 @@ public class IterationManager {
         return sb.toString();
     }
 
-    private String buildMaxReviewIterationsComment(TrackedIssue trackedIssue, int maxReviewIterations) {
+    private String buildMaxReviewIterationsComment(TrackedIssue trackedIssue, int maxReviewIterations,
+                                                    String richFindings) {
         StringBuilder sb = new StringBuilder();
         sb.append("## IssueBot: Review Budget Exhausted\n\n");
         sb.append("The independent code review could not be satisfied after **")
                 .append(maxReviewIterations).append(" review iterations**.\n\n");
 
-        // Add last review details
         List<Iteration> iterations = iterationRepository
                 .findByIssueOrderByIterationNumAsc(trackedIssue);
-        if (!iterations.isEmpty()) {
-            Iteration last = iterations.get(iterations.size() - 1);
-            if (last.getReviewJson() != null) {
-                sb.append("### Last Review Findings\n");
-                sb.append("```json\n").append(truncate(last.getReviewJson(), 1000)).append("\n```\n\n");
-            }
-            if (last.getCiResult() != null) {
-                sb.append("**CI Result:** ").append(last.getCiResult()).append("\n\n");
-            }
+
+        // Prefer the human-readable findings; fall back to the last iteration's raw JSON.
+        if (richFindings != null && !richFindings.isBlank()) {
+            // Bound the (model-controlled) findings for a readable comment.
+            sb.append("### Why the review blocked\n").append(truncate(richFindings.strip(), 6000)).append("\n\n");
+        } else if (!iterations.isEmpty() && iterations.get(iterations.size() - 1).getReviewJson() != null) {
+            sb.append("### Last Review Findings\n");
+            sb.append("```json\n").append(truncate(iterations.get(iterations.size() - 1).getReviewJson(), 1000))
+                    .append("\n```\n\n");
+        }
+        if (!iterations.isEmpty() && iterations.get(iterations.size() - 1).getCiResult() != null) {
+            sb.append("**CI Result:** ").append(iterations.get(iterations.size() - 1).getCiResult()).append("\n\n");
         }
 
         sb.append("### Next Steps\n");
