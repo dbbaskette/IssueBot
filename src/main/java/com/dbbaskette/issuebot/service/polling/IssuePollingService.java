@@ -20,6 +20,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -163,7 +164,11 @@ public class IssuePollingService {
             return;
         }
 
-        TrackedIssue next = pending.getFirst();
+        // Lowest issue number first, so decomposed parts resume 1/X → N/X (findByRepoAndStatus
+        // has no ordering guarantee).
+        TrackedIssue next = pending.stream()
+                .min(Comparator.comparingInt(TrackedIssue::getIssueNumber))
+                .orElseThrow();
         log.info("Resuming pending issue {} #{}: {}", repo.fullName(),
                 next.getIssueNumber(), next.getIssueTitle());
         // Claim IN_PROGRESS synchronously before the async dispatch so a subsequent poll cycle
@@ -256,8 +261,17 @@ public class IssuePollingService {
             return;
         }
 
+        // Oldest-first (ascending issue number). GitHub's default list order is newest-first, so
+        // without this the LAST-created issue starts first — for a decomposed epic that means the
+        // highest part (e.g. 4/4) runs before 1/X. Lower issue numbers correspond to earlier
+        // parts, so ascending gives natural 1/X → N/X (and FIFO for ordinary issues). Once the
+        // first is claimed and the rest queue, drainQueuedIssues drains them in the same order.
+        List<JsonNode> ordered = issues.stream()
+                .sorted(Comparator.comparingInt(n -> n.path("number").asInt(Integer.MAX_VALUE)))
+                .toList();
+
         long slotsUsed = 0;
-        for (JsonNode issueNode : issues) {
+        for (JsonNode issueNode : ordered) {
             if (slotsUsed >= availableSlots) break;
             if (evaluateIssue(repo, issueNode) == WebhookOutcome.STARTED) {
                 slotsUsed++;
