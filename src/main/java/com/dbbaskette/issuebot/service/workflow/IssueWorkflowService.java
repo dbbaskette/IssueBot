@@ -49,6 +49,10 @@ public class IssueWorkflowService {
 
     private static final Logger log = LoggerFactory.getLogger(IssueWorkflowService.class);
 
+    /** Base backoff between review-invocation retries (linear: attempt × base). Package-private
+     *  so tests can zero it out and not sleep. */
+    long reviewRetryBackoffBaseMs = 2000L;
+
     private static final DateTimeFormatter GUIDANCE_TIME = DateTimeFormatter.ofPattern("HH:mm");
 
     private final GitOperationsService gitOps;
@@ -1035,7 +1039,9 @@ public class IssueWorkflowService {
         // Retry the REVIEW (not the implementation) on an invocation failure: a crashed/empty/
         // unparseable review never judged the code, so re-implementing would waste an iteration
         // "fixing" a non-problem. Bounded, so a persistent environment issue still escalates.
-        final int maxReviewInvocationAttempts = 3;
+        // These failures are usually transient (rate-limit/load), so back off between attempts
+        // rather than hammering immediately.
+        final int maxReviewInvocationAttempts = 5;
         CodeReviewResult reviewResult;
         int attempt = 0;
         while (true) {
@@ -1062,13 +1068,23 @@ public class IssueWorkflowService {
             if (!reviewResult.invocationFailed() || attempt >= maxReviewInvocationAttempts) {
                 break; // a real verdict (pass/fail), or retries exhausted → let the caller escalate
             }
-            log.warn("Review invocation failed (attempt {}/{}): {} — retrying the review",
-                    attempt, maxReviewInvocationAttempts, reviewResult.summary());
+            long backoffMs = attempt * reviewRetryBackoffBaseMs; // linear: 2s, 4s, 6s, 8s
+            log.warn("Review invocation failed (attempt {}/{}): {} — retrying in {}ms",
+                    attempt, maxReviewInvocationAttempts, reviewResult.summary(), backoffMs);
             eventService.log("PHASE_REVIEW_RETRY",
                     "Review couldn't run (attempt " + attempt + "/" + maxReviewInvocationAttempts
-                            + ") — retrying the review, not re-implementing", repo, trackedIssue);
-            sseService.broadcastClaudeLog(issueId, "[system] Review couldn't run — retrying ("
-                    + (attempt + 1) + "/" + maxReviewInvocationAttempts + ")...");
+                            + ") — retrying the review in " + (backoffMs / 1000) + "s, not re-implementing",
+                    repo, trackedIssue);
+            sseService.broadcastClaudeLog(issueId, "[system] Review couldn't run — retrying in "
+                    + (backoffMs / 1000) + "s (" + (attempt + 1) + "/" + maxReviewInvocationAttempts + ")...");
+            if (backoffMs > 0) {
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
 
         // Consume a review-iteration slot only after the review completes successfully

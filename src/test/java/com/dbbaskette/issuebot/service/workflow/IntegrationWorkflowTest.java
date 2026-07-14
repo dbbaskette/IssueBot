@@ -100,6 +100,7 @@ class IntegrationWorkflowTest {
                 lessonRepository,
                 lessonsService,
                 objectMapper);
+        workflowService.reviewRetryBackoffBaseMs = 0; // don't sleep between review retries in tests
     }
 
     private TrackedIssue createTestIssue() {
@@ -560,8 +561,8 @@ class IntegrationWorkflowTest {
 
         workflowService.processIssue(issue);
 
-        // Retried up to the cap, then escalated as "could not run" (invocationFailed=true) — NOT re-implemented.
-        verify(codeReviewService, times(3)).reviewCode(any(Path.class), anyString(), anyString(),
+        // Retried up to the cap (5), then escalated as "could not run" (invocationFailed=true) — NOT re-implemented.
+        verify(codeReviewService, times(5)).reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any());
         verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));

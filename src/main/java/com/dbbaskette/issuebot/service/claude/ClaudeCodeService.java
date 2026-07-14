@@ -197,14 +197,10 @@ public class ClaudeCodeService {
 
                 if (exitCode != 0) {
                     result.setSuccess(false);
-                    String errorDetail = stderr.length() > 0 ? stderr.toString().trim() : "";
-                    if (errorDetail.isEmpty() && stdout.length() > 0) {
-                        // CLI may report errors on stdout (e.g. nested session detection)
-                        errorDetail = stdout.substring(0, Math.min(500, stdout.length())).trim();
-                    }
-                    result.setErrorMessage("Claude Code exited with code " + exitCode
-                            + (errorDetail.isEmpty() ? "" : ": " + errorDetail));
-                    log.warn("Claude Code failed (exit {}): {}", exitCode, errorDetail);
+                    String errorMessage = describeExitFailure(exitCode, result.getFinalResult(),
+                            stderr.toString(), stdout.toString());
+                    result.setErrorMessage(errorMessage);
+                    log.warn("Claude Code failed (exit {}): {}", exitCode, errorMessage);
                 }
 
                 log.info("Claude Code completed: {}", result);
@@ -265,6 +261,30 @@ public class ClaudeCodeService {
             command.add(systemPrompt);
         }
         return command;
+    }
+
+    /**
+     * Build a useful error message for a non-zero CLI exit. Prefers, in order: stderr, then the
+     * {@code result} event's text ({@code finalResult} — the CLI's own error summary, e.g.
+     * "Not logged in · Please run /login"), then the TAIL of stdout. Deliberately never leads with
+     * the head of stdout, which is the {@code system/init} event — informative-looking but useless
+     * for diagnosing why the process died (the recurring "exited with code 1: {init…}" reports).
+     * Package-private + static for unit testing without spawning a process.
+     */
+    static String describeExitFailure(int exitCode, String finalResult, String stderr, String stdout) {
+        String detail = "";
+        if (stderr != null && !stderr.isBlank()) {
+            detail = stderr.trim();
+        } else if (finalResult != null && !finalResult.isBlank()) {
+            detail = finalResult.trim();
+        } else if (stdout != null && !stdout.isBlank()) {
+            String s = stdout.trim();
+            detail = s.substring(Math.max(0, s.length() - 500)); // tail = the error, not the init head
+        }
+        if (detail.length() > 500) {
+            detail = detail.substring(0, 500);
+        }
+        return "Claude Code exited with code " + exitCode + (detail.isEmpty() ? "" : ": " + detail);
     }
 
     private ClaudeCodeResult failedResult(long durationMs, String errorMessage) {
