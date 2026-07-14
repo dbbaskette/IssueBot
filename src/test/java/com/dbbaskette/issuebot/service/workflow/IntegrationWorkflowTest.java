@@ -567,6 +567,36 @@ class IntegrationWorkflowTest {
         verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));
     }
 
+    @Test
+    void reviewInvocation_transientThenRealFailingVerdict_handledAsNormalFailure_notCouldNotRun() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 102);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // Invocation crashes twice, then a REAL failing verdict — the retry loop must hand this
+        // off to the normal failed-review path, NOT the "could not run" escalation.
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(invocationFailedReview(), invocationFailedReview(), failedReview());
+        when(iterationManager.canReviewIterate(issue)).thenReturn(false); // exhaust immediately
+
+        workflowService.processIssue(issue);
+
+        // Escalated as a genuine failed review (invocationFailed=FALSE), not could-not-run.
+        verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(false));
+        verify(iterationManager, never()).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));
+    }
+
     // === Test 4: CI failure triggers retry ===
     @Test
     void ciFailure_triggersRetry() throws Exception {
