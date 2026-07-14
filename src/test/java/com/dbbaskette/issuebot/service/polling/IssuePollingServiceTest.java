@@ -289,6 +289,44 @@ class IssuePollingServiceTest {
     }
 
     @Test
+    void pollCycle_dequeuedIssue_dispatchedOnce_notAlsoResumed() {
+        // Regression: in ONE poll cycle, drainQueuedIssues (QUEUED→dispatch) and
+        // resumePendingIssues (PENDING→dispatch) must not both fire the same issue. Drain must
+        // claim IN_PROGRESS synchronously; otherwise it leaves the issue PENDING (processIssueAsync
+        // only sets IN_PROGRESS later, on the async thread) and resume re-dispatches it → two
+        // concurrent runs, double the tokens.
+        properties.setMaxConcurrentIssues(3);
+        testRepo.setAutoStart(true);
+
+        TrackedIssue issue96 = new TrackedIssue(testRepo, 96, "Sub-task");
+        issue96.setStatus(IssueStatus.QUEUED);
+
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.BLOCKED)).thenReturn(List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("issuebot-parent"), anyString()))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("agent-ready"), anyString()))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(dependencyResolver.topologicalSort(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Stateful mocks reflect issue96's live status as the cycle mutates it.
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.QUEUED))
+                .thenAnswer(inv -> issue96.getStatus() == IssueStatus.QUEUED ? List.of(issue96) : List.of());
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.PENDING))
+                .thenAnswer(inv -> issue96.getStatus() == IssueStatus.PENDING ? List.of(issue96) : List.of());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList()))
+                .thenAnswer(inv -> issue96.getStatus() == IssueStatus.IN_PROGRESS ? List.of(issue96) : List.of());
+
+        pollingService.pollForIssues();
+
+        // Dispatched exactly once and claimed IN_PROGRESS (not left PENDING for resume to re-grab).
+        verify(workflowService, times(1)).processIssueAsync(issue96);
+        assertEquals(IssueStatus.IN_PROGRESS, issue96.getStatus());
+    }
+
+    @Test
     void evaluateSingleIssueFromWebhook_underCapacityButRepoGateBusy_returnsQueued() {
         properties.setMaxConcurrentIssues(3);
         when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
