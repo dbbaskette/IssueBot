@@ -150,6 +150,12 @@ class IntegrationWorkflowTest {
                 "{\"passed\":false}", 500, 300, "claude-sonnet-4-6", null, List.of());
     }
 
+    /** A review whose INVOCATION failed (rawJson null → invocationFailed()), not a real verdict. */
+    private CodeReviewResult invocationFailedReview() {
+        return CodeReviewResult.failed(
+                "Review invocation failed: Claude Code exited with code 1", 0, 0, "claude-sonnet-4-6");
+    }
+
     private void setupCommonMocks(TrackedIssue issue, ObjectNode issueDetails) throws Exception {
         Git mockGit = mock(Git.class);
         when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
@@ -496,6 +502,69 @@ class IntegrationWorkflowTest {
 
         // Now carries the review blockers (summary + findings + invocation-failed flag).
         verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), anyBoolean());
+    }
+
+    // === Review INVOCATION failure retries the review, not the implementation ===
+
+    @Test
+    void reviewInvocationFailure_retriesTheReview_thenCompletes_withoutReimplementing() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 99);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // Invocation crashes twice, then runs and passes on the 3rd attempt.
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(invocationFailedReview(), invocationFailedReview(), passedReview());
+
+        workflowService.processIssue(issue);
+
+        // The REVIEW was retried (3 invocations) within ONE implementation attempt — not re-implemented.
+        verify(codeReviewService, times(3)).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any());
+        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(iterationManager, never()).handleMaxReviewIterationsReached(any(), any(), any(), anyBoolean());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void reviewInvocationFailure_persistent_escalatesAsCouldNotRun_withoutReimplementing() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setCiEnabled(false);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode();
+        prNode.put("number", 101);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+
+        // Invocation always crashes.
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                .thenReturn(invocationFailedReview());
+
+        workflowService.processIssue(issue);
+
+        // Retried up to the cap, then escalated as "could not run" (invocationFailed=true) — NOT re-implemented.
+        verify(codeReviewService, times(3)).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any());
+        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));
     }
 
     // === Test 4: CI failure triggers retry ===

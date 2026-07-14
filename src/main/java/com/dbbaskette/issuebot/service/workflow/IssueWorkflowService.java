@@ -523,21 +523,24 @@ public class IssueWorkflowService {
                 eventService.log("PHASE_REVIEW_SKIPPED",
                         "Review invocation failed — proceeding without review",
                         repo, trackedIssue);
+            } else if (reviewResult.invocationFailed()) {
+                // The review couldn't run even after in-phase retries — the code was never judged,
+                // so re-implementing would burn iterations "fixing" a non-problem. Escalate straight
+                // to needs-human with the "could not run" framing (an environment/config issue).
+                iterationManager.handleMaxReviewIterationsReached(trackedIssue,
+                        summarizeReviewBlockers(reviewResult),
+                        "The independent review could not run (environment/CLI error), so the "
+                                + "code was not evaluated.\n\nDetails: " + reviewResult.summary(),
+                        true);
+                return;
             } else if (!reviewResult.passed()) {
-                // Review failed — check review budget
+                // A real verdict: the code fell short. Iterate (re-implement) if budget remains.
                 if (!iterationManager.canReviewIterate(trackedIssue)) {
                     // Carry the actual blockers into the failure — otherwise "needs human"
                     // is a dead end with nothing to act on. Concise summary → the dashboard
-                    // failure reason; full human-readable findings → the GitHub comment. When
-                    // the review INVOCATION failed (CLI/parse error, not a code verdict), frame
-                    // it as "couldn't run" rather than dressing an infra error up as findings.
-                    boolean invocationFailed = reviewResult.invocationFailed();
-                    String richFindings = invocationFailed
-                            ? "The independent review could not run (environment/CLI error), so the "
-                              + "code was not evaluated.\n\nDetails: " + reviewResult.summary()
-                            : buildReviewFeedback(reviewResult);
+                    // failure reason; full human-readable findings → the GitHub comment.
                     iterationManager.handleMaxReviewIterationsReached(trackedIssue,
-                            summarizeReviewBlockers(reviewResult), richFindings, invocationFailed);
+                            summarizeReviewBlockers(reviewResult), buildReviewFeedback(reviewResult), false);
                     return;
                 }
 
@@ -1029,25 +1032,43 @@ public class IssueWorkflowService {
         sseService.broadcastClaudeLog(issueId, "[system] Launching "
                 + trackedIssue.getResolvedReviewModel() + " for independent review...");
 
+        // Retry the REVIEW (not the implementation) on an invocation failure: a crashed/empty/
+        // unparseable review never judged the code, so re-implementing would waste an iteration
+        // "fixing" a non-problem. Bounded, so a persistent environment issue still escalates.
+        final int maxReviewInvocationAttempts = 3;
         CodeReviewResult reviewResult;
-        try {
-            reviewResult = codeReviewService.reviewCode(
-                    repoPath,
-                    issueDetails.path("title").asText(),
-                    issueDetails.path("body").asText(""),
-                    repo.getBranch(),
-                    trackedIssue.getResolvedReviewModel(),
-                    issueId,
-                    criteria,
-                    repo.isSecurityReviewEnabled(),
-                    repo.getReviewPassThreshold().doubleValue(),
-                    repo.getCustomInstructions(),
-                    line -> streamClaudeLog(issueId, line));
-        } catch (Exception e) {
-            log.error("Independent review failed", e);
-            eventService.log("PHASE_REVIEW_FAILED",
-                    "Review invocation error: " + e.getMessage(), repo, trackedIssue);
-            return null;
+        int attempt = 0;
+        while (true) {
+            attempt++;
+            try {
+                reviewResult = codeReviewService.reviewCode(
+                        repoPath,
+                        issueDetails.path("title").asText(),
+                        issueDetails.path("body").asText(""),
+                        repo.getBranch(),
+                        trackedIssue.getResolvedReviewModel(),
+                        issueId,
+                        criteria,
+                        repo.isSecurityReviewEnabled(),
+                        repo.getReviewPassThreshold().doubleValue(),
+                        repo.getCustomInstructions(),
+                        line -> streamClaudeLog(issueId, line));
+            } catch (Exception e) {
+                log.error("Independent review failed", e);
+                eventService.log("PHASE_REVIEW_FAILED",
+                        "Review invocation error: " + e.getMessage(), repo, trackedIssue);
+                return null;
+            }
+            if (!reviewResult.invocationFailed() || attempt >= maxReviewInvocationAttempts) {
+                break; // a real verdict (pass/fail), or retries exhausted → let the caller escalate
+            }
+            log.warn("Review invocation failed (attempt {}/{}): {} — retrying the review",
+                    attempt, maxReviewInvocationAttempts, reviewResult.summary());
+            eventService.log("PHASE_REVIEW_RETRY",
+                    "Review couldn't run (attempt " + attempt + "/" + maxReviewInvocationAttempts
+                            + ") — retrying the review, not re-implementing", repo, trackedIssue);
+            sseService.broadcastClaudeLog(issueId, "[system] Review couldn't run — retrying ("
+                    + (attempt + 1) + "/" + maxReviewInvocationAttempts + ")...");
         }
 
         // Consume a review-iteration slot only after the review completes successfully
