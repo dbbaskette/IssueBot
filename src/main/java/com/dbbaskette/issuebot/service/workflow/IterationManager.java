@@ -218,14 +218,22 @@ public class IterationManager {
      *                       to the failure reason so "needs human" is actionable; may be blank.
      * @param richFindings   the full human-readable review findings for the GitHub escalation
      *                       comment (replaces a raw JSON dump); may be blank.
+     * @param reviewInvocationFailed true when the review itself crashed (CLI/parse error) and never
+     *                       judged the code, so the reason is framed as "could not run" not "not satisfied".
      */
     public void handleMaxReviewIterationsReached(TrackedIssue trackedIssue,
-                                                  String blockerSummary, String richFindings) {
+                                                  String blockerSummary, String richFindings,
+                                                  boolean reviewInvocationFailed) {
         int maxReviewIterations = trackedIssue.getRepo().getMaxReviewIterations();
         String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations, richFindings);
 
-        StringBuilder detail = new StringBuilder("Independent review could not be satisfied after ")
-                .append(maxReviewIterations).append(" iterations, needs human attention.");
+        // Distinct framing: the review that CRASHED never judged the code, so "could not be
+        // satisfied" (which implies the code fell short) would be misleading.
+        StringBuilder detail = new StringBuilder(reviewInvocationFailed
+                ? "The independent review could not run after " + maxReviewIterations
+                        + " attempts (environment/CLI error, not necessarily a code problem), needs human attention."
+                : "Independent review could not be satisfied after " + maxReviewIterations
+                        + " iterations, needs human attention.");
         if (blockerSummary != null && !blockerSummary.isBlank()) {
             detail.append("\n").append(blockerSummary.strip());
         }

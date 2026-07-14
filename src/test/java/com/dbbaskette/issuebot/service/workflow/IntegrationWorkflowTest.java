@@ -494,8 +494,8 @@ class IntegrationWorkflowTest {
 
         workflowService.processIssue(issue);
 
-        // Now carries the review blockers (summary + findings) into the escalation.
-        verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString());
+        // Now carries the review blockers (summary + findings + invocation-failed flag).
+        verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), anyBoolean());
     }
 
     // === Test 4: CI failure triggers retry ===

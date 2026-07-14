@@ -275,7 +275,7 @@ class IterationManagerTest {
         when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
 
         String huge = "Why: " + "x".repeat(5000);
-        iterationManager.handleMaxReviewIterationsReached(issue, huge, "findings " + "y".repeat(5000));
+        iterationManager.handleMaxReviewIterationsReached(issue, huge, "findings " + "y".repeat(5000), false);
 
         assertNotNull(issue.getLastFailureReason());
         assertTrue(issue.getLastFailureReason().length() <= 2000,
@@ -283,5 +283,21 @@ class IterationManagerTest {
         assertTrue(issue.getLastFailureReason().startsWith("Independent review could not be satisfied"));
         assertEquals(IssueStatus.COOLDOWN, issue.getStatus()); // escalate → FAILED, then enterCooldown
         verify(gitHubApi).addLabels(eq("owner"), eq("repo"), eq(98), any());
+    }
+
+    @Test
+    void handleMaxReviewIterationsReached_invocationFailure_framedAsCouldNotRun() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setMaxReviewIterations(2);
+        TrackedIssue issue = new TrackedIssue(repo, 98, "Thread-safety");
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
+
+        iterationManager.handleMaxReviewIterationsReached(issue,
+                "Error: Review invocation failed: exit 1", "…", true);
+
+        // "could not run", not "could not be satisfied" (the code was never judged).
+        assertTrue(issue.getLastFailureReason().startsWith("The independent review could not run"),
+                issue.getLastFailureReason());
+        assertFalse(issue.getLastFailureReason().contains("could not be satisfied"));
     }
 }

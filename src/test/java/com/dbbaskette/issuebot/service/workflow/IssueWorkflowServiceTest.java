@@ -1063,4 +1063,28 @@ class IssueWorkflowServiceTest {
         assertEquals("", workflowService.summarizeReviewBlockers(null));
         assertEquals("", workflowService.summarizeReviewBlockers(CodeReviewResult.failed("", 0, 0, "m")));
     }
+
+    @Test
+    void summarizeReviewBlockers_invocationFailure_surfacesErrorHead_notBlockersOrRawBlob() {
+        // failed(...) => rawJson null => invocationFailed(); the review never judged the code.
+        CodeReviewResult r = CodeReviewResult.failed(
+                "Review invocation failed: Claude Code exited with code 1\n{\"type\":\"system\",\"subtype\":\"init\"}",
+                5, 6, "claude-sonnet-5");
+
+        assertTrue(r.invocationFailed());
+        String s = workflowService.summarizeReviewBlockers(r);
+
+        assertTrue(s.startsWith("Error: Review invocation failed: Claude Code exited with code 1"), s);
+        assertFalse(s.contains("Why:"), "must not frame an infra error as code blockers");
+        assertFalse(s.contains("{"), "must drop the raw JSON blob (only the error head)");
+    }
+
+    @Test
+    void codeReviewResult_invocationFailed_trueOnlyWhenNoRawJson() {
+        assertTrue(CodeReviewResult.failed("boom", 0, 0, "m").invocationFailed());
+        CodeReviewResult ran = new CodeReviewResult(false, "found issues",
+                0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, List.of(), "advice", "{\"passed\":false}",
+                1, 2, "claude-sonnet-5", null, List.of());
+        assertFalse(ran.invocationFailed());
+    }
 }
