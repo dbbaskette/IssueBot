@@ -206,6 +206,26 @@ class IssuePollingServiceTest {
         verify(gitHubApiClient, never()).closeIssue("owner", "repo", 20);    // still has open sub #21
     }
 
+    @Test
+    void closingParent_flipsTrackedRowFromDecomposedToCompleted() {
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        ObjectNode parent = objectMapper.createObjectNode();
+        parent.put("number", 10);
+        when(gitHubApiClient.listIssues("owner", "repo", "issuebot-parent", "open"))
+                .thenReturn(List.<JsonNode>of(parent));
+        when(gitHubApiClient.listIssues("owner", "repo", "issuebot-decomposed", "open"))
+                .thenReturn(List.of());
+        TrackedIssue tracked = new TrackedIssue(testRepo, 10, "Epic");
+        tracked.setStatus(IssueStatus.DECOMPOSED);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 10)).thenReturn(Optional.of(tracked));
+
+        pollingService.pollForIssues();
+
+        verify(gitHubApiClient).closeIssue("owner", "repo", 10);
+        assertEquals(IssueStatus.COMPLETED, tracked.getStatus()); // dashboard reflects the epic is done
+        verify(issueRepository).save(tracked);
+    }
+
     // === evaluateSingleIssueFromWebhook tests ===
 
     @Test
