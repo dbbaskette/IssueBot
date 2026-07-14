@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+
+import org.mockito.ArgumentCaptor;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -293,11 +295,19 @@ class IterationManagerTest {
         when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
 
         iterationManager.handleMaxReviewIterationsReached(issue,
-                "Error: Review invocation failed: exit 1", "…", true);
+                "Error: Review invocation failed: exit 1",
+                "The independent review could not run (environment/CLI error)…", true);
 
         // "could not run", not "could not be satisfied" (the code was never judged).
         assertTrue(issue.getLastFailureReason().startsWith("The independent review could not run"),
                 issue.getLastFailureReason());
         assertFalse(issue.getLastFailureReason().contains("could not be satisfied"));
+
+        // The posted GitHub comment must be consistent (header AND body say "could not run").
+        ArgumentCaptor<String> comment = ArgumentCaptor.forClass(String.class);
+        verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(98), comment.capture());
+        assertTrue(comment.getValue().contains("Review Could Not Run"), comment.getValue());
+        assertFalse(comment.getValue().contains("Budget Exhausted"), comment.getValue());
+        assertFalse(comment.getValue().contains("could not be satisfied"), comment.getValue());
     }
 }

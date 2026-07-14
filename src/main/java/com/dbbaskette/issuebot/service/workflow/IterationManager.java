@@ -225,7 +225,8 @@ public class IterationManager {
                                                   String blockerSummary, String richFindings,
                                                   boolean reviewInvocationFailed) {
         int maxReviewIterations = trackedIssue.getRepo().getMaxReviewIterations();
-        String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations, richFindings);
+        String comment = buildMaxReviewIterationsComment(trackedIssue, maxReviewIterations,
+                richFindings, reviewInvocationFailed);
 
         // Distinct framing: the review that CRASHED never judged the code, so "could not be
         // satisfied" (which implies the code fell short) would be misleading.
@@ -239,7 +240,7 @@ public class IterationManager {
         }
 
         escalateFailure(trackedIssue,
-                "Review Budget Exhausted",
+                reviewInvocationFailed ? "Review Could Not Run" : "Review Budget Exhausted",
                 detail.toString(),
                 "MAX_REVIEW_ITERATIONS_REACHED",
                 "Review failed after " + maxReviewIterations + " iterations, entering cooldown",
@@ -395,11 +396,18 @@ public class IterationManager {
     }
 
     private String buildMaxReviewIterationsComment(TrackedIssue trackedIssue, int maxReviewIterations,
-                                                    String richFindings) {
+                                                    String richFindings, boolean reviewInvocationFailed) {
         StringBuilder sb = new StringBuilder();
-        sb.append("## IssueBot: Review Budget Exhausted\n\n");
-        sb.append("The independent code review could not be satisfied after **")
-                .append(maxReviewIterations).append(" review iterations**.\n\n");
+        // Header must match the failure framing: a crashed review never judged the code.
+        if (reviewInvocationFailed) {
+            sb.append("## IssueBot: Review Could Not Run\n\n");
+            sb.append("The independent review could not run after **").append(maxReviewIterations)
+                    .append(" attempts** — an environment/CLI error, not necessarily a code problem.\n\n");
+        } else {
+            sb.append("## IssueBot: Review Budget Exhausted\n\n");
+            sb.append("The independent code review could not be satisfied after **")
+                    .append(maxReviewIterations).append(" review iterations**.\n\n");
+        }
 
         List<Iteration> iterations = iterationRepository
                 .findByIssueOrderByIterationNumAsc(trackedIssue);
@@ -407,7 +415,8 @@ public class IterationManager {
         // Prefer the human-readable findings; fall back to the last iteration's raw JSON.
         if (richFindings != null && !richFindings.isBlank()) {
             // Bound the (model-controlled) findings for a readable comment.
-            sb.append("### Why the review blocked\n").append(truncate(richFindings.strip(), 6000)).append("\n\n");
+            sb.append(reviewInvocationFailed ? "### Why the review couldn't run\n" : "### Why the review blocked\n")
+                    .append(truncate(richFindings.strip(), 6000)).append("\n\n");
         } else if (!iterations.isEmpty() && iterations.get(iterations.size() - 1).getReviewJson() != null) {
             sb.append("### Last Review Findings\n");
             sb.append("```json\n").append(truncate(iterations.get(iterations.size() - 1).getReviewJson(), 1000))
