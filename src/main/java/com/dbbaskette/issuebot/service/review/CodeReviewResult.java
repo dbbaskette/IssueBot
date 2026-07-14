@@ -57,6 +57,17 @@ public record CodeReviewResult(
     }
 
     /**
+     * True when the review never actually evaluated the code — the CLI invocation, diff
+     * fetch, or output parse failed — as opposed to a review that ran and found blocking
+     * issues. Only the completed-parse path sets {@code rawJson}; every {@link #failed}
+     * result passes {@code null}. Callers use this to report "the review couldn't run"
+     * instead of dressing an infra error up as 0% scores / blocking findings.
+     */
+    public boolean invocationFailed() {
+        return rawJson == null;
+    }
+
+    /**
      * Create a failed result for error cases (e.g. JSON parse failure).
      */
     public static CodeReviewResult failed(String reason, long inputTokens, long outputTokens, String model) {

@@ -528,9 +528,16 @@ public class IssueWorkflowService {
                 if (!iterationManager.canReviewIterate(trackedIssue)) {
                     // Carry the actual blockers into the failure — otherwise "needs human"
                     // is a dead end with nothing to act on. Concise summary → the dashboard
-                    // failure reason; full human-readable findings → the GitHub comment.
+                    // failure reason; full human-readable findings → the GitHub comment. When
+                    // the review INVOCATION failed (CLI/parse error, not a code verdict), frame
+                    // it as "couldn't run" rather than dressing an infra error up as findings.
+                    boolean invocationFailed = reviewResult.invocationFailed();
+                    String richFindings = invocationFailed
+                            ? "The independent review could not run (environment/CLI error), so the "
+                              + "code was not evaluated.\n\nDetails: " + reviewResult.summary()
+                            : buildReviewFeedback(reviewResult);
                     iterationManager.handleMaxReviewIterationsReached(trackedIssue,
-                            summarizeReviewBlockers(reviewResult), buildReviewFeedback(reviewResult));
+                            summarizeReviewBlockers(reviewResult), richFindings, invocationFailed);
                     return;
                 }
 
@@ -1220,6 +1227,15 @@ public class IssueWorkflowService {
      */
     String summarizeReviewBlockers(CodeReviewResult review) {
         if (review == null) return "";
+        if (review.invocationFailed()) {
+            // The review never evaluated the code (CLI/diff/parse error) — surface the error
+            // head, not a raw JSON blob dressed up as findings. Framing is set by the caller.
+            String reason = review.summary() == null ? "" : review.summary().strip();
+            int nl = reason.indexOf('\n');
+            if (nl > 0) reason = reason.substring(0, nl).strip();
+            if (reason.length() > 200) reason = reason.substring(0, 200).strip() + "…";
+            return reason.isBlank() ? "" : "Error: " + reason;
+        }
         StringBuilder sb = new StringBuilder();
         if (review.summary() != null && !review.summary().isBlank()) {
             sb.append("Why: ").append(review.summary().strip());
