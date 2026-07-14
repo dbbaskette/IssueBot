@@ -163,4 +163,47 @@ class IssueDetailLivePollRenderTest {
         assertThat(html).contains("id=\"goal-budget\"");
         assertThat(html).doesNotContain("hx-swap-oob");
     }
+
+    @Test
+    void content_timelinePanelWrapperAlwaysRenders_evenWhenTimelineEmpty() {
+        // The OOB target id must exist on the initial page even before iteration 1 (empty timeline),
+        // otherwise htmx drops the later OOB timeline update (it needs a matching id in the DOM).
+        String html = render(inProgressIssue(33L, 33, "SETUP"), "content", 0, false);
+
+        assertThat(html).contains("id=\"timeline-panel\"");
+    }
+
+    @Test
+    void liveStatusPoll_withTimeline_emitsTimelinePanelOutOfBandWithContent() {
+        TrackedIssue issue = inProgressIssue(34L, 34, "IMPLEMENTATION");
+        var timeline = List.of(new com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline(1, List.of(
+                new com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline(1,
+                        List.of(new com.dbbaskette.issuebot.service.ui.TimelineAssembler.Segment("Implementation", 60, 100.0, "ok")),
+                        new BigDecimal("0.50"), "RUNNING"))));
+
+        WebContext ctx = new WebContext(webExchange, Locale.US);
+        ctx.setVariable("issue", issue);
+        ctx.setVariable("latestIteration", null);
+        ctx.setVariable("iterations", List.of());
+        ctx.setVariable("iterationsNewestFirst", List.of());
+        ctx.setVariable("totalCost", BigDecimal.ZERO);
+        ctx.setVariable("events", List.of());
+        ctx.setVariable("phaseIndex", 1);
+        ctx.setVariable("phaseCompleted", false);
+        ctx.setVariable("modelCatalog", List.of());
+        ctx.setVariable("humanize", new HumanizeHelper());
+        ctx.setVariable("timeline", timeline);
+
+        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("live-status-poll"),
+                (org.thymeleaf.templatemode.TemplateMode) null, null);
+        StringWriter w = new StringWriter();
+        templateEngine.process(spec, ctx, w);
+        String html = w.toString();
+
+        int idx = html.indexOf("id=\"timeline-panel\"");
+        assertThat(idx).isGreaterThan(-1);
+        // The OOB attr sits on the #timeline-panel element, and it carries the rendered timeline.
+        assertThat(html.substring(idx, Math.min(idx + 120, html.length()))).contains("hx-swap-oob=\"true\"");
+        assertThat(html).contains(">Timeline<");
+    }
 }

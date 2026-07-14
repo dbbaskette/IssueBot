@@ -226,9 +226,13 @@
             </div>
 
             <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
-            <div th:fragment="timeline-panel(oob)" id="timeline-panel" class="panel mb-3"
-                 th:if="${timeline != null and not #lists.isEmpty(timeline)}"
+            <!--/* The #timeline-panel wrapper ALWAYS renders (even before iteration 1, when the
+                   timeline is empty) so the id exists as an hx-swap-oob target: htmx silently drops
+                   an OOB element whose id isn't already in the DOM. The .panel inside is what's
+                   conditional, so nothing is visible until there's timeline data. */-->
+            <div th:fragment="timeline-panel(oob)" id="timeline-panel"
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+              <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
                 <div class="panel-header">
                     <h3>Timeline</h3>
                     <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
@@ -266,6 +270,7 @@
                     </div>
                     </th:block>
                 </div>
+              </div>
             </div>
 
             <!-- === LIVE-REFRESHED STATUS SECTION (metrics + phase pipeline) === -->
