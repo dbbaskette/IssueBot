@@ -166,6 +166,10 @@ public class IssuePollingService {
         TrackedIssue next = pending.getFirst();
         log.info("Resuming pending issue {} #{}: {}", repo.fullName(),
                 next.getIssueNumber(), next.getIssueTitle());
+        // Claim IN_PROGRESS synchronously before the async dispatch so a subsequent poll cycle
+        // (or a concurrent dispatcher) sees it active and won't re-dispatch the same issue.
+        next.setStatus(IssueStatus.IN_PROGRESS);
+        issueRepository.save(next);
         eventService.log("ISSUE_RESUMED",
                 "Resuming pending issue #" + next.getIssueNumber(), repo, next);
         workflowService.processIssueAsync(next);
@@ -203,7 +207,11 @@ public class IssuePollingService {
         TrackedIssue next = sorted.getFirst();
         log.info("Gate cleared for {} — dequeuing issue #{}: {}",
                 repo.fullName(), next.getIssueNumber(), next.getIssueTitle());
-        next.setStatus(IssueStatus.PENDING);
+        // Claim IN_PROGRESS synchronously (NOT PENDING) before the async dispatch. Otherwise the
+        // issue is still PENDING when resumePendingIssues runs later in this same poll cycle —
+        // processIssueAsync only flips IN_PROGRESS later, on the async thread — and gets dispatched
+        // a SECOND time (two concurrent runs, double the tokens).
+        next.setStatus(IssueStatus.IN_PROGRESS);
         issueRepository.save(next);
 
         eventService.log("ISSUE_DEQUEUED",
