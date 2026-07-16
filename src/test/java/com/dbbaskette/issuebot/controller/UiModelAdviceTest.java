@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,7 +18,7 @@ class UiModelAdviceTest {
     @Test
     void dashboardNotificationsEnabled_reflectsPropertyToggle() {
         IssueBotProperties properties = new IssueBotProperties();
-        UiModelAdvice advice = new UiModelAdvice(properties);
+        UiModelAdvice advice = new UiModelAdvice(properties, org.mockito.Mockito.mock(ProcessingControlService.class));
 
         properties.getNotifications().setDashboard(true);
         assertThat(advice.dashboardNotificationsEnabled()).isTrue();

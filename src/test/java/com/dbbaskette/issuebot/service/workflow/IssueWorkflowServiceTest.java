@@ -1,6 +1,8 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.FailureCategory;
+import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -52,6 +54,21 @@ class IssueWorkflowServiceTest {
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
+
+    @Test
+    void recordsStructuredFailureForRecoveryUi() {
+        FailureDiagnosticService diagnostics = mock(FailureDiagnosticService.class);
+        workflowService.setFailureDiagnosticService(diagnostics);
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Fix");
+
+        workflowService.recordFailure(issue, FailureCategory.SETUP, "Setup failed", "SETUP",
+                "permission denied", "Check repository credentials",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+
+        verify(diagnostics).record(issue, FailureCategory.SETUP, "Setup failed", "SETUP",
+                "permission denied", "Check repository credentials",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+    }
 
     @BeforeEach
     void setUp() {

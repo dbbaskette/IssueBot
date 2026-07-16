@@ -26,6 +26,7 @@ import org.eclipse.jgit.api.Git;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -78,6 +79,12 @@ public class IssueWorkflowService {
     private final RepoLessonRepository lessonRepository;
     private final LessonsService lessonsService;
     private final ObjectMapper objectMapper;
+    private FailureDiagnosticService failureDiagnosticService;
+
+    @Autowired(required = false)
+    void setFailureDiagnosticService(FailureDiagnosticService failureDiagnosticService) {
+        this.failureDiagnosticService = failureDiagnosticService;
+    }
 
     public IssueWorkflowService(GitOperationsService gitOps,
                                  GitHubApiClient gitHubApi,
@@ -144,8 +151,10 @@ public class IssueWorkflowService {
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
-            trackedIssue.setLastFailureReason("Unhandled error: " + e.getMessage());
-            issueRepository.save(trackedIssue);
+            recordFailure(trackedIssue, FailureCategory.UNEXPECTED,
+                    "Unhandled error: " + e.getMessage(), null, e.toString(),
+                    "Review the technical details and add narrower guidance before retrying.",
+                    FailureRetryability.RETRYABLE);
             eventService.log("WORKFLOW_ERROR", "Unhandled error: " + e.getMessage(),
                     trackedIssue.getRepo(), trackedIssue);
         }
@@ -201,8 +210,10 @@ public class IssueWorkflowService {
             log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
-            trackedIssue.setLastFailureReason("Setup failed: " + e.getMessage());
-            issueRepository.save(trackedIssue);
+            recordFailure(trackedIssue, FailureCategory.SETUP,
+                    "Setup failed: " + e.getMessage(), "SETUP", e.toString(),
+                    "Check repository access, credentials, and the local checkout before retrying.",
+                    FailureRetryability.OPERATOR_ACTION_REQUIRED);
             eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
             return;
         }
@@ -501,8 +512,10 @@ public class IssueWorkflowService {
                 log.error("Phase 4 (PR Creation) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
-                trackedIssue.setLastFailureReason("PR creation failed: " + e.getMessage());
-                issueRepository.save(trackedIssue);
+                recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
+                        "PR creation failed: " + e.getMessage(), "PR_CREATION", e.toString(),
+                        "Check GitHub permissions and branch state, then retry.",
+                        FailureRetryability.OPERATOR_ACTION_REQUIRED);
                 eventService.log("PHASE_PR_CREATION_FAILED",
                         "PR creation failed: " + e.getMessage(), repo, trackedIssue);
                 return;
@@ -579,8 +592,10 @@ public class IssueWorkflowService {
                 log.error("Phase 6 (Completion) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
-                trackedIssue.setLastFailureReason("Completion failed: " + e.getMessage());
-                issueRepository.save(trackedIssue);
+                recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
+                        "Completion failed: " + e.getMessage(), "COMPLETION", e.toString(),
+                        "Inspect the pull request and merge checks, then retry completion.",
+                        FailureRetryability.OPERATOR_ACTION_REQUIRED);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);
                 return;
@@ -666,6 +681,18 @@ public class IssueWorkflowService {
         }
         cancellationService.clear(trackedIssue.getId());
         return true;
+    }
+
+    void recordFailure(TrackedIssue issue, FailureCategory category, String summary, String phase,
+                       String technicalDetails, String suggestedAction,
+                       FailureRetryability retryability) {
+        if (failureDiagnosticService != null) {
+            failureDiagnosticService.record(issue, category, summary, phase, technicalDetails,
+                    suggestedAction, retryability);
+        } else {
+            issue.setLastFailureReason(summary);
+            issueRepository.save(issue);
+        }
     }
 
     /**

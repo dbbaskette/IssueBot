@@ -52,14 +52,19 @@
                     <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
                     <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                             type="button" class="btn btn-ghost btn-sm"
+                            th:disabled="${processingPaused == true}"
+                            th:title="${processingPaused == true ? 'Processing is paused' : 'Review recovery options'}"
                             data-modal-open="retry-modal">
                         <i class="ti ti-refresh" aria-hidden="true"></i>
                         <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
                     </button>
-                    <button th:if="${issue.status.name() == 'QUEUED'}"
+                    <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                             type="button" class="btn btn-primary btn-sm"
+                            th:disabled="${processingPaused == true}"
+                            th:title="${processingPaused == true ? 'Processing is paused' : 'Start this issue now'}"
                             data-modal-open="start-modal">
-                        <i class="ti ti-player-play" aria-hidden="true"></i> Start
+                        <i class="ti ti-player-play" aria-hidden="true"></i>
+                        <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
                     </button>
                     <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
                             type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
@@ -72,14 +77,54 @@
                 </div>
             </div>
 
-            <!-- === LAST FAILURE BANNER === -->
-            <div class="alert alert-danger" role="alert"
+            <div th:if="${issue.status.name() == 'PENDING' and issue.suspensionReason != null}"
+                 class="alert alert-info" role="status">
+                <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
+            </div>
+
+            <!-- === FAILURE RECOVERY PANEL === -->
+            <div class="panel mb-3 failure-recovery"
                  th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
-                <strong>Last failure:</strong>
-                <!-- pre-line so a multi-line failure reason (e.g. review blockers) renders as a list -->
-                <span th:text="${issue.lastFailureReason}" style="white-space: pre-line;"></span>
-                <span th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}"
-                      th:text="' — cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></span>
+                <div class="panel-header">
+                    <h3>Recovery</h3>
+                    <span class="status status-failed">Needs attention</span>
+                </div>
+                <div class="panel-body">
+                    <h4>What happened</h4>
+                    <p th:text="${latestFailureDiagnostic != null ? latestFailureDiagnostic.summary : issue.lastFailureReason}"
+                       style="white-space:pre-line"></p>
+                    <h4>Suggested next step</h4>
+                    <p th:text="${latestFailureDiagnostic != null and latestFailureDiagnostic.suggestedAction != null ? latestFailureDiagnostic.suggestedAction : 'Review the failure details, add guidance for the next attempt, then retry.'}"></p>
+                    <details th:if="${latestFailureDiagnostic != null and latestFailureDiagnostic.technicalDetails != null}" class="mb-2">
+                        <summary>Technical details</summary>
+                        <pre class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
+                    </details>
+                    <p th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}" class="text-sm text-muted"
+                       th:text="'Cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></p>
+                    <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post">
+                        <label for="recoveryInstructions">Guidance for the next attempt</label>
+                        <textarea id="recoveryInstructions" name="instructions" rows="4" class="modal-textarea"
+                                  placeholder="What should the agent do differently this time?"></textarea>
+                        <details class="mt-1">
+                            <summary>Advanced retry options</summary>
+                            <div class="field-group">
+                                <label for="recoveryImplModel">Implementation model</label>
+                                <select id="recoveryImplModel" name="implModelOverride">
+                                    <option value="" selected>Use repo/global setting</option>
+                                    <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                                </select>
+                            </div>
+                            <div class="field-group">
+                                <label for="recoveryBudget">Budget override (USD)</label>
+                                <input type="number" id="recoveryBudget" name="budgetOverrideUsd" step="0.50" min="0" placeholder="Use repo setting">
+                            </div>
+                        </details>
+                        <div class="modal-actions">
+                            <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingPaused == true}"
+                                    th:title="${processingPaused == true ? 'Processing is paused' : 'Retry with this guidance'}">Retry with guidance</button>
+                        </div>
+                    </form>
+                </div>
             </div>
 
             <!-- === BLOCKED-BY INFO PANEL === -->
@@ -417,7 +462,7 @@
     </div>
 
     <!-- === Start Modal === -->
-    <div th:if="${issue.status.name() == 'QUEUED'}"
+    <div th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
          id="start-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="start-modal-title">
             <h3 id="start-modal-title" style="margin:0 0 0.5rem">Start Issue</h3>

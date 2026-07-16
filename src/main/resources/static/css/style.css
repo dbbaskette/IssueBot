@@ -315,6 +315,35 @@ code {
     color: var(--text-secondary);
 }
 
+.processing-control {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    width: 100%;
+}
+
+.processing-control.btn {
+    justify-content: flex-start;
+}
+
+.failure-recovery {
+    border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.failure-recovery h4 {
+    margin: 0 0 .35rem;
+}
+
+.failure-recovery h4:not(:first-child) {
+    margin-top: 1rem;
+}
+
+.failure-recovery pre {
+    max-height: 18rem;
+    overflow: auto;
+    white-space: pre-wrap;
+}
+
 /* Pulsing status dot */
 .status-dot {
     width: 9px;

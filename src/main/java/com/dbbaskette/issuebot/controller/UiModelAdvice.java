@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
+import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
 
@@ -23,9 +24,11 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 public class UiModelAdvice {
 
     private final IssueBotProperties properties;
+    private final ProcessingControlService processingControl;
 
-    public UiModelAdvice(IssueBotProperties properties) {
+    public UiModelAdvice(IssueBotProperties properties, ProcessingControlService processingControl) {
         this.properties = properties;
+        this.processingControl = processingControl;
     }
 
     @ModelAttribute("humanize")
@@ -44,4 +47,7 @@ public class UiModelAdvice {
     public boolean dashboardNotificationsEnabled() {
         return properties.getNotifications().isDashboard();
     }
+
+    @ModelAttribute("processingPaused")
+    public boolean processingPaused() { return processingControl.isPaused(); }
 }
