@@ -199,11 +199,11 @@ Finally change `ISSUEBOT_FIRST_CUTOVER=false` in the mode-`0600` deploy file. Al
 ./deploy/deploy-remote.sh status
 ./deploy/deploy-remote.sh logs issuebot 200
 ./deploy/deploy-remote.sh logs codex-cli-provider 200
-curl --fail --silent --show-error http://home-services.local:8090/actuator/health/liveness
-curl --fail --silent --show-error http://home-services.local:8090/actuator/health/readiness
+ssh dbbaskette@home-services.local 'curl --fail --silent --show-error http://127.0.0.1:8090/actuator/health/liveness'
+ssh dbbaskette@home-services.local 'curl --fail --silent --show-error http://127.0.0.1:8090/actuator/health/readiness'
 ```
 
-Expected: both Compose services are healthy; liveness and readiness return HTTP 200 with `UP`. The aggregate health check additionally validates GitHub during deployment unless degraded GitHub operation was explicitly approved in code. Logs are redacted by the wrapper and limited to 1–500 lines.
+Expected: both Compose services are healthy; liveness and readiness return HTTP 200 with `UP`. The default `ISSUEBOT_BIND_ADDRESS=127.0.0.1` is loopback on `home-services.local`, so operator-workstation checks must SSH to that host and run curl there. If direct LAN access is intentionally required, set `ISSUEBOT_BIND_ADDRESS` to the host's specific LAN address only after protecting port 8090 with the approved firewall/reverse-proxy and TLS policy; this exposes the dashboard beyond host loopback, so dashboard authentication remains mandatory. The aggregate health check additionally validates GitHub during deployment unless degraded GitHub operation was explicitly approved in code. Logs are redacted by the wrapper and limited to 1–500 lines.
 
 For later releases, first update the approved provider digest if required, then run `preflight` and `deploy`. A build or provider-pull failure happens before shutdown and leaves the old process running. Failures after shutdown capture sanitized diagnostics under `${ISSUEBOT_HOME}/deployments/failed/<UTC timestamp>/` and attempt only a schema-safe application rollback.
 
@@ -217,7 +217,7 @@ Expected: the recorded previous IssueBot image and provider digest are reused lo
 
 ## Operator-approved H2 restore
 
-Use this only after an application rollback is schema-unsafe or the new database is known to be corrupt, and only with explicit operator approval. The restricted deploy key cannot perform this procedure. The commands intentionally stop both native and Compose ownership, preserve the failed database, verify the selected backup against `backup.metadata`, restore ownership/mode, and start only the version in the previous known-good `current.manifest`.
+Use this only after an application rollback is schema-unsafe or the new database is known to be corrupt, and only with explicit operator approval. The restricted deploy key cannot perform this procedure. The commands intentionally stop both native and Compose ownership, preserve the failed database, strictly validate the selected backup's own `backup.metadata` and `previous.manifest`, restore ownership/mode, and start only the IssueBot/provider versions stored with that backup. Never select the application release from `deployments/current.manifest` during an H2 restore: the database and release must remain one backup set.
 
 Open an unrestricted host shell, change to the checkout, and load the protected deployment file with the allowlisting parser:
 
@@ -248,15 +248,29 @@ esac
 require_h2_closed
 ```
 
-Select the exact verified backup directory reported by the failed deployment. Preserve the failed DB, verify the backup checksum and size, restore through a temporary file, and verify the restored checksum:
+Select the exact verified backup directory reported by the failed deployment. Before moving the failed database, require and strictly load the `previous.manifest` copied into that backup by `backup_h2`; `require_private_file`, `read_manifest`, and `load_manifest_map` reject symlinks, unsafe modes, malformed records, and non-allowlisted keys. Then validate all required release identities and locally available images, verify the backup checksum and size, restore through a temporary file, and verify the restored checksum:
 
 ```bash
 backup=/home/dbbaskette/.issuebot/backups/YYYYMMDDTHHMMSSZ
+restore_manifest="$backup/previous.manifest"
 db="$ISSUEBOT_HOME/issuebot.mv.db"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 failed="$ISSUEBOT_HOME/issuebot.failed.$stamp.mv.db"
+require_private_file "$restore_manifest"
+load_manifest_map "$restore_manifest"
+[[ "$PREVIOUS_issuebot_git_sha" =~ ^[0-9a-f]{40}$ ]]
+[[ "$PREVIOUS_issuebot_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+validate_provider_image "$PREVIOUS_provider_image"
+[[ "$PREVIOUS_provider_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+test "$PREVIOUS_provider_digest" = "${PREVIOUS_provider_image##*@}"
+[[ "$PREVIOUS_provider_protocol" =~ ^[0-9]+$ ]]
+git cat-file -e "$PREVIOUS_issuebot_git_sha^{commit}"
+test "$(docker image inspect --format '{{.Id}}' "issuebot:$PREVIOUS_issuebot_git_sha")" = "$PREVIOUS_issuebot_image_id"
+docker image inspect "$PREVIOUS_provider_image" >/dev/null
 expected_sha=$(awk -F= '$1=="database_sha256" {print $2}' "$backup/backup.metadata")
 expected_bytes=$(awk -F= '$1=="database_bytes" {print $2}' "$backup/backup.metadata")
+[[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+[[ "$expected_bytes" =~ ^[0-9]+$ ]]
 test "$(sha256_file "$backup/issuebot.mv.db")" = "$expected_sha"
 test "$(file_bytes "$backup/issuebot.mv.db")" = "$expected_bytes"
 mv "$db" "$failed"
@@ -268,18 +282,18 @@ mv "$db.restore" "$db"
 require_h2_closed
 ```
 
-Load only the previous known-good manifest and start its already-local images without a build or pull:
+Use only the already-validated release variables loaded from `$backup/previous.manifest`, then start those already-local images without a build or pull:
 
 ```bash
-known_good="$ISSUEBOT_HOME/deployments/current.manifest"
-load_manifest_map "$known_good"
 ISSUEBOT_GIT_SHA=$PREVIOUS_issuebot_git_sha
+ISSUEBOT_IMAGE_ID=$PREVIOUS_issuebot_image_id
 CODEX_CLI_PROVIDER_IMAGE=$PREVIOUS_provider_image
+PROVIDER_DIGEST=$PREVIOUS_provider_digest
 CODEX_CLI_PROVIDER_PROTOCOL_VERSION=$PREVIOUS_provider_protocol
+BACKUP_PATH=$backup
 BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-export ISSUEBOT_GIT_SHA CODEX_CLI_PROVIDER_IMAGE CODEX_CLI_PROVIDER_PROTOCOL_VERSION BUILD_DATE
-test "$(docker image inspect --format '{{.Id}}' "issuebot:$ISSUEBOT_GIT_SHA")" = "$PREVIOUS_issuebot_image_id"
-docker image inspect "$CODEX_CLI_PROVIDER_IMAGE" >/dev/null
+export ISSUEBOT_GIT_SHA ISSUEBOT_IMAGE_ID CODEX_CLI_PROVIDER_IMAGE PROVIDER_DIGEST
+export CODEX_CLI_PROVIDER_PROTOCOL_VERSION BACKUP_PATH BUILD_DATE
 docker compose --env-file "$DEPLOY_ENV" up -d --no-build codex-cli-provider issuebot
 verify_release
 ```
@@ -291,7 +305,7 @@ Expected: verification succeeds against the restored H2 database. Keep `issuebot
 After a successful cutover and native-service disablement, reboot only in an approved maintenance window:
 
 ```bash
-ssh dbbaskette@home-services.local 'docker compose --env-file /home/dbbaskette/.config/issuebot/deploy.env ps; systemctl --user is-enabled issuebot.service || true'
+ssh dbbaskette@home-services.local 'cd /home/dbbaskette/IssueBot || exit; docker compose --env-file /home/dbbaskette/.config/issuebot/deploy.env ps; systemctl --user is-enabled issuebot.service || true'
 ssh dbbaskette@home-services.local 'sudo reboot'
 ```
 
@@ -299,8 +313,8 @@ After the host returns:
 
 ```bash
 ./deploy/deploy-remote.sh status
-curl --fail --silent --show-error http://home-services.local:8090/actuator/health/liveness
-curl --fail --silent --show-error http://home-services.local:8090/actuator/health/readiness
+ssh dbbaskette@home-services.local 'curl --fail --silent --show-error http://127.0.0.1:8090/actuator/health/liveness'
+ssh dbbaskette@home-services.local 'curl --fail --silent --show-error http://127.0.0.1:8090/actuator/health/readiness'
 ssh dbbaskette@home-services.local 'pgrep -af issuebot-0.1.0-SNAPSHOT.jar || true; lsof -nP -iTCP:8090 -sTCP:LISTEN'
 ```
 
