@@ -106,11 +106,25 @@ chmod 600 "$manifest"
 assert_failure run_dispatch status
 assert_equals '' "$(<"$call_log")"
 
-write_current_manifest
-printf 'deployed_at=not-a-timestamp\n' >>"$manifest"
+printf '%s\n' \
+  'issuebot_git_sha=0123456789abcdef0123456789abcdef01234567' \
+  'deployed_at=not-a-timestamp' >"$manifest"
+chmod 600 "$manifest"
 : >"$call_log"
 assert_failure run_dispatch 'logs issuebot 10'
 assert_equals '' "$(<"$call_log")"
+
+for duplicate_record in \
+  'issuebot_git_sha=0123456789abcdef0123456789abcdef01234567' \
+  'issuebot_git_sha=ffffffffffffffffffffffffffffffffffffffff' \
+  'deployed_at=2026-07-16T12:00:00Z' \
+  'deployed_at=2026-07-17T12:00:00Z'; do
+  write_current_manifest
+  printf '%s\n' "$duplicate_record" >>"$manifest"
+  : >"$call_log"
+  assert_failure run_dispatch status
+  assert_equals '' "$(<"$call_log")"
+done
 write_current_manifest
 
 # The command substitution is intentionally literal attack input.
