@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a secure Docker Compose deployment for IssueBot on `dbbaskette@home-services.local` that fast-forward-updates source, preserves native data, consumes a separately released pinned runner image, verifies health, and supports schema-safe rollback.
+**Goal:** Build a secure Docker Compose deployment for IssueBot on `dbbaskette@home-services.local` that fast-forward-updates source, preserves its H2 data, consumes a separately released pinned `codex-cli-provider` image, verifies health, and supports schema-safe rollback.
 
-**Architecture:** The IssueBot repository owns a multi-stage application image, production Compose file, host deployment library, restricted SSH wrapper, and operator client. IssueBot is built on the remote host from a verified Git SHA; the runner is pulled by immutable digest through its separately released deployment contract. Existing `~/.issuebot` state remains a host bind mount, and production cutover is blocked until the separate runner integration removes IssueBot's direct local `claude` dependency.
+**Architecture:** The IssueBot repository owns a multi-stage application image, production Compose file, persistent H2 bind mount, host deployment library, restricted SSH wrapper, and operator client. IssueBot is built on the remote host from a verified Git SHA; `codex-cli-provider` is built only by its separate project and pulled here by immutable digest. Existing `~/.issuebot` state remains a host bind mount, and production cutover is blocked until separate provider integration removes IssueBot's direct local `claude` dependency.
 
 **Tech Stack:** Java 21, Spring Boot 3.4.2 Actuator, Maven Wrapper, Docker Engine, Docker Compose v2, Bash, H2, Flyway, JUnit 5, Mockito, MockMvc
 
@@ -14,9 +14,10 @@
 - Every deployment runs `git fetch --prune` followed by `git pull --ff-only` before build or restart.
 - Deployment refuses a dirty, detached, divergent, unexpected-branch, or upstream-less checkout.
 - IssueBot is built from the updated checkout and tagged with its full Git SHA.
-- `EXECUTION_RUNNER_IMAGE` must match the immutable-image rule `^.+@sha256:[0-9a-f]{64}$`.
-- Runner internals, disposable jobs, provider selection, and credential formats remain out of scope.
-- Production cutover is forbidden until a compatible runner release and IssueBot runner integration exist.
+- `CODEX_CLI_PROVIDER_IMAGE` must match the immutable-image rule `^.+@sha256:[0-9a-f]{64}$`.
+- `codex-cli-provider` build logic, internals, authentication, and credential formats remain out of scope.
+- PostgreSQL, SQLite, and MinIO are not part of this stack; IssueBot keeps its current file-backed H2 database on the host bind mount.
+- Production cutover is forbidden until a compatible `codex-cli-provider` release and IssueBot provider integration exist.
 - `${HOME}/.issuebot` remains authoritative; H2 is copied only while every IssueBot process is stopped.
 - Automation never invokes `docker compose down -v` and never automatically restores H2.
 - Secrets remain outside Git and image layers.
@@ -169,8 +170,8 @@ git commit -m "feat: add deployment health probes"
 **Interfaces:**
 - Consumes: Task 1 probe endpoints.
 - Produces build arguments: `APP_UID`, `APP_GID`, `VCS_REF`, `BUILD_DATE`.
-- Produces services `issuebot` and `execution-runner` on private network `backend`.
-- Consumes runner contract: immutable image, embedded OCI healthcheck, label `com.issuebot.runner.protocol`, and non-billable `runner doctor --json --no-billable-work`.
+- Produces services `issuebot` and `codex-cli-provider` on private network `backend`.
+- Consumes provider contract: immutable image, embedded OCI healthcheck, label `com.issuebot.codex-provider.protocol`, and non-billable `codex-cli-provider doctor --json --no-billable-work`.
 
 - [ ] **Step 1: Write failing image and Compose contract tests**
 
@@ -186,7 +187,7 @@ grep -Fq '.git' .dockerignore
 grep -Fq '.issuebot' .dockerignore
 ```
 
-`compose-test.sh` renders config with a temporary fixture and asserts exactly two services, only IssueBot publishes `127.0.0.1:8090:8090`, both services use `read_only`, `no-new-privileges`, dropped capabilities, bounded resources, and rotated logs, the runner image contains `@sha256:`, and neither service mounts Docker socket or SSH paths.
+`compose-test.sh` renders config with a temporary fixture and asserts exactly two services, only IssueBot publishes `127.0.0.1:8090:8090`, both services use `read_only`, `no-new-privileges`, dropped capabilities, bounded resources, and rotated logs, the provider image contains `@sha256:`, the provider has no `build:` section, and neither service mounts Docker socket or SSH paths. It also asserts there are no PostgreSQL or MinIO services and that `${ISSUEBOT_HOME}` maps to `/home/issuebot/.issuebot`.
 
 - [ ] **Step 2: Verify both tests fail**
 
@@ -241,7 +242,7 @@ volumes:
   - ${ISSUEBOT_HOME:?ISSUEBOT_HOME is required}:/home/issuebot/.issuebot
 ```
 
-Runner image is `${EXECUTION_RUNNER_IMAGE:?EXECUTION_RUNNER_IMAGE is required}` with separate `runner_credentials` and `runner_state` volumes. Both services use `restart: unless-stopped`, read-only roots, `tmpfs: [/tmp]`, all capabilities dropped, `no-new-privileges`, PID/CPU/memory limits, JSON log rotation (`10m`, five files), and `backend`. Runner has no `ports`; IssueBot readiness uses `/actuator/health/readiness`.
+Provider image is `${CODEX_CLI_PROVIDER_IMAGE:?CODEX_CLI_PROVIDER_IMAGE is required}` and must not have a Compose `build:` section. Provider credentials/state use separate protected mounts defined by the provider contract. Both services use `restart: unless-stopped`, read-only roots, `tmpfs: [/tmp]`, all capabilities dropped, `no-new-privileges`, PID/CPU/memory limits, JSON log rotation (`10m`, five files), and `backend`. Provider has no `ports`; IssueBot readiness uses `/actuator/health/readiness`.
 
 - [ ] **Step 6: Define non-secret production variables**
 
@@ -252,8 +253,8 @@ APP_GID=1000
 ISSUEBOT_HOME=/home/dbbaskette/.issuebot
 ISSUEBOT_BIND_ADDRESS=127.0.0.1
 ISSUEBOT_SECRET_ENV=/home/dbbaskette/.config/issuebot/runtime.env
-EXECUTION_RUNNER_IMAGE=registry.example.invalid/issuebot/execution-runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
-RUNNER_PROTOCOL_VERSION=1
+CODEX_CLI_PROVIDER_IMAGE=registry.example.invalid/providers/codex-cli-provider@sha256:0000000000000000000000000000000000000000000000000000000000000000
+CODEX_CLI_PROVIDER_PROTOCOL_VERSION=1
 ```
 
 The invalid registry/zero digest is intentionally rejected by preflight. Ignore `deploy/production.env` and `deploy/*.local.env`.
@@ -288,7 +289,7 @@ git commit -m "build: add production Compose stack"
 - Create: `deploy/tests/preflight-test.sh`
 
 **Interfaces:**
-- Produces `die`, `log`, `redact`, `require_command`, `acquire_lock`, `validate_runner_image`, `load_deploy_env`, and atomic manifest read/write.
+- Produces `die`, `log`, `redact`, `require_command`, `acquire_lock`, `validate_provider_image`, `load_deploy_env`, and atomic manifest read/write.
 - Produces `preflight_all`, `preflight_checkout`, `preflight_runtime`, `preflight_storage`, and `preflight_runner`.
 - Every failure returns before lifecycle mutation.
 
@@ -299,9 +300,9 @@ git commit -m "build: add production Compose stack"
 - [ ] **Step 2: Write failing common tests**
 
 ```bash
-assert_success validate_runner_image 'ghcr.io/acme/runner@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-assert_failure validate_runner_image 'ghcr.io/acme/runner:latest'
-assert_failure validate_runner_image 'registry.example.invalid/issuebot/execution-runner@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+assert_success validate_provider_image 'ghcr.io/acme/codex-cli-provider@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+assert_failure validate_provider_image 'ghcr.io/acme/codex-cli-provider:latest'
+assert_failure validate_provider_image 'registry.example.invalid/providers/codex-cli-provider@sha256:0000000000000000000000000000000000000000000000000000000000000000'
 assert_failure load_deploy_env "$world_readable_env"
 assert_contains '[REDACTED]' "$(redact 'Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789AB')"
 ```
@@ -320,7 +321,7 @@ Use `set -Eeuo pipefail`, `flock -n`, `umask 077`, UTC timestamps, `printf`, env
 
 - [ ] **Step 5: Write failing preflight tests**
 
-Cover clean attached expected branch, dirty files, untracked files, detached `HEAD`, unexpected branch, absent upstream, divergence, missing Compose v2, less than 5 GiB free, unknown owner on `8090`, allowed identified native process during first cutover, secret-file mode, runner digest/platform/healthcheck/protocol, and non-billable doctor contract.
+Cover clean attached expected branch, dirty files, untracked files, detached `HEAD`, unexpected branch, absent upstream, divergence, missing Compose v2, less than 5 GiB free, unknown owner on `8090`, allowed identified native process during first cutover, secret-file mode, provider digest/platform/healthcheck/protocol, and non-billable doctor contract.
 
 - [ ] **Step 6: Verify preflight tests fail**
 
@@ -363,7 +364,7 @@ git commit -m "feat: add deployment preflight guards"
 **Interfaces:**
 - Consumes Task 3 guards.
 - Produces `deploy_release`, `rollback_release`, `verify_release`, `backup_h2`, and `stop_native_issuebot`.
-- Manifest keys: `issuebot_git_sha`, `issuebot_image_id`, `runner_image`, `runner_digest`, `runner_protocol`, `deployed_at`, `backup_path`, `compose_project`.
+- Manifest keys: `issuebot_git_sha`, `issuebot_image_id`, `provider_image`, `provider_digest`, `provider_protocol`, `deployed_at`, `backup_path`, `compose_project`.
 
 - [ ] **Step 1: Write failing ordering and failure-safety tests**
 
@@ -391,7 +392,7 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export ISSUEBOT_GIT_SHA BUILD_DATE
 docker compose --env-file "$DEPLOY_ENV" config --quiet
 docker compose --env-file "$DEPLOY_ENV" build --pull issuebot
-docker compose --env-file "$DEPLOY_ENV" pull execution-runner
+docker compose --env-file "$DEPLOY_ENV" pull codex-cli-provider
 ```
 
 Rerun checkout/runner preflight after pull. Resolve image IDs and digests from Docker inspection, never tags alone.
@@ -405,14 +406,14 @@ Create `${ISSUEBOT_HOME}/backups/<UTC timestamp>/`, copy the closed `issuebot.mv
 - [ ] **Step 5: Implement start and verification**
 
 ```bash
-docker compose --env-file "$DEPLOY_ENV" up -d --no-build execution-runner issuebot
+docker compose --env-file "$DEPLOY_ENV" up -d --no-build codex-cli-provider issuebot
 ```
 
-Poll liveness/readiness for 120 seconds. Verify both services healthy; expected Git SHA; no H2/Flyway failure; writable config/repos/log paths; expected dashboard auth response; GitHub UP unless explicitly allowed degraded; exact runner protocol; successful `runner doctor --json --no-billable-work`; no native process; correct port owner; and no sanitized fatal startup pattern.
+Poll liveness/readiness for 120 seconds. Verify both services healthy; expected Git SHA; no H2/Flyway failure; writable config/repos/log paths; expected dashboard auth response; GitHub UP unless explicitly allowed degraded; exact provider protocol; successful `codex-cli-provider doctor --json --no-billable-work`; no native process; correct port owner; and no sanitized fatal startup pattern.
 
 - [ ] **Step 6: Implement rollback without automatic data restore**
 
-Load only allowlisted previous-manifest keys. Refuse automatic rollback when Flyway migration sets differ unless the new manifest records a tested `schema_rollback_compatible=true`. Never restore H2. Reuse only a locally present prior commit/image and recorded runner digest, then run full verification. Store diagnostics under `${ISSUEBOT_HOME}/deployments/failed/<timestamp>/` and print the verified backup path when manual restoration is required.
+Load only allowlisted previous-manifest keys. Refuse automatic rollback when Flyway migration sets differ unless the new manifest records a tested `schema_rollback_compatible=true`. Never restore H2. Reuse only a locally present prior commit/image and recorded provider digest, then run full verification. Store diagnostics under `${ISSUEBOT_HOME}/deployments/failed/<timestamp>/` and print the verified backup path when manual restoration is required.
 
 - [ ] **Step 7: Run all shell tests and commit**
 
@@ -436,7 +437,7 @@ git commit -m "feat: add safe deployment lifecycle"
 - Create: `deploy/tests/dispatcher-test.sh`
 
 **Interfaces:**
-- Produces remote commands `preflight`, `deploy`, `rollback`, `status`, and `logs [issuebot|execution-runner] [1-500]`.
+- Produces remote commands `preflight`, `deploy`, `rollback`, `status`, and `logs [issuebot|codex-cli-provider] [1-500]`.
 - Consumes forced-command variable `SSH_ORIGINAL_COMMAND`.
 
 - [ ] **Step 1: Write failing dispatcher tests**
@@ -514,7 +515,7 @@ The H2 restore procedure stops native and Compose processes, preserves the faile
 
 - [ ] **Step 2: Update README and `.env.example`**
 
-Add a Docker deployment link, independent-runner boundary, and production-cutover gate. Add only IssueBot-supported runtime secrets; never runner credentials.
+Add a Docker deployment link, independent-provider boundary, and production-cutover gate. Add only IssueBot-supported runtime secrets; never provider credentials.
 
 - [ ] **Step 3: Run complete local verification**
 
@@ -554,31 +555,31 @@ If acceptance changed code, commit those fixes separately as `fix: satisfy deplo
 - Remote protected configuration and deployment history only.
 
 **Interfaces:**
-- Consumes all completed tasks, dedicated key, compatible pinned runner, and merged IssueBot runner integration.
+- Consumes all completed tasks, dedicated key, compatible pinned `codex-cli-provider`, and merged IssueBot provider integration.
 - Produces verified Compose deployment and disables native autostart.
 
 - [ ] **Step 1: Confirm external gates**
 
-Record the exact runner digest/architecture/protocol, successful non-billable doctor result, proof IssueBot no longer needs local `claude`, mode-`0600` configuration, known native service identity, and at least twice the H2 database size available for backup.
+Record the exact provider digest/architecture/protocol, successful non-billable doctor result, proof IssueBot no longer needs local `claude`, mode-`0600` configuration, known native service identity, and at least twice the H2 database size available for backup.
 
 - [ ] **Step 2: Run preflight**
 
 Run: `./deploy/deploy-remote.sh preflight`
 
-Expected: PASS with branch/SHA, Docker/Compose, architecture, disk, port owner, secret modes, runner contract, and native-service identity.
+Expected: PASS with branch/SHA, Docker/Compose, architecture, disk, port owner, secret modes, provider contract, and native-service identity.
 
 - [ ] **Step 3: Deploy**
 
 Run: `./deploy/deploy-remote.sh deploy`
 
-Expected: fast-forward pull, test-bearing build, runner pull, graceful native stop, verified H2 backup, healthy services, functional checks, known-good manifest, and disabled native autostart.
+Expected: fast-forward pull, test-bearing build, provider pull, graceful native stop, verified H2 backup, healthy services, functional checks, known-good manifest, and disabled native autostart.
 
 - [ ] **Step 4: Independently verify**
 
 ```bash
 ./deploy/deploy-remote.sh status
 ./deploy/deploy-remote.sh logs issuebot 200
-./deploy/deploy-remote.sh logs execution-runner 200
+./deploy/deploy-remote.sh logs codex-cli-provider 200
 curl --fail --silent http://home-services.local:8090/actuator/health/liveness
 curl --fail --silent http://home-services.local:8090/actuator/health/readiness
 ```
@@ -593,10 +594,10 @@ Expected: services recover, persistent data is intact, only containerized IssueB
 
 - [ ] **Step 6: Record evidence**
 
-Store manifest, backup checksum/path, health output, runner digest/protocol, Git SHA, and reboot timestamp in deployment history. Never copy secret environment files.
+Store manifest, backup checksum/path, health output, provider digest/protocol, Git SHA, and reboot timestamp in deployment history. Never copy secret environment files.
 
 ---
 
 ## External Dependency Gate
 
-Tasks 1–6 are safe without touching production. Task 7 must not begin until the separate execution-runner project publishes a compatible immutable image and separate IssueBot runner-integration work removes direct local CLI execution. This plan defines only the runner deployment contract: immutable digest, embedded healthcheck, protocol label, and non-billable doctor command.
+Tasks 1–6 are safe without touching production. Task 7 must not begin until the separate `codex-cli-provider` project publishes a compatible immutable image and separate IssueBot provider-integration work removes direct local CLI execution. This plan defines only the provider deployment contract: immutable digest, embedded healthcheck, protocol label, and non-billable doctor command.
