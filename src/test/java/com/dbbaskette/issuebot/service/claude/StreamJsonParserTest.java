@@ -178,4 +178,21 @@ class StreamJsonParserTest {
         assertTrue(result.isSuccess());
         assertEquals("sess-final", result.getSessionId());
     }
+
+    @Test
+    void truncatedTailLine_isSkipped_notThrown() {
+        // A SIGKILLed (timed-out) run leaves a half-written final line. The timeout path parses
+        // this partial output to salvage the billed usage, so parse() must tolerate it.
+        String output = """
+                {"type":"system","subtype":"init","session_id":"sess-1"}
+                {"type":"assistant","message":{"usage":{"input_tokens":15441,"output_tokens":181}}}
+                {"type":"assistant","message":{"cont\
+                """;
+
+        ClaudeCodeResult result = parser.parse(output);
+
+        assertEquals("sess-1", result.getSessionId());
+        assertEquals(15441, result.getInputTokens()); // usage before the truncation survives
+        assertEquals(181, result.getOutputTokens());
+    }
 }

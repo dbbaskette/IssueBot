@@ -29,12 +29,18 @@ issuebot:
   work-directory: ${user.home}/.issuebot/repos
   claude-code:
     max-turns-per-invocation: 30
-    timeout-minutes: 10
+    # Wall-clock caps. These values (not the Java field defaults) are what actually apply when a
+    # key is absent from ~/.issuebot/config.yml, so they must carry the real defaults.
+    # Implementation/planning: a real agentic run (explore → write → test → iterate) routinely
+    # exceeds 10 minutes; the old cap killed healthy runs mid-flight and discarded the work.
+    timeout-minutes: 45
     implementation-model: claude-opus-4-8
     review-model: claude-sonnet-5
     utility-model: claude-haiku-4-5
     review-max-turns: 15
-    review-timeout-minutes: 5
+    # Review/utility: smaller than implementation (it only reads a diff and returns a verdict),
+    # but 5 minutes was too tight for large diffs — the real cause of "Review Could Not Run".
+    review-timeout-minutes: 20
   auth:
     username: ${ISSUEBOT_USERNAME:}
     password: ${ISSUEBOT_PASSWORD:}

@@ -177,11 +177,10 @@ public class ClaudeCodeService {
                     log.warn("Claude Code timed out after {} minutes. stdout length={}, stderr: {}",
                             timeoutMinutes, stdout.length(),
                             stderr.length() > 0 ? stderr.toString().trim() : "(empty)");
-                    ClaudeCodeResult result = failedResult(duration,
-                            "Claude Code timed out after " + timeoutMinutes + " minutes"
-                                    + (stderr.length() > 0 ? ". stderr: " + stderr.toString().trim() : ""));
-                    result.setTimedOut(true);
-                    return result;
+                    // Parse what the killed run DID produce rather than discarding it (the parser is
+                    // line-tolerant, so a truncated tail is fine).
+                    return timedOutResult(parser.parse(stdout.toString()), duration,
+                            timeoutMinutes, stderr.toString());
                 }
 
                 stdoutReader.join(5000);
@@ -261,6 +260,22 @@ public class ClaudeCodeService {
             command.add(systemPrompt);
         }
         return command;
+    }
+
+    /**
+     * Mark a (partially parsed) run as timed out WITHOUT discarding what it produced. Those tokens
+     * were billed whether or not we killed the process, so zeroing them — as a fresh
+     * {@code failedResult} does — silently under-counts the issue's cost and its budget, and throws
+     * away the session id a retry could resume from. Package-private + static for unit testing.
+     */
+    static ClaudeCodeResult timedOutResult(ClaudeCodeResult parsed, long durationMs,
+                                            int timeoutMinutes, String stderr) {
+        parsed.setDurationMs(durationMs);
+        parsed.setSuccess(false);
+        parsed.setTimedOut(true);
+        parsed.setErrorMessage("Claude Code timed out after " + timeoutMinutes + " minutes"
+                + (stderr != null && !stderr.isBlank() ? ". stderr: " + stderr.trim() : ""));
+        return parsed;
     }
 
     /**

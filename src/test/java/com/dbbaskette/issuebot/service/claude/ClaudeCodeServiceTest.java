@@ -117,6 +117,32 @@ class ClaudeCodeServiceTest {
     }
 
     @Test
+    void timedOutResult_keepsBilledUsageAndSession_insteadOfZeroingThem() {
+        // A killed run's tokens were billed regardless — zeroing them (what a fresh failedResult
+        // does) silently under-counts the issue's cost and budget. Regression guard.
+        ClaudeCodeResult parsed = new ClaudeCodeResult();
+        parsed.setInputTokens(15441);
+        parsed.setOutputTokens(2000);
+        parsed.setCostUsd(new java.math.BigDecimal("1.23"));
+        parsed.setSessionId("sess-1");
+        parsed.setFilesChanged(java.util.List.of("Foo.java"));
+        parsed.setSuccess(true);
+
+        ClaudeCodeResult r = ClaudeCodeService.timedOutResult(parsed, 1200116L, 20, "");
+
+        assertFalse(r.isSuccess(), "a timed-out run is still a failure");
+        assertTrue(r.isTimedOut());
+        assertTrue(r.getErrorMessage().contains("timed out after 20 minutes"), r.getErrorMessage());
+        // ...but everything it actually produced/consumed survives:
+        assertEquals(15441, r.getInputTokens());
+        assertEquals(2000, r.getOutputTokens());
+        assertEquals(new java.math.BigDecimal("1.23"), r.getCostUsd());
+        assertEquals("sess-1", r.getSessionId());
+        assertEquals(1, r.getFilesChanged().size());
+        assertEquals(1200116L, r.getDurationMs());
+    }
+
+    @Test
     void describeExitFailure_noStderrOrResult_usesStdoutTailNotHead() {
         String stdout = "INIT_HEAD_LINE" + "x".repeat(600) + "REAL_ERROR_TAIL";
         String msg = ClaudeCodeService.describeExitFailure(1, null, "", stdout);
