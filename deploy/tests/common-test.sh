@@ -24,6 +24,11 @@ chmod 600 "$deploy_env"
 assert_success load_deploy_env "$deploy_env"
 assert_equals '1000:main' "$(load_deploy_env "$deploy_env" && printf '%s:%s' "$APP_UID" "$ISSUEBOT_BRANCH")"
 
+printf 'NATIVE_SERVICE_KIND=systemd-user\nNATIVE_SERVICE_NAME=issuebot.service\n' >"$deploy_env"
+chmod 600 "$deploy_env"
+assert_success load_deploy_env "$deploy_env"
+assert_equals 'systemd-user:issuebot.service' "$(load_deploy_env "$deploy_env" && printf '%s:%s' "$NATIVE_SERVICE_KIND" "$NATIVE_SERVICE_NAME")"
+
 malicious_env="$TEST_ROOT/malicious.env"
 printf 'APP_UID=$(touch %s/pwned)\n' "$TEST_ROOT" >"$malicious_env"
 chmod 600 "$malicious_env"

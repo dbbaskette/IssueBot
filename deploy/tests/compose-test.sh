@@ -80,4 +80,7 @@ assert "postgres" not in services and "postgresql" not in services, "PostgreSQL 
 assert "minio" not in services, "MinIO is out of scope"
 PY
 
+env -u ISSUEBOT_GIT_SHA -u BUILD_DATE \
+  docker compose --env-file deploy/production.env.example config --quiet
+
 printf 'compose-test: PASS\n'
