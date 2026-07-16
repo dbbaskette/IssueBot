@@ -20,3 +20,6 @@ Thumbs.db
 *.db
 *.trace.db
 *.lock.db
+
+# Local Superpowers visual-companion sessions
+.superpowers/
