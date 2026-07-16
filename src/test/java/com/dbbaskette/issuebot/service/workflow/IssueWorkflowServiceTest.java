@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
@@ -569,6 +570,23 @@ class IssueWorkflowServiceTest {
         verify(eventService, never()).log(eq("SESSION_RESUME_FAILED"), anyString(), any(), any());
         assertEquals("sess-live", issue.getClaudeSessionId());
         verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void globalPauseFinalizesAsPendingNotFailed() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setLastFailureReason("old failure");
+        cancellationService.requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
+
+        assertTrue(workflowService.cancelled(issue));
+
+        assertEquals(IssueStatus.PENDING, issue.getStatus());
+        assertEquals("Processing paused by operator", issue.getSuspensionReason());
+        assertNull(issue.getLastFailureReason());
+        verify(eventService).log("WORKFLOW_SUSPENDED", "Processing paused by operator", repo, issue);
     }
 
     /**

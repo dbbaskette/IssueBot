@@ -74,6 +74,9 @@ public class TrackedIssue {
     @Column(name = "last_failure_reason", length = 2000)
     private String lastFailureReason;
 
+    @Column(name = "suspension_reason", length = 500)
+    private String suspensionReason;
+
     @Column(name = "budget_override_usd", precision = 10, scale = 2)
     private BigDecimal budgetOverrideUsd;
 
@@ -182,6 +185,9 @@ public class TrackedIssue {
 
     public String getLastFailureReason() { return lastFailureReason; }
     public void setLastFailureReason(String lastFailureReason) { this.lastFailureReason = lastFailureReason; }
+
+    public String getSuspensionReason() { return suspensionReason; }
+    public void setSuspensionReason(String suspensionReason) { this.suspensionReason = suspensionReason; }
 
     public BigDecimal getBudgetOverrideUsd() { return budgetOverrideUsd; }
     public void setBudgetOverrideUsd(BigDecimal budgetOverrideUsd) { this.budgetOverrideUsd = budgetOverrideUsd; }

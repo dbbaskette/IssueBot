@@ -176,6 +176,7 @@ public class IssueWorkflowService {
         trackedIssue.setStartedAt(LocalDateTime.now());
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
+        trackedIssue.setSuspensionReason(null);
         trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
         trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
         issueRepository.save(trackedIssue);
@@ -642,14 +643,27 @@ public class IssueWorkflowService {
      * Checkpoint: returns true (and finalizes the issue as FAILED) if the operator
      * requested cancellation. Callers must return immediately when this returns true.
      */
-    private boolean cancelled(TrackedIssue trackedIssue) {
-        if (!cancellationService.isCancelled(trackedIssue.getId())) return false;
-        trackedIssue.setStatus(IssueStatus.FAILED);
+    boolean cancelled(TrackedIssue trackedIssue) {
+        CancellationReason reason = cancellationService.reason(trackedIssue.getId()).orElse(null);
+        if (reason == null) return false;
         trackedIssue.setCurrentPhase(null);
-        trackedIssue.setLastFailureReason("Cancelled by operator");
+        if (reason == CancellationReason.GLOBAL_PAUSE) {
+            trackedIssue.setStatus(IssueStatus.PENDING);
+            trackedIssue.setSuspensionReason("Processing paused by operator");
+            trackedIssue.setLastFailureReason(null);
+        } else {
+            trackedIssue.setStatus(IssueStatus.FAILED);
+            trackedIssue.setSuspensionReason(null);
+            trackedIssue.setLastFailureReason("Cancelled by operator");
+        }
         issueRepository.save(trackedIssue);
-        eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
-                trackedIssue.getRepo(), trackedIssue);
+        if (reason == CancellationReason.GLOBAL_PAUSE) {
+            eventService.log("WORKFLOW_SUSPENDED", "Processing paused by operator",
+                    trackedIssue.getRepo(), trackedIssue);
+        } else {
+            eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
+                    trackedIssue.getRepo(), trackedIssue);
+        }
         cancellationService.clear(trackedIssue.getId());
         return true;
     }
