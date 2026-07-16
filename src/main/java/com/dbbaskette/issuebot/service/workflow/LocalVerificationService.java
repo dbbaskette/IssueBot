@@ -116,20 +116,31 @@ public class LocalVerificationService {
             process.getOutputStream().close();
 
             Thread reader = Thread.ofVirtual().start(() -> {
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        output.append(line).append("\n");
-                        if (lineCallback != null) {
-                            try {
-                                lineCallback.accept(line);
-                            } catch (Exception e) {
-                                log.debug("Local verification line callback error: {}", e.getMessage());
-                            }
+                BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                StringBuilder line = new StringBuilder();
+                try {
+                    while (process.isAlive() || br.ready()) {
+                        if (!br.ready()) {
+                            Thread.sleep(10);
+                            continue;
                         }
+                        int character = br.read();
+                        if (character == -1) {
+                            break;
+                        }
+                        if (character == '\n') {
+                            appendOutputLine(output, line, lineCallback);
+                        } else if (character != '\r') {
+                            line.append((char) character);
+                        }
+                    }
+                    if (!line.isEmpty()) {
+                        appendOutputLine(output, line, lineCallback);
                     }
                 } catch (IOException e) {
                     log.warn("Error reading local verification command output", e);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
             });
 
@@ -190,6 +201,20 @@ public class LocalVerificationService {
                 // closing is best-effort; the reader's readLine will fail either way
             }
             reader.join();
+        }
+    }
+
+    private static void appendOutputLine(StringBuffer output, StringBuilder line,
+                                         Consumer<String> lineCallback) {
+        String value = line.toString();
+        line.setLength(0);
+        output.append(value).append("\n");
+        if (lineCallback != null) {
+            try {
+                lineCallback.accept(value);
+            } catch (Exception e) {
+                log.debug("Local verification line callback error: {}", e.getMessage());
+            }
         }
     }
 
