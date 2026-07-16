@@ -305,7 +305,8 @@ Expected: verification succeeds against the restored H2 database. Keep `issuebot
 After a successful cutover and native-service disablement, reboot only in an approved maintenance window:
 
 ```bash
-ssh dbbaskette@home-services.local 'cd /home/dbbaskette/IssueBot || exit; docker compose --env-file /home/dbbaskette/.config/issuebot/deploy.env ps; systemctl --user is-enabled issuebot.service || true'
+./deploy/deploy-remote.sh status
+ssh dbbaskette@home-services.local 'systemctl --user is-enabled issuebot.service || true'
 ssh dbbaskette@home-services.local 'sudo reboot'
 ```
 
