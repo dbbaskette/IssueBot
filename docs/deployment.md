@@ -213,6 +213,28 @@ For later releases, first update the approved provider digest if required, then 
 
 Expected: the dispatcher loads `current.manifest` only to render and compare the active release, acquires the same deployment lock used by deploy, and targets durable `previous.manifest`. The recorded previous IssueBot image and provider digest are reused locally and fully verified. This command never restores H2. If Flyway migration sets differ and the active/candidate release was not explicitly recorded as compatible, rollback refuses to start the old application, stops/removes the unsafe candidate, proves closure, and reports the verified backup path.
 
+## Operator-approved native first-cutover recovery
+
+Use this only when the first Compose cutover failed and no previous Compose manifest exists. This is a deliberate data restore and is therefore unavailable through the restricted deployment key. The original cutover records the systemd scope/name, exact unit-fragment path and SHA-256, original autostart state, and an encoded exact process pattern before native shutdown; the closed-H2 backup retains that `native-recovery.manifest` beside `backup.metadata`.
+
+Open an unrestricted host shell, select the exact verified backup reported by the failed deployment, and invoke the repository-owned recovery function:
+
+```bash
+ssh -t dbbaskette@home-services.local
+cd /home/dbbaskette/IssueBot
+export DEPLOY_ENV=/home/dbbaskette/.config/issuebot/deploy.env
+source deploy/lib/common.sh
+load_deploy_env "$DEPLOY_ENV"
+source deploy/lib/preflight.sh
+source deploy/lib/lifecycle.sh
+backup="$ISSUEBOT_HOME/backups/REPLACE_WITH_REPORTED_UTC_DIRECTORY"
+recover_native_cutover "$backup"
+```
+
+The function requires the backup to be under `${ISSUEBOT_HOME}/backups`, validates protected file modes, strict/unique recovery records, H2 checksum and byte count, exact systemd unit path/checksum, and the recorded process pattern before mutation. It then acquires the deployment lock, stops/removes both candidate Compose services, proves the port/process/H2 are closed, preserves the failed database under `deployments/failed/<UTC timestamp>/`, restores H2 through a checksum-verified temporary file, and starts the exact recorded systemd unit. If the unit was originally enabled but the failed cutover disabled it, recovery re-enables and verifies it; it never automatically unmasks a unit. Success requires the unit active, the recorded process present, and every port `8090` owner matching that process.
+
+`pidfile` recovery is intentionally rejected before Compose or H2 mutation because a pidfile cannot prove the original executable/unit identity or autostart behavior. Convert the native owner to a documented systemd user/system unit or perform a separately reviewed manual recovery; do not claim automated native recovery from pidfile metadata.
+
 ## Operator-approved H2 restore
 
 Use this only after an application rollback is schema-unsafe or the new database is known to be corrupt, and only with explicit operator approval. The restricted deploy key cannot perform this procedure. The commands intentionally stop both native and Compose ownership, preserve the failed database, strictly validate the selected backup's own `backup.metadata` and `previous.manifest`, restore ownership/mode, and start only the IssueBot/provider versions stored with that backup. Never select the application release from `deployments/current.manifest` during an H2 restore: the database and release must remain one backup set.

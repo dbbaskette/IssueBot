@@ -87,7 +87,7 @@ load_deploy_env() {
 
 manifest_key_allowed() {
   case "$1" in
-    issuebot_git_sha|issuebot_image_id|provider_image|provider_digest|provider_protocol|deployed_at|backup_path|compose_project|schema_rollback_compatible|recovery_type|native_service_kind|native_service_name|native_process_pattern|recorded_at) return 0 ;;
+    issuebot_git_sha|issuebot_image_id|provider_image|provider_digest|provider_protocol|deployed_at|backup_path|compose_project|schema_rollback_compatible|recovery_type|native_service_kind|native_service_name|native_process_pattern_b64|native_unit_fragment|native_unit_sha256|native_autostart_state|recorded_at) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -98,7 +98,7 @@ validate_manifest_record() {
   key="${BASH_REMATCH[1]}"
   value="${BASH_REMATCH[2]}"
   manifest_key_allowed "$key" || die "manifest key is not allowed: $key" || return 1
-  [[ "$value" =~ ^[A-Za-z0-9._:/@+-]*$ ]] || die "manifest value contains unsafe characters: $key" || return 1
+  [[ "$value" =~ ^[A-Za-z0-9._:/@+=-]*$ ]] || die "manifest value contains unsafe characters: $key" || return 1
 }
 
 write_manifest() {

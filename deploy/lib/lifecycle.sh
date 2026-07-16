@@ -142,15 +142,41 @@ stop_native_issuebot() {
 }
 
 write_native_recovery_record() {
-  local manifest_dir="$ISSUEBOT_HOME/deployments" recorded_at
+  local manifest_dir="$ISSUEBOT_HOME/deployments" recorded_at pattern_b64 fragment='' unit_checksum='' autostart_state=unmanaged
   [[ -n "${NATIVE_SERVICE_KIND:-}" && -n "${NATIVE_SERVICE_NAME:-}" ]] || die 'native recovery identity is incomplete' || return 1
   [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'native recovery process pattern is required' || return 1
+  pattern_b64="$(printf '%s' "$ISSUEBOT_NATIVE_PROCESS_PATTERN" | base64 | tr -d '\n')" || die 'cannot encode native recovery process pattern' || return 1
+  [[ -n "$pattern_b64" ]] || die 'cannot encode empty native recovery process pattern' || return 1
+  case "$NATIVE_SERVICE_KIND" in
+    systemd-user)
+      fragment="$(systemctl --user show --property FragmentPath --value "$NATIVE_SERVICE_NAME")" || die 'cannot inspect native user unit fragment' || return 1
+      if autostart_state="$(systemctl --user is-enabled "$NATIVE_SERVICE_NAME" 2>/dev/null)"; then :; else :; fi
+      ;;
+    systemd-system)
+      fragment="$(systemctl show --property FragmentPath --value "$NATIVE_SERVICE_NAME")" || die 'cannot inspect native system unit fragment' || return 1
+      if autostart_state="$(systemctl is-enabled "$NATIVE_SERVICE_NAME" 2>/dev/null)"; then :; else :; fi
+      ;;
+    pidfile) ;;
+    *) die "unknown native service ownership kind: $NATIVE_SERVICE_KIND" || return 1 ;;
+  esac
+  if [[ "$NATIVE_SERVICE_KIND" == systemd-user || "$NATIVE_SERVICE_KIND" == systemd-system ]]; then
+    [[ "$fragment" == /* && -f "$fragment" && ! -L "$fragment" ]] || die 'native systemd unit fragment is missing or unsafe' || return 1
+    unit_checksum="$(sha256_file "$fragment")" || die 'cannot checksum native systemd unit fragment' || return 1
+    [[ "$autostart_state" == enabled || "$autostart_state" == disabled || "$autostart_state" == masked || "$autostart_state" == static ]] || die 'native systemd autostart state is unsupported or ambiguous' || return 1
+  fi
   recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || die 'cannot create native recovery timestamp' || return 1
-  write_manifest "$manifest_dir/native-recovery.manifest" \
+  local -a records=(
     recovery_type=native \
     "native_service_kind=$NATIVE_SERVICE_KIND" \
     "native_service_name=$NATIVE_SERVICE_NAME" \
+    "native_process_pattern_b64=$pattern_b64" \
+    "native_autostart_state=$autostart_state" \
     "recorded_at=$recorded_at"
+  )
+  if [[ -n "$fragment" ]]; then
+    records+=("native_unit_fragment=$fragment" "native_unit_sha256=$unit_checksum")
+  fi
+  write_manifest "$manifest_dir/native-recovery.manifest" "${records[@]}"
 }
 
 disable_native_autostart() {
@@ -395,6 +421,7 @@ recover_failed_release() {
   local previous_manifest="$1"
   capture_diagnostics || true
   if [[ -f "$previous_manifest" ]] && rollback_release "$previous_manifest"; then
+    rm -f "$ISSUEBOT_HOME/deployments/candidate.manifest"
     return 0
   fi
   if ! ensure_failed_candidate_stopped; then
@@ -416,6 +443,187 @@ ensure_failed_candidate_stopped() {
     require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
   fi
   require_h2_closed || return 1
+}
+
+decode_base64_value() {
+  local value="$1"
+  if printf '%s' "$value" | base64 --decode 2>/dev/null; then
+    return 0
+  fi
+  printf '%s' "$value" | base64 -D 2>/dev/null
+}
+
+load_native_recovery_record() {
+  local path="$1" data record key value
+  local recovery_type_count=0 kind_count=0 name_count=0 pattern_count=0 fragment_count=0 checksum_count=0 autostart_count=0 recorded_count=0
+  NATIVE_RECOVERY_TYPE=''
+  NATIVE_RECOVERY_KIND=''
+  NATIVE_RECOVERY_NAME=''
+  NATIVE_RECOVERY_PATTERN_B64=''
+  NATIVE_RECOVERY_FRAGMENT=''
+  NATIVE_RECOVERY_UNIT_SHA256=''
+  NATIVE_RECOVERY_AUTOSTART=''
+  NATIVE_RECOVERY_RECORDED_AT=''
+  data="$(read_manifest "$path")" || return 1
+  while IFS= read -r record; do
+    key="${record%%=*}"
+    value="${record#*=}"
+    case "$key" in
+      recovery_type) (( ++recovery_type_count )); NATIVE_RECOVERY_TYPE="$value" ;;
+      native_service_kind) (( ++kind_count )); NATIVE_RECOVERY_KIND="$value" ;;
+      native_service_name) (( ++name_count )); NATIVE_RECOVERY_NAME="$value" ;;
+      native_process_pattern_b64) (( ++pattern_count )); NATIVE_RECOVERY_PATTERN_B64="$value" ;;
+      native_unit_fragment) (( ++fragment_count )); NATIVE_RECOVERY_FRAGMENT="$value" ;;
+      native_unit_sha256) (( ++checksum_count )); NATIVE_RECOVERY_UNIT_SHA256="$value" ;;
+      native_autostart_state) (( ++autostart_count )); NATIVE_RECOVERY_AUTOSTART="$value" ;;
+      recorded_at) (( ++recorded_count )); NATIVE_RECOVERY_RECORDED_AT="$value" ;;
+      *) die "native recovery manifest contains an unexpected key: $key" || return 1 ;;
+    esac
+  done <<<"$data"
+  (( recovery_type_count == 1 && kind_count == 1 && name_count == 1 && pattern_count == 1 && autostart_count == 1 && recorded_count == 1 )) || die 'native recovery manifest has missing or duplicate identity fields' || return 1
+  [[ "$NATIVE_RECOVERY_TYPE" == native ]] || die 'native recovery manifest has the wrong recovery type' || return 1
+  [[ "$NATIVE_RECOVERY_RECORDED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || die 'native recovery manifest has an invalid timestamp' || return 1
+  case "$NATIVE_RECOVERY_KIND" in
+    systemd-user|systemd-system)
+      (( fragment_count == 1 && checksum_count == 1 )) || die 'native systemd recovery identity is incomplete or duplicated' || return 1
+      [[ "$NATIVE_RECOVERY_FRAGMENT" == /* ]] || die 'native systemd unit fragment path is invalid' || return 1
+      [[ "$NATIVE_RECOVERY_UNIT_SHA256" =~ ^[0-9a-f]{64}$ ]] || die 'native systemd unit checksum is invalid' || return 1
+      [[ "$NATIVE_RECOVERY_AUTOSTART" == enabled || "$NATIVE_RECOVERY_AUTOSTART" == disabled || "$NATIVE_RECOVERY_AUTOSTART" == masked || "$NATIVE_RECOVERY_AUTOSTART" == static ]] || die 'native recovery autostart state is invalid' || return 1
+      ;;
+    pidfile)
+      die 'pidfile recovery is unsupported because unit identity and autostart cannot be proven'
+      return 1
+      ;;
+    *) die 'native recovery service kind is unsupported' || return 1 ;;
+  esac
+}
+
+load_backup_metadata() {
+  local path="$1" line key value checksum_count=0 bytes_count=0 created_count=0
+  RECOVERY_DATABASE_SHA256=''
+  RECOVERY_DATABASE_BYTES=''
+  require_private_file "$path" || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^([a-z0-9_]+)=([A-Za-z0-9:-]+)$ ]] || die 'backup metadata contains an invalid record' || return 1
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    case "$key" in
+      database_sha256) (( ++checksum_count )); RECOVERY_DATABASE_SHA256="$value" ;;
+      database_bytes) (( ++bytes_count )); RECOVERY_DATABASE_BYTES="$value" ;;
+      created_at) (( ++created_count )) ;;
+      *) die "backup metadata contains an unexpected key: $key" || return 1 ;;
+    esac
+  done <"$path"
+  (( checksum_count == 1 && bytes_count == 1 && created_count == 1 )) || die 'backup metadata has missing or duplicate records' || return 1
+  [[ "$RECOVERY_DATABASE_SHA256" =~ ^[0-9a-f]{64}$ && "$RECOVERY_DATABASE_BYTES" =~ ^[0-9]+$ ]] || die 'backup metadata checksum or byte count is invalid' || return 1
+}
+
+native_systemctl() {
+  case "$NATIVE_SERVICE_KIND" in
+    systemd-user) systemctl --user "$@" ;;
+    systemd-system) systemctl "$@" ;;
+    *) return 1 ;;
+  esac
+}
+
+wait_for_native_active() {
+  local deadline=$((SECONDS + 60))
+  while ! native_systemctl is-active --quiet "$NATIVE_SERVICE_NAME"; do
+    (( SECONDS < deadline )) || die "restored native service did not become active within 60 seconds: $NATIVE_SERVICE_NAME" || return 1
+    sleep 1
+  done
+}
+
+require_native_port_owner() {
+  local pids pid command_line
+  pids="$(lsof -nP -iTCP:8090 -sTCP:LISTEN -t 2>/dev/null)" || die 'restored native service did not create the port 8090 listener' || return 1
+  [[ -n "$pids" ]] || die 'restored native service has no port 8090 listener' || return 1
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || die 'restored native port owner could not be identified' || return 1
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || die "cannot inspect restored native port owner PID $pid" || return 1
+    case "$command_line" in
+      *"$ISSUEBOT_NATIVE_PROCESS_PATTERN"*) ;;
+      *) die "restored port 8090 has an unexpected owner (PID $pid)" || return 1 ;;
+    esac
+  done <<<"$pids"
+}
+
+recover_native_cutover() {
+  local backup="$1" backups_root backup_real database backup_database metadata recovery_manifest context_manifest
+  local pattern fragment checksum bytes timestamp failed_dir restore_tmp current_autostart
+  [[ -d "$backup" && ! -L "$backup" ]] || die 'native recovery backup directory is missing or unsafe' || return 1
+  backups_root="$(cd "$ISSUEBOT_HOME/backups" && pwd -P)" || die 'cannot resolve IssueBot backups directory' || return 1
+  backup_real="$(cd "$backup" && pwd -P)" || die 'cannot resolve native recovery backup directory' || return 1
+  case "$backup_real" in "$backups_root"/*) ;; *) die 'native recovery backup must be inside ISSUEBOT_HOME/backups' || return 1 ;; esac
+  backup_database="$backup_real/issuebot.mv.db"
+  metadata="$backup_real/backup.metadata"
+  recovery_manifest="$backup_real/native-recovery.manifest"
+  require_private_file "$backup_database" || return 1
+  load_backup_metadata "$metadata" || return 1
+  load_native_recovery_record "$recovery_manifest" || return 1
+  checksum="$(sha256_file "$backup_database")" || die 'cannot checksum native recovery database' || return 1
+  bytes="$(file_bytes "$backup_database")" || die 'cannot inspect native recovery database size' || return 1
+  [[ "$checksum" == "$RECOVERY_DATABASE_SHA256" && "$bytes" == "$RECOVERY_DATABASE_BYTES" ]] || die 'native recovery database does not match backup metadata' || return 1
+
+  pattern="$(decode_base64_value "$NATIVE_RECOVERY_PATTERN_B64")" || die 'native recovery process pattern is not valid base64' || return 1
+  [[ -n "$pattern" && "$pattern" != *$'\n'* ]] || die 'native recovery process pattern is empty or multiline' || return 1
+  fragment="$NATIVE_RECOVERY_FRAGMENT"
+  [[ -f "$fragment" && ! -L "$fragment" ]] || die 'recorded native systemd unit fragment is missing or unsafe' || return 1
+  [[ "$(sha256_file "$fragment")" == "$NATIVE_RECOVERY_UNIT_SHA256" ]] || die 'recorded native systemd unit fragment has changed' || return 1
+
+  NATIVE_SERVICE_KIND="$NATIVE_RECOVERY_KIND"
+  NATIVE_SERVICE_NAME="$NATIVE_RECOVERY_NAME"
+  ISSUEBOT_NATIVE_PROCESS_PATTERN="$pattern"
+  export NATIVE_SERVICE_KIND NATIVE_SERVICE_NAME ISSUEBOT_NATIVE_PROCESS_PATTERN
+  fragment="$(native_systemctl show --property FragmentPath --value "$NATIVE_SERVICE_NAME")" || die 'cannot inspect current native systemd unit identity' || return 1
+  [[ "$fragment" == "$NATIVE_RECOVERY_FRAGMENT" ]] || die 'native systemd unit fragment identity changed' || return 1
+
+  context_manifest="$ISSUEBOT_HOME/deployments/candidate.manifest"
+  [[ -f "$context_manifest" ]] || context_manifest="$ISSUEBOT_HOME/deployments/current.manifest"
+  ISSUEBOT_GIT_SHA="$(manifest_value "$context_manifest" issuebot_git_sha)" || die 'cannot load Compose recovery Git context' || return 1
+  BUILD_DATE="$(manifest_value "$context_manifest" deployed_at)" || die 'cannot load Compose recovery build context' || return 1
+  [[ "$ISSUEBOT_GIT_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'Compose recovery Git context is invalid' || return 1
+  export ISSUEBOT_GIT_SHA BUILD_DATE
+
+  ensure_deployment_lock || return 1
+  ensure_failed_candidate_stopped || return 1
+  database="$ISSUEBOT_HOME/issuebot.mv.db"
+  [[ -f "$database" && ! -L "$database" ]] || die 'failed candidate H2 database is missing or unsafe' || return 1
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)" || die 'cannot create native recovery timestamp' || return 1
+  failed_dir="$ISSUEBOT_HOME/deployments/failed/$timestamp"
+  mkdir -p "$failed_dir" || die 'cannot create failed-database preservation directory' || return 1
+  chmod 700 "$ISSUEBOT_HOME/deployments/failed" "$failed_dir"
+  mv "$database" "$failed_dir/issuebot.mv.db.failed-$timestamp" || die 'cannot preserve failed candidate H2 database' || return 1
+  restore_tmp="$ISSUEBOT_HOME/.issuebot.mv.db.restore-$timestamp"
+  cp -p "$backup_database" "$restore_tmp" || die 'cannot stage native recovery H2 database' || return 1
+  [[ "$(sha256_file "$restore_tmp")" == "$RECOVERY_DATABASE_SHA256" ]] || { rm -f "$restore_tmp"; die 'staged native recovery H2 checksum mismatch'; return 1; }
+  mv "$restore_tmp" "$database" || die 'cannot atomically install native recovery H2 database' || return 1
+
+  if current_autostart="$(native_systemctl is-enabled "$NATIVE_SERVICE_NAME" 2>/dev/null)"; then :; else :; fi
+  if [[ "$NATIVE_RECOVERY_AUTOSTART" == enabled && "$current_autostart" != enabled ]]; then
+    [[ "$current_autostart" != masked ]] || die 'native unit became masked; refusing to unmask it automatically' || return 1
+    native_systemctl enable "$NATIVE_SERVICE_NAME" || die 'cannot re-enable recorded native autostart' || return 1
+    current_autostart="$(native_systemctl is-enabled "$NATIVE_SERVICE_NAME" 2>/dev/null)" || true
+    [[ "$current_autostart" == enabled ]] || die 'native autostart re-enable could not be verified' || return 1
+  fi
+  native_systemctl start "$NATIVE_SERVICE_NAME" || die 'cannot start restored native IssueBot service' || return 1
+  if ! wait_for_native_active \
+    || ! pgrep -f -- "$ISSUEBOT_NATIVE_PROCESS_PATTERN" >/dev/null 2>&1 \
+    || ! require_native_port_owner; then
+    native_systemctl stop "$NATIVE_SERVICE_NAME" >/dev/null 2>&1 || true
+    if [[ "$NATIVE_SERVICE_KIND" == systemd-user ]]; then
+      wait_for_systemd_inactive user "$NATIVE_SERVICE_NAME" || true
+    else
+      wait_for_systemd_inactive system "$NATIVE_SERVICE_NAME" || true
+    fi
+    require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || true
+    require_port_free || true
+    require_h2_closed || true
+    die 'restored native service failed verification and was stopped'
+    return 1
+  fi
+  rm -f "$ISSUEBOT_HOME/deployments/candidate.manifest"
+  log "native IssueBot recovery verified from $backup_real; failed database preserved at $failed_dir"
 }
 
 load_manifest_map() {

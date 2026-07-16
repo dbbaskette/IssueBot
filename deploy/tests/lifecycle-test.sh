@@ -195,6 +195,14 @@ for failure in functional-check autostart-disable; do
   assert_contains $'diagnostics\ncleanup-stop\ncleanup-port-free\ncleanup-process-free\ncleanup-h2-closed' "$(<"$CALL_LOG")"
 done
 
+candidate_after_recovery="$ISSUEBOT_HOME/deployments/candidate.manifest"
+current_for_recovery="$ISSUEBOT_HOME/deployments/current.manifest"
+write_manifest "$candidate_after_recovery" issuebot_git_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa deployed_at=2026-07-16T12:00:00Z
+write_manifest "$current_for_recovery" issuebot_git_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb deployed_at=2026-07-15T12:00:00Z
+reset_calls
+recover_failed_release "$current_for_recovery"
+test ! -e "$candidate_after_recovery"
+
 reset_calls
 assert_success deploy_release
 test -f "$ISSUEBOT_HOME/deployments/current.manifest"
@@ -379,9 +387,22 @@ export NATIVE_SERVICE_KIND=pidfile NATIVE_SERVICE_NAME="$TEST_ROOT/issuebot.pid"
 assert_failure real_disable_native_autostart
 
 export NATIVE_SERVICE_KIND=systemd-user NATIVE_SERVICE_NAME=issuebot.service ISSUEBOT_NATIVE_PROCESS_PATTERN=issuebot-native-marker
+unit_file="$TEST_ROOT/issuebot.service"
+printf '[Service]\nExecStart=/usr/bin/java -jar /opt/issuebot.jar\n' >"$unit_file"
+export UNIT_FILE="$unit_file"
+mock_command systemctl '
+case "$*" in
+  "--user show --property FragmentPath --value issuebot.service") printf "%s\n" "$UNIT_FILE" ;;
+  "--user is-enabled issuebot.service") printf "enabled\n" ;;
+  *) exit 2 ;;
+esac'
 real_write_native_recovery_record
 assert_contains 'recovery_type=native' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
 assert_contains 'native_service_kind=systemd-user' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
+assert_contains 'native_process_pattern_b64=' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
+assert_contains "native_unit_fragment=$unit_file" "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
+assert_contains 'native_unit_sha256=' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
+assert_contains 'native_autostart_state=enabled' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
 
 mock_command docker '
 case "$*" in

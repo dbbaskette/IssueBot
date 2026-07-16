@@ -118,7 +118,7 @@ validate_secret_location() {
 }
 
 preflight_runner() {
-  local image repo_digests platform expected_platform engine_arch healthcheck protocol doctor provider_user provider_uid
+  local image repo_digests platform expected_platform engine_arch healthcheck protocol doctor provider_user provider_uid provider_group
   image="${1:-${CODEX_CLI_PROVIDER_IMAGE:-}}"
   [[ -n "$image" ]] || die 'CODEX_CLI_PROVIDER_IMAGE is required' || return 1
   validate_provider_image "$image" || return 1
@@ -146,8 +146,21 @@ preflight_runner() {
 
   provider_user="$(docker image inspect --format '{{.Config.User}}' "$image")" || die 'cannot inspect provider runtime user' || return 1
   [[ -n "$provider_user" ]] || die 'provider image must declare an explicit non-root runtime user' || return 1
+  [[ "$provider_user" != *:*:* ]] || die 'provider image runtime user is invalid or ambiguous' || return 1
   provider_uid="${provider_user%%:*}"
-  [[ "$provider_uid" != root && "$provider_uid" != 0 ]] || die 'provider image runtime user must not be root' || return 1
+  provider_group=''
+  if [[ "$provider_user" == *:* ]]; then
+    provider_group="${provider_user#*:}"
+    [[ "$provider_group" =~ ^[0-9]+$ || "$provider_group" =~ ^[a-z_][a-z0-9_-]*$ ]] || die 'provider image runtime group is invalid or ambiguous' || return 1
+  fi
+  if [[ "$provider_uid" =~ ^[0-9]+$ ]]; then
+    [[ ! "$provider_uid" =~ ^0+$ ]] || die 'provider image runtime user must not resolve to UID 0' || return 1
+  elif [[ "$provider_uid" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    [[ "$provider_uid" != root ]] || die 'provider image runtime user must not be root' || return 1
+  else
+    die 'provider image runtime user is invalid or ambiguous'
+    return 1
+  fi
 }
 
 preflight_all() {

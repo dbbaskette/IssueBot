@@ -106,3 +106,50 @@ The rendered Compose suite additionally proves the provider attaches to both net
 
 - `5810562 fix: harden deployment recovery and rollback`
 - The report itself is committed separately after this file is added.
+
+---
+
+## Final re-review follow-up
+
+### Status
+
+DONE. This focused follow-up closes the numeric UID canonicalization, native first-cutover restore, persisted native-process identity, and stale-candidate findings. No production deployment or real IssueBot home mutation was performed.
+
+### Changes
+
+- Provider `.Config.User` parsing now treats every all-digit user component as a numeric UID and rejects it when it consists only of zeroes. Regressions cover `0`, `0:1000`, `00`, `000:1000`, `+0`, leading/trailing whitespace, empty/extra-colon, and invalid named forms. Positive coverage includes UID `1`/`1000`, numeric and named groups, and valid named non-root users.
+- The first-cutover recovery record now persists the exact systemd scope/name, unit fragment path and SHA-256, original autostart state, timestamp, and the required exact process pattern as strict base64 data. The unit checksum binds the recorded unit to its `ExecStart`/binary command without inventing provider or native runtime internals.
+- Added operator-only `recover_native_cutover <backup>` for failed first cutovers with no previous Compose release. It strictly validates backup location/modes/metadata/checksum/bytes, unique allowlisted native records, process-pattern encoding, current unit path, and unit checksum before mutation. It shares the deployment lock; stops/removes both candidate services; proves port/process/H2 closure; preserves the failed H2 file; restores through a checksum-verified temporary file; conditionally re-enables originally-enabled autostart without unmasking; and verifies the recorded systemd unit, process, and port owner.
+- Pidfile native restore is rejected before Compose or H2 mutation because executable/unit identity and autostart cannot be proven.
+- Successful automated Compose recovery now removes `candidate.manifest`, preventing stale schema compatibility metadata from influencing later standalone rollback.
+- The runbook contains the exact unrestricted-shell recovery invocation and its safety boundary; `native-recovery-test.sh` asserts those commands remain documented.
+
+### TDD evidence
+
+Before implementation:
+
+- `preflight-test.sh` failed because zero-padded UID `00` was accepted.
+- `lifecycle-test.sh` failed when the stale `candidate.manifest` remained after successful automated recovery and when the native record lacked the new identity fields.
+- `native-recovery-test.sh` failed because the recovery schema/function did not exist.
+
+After implementation, the focused preflight, lifecycle, native-recovery, and dispatcher suites all exited `0`.
+
+### Fresh verification
+
+```bash
+for test_file in deploy/tests/*-test.sh; do bash "$test_file"; done
+bash -n deploy/*.sh deploy/lib/*.sh deploy/tests/*.sh
+shellcheck -x -e SC2016 deploy/*.sh deploy/lib/*.sh deploy/tests/*.sh
+docker compose --env-file deploy/production.env.example config --quiet
+git diff --check
+```
+
+All commands exited `0`. PASS markers were printed for the original six deploy suites plus the new `native-recovery-test: PASS`. Negative-fixture errors for invalid users, corrupted backup data, pidfile recovery, and other rejection paths were expected assertions.
+
+The documentation command checks are part of `native-recovery-test.sh` and require the runbook to contain the common/lifecycle sources and exact `recover_native_cutover "$backup"` invocation.
+
+Maven was intentionally omitted in this focused follow-up because no Java source, Java test, `pom.xml`, or application resource changed after the previously recorded isolated-home `./mvnw clean verify` result (763 tests, zero failures/errors). Every changed executable is Bash or Compose and is covered by the full shell, syntax, ShellCheck, and Compose gates above.
+
+### Remaining gate
+
+Production cutover remains blocked on the independent provider release and IssueBot provider integration. Native automatic restore remains intentionally systemd-only; pidfile recovery requires a separately reviewed manual procedure.

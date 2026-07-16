@@ -201,7 +201,7 @@ assert_failure preflight_runner
 mock_runtime_clean
 assert_failure preflight_runner 'ghcr.io/acme/codex-cli-provider:latest'
 
-for unsafe_user in '' root root:root 0 0:1000; do
+for unsafe_user in '' root root:root 0 0:1000 00 000:1000 +0 ' 0' '0 ' 'provider user' 'Provider!' ':1000'; do
   mock_runtime_clean
   export UNSAFE_PROVIDER_USER="$unsafe_user"
   cp "$MOCK_BIN/docker" "$TEST_ROOT/docker-clean"
@@ -209,6 +209,15 @@ for unsafe_user in '' root root:root 0 0:1000; do
   assert_failure preflight_runner
 done
 unset UNSAFE_PROVIDER_USER
+
+for safe_user in 1 1000 1000:1000 1000:provider provider provider:provider provider:1000 issuebot_user; do
+  mock_runtime_clean
+  export SAFE_PROVIDER_USER="$safe_user"
+  cp "$MOCK_BIN/docker" "$TEST_ROOT/docker-clean"
+  mock_command docker 'case "$*" in *"--format {{.Config.User}}"*) printf "%s\n" "$SAFE_PROVIDER_USER";; *) exec "$TEST_ROOT/docker-clean" "$@";; esac'
+  assert_success preflight_runner
+done
+unset SAFE_PROVIDER_USER
 
 mock_runtime_clean
 mock_command lsof 'printf "4242\n"'
