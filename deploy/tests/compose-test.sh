@@ -48,6 +48,14 @@ assert not provider.get("ports"), "provider must not publish ports"
 assert "build" not in provider, "provider must be pulled, never built by this project"
 assert "@sha256:" in provider.get("image", ""), "provider image must be immutable"
 
+assert set(issuebot.get("networks", {})) == {"frontend", "backend"}, \
+    "IssueBot must join frontend for its published port and backend for provider traffic"
+assert set(provider.get("networks", {})) == {"backend"}, "provider must use only private backend"
+
+networks = config.get("networks", {})
+assert networks.get("backend", {}).get("internal") is True, "backend must remain internal"
+assert networks.get("frontend", {}).get("internal") is not True, "frontend must permit published ports"
+
 for name, service in services.items():
     assert service.get("read_only") is True, f"{name} root filesystem must be read-only"
     assert service.get("restart") == "unless-stopped", f"{name} restart policy is not bounded"
@@ -57,7 +65,6 @@ for name, service in services.items():
     assert float(service.get("cpus", 0)) > 0, f"{name} lacks a CPU limit"
     assert int(service.get("mem_limit", 0)) > 0, f"{name} lacks a memory limit"
     assert "/tmp" in service.get("tmpfs", []), f"{name} lacks a writable /tmp tmpfs"
-    assert set(service.get("networks", {})) == {"backend"}, f"{name} must use only backend"
     logging = service.get("logging", {})
     assert logging.get("driver") == "json-file", f"{name} must use json-file logging"
     options = logging.get("options", {})

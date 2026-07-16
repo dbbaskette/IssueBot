@@ -46,6 +46,7 @@ services:
         max-size: 10m
         max-file: "5"
     networks:
+      - frontend
       - backend
 
   codex-cli-provider:
@@ -70,5 +71,6 @@ services:
       - backend
 
 networks:
+  frontend:
   backend:
     internal: true
