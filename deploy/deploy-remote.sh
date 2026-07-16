@@ -17,7 +17,7 @@ case "$1:$#" in
       issuebot|codex-cli-provider) ;;
       *) usage ;;
     esac
-    [[ "$3" =~ ^[0-9]+$ ]] || usage
+    [[ "$3" =~ ^[0-9]{1,3}$ ]] || usage
     (( 10#$3 >= 1 && 10#$3 <= 500 )) || usage
     ;;
   *) usage ;;

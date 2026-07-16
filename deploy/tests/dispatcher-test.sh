@@ -71,6 +71,7 @@ for command in \
   bash \
   'deploy; id' \
   'logs issuebot 501' \
+  'logs issuebot 18446744073709551617' \
   'logs issuebot 0' \
   'logs ../../etc/passwd 10' \
   'status --help' \
@@ -80,5 +81,17 @@ for command in \
   assert_failure run_dispatch "$command"
   assert_equals '' "$(<"$call_log")"
 done
+
+client_key="$TEST_ROOT/issuebot_deploy_ed25519"
+: >"$client_key"
+chmod 600 "$client_key"
+# shellcheck disable=SC2016
+mock_command ssh 'printf "%s\n" "$*" >>"$CALL_LOG"'
+: >"$call_log"
+assert_failure env \
+  DEPLOY_HOST=operator@example.test \
+  DEPLOY_KEY="$client_key" \
+  bash deploy/deploy-remote.sh logs issuebot 18446744073709551617
+assert_equals '' "$(<"$call_log")"
 
 printf 'dispatcher-test: PASS\n'

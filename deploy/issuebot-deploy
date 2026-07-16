@@ -24,7 +24,7 @@ case "${command_parts[0]}:${#command_parts[@]}" in
       issuebot|codex-cli-provider) ;;
       *) reject || exit 1 ;;
     esac
-    [[ "${command_parts[2]}" =~ ^[0-9]+$ ]] || reject || exit 1
+    [[ "${command_parts[2]}" =~ ^[0-9]{1,3}$ ]] || reject || exit 1
     (( 10#${command_parts[2]} >= 1 && 10#${command_parts[2]} <= 500 )) || reject || exit 1
     ;;
   *) reject || exit 1 ;;
