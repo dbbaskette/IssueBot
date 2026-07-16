@@ -11,6 +11,8 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
+import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -34,6 +36,7 @@ class IssuePollingServiceTest {
     private IssueWorkflowService workflowService;
     private IssueBotProperties properties;
     private DependencyResolverService dependencyResolver;
+    private ProcessingControlService processingControl;
     private WatchedRepo testRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -45,6 +48,7 @@ class IssuePollingServiceTest {
         workflowService = mock(IssueWorkflowService.class);
         properties = new IssueBotProperties();
         dependencyResolver = mock(DependencyResolverService.class);
+        processingControl = mock(ProcessingControlService.class);
         pollingService = new IssuePollingService(
                 gitHubApiClient,
                 repoRepository,
@@ -53,7 +57,9 @@ class IssuePollingServiceTest {
                 mock(NotificationService.class),
                 workflowService,
                 properties,
-                dependencyResolver
+                dependencyResolver,
+                processingControl,
+                new IssueDispatchService(issueRepository, processingControl)
         );
         testRepo = new WatchedRepo("owner", "repo");
     }
@@ -62,6 +68,33 @@ class IssuePollingServiceTest {
     void qualifiesForProcessing_newIssue() {
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 1)).thenReturn(Optional.empty());
         assertTrue(pollingService.qualifiesForProcessing(testRepo, 1));
+    }
+
+    @Test
+    void pausedPollDoesNotDispatchWork() {
+        when(processingControl.isPaused()).thenReturn(true);
+
+        pollingService.pollForIssues();
+
+        verifyNoInteractions(repoRepository);
+        verifyNoInteractions(workflowService);
+    }
+
+    @Test
+    void pausedWebhookTracksNewIssueAsQueued() {
+        when(processingControl.isPaused()).thenReturn(true);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 42)).thenReturn(Optional.empty());
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("number", 42);
+        node.put("title", "Paused work");
+        when(dependencyResolver.resolve(any(), anyInt())).thenReturn(
+                new com.dbbaskette.issuebot.service.dependency.DependencyResolverService.DependencyResult(
+                        List.of(), List.of(), "", false));
+
+        WebhookOutcome outcome = pollingService.evaluateIssue(testRepo, node);
+
+        assertEquals(WebhookOutcome.QUEUED, outcome);
+        verify(workflowService, never()).processIssueAsync(any());
     }
 
     @Test
