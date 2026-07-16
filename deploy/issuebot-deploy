@@ -52,13 +52,40 @@ source deploy/lib/preflight.sh
 # shellcheck source=deploy/lib/lifecycle.sh
 source deploy/lib/lifecycle.sh
 
+load_readonly_compose_context() {
+  local manifest manifest_data record key value issuebot_git_sha='' deployed_at=''
+  manifest="$ISSUEBOT_HOME/deployments/current.manifest"
+  manifest_data="$(read_manifest "$manifest")" || return 1
+  while IFS= read -r record; do
+    key="${record%%=*}"
+    value="${record#*=}"
+    case "$key" in
+      issuebot_git_sha) issuebot_git_sha="$value" ;;
+      deployed_at) deployed_at="$value" ;;
+    esac
+  done <<<"$manifest_data"
+
+  [[ -n "$issuebot_git_sha" ]] || die 'current deployment manifest lacks issuebot_git_sha' || return 1
+  [[ "$issuebot_git_sha" =~ ^[0-9a-f]{40}$ ]] || die 'current deployment manifest has invalid issuebot_git_sha' || return 1
+  [[ -n "$deployed_at" ]] || die 'current deployment manifest lacks deployed_at' || return 1
+  [[ "$deployed_at" =~ ^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$ ]] || die 'current deployment manifest has invalid deployed_at' || return 1
+
+  ISSUEBOT_GIT_SHA="$issuebot_git_sha"
+  BUILD_DATE="$deployed_at"
+  export ISSUEBOT_GIT_SHA BUILD_DATE
+}
+
 dispatch() {
   case "${command_parts[0]}" in
     preflight) preflight_all ;;
     deploy) deploy_release ;;
     rollback) rollback_release ;;
-    status) docker compose --env-file "$DEPLOY_ENV" ps ;;
+    status)
+      load_readonly_compose_context || return 1
+      docker compose --env-file "$DEPLOY_ENV" ps
+      ;;
     logs)
+      load_readonly_compose_context || return 1
       docker compose --env-file "$DEPLOY_ENV" logs --no-color --tail "${command_parts[2]}" "${command_parts[1]}"
       ;;
   esac
