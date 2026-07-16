@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly DEPLOY_CONFIG=/home/dbbaskette/.config/issuebot/deploy.env
+
+reject() {
+  printf 'ERROR: remote deployment command rejected\n' >&2
+  return 1
+}
+
+original_command="${SSH_ORIGINAL_COMMAND:-}"
+[[ -n "$original_command" ]] || reject || exit 1
+[[ "$original_command" =~ ^[A-Za-z0-9._/[:space:]-]+$ ]] || reject || exit 1
+
+normalized_command="$(printf '%s' "$original_command" | tr '[:space:]' ' ')"
+read -r -a command_parts <<<"$normalized_command"
+(( ${#command_parts[@]} >= 1 && ${#command_parts[@]} <= 3 )) || reject || exit 1
+
+case "${command_parts[0]}:${#command_parts[@]}" in
+  preflight:1|deploy:1|rollback:1|status:1) ;;
+  logs:3)
+    case "${command_parts[1]}" in
+      issuebot|codex-cli-provider) ;;
+      *) reject || exit 1 ;;
+    esac
+    [[ "${command_parts[2]}" =~ ^[0-9]+$ ]] || reject || exit 1
+    (( 10#${command_parts[2]} >= 1 && 10#${command_parts[2]} <= 500 )) || reject || exit 1
+    ;;
+  *) reject || exit 1 ;;
+esac
+
+[[ -f "$DEPLOY_CONFIG" && ! -L "$DEPLOY_CONFIG" ]] || {
+  printf 'ERROR: deployment configuration is missing or unsafe\n' >&2
+  exit 1
+}
+ISSUEBOT_CHECKOUT="$(awk -F= '$1 == "ISSUEBOT_CHECKOUT" { print substr($0, index($0, "=") + 1); exit }' "$DEPLOY_CONFIG")"
+[[ "$ISSUEBOT_CHECKOUT" == /* && -d "$ISSUEBOT_CHECKOUT" && ! -L "$ISSUEBOT_CHECKOUT" ]] || {
+  printf 'ERROR: deployment checkout is missing or unsafe\n' >&2
+  exit 1
+}
+
+cd "$ISSUEBOT_CHECKOUT"
+# shellcheck source=deploy/lib/common.sh
+source deploy/lib/common.sh
+DEPLOY_ENV="$DEPLOY_CONFIG"
+export DEPLOY_ENV
+load_deploy_env "$DEPLOY_ENV"
+[[ "$PWD" == "$ISSUEBOT_CHECKOUT" ]] || die 'deployment checkout changed while loading configuration'
+# shellcheck source=deploy/lib/preflight.sh
+source deploy/lib/preflight.sh
+# shellcheck source=deploy/lib/lifecycle.sh
+source deploy/lib/lifecycle.sh
+
+dispatch() {
+  case "${command_parts[0]}" in
+    preflight) preflight_all ;;
+    deploy) deploy_release ;;
+    rollback) rollback_release ;;
+    status) docker compose --env-file "$DEPLOY_ENV" ps ;;
+    logs)
+      docker compose --env-file "$DEPLOY_ENV" logs --no-color --tail "${command_parts[2]}" "${command_parts[1]}"
+      ;;
+  esac
+}
+
+set +e
+dispatch_output="$(dispatch 2>&1)"
+dispatch_status=$?
+set -e
+[[ -z "$dispatch_output" ]] || redact "$dispatch_output"
+exit "$dispatch_status"
