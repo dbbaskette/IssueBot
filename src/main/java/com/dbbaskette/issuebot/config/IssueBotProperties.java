@@ -58,8 +58,13 @@ public class IssueBotProperties {
     public static class ClaudeCodeConfig {
         @Min(1)
         private int maxTurnsPerInvocation = 30;
+        /**
+         * Implementation/planning wall-clock cap. A real agentic implementation (explore, write,
+         * run tests, iterate) routinely runs tens of minutes; the old 10-minute default killed
+         * healthy runs mid-flight and threw the work away.
+         */
         @Min(1)
-        private int timeoutMinutes = 10;
+        private int timeoutMinutes = 45;
 
         // Dual-model support: Opus for implementation, Sonnet for review
         private String implementationModel = "claude-opus-4-8";
@@ -68,8 +73,13 @@ public class IssueBotProperties {
         private String utilityModel = "claude-haiku-4-5";
         @Min(1)
         private int reviewMaxTurns = 15;
+        /**
+         * Review/utility cap — smaller than the implementation's, since a review only reads a diff
+         * and returns a verdict. The old 5-minute default was still too tight for large diffs and
+         * was the real cause of recurring "Review Could Not Run" timeouts.
+         */
         @Min(1)
-        private int reviewTimeoutMinutes = 5;
+        private int reviewTimeoutMinutes = 20;
 
         public int getMaxTurnsPerInvocation() { return maxTurnsPerInvocation; }
         public void setMaxTurnsPerInvocation(int v) { this.maxTurnsPerInvocation = v; }
