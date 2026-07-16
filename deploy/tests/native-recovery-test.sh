@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Mock command bodies expand only when the mock executes.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
