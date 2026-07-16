@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.vscode
+.env
+.env.*
+.issuebot
+target
+*.db
+*.trace.db
+*.lock.db
+docs
+deploy/tests
