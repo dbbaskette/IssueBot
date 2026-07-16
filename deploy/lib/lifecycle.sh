@@ -15,6 +15,15 @@ compose() {
   docker compose --env-file "$DEPLOY_ENV" "$@"
 }
 
+DEPLOY_LOCK_HELD=false
+
+ensure_deployment_lock() {
+  if [[ "$DEPLOY_LOCK_HELD" != true ]]; then
+    acquire_lock "$ISSUEBOT_HOME/deployments/deploy.lock" || return 1
+    DEPLOY_LOCK_HELD=true
+  fi
+}
+
 preflight_deploy() {
   preflight_checkout || return 1
   preflight_runtime || return 1
@@ -132,13 +141,52 @@ stop_native_issuebot() {
   require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
 }
 
+write_native_recovery_record() {
+  local manifest_dir="$ISSUEBOT_HOME/deployments" recorded_at
+  [[ -n "${NATIVE_SERVICE_KIND:-}" && -n "${NATIVE_SERVICE_NAME:-}" ]] || die 'native recovery identity is incomplete' || return 1
+  [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'native recovery process pattern is required' || return 1
+  recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || die 'cannot create native recovery timestamp' || return 1
+  write_manifest "$manifest_dir/native-recovery.manifest" \
+    recovery_type=native \
+    "native_service_kind=$NATIVE_SERVICE_KIND" \
+    "native_service_name=$NATIVE_SERVICE_NAME" \
+    "recorded_at=$recorded_at"
+}
+
+disable_native_autostart() {
+  local kind="${NATIVE_SERVICE_KIND:-}" name="${NATIVE_SERVICE_NAME:-}" state status
+  case "$kind" in
+    systemd-user)
+      systemctl --user disable "$name" || die "cannot disable user service autostart: $name" || return 1
+      if state="$(systemctl --user is-enabled "$name" 2>/dev/null)"; then status=0; else status=$?; fi
+      ;;
+    systemd-system)
+      systemctl disable "$name" || die "cannot disable system service autostart: $name" || return 1
+      if state="$(systemctl is-enabled "$name" 2>/dev/null)"; then status=0; else status=$?; fi
+      ;;
+    pidfile)
+      die 'pidfile ownership cannot prove native autostart is disabled; configure a supported systemd service before first-cutover success'
+      return 1
+      ;;
+    *) die "unknown native service ownership kind: $kind" || return 1 ;;
+  esac
+  [[ "$status" != 0 && ( "$state" == disabled || "$state" == masked ) ]] || die "native service autostart remains enabled or unverifiable: $name" || return 1
+  require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
+}
+
 stop_issuebot_for_cutover() {
   local container stopped
   container="$(compose ps -q issuebot)" || die 'cannot inspect existing Compose IssueBot ownership' || return 1
   if [[ -z "$container" ]]; then
+    write_native_recovery_record || return 1
+    CUTOVER_WAS_NATIVE=true
+    export CUTOVER_WAS_NATIVE
     stop_native_issuebot
     return
   fi
+
+  CUTOVER_WAS_NATIVE=false
+  export CUTOVER_WAS_NATIVE
 
   compose stop -t 60 issuebot codex-cli-provider || die 'cannot gracefully stop existing Compose release' || return 1
   stopped="$(compose ps -q issuebot)" || die 'cannot verify existing Compose IssueBot shutdown' || return 1
@@ -169,6 +217,8 @@ backup_h2() {
     require_private_file "$ISSUEBOT_HOME/deployments/current.manifest" || return 1
     cp -p "$ISSUEBOT_HOME/deployments/current.manifest" "$backup_dir/previous.manifest" || die 'cannot record current deployment manifest with backup' || return 1
     chmod 600 "$backup_dir/previous.manifest"
+  elif [[ -f "$ISSUEBOT_HOME/deployments/native-recovery.manifest" ]]; then
+    copy_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest" "$backup_dir/native-recovery.manifest" || return 1
   fi
   BACKUP_PATH="$backup_dir"
   export BACKUP_PATH
@@ -226,6 +276,11 @@ verify_github_health() {
   esac
 }
 
+fatal_startup_log_present() {
+  printf '%s\n' "$1" | grep -Eiq \
+    'flyway.*(error|exception|failed)|migration.*(error|exception|failed)|h2.*(error|exception|failed)|database.*(already in use|locked)|accessdeniedexception|permission denied|application (run )?failed|failed to start|outofmemoryerror|exception in thread|port 8090.*already in use'
+}
+
 verify_functional() {
   local revision protocol doctor dashboard_status auth_enabled health logs listener_pids pid command_line
   container_is_healthy issuebot || die 'IssueBot container is not healthy' || return 1
@@ -262,7 +317,7 @@ verify_functional() {
     esac
   done <<<"$listener_pids"
   logs="$(compose logs --no-color issuebot 2>&1)" || die 'cannot inspect IssueBot startup logs' || return 1
-  if printf '%s\n' "$logs" | grep -Eiq 'flyway.*(error|failed)|h2.*(error|failed)|application run failed|outofmemoryerror|exception in thread'; then
+  if fatal_startup_log_present "$logs"; then
     printf '%s\n' "$logs" | redact >&2
     die 'fatal startup pattern found in IssueBot logs'
     return 1
@@ -276,13 +331,18 @@ verify_release() {
 }
 
 write_release_manifest() {
-  local manifest_dir="$ISSUEBOT_HOME/deployments" deployed_at compatible
+  local rotate_previous="${1:-true}" manifest_dir="$ISSUEBOT_HOME/deployments" deployed_at compatible current previous
   mkdir -p "$manifest_dir" || die 'cannot create deployments directory' || return 1
   chmod 700 "$manifest_dir"
   deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 1
   compatible="${SCHEMA_ROLLBACK_COMPATIBLE:-false}"
   [[ "$compatible" == true || "$compatible" == false ]] || die 'schema rollback compatibility must be true or false' || return 1
-  write_manifest "$manifest_dir/current.manifest" \
+  current="$manifest_dir/current.manifest"
+  previous="$manifest_dir/previous.manifest"
+  if [[ "$rotate_previous" == true && -f "$current" ]]; then
+    copy_manifest "$current" "$previous" || return 1
+  fi
+  write_manifest "$current" \
     "issuebot_git_sha=$ISSUEBOT_GIT_SHA" \
     "issuebot_image_id=$ISSUEBOT_IMAGE_ID" \
     "provider_image=$CODEX_CLI_PROVIDER_IMAGE" \
@@ -334,9 +394,28 @@ capture_diagnostics() {
 recover_failed_release() {
   local previous_manifest="$1"
   capture_diagnostics || true
-  if ! rollback_release "$previous_manifest"; then
-    printf 'Automatic recovery did not complete. Database was not restored. Verified backup: %s\n' "${BACKUP_PATH:-unknown}" >&2
+  if [[ -f "$previous_manifest" ]] && rollback_release "$previous_manifest"; then
+    return 0
   fi
+  if ! ensure_failed_candidate_stopped; then
+    printf 'CRITICAL: failed candidate could not be proven stopped and closed. Database was not restored. Verified backup: %s\n' "${BACKUP_PATH:-unknown}" >&2
+    return 1
+  fi
+  printf 'Automatic recovery target was unavailable or failed; candidate is stopped and H2 is verified closed. Database was not restored. Verified backup: %s\n' "${BACKUP_PATH:-unknown}" >&2
+}
+
+ensure_failed_candidate_stopped() {
+  local issuebot_container provider_container
+  compose stop -t 60 issuebot codex-cli-provider || die 'cannot stop failed Compose candidate' || return 1
+  compose rm -f issuebot codex-cli-provider || die 'cannot remove failed Compose candidate' || return 1
+  issuebot_container="$(compose ps -q issuebot)" || die 'cannot verify failed IssueBot candidate removal' || return 1
+  provider_container="$(compose ps -q codex-cli-provider)" || die 'cannot verify failed provider candidate removal' || return 1
+  [[ -z "$issuebot_container" && -z "$provider_container" ]] || die 'failed Compose candidate remains after cleanup' || return 1
+  require_port_free || return 1
+  if [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]]; then
+    require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
+  fi
+  require_h2_closed || return 1
 }
 
 load_manifest_map() {
@@ -371,7 +450,8 @@ manifest_value() {
 }
 
 rollback_release() {
-  local previous_manifest="${1:-$ISSUEBOT_HOME/deployments/current.manifest}" new_manifest compatibility=false old_sha old_image old_provider old_digest old_protocol old_backup current_set old_set actual_id
+  local previous_manifest="${1:-$ISSUEBOT_HOME/deployments/previous.manifest}" new_manifest compatibility=false old_sha old_image old_provider old_digest old_protocol old_backup current_set old_set actual_id rotate_active=false
+  ensure_deployment_lock || return 1
   load_manifest_map "$previous_manifest" || return 1
   old_sha="$PREVIOUS_issuebot_git_sha"
   old_image="$PREVIOUS_issuebot_image_id"
@@ -379,6 +459,9 @@ rollback_release() {
   old_digest="$PREVIOUS_provider_digest"
   old_protocol="$PREVIOUS_provider_protocol"
   old_backup="${PREVIOUS_backup_path:-${BACKUP_PATH:-unknown}}"
+  if [[ "$previous_manifest" == "$ISSUEBOT_HOME/deployments/previous.manifest" ]]; then
+    rotate_active=true
+  fi
   [[ -n "$old_sha" && -n "$old_image" && -n "$old_provider" && -n "$old_digest" && -n "$old_protocol" ]] || die 'previous manifest lacks required rollback fields' || return 1
   [[ "$old_provider" == *@"$old_digest" ]] || die 'previous provider image and digest disagree' || return 1
   git -C "$ISSUEBOT_CHECKOUT" cat-file -e "$old_sha^{commit}" || die 'previous IssueBot commit is not local' || return 1
@@ -386,6 +469,9 @@ rollback_release() {
   [[ "$actual_id" == "$old_image" ]] || die 'previous IssueBot tag no longer resolves to the recorded image ID' || return 1
   docker image inspect "$old_provider" >/dev/null 2>&1 || die 'previous provider digest is not local' || return 1
   new_manifest="${ROLLBACK_NEW_MANIFEST:-$ISSUEBOT_HOME/deployments/candidate.manifest}"
+  if [[ ! -f "$new_manifest" ]]; then
+    new_manifest="$ISSUEBOT_HOME/deployments/current.manifest"
+  fi
   if [[ -f "$new_manifest" ]]; then
     compatibility="$(manifest_value "$new_manifest" schema_rollback_compatible)" || compatibility=false
   fi
@@ -409,14 +495,14 @@ rollback_release() {
     printf 'Rollback verification failed. Database was not restored. Verified backup: %s\n' "$old_backup" >&2
     return 1
   }
-  write_release_manifest
+  write_release_manifest "$rotate_active"
 }
 
 deploy_release() {
   local previous_manifest="$ISSUEBOT_HOME/deployments/current.manifest"
   mkdir -p "$ISSUEBOT_HOME/deployments" || die 'cannot create deployments directory' || return 1
   chmod 700 "$ISSUEBOT_HOME/deployments"
-  acquire_lock "$ISSUEBOT_HOME/deployments/deploy.lock" || return 1
+  ensure_deployment_lock || return 1
   preflight_deploy || return 1
   git -C "$ISSUEBOT_CHECKOUT" fetch --prune || die 'Git fetch failed' || return 1
   git -C "$ISSUEBOT_CHECKOUT" pull --ff-only || die 'Git fast-forward pull failed' || return 1
@@ -442,6 +528,13 @@ deploy_release() {
     recover_failed_release "$previous_manifest"
     return 1
   fi
-  write_release_manifest || return 1
+  if [[ "${CUTOVER_WAS_NATIVE:-false}" == true ]] && ! disable_native_autostart; then
+    recover_failed_release "$previous_manifest"
+    return 1
+  fi
+  if ! write_release_manifest; then
+    recover_failed_release "$previous_manifest"
+    return 1
+  fi
   rm -f "$ISSUEBOT_HOME/deployments/candidate.manifest"
 }

@@ -50,11 +50,13 @@ assert "@sha256:" in provider.get("image", ""), "provider image must be immutabl
 
 assert set(issuebot.get("networks", {})) == {"frontend", "backend"}, \
     "IssueBot must join frontend for its published port and backend for provider traffic"
-assert set(provider.get("networks", {})) == {"backend"}, "provider must use only private backend"
+assert set(provider.get("networks", {})) == {"backend", "egress"}, \
+    "provider needs private backend plus non-internal egress"
 
 networks = config.get("networks", {})
 assert networks.get("backend", {}).get("internal") is True, "backend must remain internal"
 assert networks.get("frontend", {}).get("internal") is not True, "frontend must permit published ports"
+assert networks.get("egress", {}).get("internal") is not True, "provider egress must not be internal"
 
 for name, service in services.items():
     assert service.get("read_only") is True, f"{name} root filesystem must be read-only"

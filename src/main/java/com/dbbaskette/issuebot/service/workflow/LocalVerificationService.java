@@ -104,8 +104,8 @@ public class LocalVerificationService {
     private record CommandOutcome(boolean success, String output) {}
 
     private CommandOutcome runOne(Path repoPath, String command, long timeoutMillis, Consumer<String> lineCallback) {
-        // StringBuffer: written by the reader thread, read by this thread only after
-        // the reader has terminated (unbounded join) — thread-safe either way.
+        // StringBuffer is written by the reader thread and may be read after the
+        // bounded drain/forced-close sequence; synchronization keeps that handoff safe.
         StringBuffer output = new StringBuffer();
         try {
             ProcessBuilder pb = new ProcessBuilder(List.of("bash", "-lc", command));
@@ -186,9 +186,8 @@ public class LocalVerificationService {
      * Wait for the reader thread to finish, but never indefinitely: a command that
      * backgrounds a subprocess without redirecting stdout (e.g. {@code ./start-server.sh &})
      * leaves an orphan holding the pipe open, which would block readLine() — and an
-     * unbounded join here would hang the whole workflow iteration. After the grace
-     * period, force EOF by closing the stream, then the reader terminates promptly.
-     * The buffer is only ever read after the reader has fully terminated.
+     * an unbounded initial join here would hang the workflow iteration. After the
+     * grace period, force EOF by closing the stream, then wait for reader termination.
      */
     private static void awaitReader(Thread reader, Process process) throws InterruptedException {
         reader.join(READER_JOIN_MILLIS);

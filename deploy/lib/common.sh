@@ -87,7 +87,7 @@ load_deploy_env() {
 
 manifest_key_allowed() {
   case "$1" in
-    issuebot_git_sha|issuebot_image_id|provider_image|provider_digest|provider_protocol|deployed_at|backup_path|compose_project|schema_rollback_compatible) return 0 ;;
+    issuebot_git_sha|issuebot_image_id|provider_image|provider_digest|provider_protocol|deployed_at|backup_path|compose_project|schema_rollback_compatible|recovery_type|native_service_kind|native_service_name|native_process_pattern|recorded_at) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -133,4 +133,14 @@ read_manifest() {
   done <"$path"
   (( ${#records[@]} > 0 )) || die 'manifest is empty' || return 1
   printf '%s\n' "${records[@]}"
+}
+
+copy_manifest() {
+  local source="$1" destination="$2" manifest_data record
+  local -a records=()
+  manifest_data="$(read_manifest "$source")" || return 1
+  while IFS= read -r record; do
+    records[${#records[@]}]="$record"
+  done <<<"$manifest_data"
+  write_manifest "$destination" "${records[@]}"
 }

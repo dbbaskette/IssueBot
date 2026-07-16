@@ -16,6 +16,9 @@ eval "$(declare -f backup_h2 | sed '1s/backup_h2/real_backup_h2/')"
 eval "$(declare -f rollback_release | sed '1s/rollback_release/real_rollback_release/')"
 eval "$(declare -f stop_issuebot_for_cutover | sed '1s/stop_issuebot_for_cutover/real_stop_issuebot_for_cutover/')"
 eval "$(declare -f write_release_manifest | sed '1s/write_release_manifest/real_write_release_manifest/')"
+eval "$(declare -f disable_native_autostart | sed '1s/disable_native_autostart/real_disable_native_autostart/')"
+eval "$(declare -f ensure_failed_candidate_stopped | sed '1s/ensure_failed_candidate_stopped/real_ensure_failed_candidate_stopped/')"
+eval "$(declare -f write_native_recovery_record | sed '1s/write_native_recovery_record/real_write_native_recovery_record/')"
 
 export CALL_LOG="$TEST_ROOT/calls"
 export ISSUEBOT_HOME="$TEST_ROOT/issuebot-home"
@@ -32,7 +35,7 @@ mkdir -p "$ISSUEBOT_HOME/backups" "$ISSUEBOT_HOME/deployments/failed" "$ISSUEBOT
 chmod 600 "$DEPLOY_ENV"
 
 record() { printf '%s\n' "$1" >>"$CALL_LOG"; }
-reset_calls() { : >"$CALL_LOG"; unset FAIL_AT; }
+reset_calls() { : >"$CALL_LOG"; unset FAIL_AT; DEPLOY_LOCK_HELD=false; }
 maybe_fail() { record "$1"; [[ "${FAIL_AT:-}" != "$1" ]]; }
 
 acquire_lock() { maybe_fail lock; }
@@ -46,8 +49,19 @@ stop_issuebot_for_cutover() {
     maybe_fail compose-stop || return 1
     maybe_fail process-free || return 1
   else
+    write_native_recovery_record || return 1
+    CUTOVER_WAS_NATIVE=true
+    export CUTOVER_WAS_NATIVE
     stop_native_issuebot
   fi
+}
+write_native_recovery_record() { maybe_fail native-recovery; }
+disable_native_autostart() { maybe_fail autostart-disable; }
+ensure_failed_candidate_stopped() {
+  maybe_fail cleanup-stop || return 1
+  maybe_fail cleanup-port-free || return 1
+  maybe_fail cleanup-process-free || return 1
+  maybe_fail cleanup-h2-closed
 }
 require_port_free() { maybe_fail port-free; }
 require_h2_closed() { maybe_fail h2-closed; }
@@ -56,7 +70,7 @@ verify_liveness() { maybe_fail liveness; }
 verify_readiness() { maybe_fail readiness; }
 verify_functional() { maybe_fail functional-check; }
 capture_diagnostics() { maybe_fail diagnostics; }
-rollback_release() { maybe_fail rollback; }
+rollback_release() { maybe_fail rollback || return 1; [[ -f "${1:-}" ]]; }
 write_release_manifest() { maybe_fail manifest || return 1; real_write_release_manifest; }
 resolve_release_images() { ISSUEBOT_IMAGE_ID='sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; PROVIDER_DIGEST='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; export ISSUEBOT_IMAGE_ID PROVIDER_DIGEST; }
 
@@ -91,6 +105,7 @@ compose-config
 build
 runner-pull
 runner-contract
+native-recovery
 native-stop
 port-free
 h2-closed
@@ -99,6 +114,7 @@ compose-up
 liveness
 readiness
 functional-check
+autostart-disable
 manifest' "$(<"$CALL_LOG")"
 
 for failure in pull build runner-pull runner-contract; do
@@ -162,13 +178,22 @@ unset EXISTING_COMPOSE FAIL_AT
 
 reset_calls
 export FAIL_AT=readiness
+rm -f "$ISSUEBOT_HOME/deployments/current.manifest" "$ISSUEBOT_HOME/deployments/previous.manifest"
 assert_failure deploy_release
-assert_contains $'readiness\ndiagnostics\nrollback' "$(<"$CALL_LOG")"
+assert_contains $'readiness\ndiagnostics\ncleanup-stop\ncleanup-port-free\ncleanup-process-free\ncleanup-h2-closed' "$(<"$CALL_LOG")"
 
 reset_calls
 export FAIL_AT=compose-up
 assert_failure deploy_release
-assert_contains $'compose-up\ndiagnostics\nrollback' "$(<"$CALL_LOG")"
+assert_contains $'compose-up\ndiagnostics\ncleanup-stop\ncleanup-port-free\ncleanup-process-free\ncleanup-h2-closed' "$(<"$CALL_LOG")"
+
+for failure in functional-check autostart-disable; do
+  reset_calls
+  export FAIL_AT="$failure"
+  rm -f "$ISSUEBOT_HOME/deployments/current.manifest" "$ISSUEBOT_HOME/deployments/previous.manifest"
+  assert_failure deploy_release
+  assert_contains $'diagnostics\ncleanup-stop\ncleanup-port-free\ncleanup-process-free\ncleanup-h2-closed' "$(<"$CALL_LOG")"
+done
 
 reset_calls
 assert_success deploy_release
@@ -188,6 +213,25 @@ case "$*" in
 esac'
 mock_command pgrep 'exit 1'
 assert_success real_stop_native_issuebot
+
+export NATIVE_SERVICE_KIND=systemd-system
+mock_command systemctl '
+case "$*" in
+  "stop issuebot.service") exit 0 ;;
+  "is-active --quiet issuebot.service") exit 1 ;;
+  *) exit 2 ;;
+esac'
+assert_success real_stop_native_issuebot
+
+sleep 30 &
+native_pid=$!
+pidfile="$TEST_ROOT/native.pid"
+printf '%s\n' "$native_pid" >"$pidfile"
+export NATIVE_SERVICE_KIND=pidfile NATIVE_SERVICE_NAME="$pidfile"
+assert_success real_stop_native_issuebot
+wait "$native_pid" 2>/dev/null || true
+
+export NATIVE_SERVICE_KIND=systemd-user NATIVE_SERVICE_NAME=issuebot.service
 mock_command pgrep 'exit 0'
 assert_failure real_stop_native_issuebot
 mock_command pgrep 'exit 2'
@@ -300,7 +344,8 @@ real_rollback_release "$previous"
 assert_equals "$old_sha" "$ISSUEBOT_GIT_SHA"
 assert_equals "$old_image" "$ISSUEBOT_IMAGE_ID"
 assert_equals "$old_provider" "$CODEX_CLI_PROVIDER_IMAGE"
-assert_equals 'compose-stop
+assert_equals 'lock
+compose-stop
 compose-up
 liveness
 readiness
@@ -310,5 +355,69 @@ assert_equals "$database_checksum" "$(sha256_file "$ISSUEBOT_HOME/issuebot.mv.db
 assert_contains "issuebot_git_sha=$old_sha" "$(read_manifest "$ISSUEBOT_HOME/deployments/current.manifest")"
 assert_contains "issuebot_image_id=$old_image" "$(read_manifest "$ISSUEBOT_HOME/deployments/current.manifest")"
 assert_contains "provider_image=$old_provider" "$(read_manifest "$ISSUEBOT_HOME/deployments/current.manifest")"
+
+export NATIVE_SERVICE_KIND=systemd-user NATIVE_SERVICE_NAME=issuebot.service ISSUEBOT_NATIVE_PROCESS_PATTERN=issuebot-native-marker
+mock_command systemctl '
+case "$*" in
+  "--user disable issuebot.service") exit 0 ;;
+  "--user is-enabled issuebot.service") printf "disabled\n"; exit 1 ;;
+  *) exit 2 ;;
+esac'
+mock_command pgrep 'exit 1'
+assert_success real_disable_native_autostart
+
+export NATIVE_SERVICE_KIND=systemd-system
+mock_command systemctl '
+case "$*" in
+  "disable issuebot.service") exit 0 ;;
+  "is-enabled issuebot.service") printf "disabled\n"; exit 1 ;;
+  *) exit 2 ;;
+esac'
+assert_success real_disable_native_autostart
+
+export NATIVE_SERVICE_KIND=pidfile NATIVE_SERVICE_NAME="$TEST_ROOT/issuebot.pid"
+assert_failure real_disable_native_autostart
+
+export NATIVE_SERVICE_KIND=systemd-user NATIVE_SERVICE_NAME=issuebot.service ISSUEBOT_NATIVE_PROCESS_PATTERN=issuebot-native-marker
+real_write_native_recovery_record
+assert_contains 'recovery_type=native' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
+assert_contains 'native_service_kind=systemd-user' "$(read_manifest "$ISSUEBOT_HOME/deployments/native-recovery.manifest")"
+
+mock_command docker '
+case "$*" in
+  "compose --env-file "*" stop -t 60 issuebot codex-cli-provider") printf "cleanup-stop\n" >>"$CALL_LOG" ;;
+  "compose --env-file "*" rm -f issuebot codex-cli-provider") printf "cleanup-rm\n" >>"$CALL_LOG" ;;
+  "compose --env-file "*" ps -q issuebot"|"compose --env-file "*" ps -q codex-cli-provider") exit 0 ;;
+  *) exit 2 ;;
+esac'
+mock_command lsof 'exit 1'
+mock_command pgrep 'exit 1'
+reset_calls
+assert_success real_ensure_failed_candidate_stopped
+assert_equals $'cleanup-stop\ncleanup-rm\nport-free\nh2-closed' "$(<"$CALL_LOG")"
+
+current_manifest="$ISSUEBOT_HOME/deployments/current.manifest"
+previous_manifest="$ISSUEBOT_HOME/deployments/previous.manifest"
+write_manifest "$current_manifest" issuebot_git_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa deployed_at=2026-07-14T12:00:00Z
+ISSUEBOT_GIT_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+ISSUEBOT_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+CODEX_CLI_PROVIDER_IMAGE='ghcr.io/acme/codex-cli-provider@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+PROVIDER_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+CODEX_CLI_PROVIDER_PROTOCOL_VERSION=1
+BACKUP_PATH="$ISSUEBOT_HOME/backups/verified"
+real_write_release_manifest
+assert_contains 'issuebot_git_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$(read_manifest "$previous_manifest")"
+assert_contains 'issuebot_git_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$(read_manifest "$current_manifest")"
+
+for fatal_log in \
+  'org.flywaydb.core.api.FlywayException: migration failed' \
+  'JdbcSQLNonTransientConnectionException: Database may be already in use' \
+  'java.nio.file.AccessDeniedException: /home/issuebot/.issuebot' \
+  'APPLICATION FAILED TO START' \
+  'java.lang.OutOfMemoryError: Java heap space' \
+  'Web server failed to start. Port 8090 was already in use'; do
+  assert_success fatal_startup_log_present "$fatal_log"
+done
+assert_failure fatal_startup_log_present 'Started IssueBotApplication in 4.2 seconds'
 
 printf 'lifecycle-test: PASS\n'

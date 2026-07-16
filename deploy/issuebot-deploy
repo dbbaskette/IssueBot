@@ -86,7 +86,10 @@ dispatch() {
   case "${command_parts[0]}" in
     preflight) preflight_all ;;
     deploy) deploy_release ;;
-    rollback) rollback_release ;;
+    rollback)
+      load_readonly_compose_context || return 1
+      rollback_release "$ISSUEBOT_HOME/deployments/previous.manifest"
+      ;;
     status)
       load_readonly_compose_context || return 1
       docker compose --env-file "$DEPLOY_ENV" ps

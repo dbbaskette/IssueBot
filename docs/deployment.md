@@ -29,7 +29,9 @@ Before proceeding, require:
 - outbound Git, registry, GitHub, and provider connectivity;
 - at least 5 GiB free and at least twice the H2 database size available for a backup and failed copy;
 - `${ISSUEBOT_HOME}`, `${ISSUEBOT_HOME}/repos`, and `${ISSUEBOT_HOME}/logs` owned and writable by the configured UID/GID;
-- a compatible provider image with an embedded healthcheck, label `com.issuebot.codex-provider.protocol`, and doctor label containing the exact non-billable command `codex-cli-provider doctor --json --no-billable-work`.
+- a compatible provider image with an explicit non-root `Config.User`, an embedded healthcheck, label `com.issuebot.codex-provider.protocol`, and doctor label containing the exact non-billable command `codex-cli-provider doctor --json --no-billable-work`.
+
+The provider joins the internal `backend` network for IssueBot traffic and a separate non-internal `egress` network for outbound provider calls. It publishes no host port. IssueBot is the only service that publishes `8090`.
 
 Confirm tools and architecture on the host:
 
@@ -125,7 +127,7 @@ ssh dbbaskette@home-services.local '
 '
 ```
 
-Expected: a non-placeholder digest with 64 lowercase hexadecimal characters. The deployment rejects mutable tags, the example zero digest, a platform mismatch, a missing healthcheck, a protocol mismatch, or a missing exact doctor contract. IssueBot never builds this image.
+Expected: a non-placeholder digest with 64 lowercase hexadecimal characters. The deployment rejects mutable tags, the example zero digest, a platform mismatch, an empty/root/numeric-zero runtime user, a missing healthcheck, a protocol mismatch, or a missing exact doctor contract. An accepted provider must declare a named or numeric non-root `Config.User`; IssueBot never builds this image.
 
 ## Discover native service ownership
 
@@ -146,6 +148,8 @@ Record one verified ownership mode in `deploy.env`:
 - `NATIVE_SERVICE_KIND=systemd-user` and the user unit name;
 - `NATIVE_SERVICE_KIND=systemd-system` and the system unit name (the deployment account must already have narrowly scoped permission to stop it); or
 - `NATIVE_SERVICE_KIND=pidfile` and `NATIVE_SERVICE_NAME` set to the absolute, non-symlink pidfile path.
+
+The deployer can stop all three kinds safely. It can disable and verify autostart only for `systemd-user` and `systemd-system`. A pidfile does not identify an autostart mechanism, so a pidfile-owned first cutover fails closed after verification and removes the candidate instead of marking it known-good. Convert the native launch to one of the documented systemd kinds before a successful first cutover.
 
 Set `ISSUEBOT_NATIVE_PROCESS_PATTERN` to a distinctive portion of the verified Java command. During the first cutover only, `ISSUEBOT_FIRST_CUTOVER=true` lets preflight accept port 8090 when every listener matches this pattern. An unknown owner is always rejected.
 
@@ -181,17 +185,11 @@ Then run:
 ./deploy/deploy-remote.sh deploy
 ```
 
-Expected: `git fetch --prune`, `git pull --ff-only`, a test-bearing IssueBot image build tagged with the full SHA, provider pull by digest, graceful native shutdown, a verified closed-H2 backup, both services healthy, successful liveness/readiness and functional checks, and `${ISSUEBOT_HOME}/deployments/current.manifest` updated atomically.
+Expected: `git fetch --prune`, `git pull --ff-only`, a test-bearing IssueBot image build tagged with the full SHA, provider pull by digest, a durable `${ISSUEBOT_HOME}/deployments/native-recovery.manifest` written before graceful native shutdown, a verified closed-H2 backup, both services healthy, successful liveness/readiness and functional checks, native systemd autostart disabled and verified, and `${ISSUEBOT_HOME}/deployments/current.manifest` updated atomically. The deployment is not successful and does not write a known-good manifest if autostart disablement cannot be proved.
 
-After all checks pass, disable (do not delete) the verified native autostart mechanism so it cannot race Compose after reboot. Use the ownership mode discovered above:
+If candidate startup, readiness, migration/functional verification, autostart disablement, or manifest publication fails without an older Compose release, the deployer stops and removes both candidate containers and proves port `8090`, the native process pattern, and H2 are closed. It never leaves an `unless-stopped` candidate owning H2.
 
-```bash
-ssh dbbaskette@home-services.local 'systemctl --user disable issuebot.service'
-# Or, for a system unit with approved privileges:
-# ssh dbbaskette@home-services.local 'sudo systemctl disable issuebot.service'
-```
-
-Finally change `ISSUEBOT_FIRST_CUTOVER=false` in the mode-`0600` deploy file. All later preflights require port 8090 to be free before mutation.
+Finally change `ISSUEBOT_FIRST_CUTOVER=false` in the mode-`0600` deploy file. Later preflights accept port `8090` only when Docker reports exactly one container with the configured Compose project and `issuebot` service labels and the expected `8090` binding. The lifecycle then performs a controlled Compose stop and requires the port to be free before H2 backup or restart. Any other listener is rejected.
 
 ## Routine operation
 
@@ -205,7 +203,7 @@ ssh dbbaskette@home-services.local 'curl --fail --silent --show-error http://127
 
 Expected: both Compose services are healthy; liveness and readiness return HTTP 200 with `UP`. The default `ISSUEBOT_BIND_ADDRESS=127.0.0.1` is loopback on `home-services.local`, so operator-workstation checks must SSH to that host and run curl there. If direct LAN access is intentionally required, set `ISSUEBOT_BIND_ADDRESS` to the host's specific LAN address only after protecting port 8090 with the approved firewall/reverse-proxy and TLS policy; this exposes the dashboard beyond host loopback, so dashboard authentication remains mandatory. The aggregate health check additionally validates GitHub during deployment unless degraded GitHub operation was explicitly approved in code. Logs are redacted by the wrapper and limited to 1–500 lines.
 
-For later releases, first update the approved provider digest if required, then run `preflight` and `deploy`. A build or provider-pull failure happens before shutdown and leaves the old process running. Failures after shutdown capture sanitized diagnostics under `${ISSUEBOT_HOME}/deployments/failed/<UTC timestamp>/` and attempt only a schema-safe application rollback.
+For later releases, first update the approved provider digest if required, then run `preflight` and `deploy`. A build or provider-pull failure happens before shutdown and leaves the old process running. Failures after shutdown capture sanitized diagnostics under `${ISSUEBOT_HOME}/deployments/failed/<UTC timestamp>/` and attempt only a schema-safe application rollback. Each successful deployment atomically rotates the old `current.manifest` to durable `previous.manifest` before publishing the new current manifest.
 
 ## Application rollback
 
@@ -213,7 +211,7 @@ For later releases, first update the approved provider digest if required, then 
 ./deploy/deploy-remote.sh rollback
 ```
 
-Expected: the recorded previous IssueBot image and provider digest are reused locally and fully verified. This command never restores H2. If Flyway migration sets differ and the candidate was not explicitly recorded as compatible, rollback refuses to start the old application and reports the verified backup path.
+Expected: the dispatcher loads `current.manifest` only to render and compare the active release, acquires the same deployment lock used by deploy, and targets durable `previous.manifest`. The recorded previous IssueBot image and provider digest are reused locally and fully verified. This command never restores H2. If Flyway migration sets differ and the active/candidate release was not explicitly recorded as compatible, rollback refuses to start the old application, stops/removes the unsafe candidate, proves closure, and reports the verified backup path.
 
 ## Operator-approved H2 restore
 
@@ -331,7 +329,7 @@ find "$ISSUEBOT_HOME/deployments" -type f \( -name '*.manifest' -o -name 'backup
 docker image ls --digests issuebot
 ```
 
-Never use `docker compose down -v`; the H2 bind mount is authoritative. Delete backups, diagnostics, failed databases, or images only after confirming they are not referenced by `current.manifest`, a candidate/failed manifest, or an open incident.
+Never use `docker compose down -v`; the H2 bind mount is authoritative. Delete backups, diagnostics, failed databases, or images only after confirming they are not referenced by `current.manifest`, `previous.manifest`, `native-recovery.manifest`, a candidate/failed manifest, or an open incident.
 
 ## Troubleshooting
 
@@ -340,9 +338,10 @@ Never use `docker compose down -v`; the H2 bind mount is authoritative. Delete b
 | Dirty, untracked, detached, wrong, upstream-less, or divergent checkout | Pre-shutdown refusal. Clean the checkout and reconcile it through reviewed Git history; never force-reset production. |
 | `git pull --ff-only` fails | Pre-shutdown refusal; the old process remains running. Correct the remote/branch history before retrying. |
 | Maven/image build fails | Pre-shutdown refusal; inspect build output and fix/test in source. |
-| Provider tag, zero digest, wrong platform, healthcheck, protocol, or doctor label | Pre-shutdown refusal. Select a compatible externally published digest; do not add a provider build here. |
+| Provider tag, zero digest, wrong platform, root/empty user, healthcheck, protocol, or doctor label | Pre-shutdown refusal. Select a compatible externally published non-root digest; do not add a provider build here. |
 | Provider doctor fails | Post-start verification failure. Inspect `logs codex-cli-provider 200` and failed diagnostics; the doctor command must remain `codex-cli-provider doctor --json --no-billable-work`. |
-| Port 8090 occupied | Before first cutover, identify the exact native owner and pattern. Later, stop the unexpected owner; never kill an unidentified PID. |
+| Port 8090 occupied | Before first cutover, identify the exact native owner and pattern. Later, only the exact configured Compose project/service is accepted before its controlled stop; stop any other owner through its own manager and never kill an unidentified PID. |
+| Native autostart cannot be disabled | The candidate is stopped/removed and closure is verified. Use a supported systemd user/system service; pidfile ownership alone cannot prove reboot safety. |
 | `H2 database is still open` | Stop all native/Compose IssueBot processes and identify the holder with `lsof "$ISSUEBOT_HOME/issuebot.mv.db"`; never copy it while open. |
 | Liveness/readiness timeout | Post-shutdown diagnostics are under `deployments/failed/`; inspect bounded logs, persistent-path ownership, database/Flyway messages, and resource limits. |
 | Flyway migration sets differ | Automatic rollback refuses data restoration and prints the verified backup. Obtain operator approval and use the manual H2 restore procedure with the previous known-good version only. |

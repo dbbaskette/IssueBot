@@ -46,6 +46,7 @@ case "$*" in
   *"--format {{json .RepoDigests}}"*) printf "[\\"%s\\"]\\n" "$CODEX_CLI_PROVIDER_IMAGE" ;;
   *"--format {{.Os}}/{{.Architecture}}"*) printf "linux/amd64\\n" ;;
   *"--format {{json .Config.Healthcheck.Test}}"*) printf "[\\"CMD\\",\\"/usr/local/bin/healthcheck\\"]\\n" ;;
+  *"--format {{.Config.User}}"*) printf "1000:1000\\n" ;;
   *"codex-provider.protocol"*) printf "1\\n" ;;
   *"codex-provider.doctor"*) printf "codex-cli-provider doctor --json --no-billable-work\\n" ;;
   "image inspect "*) exit 0 ;;
@@ -200,7 +201,33 @@ assert_failure preflight_runner
 mock_runtime_clean
 assert_failure preflight_runner 'ghcr.io/acme/codex-cli-provider:latest'
 
-if grep -Eq 'docker[[:space:]]+(pull|run)|docker[[:space:]]+compose[[:space:]]+(pull|up|down|stop|restart)|git[^\n]*[[:space:]]+(fetch|pull)' deploy/lib/preflight.sh; then
+for unsafe_user in '' root root:root 0 0:1000; do
+  mock_runtime_clean
+  export UNSAFE_PROVIDER_USER="$unsafe_user"
+  cp "$MOCK_BIN/docker" "$TEST_ROOT/docker-clean"
+  mock_command docker 'case "$*" in *"--format {{.Config.User}}"*) printf "%s\n" "$UNSAFE_PROVIDER_USER";; *) exec "$TEST_ROOT/docker-clean" "$@";; esac'
+  assert_failure preflight_runner
+done
+unset UNSAFE_PROVIDER_USER
+
+mock_runtime_clean
+mock_command lsof 'printf "4242\n"'
+mock_command ps 'printf "/usr/bin/docker-proxy -host-port 8090\n"'
+cp "$MOCK_BIN/docker" "$TEST_ROOT/docker-clean"
+mock_command docker '
+case "$*" in
+  "ps --filter label=com.docker.compose.project=issuebot --filter label=com.docker.compose.service=issuebot --format {{.ID}}") printf "current-container\n" ;;
+  "inspect --format {{json .HostConfig.PortBindings}} current-container") printf "{\"8090/tcp\":[{\"HostIp\":\"127.0.0.1\",\"HostPort\":\"8090\"}]}\n" ;;
+  *) exec "$TEST_ROOT/docker-clean" "$@" ;;
+esac'
+assert_success preflight_storage
+
+mock_runtime_clean
+mock_command lsof 'printf "4242\n"'
+mock_command ps 'printf "/usr/bin/docker-proxy -host-port 8090\n"'
+assert_failure preflight_storage
+
+if grep -Eq '^[[:space:]]*(docker[[:space:]]+(pull|run)|docker[[:space:]]+compose[[:space:]]+(pull|up|down|stop|restart)|git[[:space:]].*[[:space:]](fetch|pull)([[:space:]]|$))' deploy/lib/preflight.sh; then
   printf 'FAIL: preflight contains lifecycle mutation command\n' >&2
   exit 1
 fi

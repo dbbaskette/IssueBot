@@ -41,8 +41,20 @@ preflight_runtime() {
   esac
 }
 
+current_compose_owns_port_8090() {
+  local project="${COMPOSE_PROJECT_NAME:-issuebot}" containers container bindings
+  containers="$(docker ps \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter 'label=com.docker.compose.service=issuebot' \
+    --format '{{.ID}}')" || return 1
+  [[ -n "$containers" && "$containers" != *$'\n'* ]] || return 1
+  container="$containers"
+  bindings="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$container")" || return 1
+  [[ "$bindings" == *'"8090/tcp"'* && "$bindings" == *'"HostPort":"8090"'* ]]
+}
+
 preflight_storage() {
-  local available_kib pids pid command_line lsof_status
+  local available_kib pids pid command_line lsof_status listener_is_docker=true
   [[ -n "${ISSUEBOT_HOME:-}" ]] || die 'ISSUEBOT_HOME is required' || return 1
   [[ -n "${ISSUEBOT_SECRET_ENV:-}" ]] || die 'ISSUEBOT_SECRET_ENV is required' || return 1
 
@@ -71,10 +83,18 @@ preflight_storage() {
     pids=''
   fi
   [[ -z "$pids" ]] && return 0
-  [[ "${ISSUEBOT_FIRST_CUTOVER:-}" == true ]] || die 'port 8090 must be free outside explicit first-cutover preflight' || return 1
-  [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'port 8090 is owned by an unidentified process' || return 1
   while IFS= read -r pid; do
     [[ "$pid" =~ ^[0-9]+$ ]] || die 'port 8090 owner could not be identified' || return 1
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || die "cannot inspect port 8090 owner PID $pid" || return 1
+    case "$command_line" in *docker*|*Docker*) ;; *) listener_is_docker=false ;; esac
+  done <<<"$pids"
+
+  if [[ "$listener_is_docker" == true ]] && current_compose_owns_port_8090; then
+    return 0
+  fi
+  [[ "${ISSUEBOT_FIRST_CUTOVER:-}" == true ]] || die 'port 8090 is not owned by the current Compose issuebot service' || return 1
+  [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'port 8090 is owned by an unidentified process' || return 1
+  while IFS= read -r pid; do
     command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || die "cannot inspect port 8090 owner PID $pid" || return 1
     case "$command_line" in
       *"$ISSUEBOT_NATIVE_PROCESS_PATTERN"*) ;;
@@ -98,7 +118,7 @@ validate_secret_location() {
 }
 
 preflight_runner() {
-  local image repo_digests platform expected_platform engine_arch healthcheck protocol doctor
+  local image repo_digests platform expected_platform engine_arch healthcheck protocol doctor provider_user provider_uid
   image="${1:-${CODEX_CLI_PROVIDER_IMAGE:-}}"
   [[ -n "$image" ]] || die 'CODEX_CLI_PROVIDER_IMAGE is required' || return 1
   validate_provider_image "$image" || return 1
@@ -123,6 +143,11 @@ preflight_runner() {
 
   doctor="$(docker image inspect --format '{{index .Config.Labels "com.issuebot.codex-provider.doctor"}}' "$image")" || die 'cannot inspect provider doctor contract' || return 1
   [[ "$doctor" == 'codex-cli-provider doctor --json --no-billable-work' ]] || die 'provider doctor contract is missing the exact non-billable command' || return 1
+
+  provider_user="$(docker image inspect --format '{{.Config.User}}' "$image")" || die 'cannot inspect provider runtime user' || return 1
+  [[ -n "$provider_user" ]] || die 'provider image must declare an explicit non-root runtime user' || return 1
+  provider_uid="${provider_user%%:*}"
+  [[ "$provider_uid" != root && "$provider_uid" != 0 ]] || die 'provider image runtime user must not be root' || return 1
 }
 
 preflight_all() {

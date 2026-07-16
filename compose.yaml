@@ -69,8 +69,10 @@ services:
         max-file: "5"
     networks:
       - backend
+      - egress
 
 networks:
   frontend:
   backend:
     internal: true
+  egress:

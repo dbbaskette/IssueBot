@@ -46,7 +46,11 @@ export TEST_ROOT
 mock_command flock 'mkdir "$TEST_ROOT/flock-held" 2>/dev/null'
 bash -c 'source deploy/lib/common.sh; acquire_lock "$1"; : >"$2"; while test ! -e "$3"; do :; done' _ "$lock" "$ready" "$TEST_ROOT/release-lock" &
 holder=$!
-while test ! -e "$ready"; do :; done
+deadline=$((SECONDS + 5))
+while test ! -e "$ready"; do
+  (( SECONDS < deadline )) || { printf 'FAIL: lock holder did not become ready\n' >&2; kill "$holder" 2>/dev/null || true; exit 1; }
+  sleep 0.01
+done
 assert_failure acquire_lock "$lock"
 : >"$TEST_ROOT/release-lock"
 wait "$holder"

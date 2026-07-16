@@ -24,7 +24,7 @@ EOF
 cat >"$checkout/deploy/lib/lifecycle.sh" <<'EOF'
 #!/usr/bin/env bash
 deploy_release() { printf 'deploy\n' >>"$CALL_LOG"; }
-rollback_release() { printf 'rollback\n' >>"$CALL_LOG"; }
+rollback_release() { printf 'rollback:%s\n' "$1" >>"$CALL_LOG"; }
 EOF
 
 deploy_env="$config_dir/deploy.env"
@@ -39,6 +39,11 @@ write_current_manifest() {
   chmod 600 "$manifest"
 }
 write_current_manifest
+previous_manifest="$TEST_ROOT/state/deployments/previous.manifest"
+printf '%s\n' \
+  'issuebot_git_sha=1111111111111111111111111111111111111111' \
+  'deployed_at=2026-07-15T12:00:00Z' >"$previous_manifest"
+chmod 600 "$previous_manifest"
 sed "s|/home/dbbaskette/.config/issuebot/deploy.env|$deploy_env|" deploy/issuebot-deploy >"$dispatcher"
 chmod 700 "$dispatcher"
 
@@ -73,7 +78,7 @@ assert_dispatch() {
 output="$(assert_dispatch preflight preflight)"
 assert_contains '[REDACTED]' "$output"
 assert_dispatch deploy deploy >/dev/null
-assert_dispatch rollback rollback >/dev/null
+assert_dispatch rollback "rollback:$previous_manifest" >/dev/null
 compose_context='context 0123456789abcdef0123456789abcdef01234567 2026-07-16T12:00:00Z'
 assert_dispatch status "compose --env-file $deploy_env ps
 $compose_context" >/dev/null
