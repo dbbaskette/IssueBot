@@ -13,6 +13,8 @@ import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
+import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +43,8 @@ public class IssuePollingService {
     private final IssueWorkflowService workflowService;
     private final IssueBotProperties properties;
     private final DependencyResolverService dependencyResolver;
+    private final ProcessingControlService processingControl;
+    private final IssueDispatchService dispatchService;
     private final AtomicBoolean enabled = new AtomicBoolean(true);
 
     public IssuePollingService(GitHubApiClient gitHubApiClient,
@@ -50,7 +54,9 @@ public class IssuePollingService {
                                 NotificationService notificationService,
                                 IssueWorkflowService workflowService,
                                 IssueBotProperties properties,
-                                DependencyResolverService dependencyResolver) {
+                                DependencyResolverService dependencyResolver,
+                                ProcessingControlService processingControl,
+                                IssueDispatchService dispatchService) {
         this.gitHubApiClient = gitHubApiClient;
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
@@ -59,11 +65,17 @@ public class IssuePollingService {
         this.workflowService = workflowService;
         this.properties = properties;
         this.dependencyResolver = dependencyResolver;
+        this.processingControl = processingControl;
+        this.dispatchService = dispatchService;
     }
 
     @Scheduled(fixedDelayString = "${issuebot.poll-interval-seconds:60}000")
     public void pollForIssues() {
         if (!enabled.get()) {
+            return;
+        }
+        if (processingControl.isPaused()) {
+            log.debug("Global processing is paused, skipping dispatch poll");
             return;
         }
 
@@ -203,8 +215,8 @@ public class IssuePollingService {
                 next.getIssueNumber(), next.getIssueTitle());
         // Claim IN_PROGRESS synchronously before the async dispatch so a subsequent poll cycle
         // (or a concurrent dispatcher) sees it active and won't re-dispatch the same issue.
-        next.setStatus(IssueStatus.IN_PROGRESS);
-        issueRepository.save(next);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(next);
+        if (!claim.claimed()) return;
         eventService.log("ISSUE_RESUMED",
                 "Resuming pending issue #" + next.getIssueNumber(), repo, next);
         workflowService.processIssueAsync(next);
@@ -246,8 +258,8 @@ public class IssuePollingService {
         // issue is still PENDING when resumePendingIssues runs later in this same poll cycle —
         // processIssueAsync only flips IN_PROGRESS later, on the async thread — and gets dispatched
         // a SECOND time (two concurrent runs, double the tokens).
-        next.setStatus(IssueStatus.IN_PROGRESS);
-        issueRepository.save(next);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(next);
+        if (!claim.claimed()) return;
 
         eventService.log("ISSUE_DEQUEUED",
                 "No open IssueBot PR — starting issue #" + next.getIssueNumber(), repo, next);
@@ -331,6 +343,14 @@ public class IssuePollingService {
 
         // No blockers — existing flow
         TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
+
+        if (processingControl.isPaused()) {
+            tracked.setStatus(IssueStatus.QUEUED);
+            issueRepository.save(tracked);
+            eventService.log("ISSUE_QUEUED",
+                    "Issue #" + issueNumber + " queued — processing is paused", repo, tracked);
+            return WebhookOutcome.QUEUED;
+        }
 
         // Per-repo serialization: queue if another issue is active or an IssueBot PR is open
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,

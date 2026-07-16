@@ -121,12 +121,44 @@ class LayoutSseAndAgentStatusRenderTest {
         context.setVariable("totalCost", new BigDecimal("12.34"));
         context.setVariable("events", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingPaused", false);
 
         TemplateSpec spec = new TemplateSpec("layout", null,
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    @Test
+    void fullPageOffersPauseConfirmationAndPausedStateOffersResume() {
+        String running = renderFullDashboardPage(true);
+        assertThat(running).contains("Pause processing", "pause-processing-modal", "action=\"/processing/pause\"");
+
+        WebContext context = new WebContext(webExchange, Locale.US);
+        context.setVariable("contentTemplate", "dashboard");
+        context.setVariable("activePage", "dashboard");
+        context.setVariable("agentRunning", true);
+        context.setVariable("processingPaused", true);
+        context.setVariable("pendingApprovals", 0L);
+        context.setVariable("completed", 0L);
+        context.setVariable("inProgress", 0L);
+        context.setVariable("pending", 0L);
+        context.setVariable("queued", 0L);
+        context.setVariable("blocked", 0L);
+        context.setVariable("failed", 0L);
+        context.setVariable("decomposed", 0L);
+        context.setVariable("awaitingDecomposition", 0L);
+        context.setVariable("awaitingPlanApproval", 0L);
+        context.setVariable("repoCount", 0L);
+        context.setVariable("totalCost", BigDecimal.ZERO);
+        context.setVariable("events", List.of());
+        context.setVariable("humanize", new HumanizeHelper());
+        StringWriter writer = new StringWriter();
+        templateEngine.process(new TemplateSpec("layout", null,
+                (org.thymeleaf.templatemode.TemplateMode) null, null), context, writer);
+
+        assertThat(writer.toString()).contains("Processing paused", "action=\"/processing/resume\"");
     }
 
     @Test

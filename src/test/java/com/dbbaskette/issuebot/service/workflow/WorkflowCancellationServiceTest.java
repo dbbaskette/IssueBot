@@ -34,4 +34,14 @@ class WorkflowCancellationServiceTest {
         p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
         assertThat(p.isAlive()).isFalse();
     }
+
+    @Test
+    void cancellationReasonIsRetainedUntilClear() {
+        service.requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
+        assertThat(service.reason(1L)).contains(CancellationReason.GLOBAL_PAUSE);
+
+        service.clear(1L);
+
+        assertThat(service.reason(1L)).isEmpty();
+    }
 }

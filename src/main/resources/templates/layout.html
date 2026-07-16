@@ -84,6 +84,15 @@
             <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" th:attr="aria-current=${activePage == 'setup'} ? 'page' : null" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
         </ul>
         <footer>
+            <button th:if="${processingPaused != true}" type="button" class="btn btn-ghost btn-sm processing-control"
+                    data-modal-open="pause-processing-modal" title="Stop current and future issue processing">
+                <i class="ti ti-player-pause" aria-hidden="true"></i> Pause processing
+            </button>
+            <form th:if="${processingPaused == true}" action="/processing/resume" method="post" class="processing-control">
+                <input type="hidden" name="returnTo" value="/">
+                <span class="status status-pending">Processing paused</span>
+                <button type="submit" class="btn btn-primary btn-sm">Resume</button>
+            </form>
             <!--
               Refreshed independently of any page-specific poll (the sidebar is static
               chrome shared by every page) via its own small fragment endpoint — see
@@ -112,6 +121,20 @@
          HTMX SPA swaps never wipe it. Controlled by #notif-bell-btn via its id. -->
     <div id="notif-panel" class="notif-panel" role="region" aria-label="Notifications"
          tabindex="-1" th:if="${dashboardNotificationsEnabled}" hidden></div>
+
+    <div th:if="${processingPaused != true}" id="pause-processing-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="pause-processing-title">
+            <h3 id="pause-processing-title" style="margin:0 0 0.5rem">Pause all processing?</h3>
+            <p class="text-sm text-muted">Current workflows will stop at their next safe checkpoint and return to Pending. New starts and retries will remain disabled until you resume.</p>
+            <form action="/processing/pause" method="post">
+                <input type="hidden" name="returnTo" value="/">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Keep processing</button>
+                    <button type="submit" class="btn btn-danger btn-sm">Pause processing</button>
+                </div>
+            </form>
+        </div>
+    </div>
     <script th:src="@{/js/app.js}" defer></script>
 
     <!--

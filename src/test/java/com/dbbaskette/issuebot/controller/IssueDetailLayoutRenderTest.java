@@ -1,6 +1,9 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.FailureCategory;
+import com.dbbaskette.issuebot.model.FailureDiagnostic;
+import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -70,6 +73,7 @@ class IssueDetailLayoutRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingPaused", false);
         return context;
     }
 
@@ -257,5 +261,35 @@ class IssueDetailLayoutRenderTest {
         String html = renderContent(issue(12L, 12, IssueStatus.COMPLETED), List.of()); // planHtml unset → null
         assertThat(html).doesNotContain("Design &amp; Implementation Plan");
         assertThat(html).doesNotContain("Proposed Plan");
+    }
+
+    @Test
+    void pendingIssueOffersManualStartAndExplainsSuspension() {
+        TrackedIssue pending = issue(13L, 13, IssueStatus.PENDING);
+        pending.setSuspensionReason("Processing paused by operator");
+
+        String html = renderContent(pending, List.of());
+
+        assertThat(html).contains("Start now");
+        assertThat(html).contains("Processing paused by operator");
+        assertThat(html).contains("id=\"start-modal\"");
+    }
+
+    @Test
+    void failedIssueShowsStructuredRecoveryGuidance() {
+        TrackedIssue failed = issue(14L, 14, IssueStatus.FAILED);
+        failed.setLastFailureReason("legacy fallback");
+        WebContext context = baseContext(failed, List.of());
+        context.setVariable("latestFailureDiagnostic", new FailureDiagnostic(failed,
+                FailureCategory.VERIFICATION, "Unit tests failed", "LOCAL_CHECKS",
+                "three assertions failed", "Fix the failing assertions before retrying",
+                FailureRetryability.CONFIGURATION_CHANGE_RECOMMENDED));
+
+        String html = render(context, "content");
+
+        assertThat(html).contains("What happened", "Unit tests failed");
+        assertThat(html).contains("Suggested next step", "Fix the failing assertions before retrying");
+        assertThat(html).contains("Technical details", "three assertions failed");
+        assertThat(html).contains("name=\"instructions\"");
     }
 }

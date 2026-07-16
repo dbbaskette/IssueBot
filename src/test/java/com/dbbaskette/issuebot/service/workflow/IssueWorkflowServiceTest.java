@@ -1,6 +1,9 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.FailureCategory;
+import com.dbbaskette.issuebot.model.FailureRetryability;
+import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
@@ -51,6 +54,21 @@ class IssueWorkflowServiceTest {
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
+
+    @Test
+    void recordsStructuredFailureForRecoveryUi() {
+        FailureDiagnosticService diagnostics = mock(FailureDiagnosticService.class);
+        workflowService.setFailureDiagnosticService(diagnostics);
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Fix");
+
+        workflowService.recordFailure(issue, FailureCategory.SETUP, "Setup failed", "SETUP",
+                "permission denied", "Check repository credentials",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+
+        verify(diagnostics).record(issue, FailureCategory.SETUP, "Setup failed", "SETUP",
+                "permission denied", "Check repository credentials",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+    }
 
     @BeforeEach
     void setUp() {
@@ -569,6 +587,23 @@ class IssueWorkflowServiceTest {
         verify(eventService, never()).log(eq("SESSION_RESUME_FAILED"), anyString(), any(), any());
         assertEquals("sess-live", issue.getClaudeSessionId());
         verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void globalPauseFinalizesAsPendingNotFailed() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setLastFailureReason("old failure");
+        cancellationService.requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
+
+        assertTrue(workflowService.cancelled(issue));
+
+        assertEquals(IssueStatus.PENDING, issue.getStatus());
+        assertEquals("Processing paused by operator", issue.getSuspensionReason());
+        assertNull(issue.getLastFailureReason());
+        verify(eventService).log("WORKFLOW_SUSPENDED", "Processing paused by operator", repo, issue);
     }
 
     /**

@@ -173,8 +173,10 @@
         <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
         <td>
             <button type="button"
-                    th:if="${issue.status.name() == 'QUEUED'}"
+                    th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                     class="btn btn-primary btn-sm"
+                    th:disabled="${processingPaused == true}"
+                    th:title="${processingPaused == true ? 'Processing is paused' : 'Start this issue now'}"
                     th:attr="hx-post='/issues/' + ${issue.id} + '/start',
                              aria-label='Start issue #' + ${issue.issueNumber}"
                     hx-target="#content"
@@ -187,7 +189,8 @@
             <button type="button"
                     th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
                     class="btn btn-outline btn-sm"
-                    title="Retry with defaults — open the issue for model/budget options"
+                    th:disabled="${processingPaused == true}"
+                    th:title="${processingPaused == true ? 'Processing is paused' : 'Retry with defaults — open the issue for model/budget options'}"
                     th:attr="hx-post='/issues/' + ${issue.id} + '/retry-quick',
                              aria-label='Retry issue #' + ${issue.issueNumber} + ' with defaults'"
                     hx-target="#content"

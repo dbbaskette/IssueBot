@@ -18,6 +18,8 @@ import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
+import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
+import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -73,6 +76,10 @@ public class IssueController {
     private final TimelineAssembler timelineAssembler;
     private final NotificationRepository notificationRepository;
     private final MarkdownRenderer markdownRenderer;
+    private final IssueDispatchService dispatchService;
+
+    @Autowired(required = false)
+    private FailureDiagnosticService failureDiagnosticService;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -91,7 +98,8 @@ public class IssueController {
                             ObjectMapper objectMapper,
                             TimelineAssembler timelineAssembler,
                             NotificationRepository notificationRepository,
-                            MarkdownRenderer markdownRenderer) {
+                            MarkdownRenderer markdownRenderer,
+                            IssueDispatchService dispatchService) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -110,6 +118,7 @@ public class IssueController {
         this.timelineAssembler = timelineAssembler;
         this.notificationRepository = notificationRepository;
         this.markdownRenderer = markdownRenderer;
+        this.dispatchService = dispatchService;
     }
 
     @GetMapping
@@ -276,6 +285,9 @@ public class IssueController {
     private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
                                 String reviewModelOverride, BigDecimal budgetOverrideUsd,
                                 String planFirstOverride, boolean continueSession) {
+        if (dispatchService.isPaused()) {
+            return "Processing is paused";
+        }
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return "Cannot retry issue in " + issue.getStatus() + " status";
         }
@@ -300,7 +312,6 @@ public class IssueController {
             return gateReason;
         }
 
-        issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
         issue.setCurrentPhase(null);
@@ -325,7 +336,8 @@ public class IssueController {
         if (!continueSession) {
             issue.setClaudeSessionId(null);
         }
-        issueRepository.save(issue);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(issue.getId());
+        if (!claim.claimed()) return claim.reason();
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
                 ? instructions.trim() : null;
@@ -374,8 +386,8 @@ public class IssueController {
      */
     private String performStart(TrackedIssue issue, String implModelOverride, String reviewModelOverride,
                                 BigDecimal budgetOverrideUsd, String planFirstOverride) {
-        if (issue.getStatus() != IssueStatus.QUEUED) {
-            return "Cannot start issue in " + issue.getStatus() + " status (must be QUEUED)";
+        if (issue.getStatus() != IssueStatus.QUEUED && issue.getStatus() != IssueStatus.PENDING) {
+            return "Cannot start issue in " + issue.getStatus() + " status (must be QUEUED or PENDING)";
         }
 
         // Enforce the same gating as the polling service
@@ -384,13 +396,13 @@ public class IssueController {
             return gateReason;
         }
 
-        issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setCurrentPhase(null);
         issue.setImplModelOverride(normalize(implModelOverride));
         issue.setReviewModelOverride(normalize(reviewModelOverride));
         issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         issue.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
-        issueRepository.save(issue);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(issue.getId());
+        if (!claim.claimed()) return claim.reason();
 
         eventService.log("MANUAL_START",
                 "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
@@ -890,6 +902,8 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        model.addAttribute("latestFailureDiagnostic", failureDiagnosticService == null
+                ? null : failureDiagnosticService.latestFor(issue).orElse(null));
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
         // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
         model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));

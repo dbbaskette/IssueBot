@@ -59,7 +59,20 @@ class IssuesQueueRenderTest {
         context.setVariable("issues", issues);
         // Mirrors what UiModelAdvice publishes on every real request.
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingPaused", false);
 
+        TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
+                (org.thymeleaf.templatemode.TemplateMode) null, null);
+        StringWriter writer = new StringWriter();
+        templateEngine.process(spec, context, writer);
+        return writer.toString();
+    }
+
+    private String renderTableRows(List<TrackedIssue> issues, boolean paused) {
+        WebContext context = new WebContext(webExchange, Locale.US);
+        context.setVariable("issues", issues);
+        context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingPaused", paused);
         TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
@@ -110,5 +123,18 @@ class IssuesQueueRenderTest {
         assertThat(html).contains("#5");
         assertThat(html).contains("#6");
         assertThat(html).doesNotContain("Implementation");
+    }
+
+
+    @Test
+    void pendingIssueCanBeStartedUnlessProcessingIsPaused() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 45, "Pending issue");
+        issue.setId(4L);
+        issue.setStatus(IssueStatus.PENDING);
+
+        assertThat(renderTableRows(List.of(issue), false)).contains(">Start</button>");
+        assertThat(renderTableRows(List.of(issue), true)).contains("disabled=\"disabled\"")
+                .contains("Processing is paused");
     }
 }
