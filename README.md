@@ -152,9 +152,9 @@ issuebot:
     review-model: claude-sonnet-5
     utility-model: claude-haiku-4-5
     max-turns-per-invocation: 30
-    timeout-minutes: 10
+    timeout-minutes: 45          # implementation/planning wall-clock cap
     review-max-turns: 15
-    review-timeout-minutes: 5
+    review-timeout-minutes: 20   # review/utility cap (only reads a diff, so smaller)
 
   github:
     token: ${GITHUB_TOKEN}
