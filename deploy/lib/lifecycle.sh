@@ -94,6 +94,18 @@ wait_for_systemd_inactive() {
   done
 }
 
+require_no_matching_process() {
+  local pattern="$1" status
+  [[ -n "$pattern" ]] || die 'IssueBot process pattern is required' || return 1
+  if pgrep -f -- "$pattern" >/dev/null 2>&1; then
+    die 'matching IssueBot process remains'
+    return 1
+  else
+    status=$?
+  fi
+  [[ "$status" == 1 ]] || die 'cannot inspect IssueBot process ownership with pgrep' || return 1
+}
+
 stop_native_issuebot() {
   local kind="${NATIVE_SERVICE_KIND:-}" name="${NATIVE_SERVICE_NAME:-}" pid
   [[ -n "$kind" && -n "$name" ]] || die 'protected native service ownership is required' || return 1
@@ -117,10 +129,22 @@ stop_native_issuebot() {
   esac
 
   [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'native IssueBot process pattern is required' || return 1
-  if pgrep -f -- "$ISSUEBOT_NATIVE_PROCESS_PATTERN" >/dev/null 2>&1; then
-    die 'matching native IssueBot process remains after shutdown'
-    return 1
+  require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
+}
+
+stop_issuebot_for_cutover() {
+  local container stopped
+  container="$(compose ps -q issuebot)" || die 'cannot inspect existing Compose IssueBot ownership' || return 1
+  if [[ -z "$container" ]]; then
+    stop_native_issuebot
+    return
   fi
+
+  compose stop -t 60 issuebot codex-cli-provider || die 'cannot gracefully stop existing Compose release' || return 1
+  stopped="$(compose ps -q issuebot)" || die 'cannot verify existing Compose IssueBot shutdown' || return 1
+  [[ -z "$stopped" ]] || die 'existing Compose IssueBot remains running after shutdown' || return 1
+  [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'IssueBot process pattern is required after Compose shutdown' || return 1
+  require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
 }
 
 backup_h2() {
@@ -188,6 +212,20 @@ container_is_healthy() {
   [[ "$status" == healthy ]]
 }
 
+verify_github_health() {
+  local health="$1" github_status
+  github_status="$(printf '%s\n' "$health" | tr -d '\n' | sed -E 's/.*"gitHub"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+  case "$github_status" in
+    UP) return 0 ;;
+    DOWN)
+      [[ "${ALLOW_DEGRADED_GITHUB:-false}" == true ]] && return 0
+      die 'GitHub actuator component is DOWN'
+      return 1
+      ;;
+    *) die 'cannot determine case-correct gitHub actuator component status' || return 1 ;;
+  esac
+}
+
 verify_functional() {
   local revision protocol doctor dashboard_status auth_enabled health logs listener_pids pid command_line
   container_is_healthy issuebot || die 'IssueBot container is not healthy' || return 1
@@ -207,16 +245,13 @@ verify_functional() {
   fi
 
   health="$(curl --fail --silent --show-error "http://${ISSUEBOT_BIND_ADDRESS:-127.0.0.1}:8090/actuator/health")" || die 'cannot read aggregate health' || return 1
-  if [[ "${ALLOW_GITHUB_DEGRADED:-false}" != true ]]; then
-    [[ "$health" != *'"githubToken":"missing"'* && "$health" != *'"github"'*'"status":"DOWN"'* ]] || die 'GitHub health is degraded' || return 1
-  fi
+  verify_github_health "$health" || return 1
   protocol="$(docker image inspect --format '{{index .Config.Labels "com.issuebot.codex-provider.protocol"}}' "$CODEX_CLI_PROVIDER_IMAGE")" || die 'cannot inspect provider protocol' || return 1
   [[ "$protocol" == "$CODEX_CLI_PROVIDER_PROTOCOL_VERSION" ]] || die 'provider protocol changed after startup' || return 1
   doctor="$(compose exec -T codex-cli-provider codex-cli-provider doctor --json --no-billable-work)" || die 'provider non-billable doctor failed' || return 1
   [[ "$doctor" == *'{'*'}'* ]] || die 'provider doctor did not return JSON' || return 1
-  if [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] && pgrep -f -- "$ISSUEBOT_NATIVE_PROCESS_PATTERN" >/dev/null 2>&1; then
-    die 'native IssueBot process is running alongside Compose'
-    return 1
+  if [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]]; then
+    require_no_matching_process "$ISSUEBOT_NATIVE_PROCESS_PATTERN" || return 1
   fi
   listener_pids="$(lsof -nP -iTCP:8090 -sTCP:LISTEN -t 2>/dev/null)" || die 'Compose did not create a port 8090 listener' || return 1
   while IFS= read -r pid; do
@@ -394,7 +429,7 @@ deploy_release() {
   compose pull codex-cli-provider || die 'provider image pull failed' || return 1
   preflight_runner || return 1
   resolve_release_images || return 1
-  stop_native_issuebot || return 1
+  stop_issuebot_for_cutover || return 1
   require_port_free || return 1
   require_h2_closed || return 1
   backup_h2 || return 1
