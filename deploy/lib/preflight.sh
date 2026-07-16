@@ -21,7 +21,8 @@ preflight_checkout() {
   [[ -n "$upstream" ]] || die 'checkout branch has no upstream' || return 1
   counts="$(git -C "$ISSUEBOT_CHECKOUT" rev-list --left-right --count 'HEAD...@{upstream}')" || die 'cannot compare checkout with upstream' || return 1
   read -r ahead behind <<<"$counts"
-  [[ "$ahead" == 0 && "$behind" == 0 ]] || die "checkout diverges from $upstream (ahead=$ahead behind=$behind)" || return 1
+  [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]] || die 'Git returned invalid checkout ancestry counts' || return 1
+  [[ "$ahead" == 0 ]] || die "checkout cannot fast-forward from $upstream (ahead=$ahead behind=$behind)" || return 1
 }
 
 preflight_runtime() {
@@ -56,8 +57,10 @@ preflight_storage() {
   (( available_kib >= 5242880 )) || die 'less than 5 GiB is available for deployment' || return 1
 
   require_private_file "$ISSUEBOT_SECRET_ENV" || return 1
+  validate_secret_location "$ISSUEBOT_SECRET_ENV" || return 1
   if [[ -n "${DEPLOY_ENV:-}" ]]; then
     require_private_file "$DEPLOY_ENV" || return 1
+    validate_secret_location "$DEPLOY_ENV" || return 1
   fi
 
   if pids="$(lsof -nP -iTCP:8090 -sTCP:LISTEN -t 2>/dev/null)"; then
@@ -68,6 +71,7 @@ preflight_storage() {
     pids=''
   fi
   [[ -z "$pids" ]] && return 0
+  [[ "${ISSUEBOT_FIRST_CUTOVER:-}" == true ]] || die 'port 8090 must be free outside explicit first-cutover preflight' || return 1
   [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'port 8090 is owned by an unidentified process' || return 1
   while IFS= read -r pid; do
     [[ "$pid" =~ ^[0-9]+$ ]] || die 'port 8090 owner could not be identified' || return 1
@@ -77,6 +81,20 @@ preflight_storage() {
       *) die "port 8090 is owned by an unexpected process (PID $pid)" || return 1 ;;
     esac
   done <<<"$pids"
+}
+
+validate_secret_location() {
+  local path="$1" checkout_real path_real
+  [[ -n "${ISSUEBOT_CHECKOUT:-}" ]] || die 'ISSUEBOT_CHECKOUT is required for secret location validation' || return 1
+  checkout_real="$(cd "$ISSUEBOT_CHECKOUT" && pwd -P)" || die 'cannot resolve ISSUEBOT_CHECKOUT' || return 1
+  path_real="$(cd "$(dirname "$path")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$path")")" || die "cannot resolve protected file location: $path" || return 1
+  case "$path_real" in
+    "$checkout_real"|"$checkout_real"/*) die "protected file must not be inside ISSUEBOT_CHECKOUT: $path" || return 1 ;;
+  esac
+  if git -C "$ISSUEBOT_CHECKOUT" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+    die "protected file must not be tracked by Git: $path"
+    return 1
+  fi
 }
 
 preflight_runner() {

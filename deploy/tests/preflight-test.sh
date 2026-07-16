@@ -29,6 +29,7 @@ case "$*" in
   *"symbolic-ref -q HEAD"*) printf "refs/heads/main\\n" ;;
   *"diff --quiet"*|*"diff --cached --quiet"*) exit 0 ;;
   *"ls-files --others --exclude-standard"*) exit 0 ;;
+  *"ls-files --error-unmatch"*) exit 1 ;;
   *"branch --show-current"*) printf "main\\n" ;;
   *"rev-parse --abbrev-ref"*) printf "origin/main\\n" ;;
   *"rev-list --left-right --count"*) printf "0 0\\n" ;;
@@ -93,6 +94,16 @@ mock_command git 'case "$*" in *"rev-list --left-right --count"*) printf "1 0\\n
 assert_failure preflight_checkout
 
 mock_git_clean
+cp "$MOCK_BIN/git" "$TEST_ROOT/git-clean"
+mock_command git 'case "$*" in *"rev-list --left-right --count"*) printf "0 1\\n";; *) exec "$TEST_ROOT/git-clean" "$@";; esac'
+assert_success preflight_checkout
+
+mock_git_clean
+cp "$MOCK_BIN/git" "$TEST_ROOT/git-clean"
+mock_command git 'case "$*" in *"rev-list --left-right --count"*) printf "1 1\\n";; *) exec "$TEST_ROOT/git-clean" "$@";; esac'
+assert_failure preflight_checkout
+
+mock_git_clean
 mock_runtime_clean
 mock_command docker 'case "$*" in "compose version"*) printf "Docker Compose version v1.29\\n";; *) exit 0;; esac'
 assert_failure preflight_runtime
@@ -109,12 +120,53 @@ assert_failure preflight_storage
 mock_runtime_clean
 mock_command lsof 'printf "4242\\n"'
 mock_command ps 'printf "unknown-server\\n"'
+export ISSUEBOT_FIRST_CUTOVER=true
 assert_failure preflight_storage
+unset ISSUEBOT_FIRST_CUTOVER
 
 mock_runtime_clean
 mock_command lsof 'printf "4242\\n"'
 mock_command ps 'printf "/usr/bin/java issuebot-native-marker\\n"'
+export ISSUEBOT_FIRST_CUTOVER=true
 assert_success preflight_storage
+unset ISSUEBOT_FIRST_CUTOVER
+assert_failure preflight_storage
+
+export ISSUEBOT_FIRST_CUTOVER=false
+assert_failure preflight_storage
+unset ISSUEBOT_FIRST_CUTOVER
+
+mock_runtime_clean
+secret_outside="$ISSUEBOT_SECRET_ENV"
+secret_inside="$ISSUEBOT_CHECKOUT/runtime.env"
+: >"$secret_inside"
+chmod 600 "$secret_inside"
+export ISSUEBOT_SECRET_ENV="$secret_inside"
+assert_failure preflight_storage
+export ISSUEBOT_SECRET_ENV="$secret_outside"
+
+deploy_outside="$DEPLOY_ENV"
+deploy_inside="$ISSUEBOT_CHECKOUT/deploy.env"
+: >"$deploy_inside"
+chmod 600 "$deploy_inside"
+export DEPLOY_ENV="$deploy_inside"
+assert_failure preflight_storage
+export DEPLOY_ENV="$deploy_outside"
+
+mock_runtime_clean
+cp "$MOCK_BIN/git" "$TEST_ROOT/git-clean"
+export TRACKED_SECRET="$ISSUEBOT_SECRET_ENV"
+mock_command git 'case "$*" in *"ls-files --error-unmatch"*"$TRACKED_SECRET"*) exit 0;; *) exec "$TEST_ROOT/git-clean" "$@";; esac'
+assert_failure preflight_storage
+
+mock_runtime_clean
+mock_git_clean
+cp "$MOCK_BIN/git" "$TEST_ROOT/git-clean"
+export TRACKED_SECRET="$DEPLOY_ENV"
+mock_command git 'case "$*" in *"ls-files --error-unmatch"*"$TRACKED_SECRET"*) exit 0;; *) exec "$TEST_ROOT/git-clean" "$@";; esac'
+assert_failure preflight_storage
+unset TRACKED_SECRET
+mock_git_clean
 
 chmod 640 "$ISSUEBOT_SECRET_ENV"
 assert_failure preflight_storage
