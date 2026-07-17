@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.FailureCategory;
 import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
@@ -103,7 +105,6 @@ class IssueWorkflowServiceTest {
                 iterationManager,
                 decompositionService,
                 planFirstService,
-                mock(SuperpowersMethodologyService.class),
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
@@ -243,6 +244,128 @@ class IssueWorkflowServiceTest {
     // === Plan-first mode (#64) ===
 
     @Test
+    void planFirstGenerationFailureStopsBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(planFirstService.generateVersion(eq(issue), any(JsonNode.class), any()))
+                .thenReturn(PlanFirstService.PlanningOutcome.FAILED);
+
+        spy.processIssue(issue, null);
+
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
+    void approvedContextIsIncludedInImplementationPrompt() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+        ApprovedPlanContext context = new ApprovedPlanContext(
+                14L, 3, "approved spec", "approved plan");
+
+        String prompt = workflowService.buildImplementationPrompt(
+                issue, null, null, null, false, null, context);
+
+        assertTrue(prompt.contains("## Approved Planning Contract — Version 3"));
+        assertTrue(prompt.contains("### Design Spec\napproved spec\n\n"
+                + "### Implementation Plan\napproved plan\n\n"));
+        assertTrue(prompt.contains("Mechanical implementation plan steps may adapt"));
+        assertTrue(prompt.contains("scope and acceptance criteria may not change"));
+    }
+
+    @Test
+    void planFirstWithoutApprovedContextFailsInvariantBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setPlanApproved(true);
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+
+        spy.processIssue(issue, null);
+
+        assertEquals(IssueStatus.FAILED, issue.getStatus());
+        assertTrue(issue.getLastFailureReason().contains("approved planning version"));
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
+    }
+
+    @Test
+    void alreadyStartedLegacyApprovedIssueMayFinishWithoutPretendingItHasANewSpec() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setCurrentIteration(1);
+        issue.setPlanApproved(true);
+        issue.setImplementationPlan("legacy implementation plan");
+        PlanningVersion legacyVersion = mock(PlanningVersion.class);
+        when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        issue.setApprovedPlanningVersion(legacyVersion);
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(issueRepository.findById(issue.getId())).thenReturn(Optional.empty());
+        ClaudeCodeResult success = new ClaudeCodeResult();
+        success.setSuccess(true);
+        success.setOutput("implemented");
+        when(claudeCode.executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any())).thenReturn(success);
+
+        spy.processIssue(issue, null);
+
+        verify(claudeCode).executeImplementation(
+                argThat(prompt -> prompt.contains("Legacy approved plan")
+                        && prompt.contains("legacy implementation plan")
+                        && prompt.contains("## Issue")
+                        && !prompt.contains("## Approved Planning Contract")
+                        && !prompt.contains("### Design Spec")),
+                any(), anyString(), any(), anyLong(), any());
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
+    }
+
+    @Test
+    void notYetStartedLegacyApprovedIssueRegeneratesBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setPlanApproved(true);
+        issue.setImplementationPlan("legacy implementation plan");
+        PlanningVersion legacyVersion = mock(PlanningVersion.class);
+        when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        issue.setApprovedPlanningVersion(legacyVersion);
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(planFirstService.generateVersion(eq(issue), any(), any()))
+                .thenReturn(PlanFirstService.PlanningOutcome.AWAITING_APPROVAL);
+
+        spy.processIssue(issue, null);
+
+        verify(planFirstService).generateVersion(eq(issue), any(), any());
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    private TrackedIssue planFirstWorkflowIssue() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setId(1L);
+        repo.setPlanFirst(true);
+        repo.setPreScreenEnabled(false);
+        repo.setCiEnabled(false);
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        return issue;
+    }
+
+    private IssueWorkflowService workflowSpyWithIssueDetails(TrackedIssue issue) throws Exception {
+        IssueWorkflowService spy = spy(workflowService);
+        doNothing().when(spy).phaseSetup(issue);
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the bug");
+        details.put("body", "Details");
+        details.putArray("labels");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(details);
+        return spy;
+    }
+
+    @Test
     void buildImplementationPrompt_withApprovedPlan_includesPlanSection() {
         ObjectNode issue = objectMapper.createObjectNode();
         issue.put("title", "Add pagination");
@@ -250,12 +373,13 @@ class IssueWorkflowServiceTest {
         issue.putArray("labels");
 
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
-                false, null, "1. Add a Pageable param\n2. Update the repository query");
+                false, null, new ApprovedPlanContext(11L, 2, "Use Spring Data paging",
+                        "1. Add a Pageable param\n2. Update the repository query"));
 
-        assertTrue(prompt.contains("## Approved Plan"));
+        assertTrue(prompt.contains("## Approved Planning Contract — Version 2"));
         assertTrue(prompt.contains("Pageable param"));
         // Issue section still present and precedes the plan
-        assertTrue(prompt.indexOf("## Issue") < prompt.indexOf("## Approved Plan"));
+        assertTrue(prompt.indexOf("## Issue") < prompt.indexOf("## Approved Planning Contract"));
     }
 
     @Test
@@ -266,9 +390,11 @@ class IssueWorkflowServiceTest {
         issue.putArray("labels");
 
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
-                true, null, "1. Add a Pageable param");
+                true, null, new ApprovedPlanContext(11L, 2, "Use Spring Data paging",
+                        "1. Add a Pageable param"));
 
-        assertTrue(prompt.contains("## Approved Plan"));
+        assertTrue(prompt.contains("## Approved Planning Contract — Version 2"));
+        assertTrue(prompt.contains("### Design Spec\nUse Spring Data paging"));
         assertTrue(prompt.contains("Pageable param"));
     }
 
@@ -281,7 +407,7 @@ class IssueWorkflowServiceTest {
 
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null);
 
-        assertFalse(prompt.contains("## Approved Plan"));
+        assertFalse(prompt.contains("## Approved Planning Contract"));
     }
 
     // === Repository custom instructions + cross-issue lessons (#69) ===
@@ -384,18 +510,19 @@ class IssueWorkflowServiceTest {
 
         String prompt = workflowService.buildImplementationPrompt(issue,
                 "diff content", "Tests failed", "CI broke",
-                false, null, "1. Do the thing",
+                false, null, new ApprovedPlanContext(11L, 2, "Do the approved thing",
+                        "1. Do the thing"),
                 "Always use constructor injection",
                 List.of("Run tests with ./mvnw not mvn"));
 
         int issueIdx = prompt.indexOf("## Issue");
-        int planIdx = prompt.indexOf("## Approved Plan");
+        int planIdx = prompt.indexOf("## Approved Planning Contract");
         int instructionsIdx = prompt.indexOf("## Repository Instructions");
         int lessonsIdx = prompt.indexOf("## Lessons from previous issues in this repo");
         int retryIdx = prompt.indexOf("## Previous Iteration Context");
 
-        assertTrue(issueIdx >= 0 && planIdx > issueIdx, "Issue must precede Approved Plan");
-        assertTrue(instructionsIdx > planIdx, "Approved Plan must precede Repository Instructions");
+        assertTrue(issueIdx >= 0 && planIdx > issueIdx, "Issue must precede Approved Contract");
+        assertTrue(instructionsIdx > planIdx, "Approved Contract must precede Repository Instructions");
         assertTrue(lessonsIdx > instructionsIdx, "Repository Instructions must precede Lessons");
         assertTrue(retryIdx > lessonsIdx, "Lessons must precede Previous Iteration Context");
     }
@@ -895,7 +1022,8 @@ class IssueWorkflowServiceTest {
         successResult.setSuccess(true);
         successResult.setOutput("Implementation complete");
         doReturn(successResult).when(spy).phaseImplementation(
-                any(TrackedIssue.class), any(JsonNode.class), any(), any(), any(), any(), any());
+                any(TrackedIssue.class), any(JsonNode.class), any(), any(), any(), any(), any(),
+                nullable(ApprovedPlanContext.class), nullable(String.class));
 
         // Stub phaseCommitAndPush to throw so the CI-exception path fires (continue → loop ends)
         doThrow(new RuntimeException("simulated push failure"))

@@ -36,6 +36,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Implements the 6-phase issue implementation workflow:
@@ -72,7 +73,6 @@ public class IssueWorkflowService {
     private final IterationManager iterationManager;
     private final IssueDecompositionService decompositionService;
     private final PlanFirstService planFirstService;
-    private final SuperpowersMethodologyService superpowersService;
     private final FollowUpService followUpService;
     private final ModelResolver modelResolver;
     private final WorkflowCancellationService cancellationService;
@@ -102,7 +102,6 @@ public class IssueWorkflowService {
                                  IterationManager iterationManager,
                                  IssueDecompositionService decompositionService,
                                  PlanFirstService planFirstService,
-                                 SuperpowersMethodologyService superpowersService,
                                  FollowUpService followUpService,
                                  ModelResolver modelResolver,
                                  WorkflowCancellationService cancellationService,
@@ -125,7 +124,6 @@ public class IssueWorkflowService {
         this.iterationManager = iterationManager;
         this.decompositionService = decompositionService;
         this.planFirstService = planFirstService;
-        this.superpowersService = superpowersService;
         this.followUpService = followUpService;
         this.modelResolver = modelResolver;
         this.cancellationService = cancellationService;
@@ -256,28 +254,34 @@ public class IssueWorkflowService {
             }
         }
 
-        // === Plan Gate: propose an implementation plan before writing code (#64) ===
-        // A planner failure must never block the issue — proposePlan returns false and
-        // this falls straight through into implementation instead of stalling forever.
-        if (trackedIssue.effectivePlanFirst() && !trackedIssue.isPlanApproved()) {
-            if (planFirstService.proposePlan(trackedIssue, issueDetails, repoPath)) {
+        // === Authoritative Plan First gate ===
+        // The immutable approved version is the only normal implementation contract.
+        // Planning failures and invalid approval state stop here; neither can fall through
+        // to an implementation invocation.
+        ApprovedPlanContext approvedPlan = null;
+        String legacyApprovedPlan = null;
+        if (trackedIssue.effectivePlanFirst()) {
+            Optional<ApprovedPlanContext> existing = planFirstService.approvedContext(trackedIssue);
+            if (existing.isPresent()) {
+                approvedPlan = existing.get();
+            } else if (isLegacyApprovedVersion(trackedIssue)) {
+                if (trackedIssue.getCurrentIteration() > 0
+                        && trackedIssue.getImplementationPlan() != null
+                        && !trackedIssue.getImplementationPlan().isBlank()) {
+                    // Migration-only exception: an already executing legacy issue may finish
+                    // its current run without masquerading as a validated Design Spec.
+                    legacyApprovedPlan = trackedIssue.getImplementationPlan();
+                } else {
+                    planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
+                    return;
+                }
+            } else if (trackedIssue.isPlanApproved()) {
+                failMissingApprovedPlanningVersion(trackedIssue);
+                return;
+            } else {
+                planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
                 return;
             }
-            log.info("Plan proposal failed for {} #{}, proceeding with implementation",
-                    repo.fullName(), issueNumber);
-        }
-
-        // === Superpowers methodology (autonomous): design+plan up front, then implement ===
-        // Opt-in per repo. No approval gate — the plan is generated, recorded, and
-        // implementation proceeds immediately (execution follows TDD via the methodology
-        // baked into the implementation prompt). Skipped once a plan already exists so a
-        // retry/resume doesn't re-plan. Never blocks: generatePlan swallows failures and
-        // leaves the plan empty, so the issue still implements.
-        if (repo.isSuperpowersMethodology()
-                && (trackedIssue.getImplementationPlan() == null || trackedIssue.getImplementationPlan().isBlank())) {
-            sseService.broadcastClaudeLog(trackedIssue.getId(),
-                    "[system] Running design + implementation-plan pass (superpowers methodology)...");
-            superpowersService.generatePlan(trackedIssue, issueDetails, repoPath);
         }
 
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
@@ -341,7 +345,8 @@ public class IssueWorkflowService {
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
                 issueRepository.save(trackedIssue);
                 implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
-                        previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason);
+                        previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
+                        approvedPlan, legacyApprovedPlan);
                 iteration.setClaudeOutput(implResult.getOutput());
                 if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
                     iteration.setClaudeSessionId(implResult.getSessionId());
@@ -711,6 +716,23 @@ public class IssueWorkflowService {
         }
     }
 
+    private boolean isLegacyApprovedVersion(TrackedIssue issue) {
+        PlanningVersion version = issue.getApprovedPlanningVersion();
+        return issue.isPlanApproved()
+                && version != null
+                && version.getState() == PlanningVersionState.LEGACY;
+    }
+
+    private void failMissingApprovedPlanningVersion(TrackedIssue issue) {
+        String reason = "Plan First invariant violated: approved planning version is required before implementation";
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setCurrentPhase(null);
+        recordFailure(issue, FailureCategory.UNEXPECTED, reason, "PLANNING", reason,
+                "Regenerate and approve a complete planning version before retrying.",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+        eventService.log("PLAN_APPROVAL_INVARIANT_FAILED", reason, issue.getRepo(), issue);
+    }
+
     /**
      * Checkpoint: true (and escalates via {@link IterationManager#handleBudgetExceeded})
      * when the issue's effective budget ({@link TrackedIssue#effectiveBudgetUsd()}:
@@ -784,16 +806,22 @@ public class IssueWorkflowService {
                                           Path repoPath, String previousDiff,
                                           String previousAssessment, String previousCiLogs,
                                           String lastRunFailureReason) {
+        return phaseImplementation(trackedIssue, issueDetails, repoPath, previousDiff,
+                previousAssessment, previousCiLogs, lastRunFailureReason, null, null);
+    }
+
+    ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
+                                          Path repoPath, String previousDiff,
+                                          String previousAssessment, String previousCiLogs,
+                                          String lastRunFailureReason,
+                                          ApprovedPlanContext approvedPlan,
+                                          String legacyApprovedPlan) {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_IMPLEMENTATION", "Starting implementation phase", repo, trackedIssue);
 
         Long issueId = trackedIssue.getId();
         String resumeId = trackedIssue.getClaudeSessionId();
         boolean resumed = resumeId != null && !resumeId.isBlank();
-        // The stored plan feeds implementation when the operator approved it (plan-first, #64)
-        // OR when the repo runs the autonomous superpowers methodology (no approval gate).
-        boolean superpowers = repo.isSuperpowersMethodology();
-        String approvedPlan = (trackedIssue.isPlanApproved() || superpowers) ? trackedIssue.getImplementationPlan() : null;
         // Repo custom instructions (#69) — cheap and predictable to include in every
         // prompt (cold and resumed alike) rather than tracking which sessions saw it.
         String repoInstructions = repo.getCustomInstructions();
@@ -807,14 +835,7 @@ public class IssueWorkflowService {
 
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
                 previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
-                repoInstructions, lessons);
-
-        // Superpowers methodology (autonomous): lead the implementation prompt with the
-        // TDD + executing-plans discipline so the agent executes the plan (above) test-first
-        // and finishes with committed code rather than another design doc.
-        if (superpowers) {
-            prompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + prompt;
-        }
+                repoInstructions, lessons, legacyApprovedPlan);
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching " + claudeCode.providerDisplayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -850,10 +871,7 @@ public class IssueWorkflowService {
 
             String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
                     previousAssessment, previousCiLogs, false, null, approvedPlan,
-                    repoInstructions, lessons);
-            if (superpowers) {
-                coldPrompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + coldPrompt;
-            }
+                    repoInstructions, lessons, legacyApprovedPlan);
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
                     + claudeCode.providerDisplayName() + " session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
@@ -1578,7 +1596,7 @@ public class IssueWorkflowService {
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
                                       boolean resumed, String lastFailureReason,
-                                      String approvedPlan) {
+                                      ApprovedPlanContext approvedPlan) {
         return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment, previousCiLogs,
                 resumed, lastFailureReason, approvedPlan, null, null);
     }
@@ -1592,26 +1610,36 @@ public class IssueWorkflowService {
      *                prompts that carry no other retry context (a continue-session manual retry
      *                with no operator instructions) — a resumed session must never open with a
      *                dangling "New information:" header followed by nothing.
-     * @param approvedPlan the operator-approved implementation plan (#64), or null when the
-     *                issue isn't plan-gated. Deliberately included in cold AND resumed prompts
-     *                alike: the plan was produced by a separate utility-model session, so a
-     *                resumed implementation session has never seen it, and repeating it is
-     *                harmless — simpler than tracking which sessions already got it.
+     * @param approvedPlan the immutable approved Design Spec and Implementation Plan contract,
+     *                or null when the issue explicitly opts out of Plan First. Included in cold
+     *                AND resumed prompts alike so every implementation invocation is bound to
+     *                the same exact approved artifacts.
      * @param repoInstructions the repo owner's free-text custom instructions (#69), or
      *                null/blank when unset. Included in cold AND resumed prompts alike —
      *                same rationale as approvedPlan: cheap, and simpler than tracking which
      *                sessions already saw it.
      * @param lessons cross-issue lessons captured from previous issues in this repo (#69,
      *                opt-in), or null/empty when lessons aren't enabled or none exist yet.
-     *                Section order is pinned: Issue, Approved Plan, Repository Instructions,
+     *                Section order is pinned: Issue, Approved Contract, Repository Instructions,
      *                Lessons, then retry context (Previous Iteration Context) — see the
      *                ordering test in IssueWorkflowServiceTest.
      */
     String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
                                       String previousAssessment, String previousCiLogs,
                                       boolean resumed, String lastFailureReason,
-                                      String approvedPlan, String repoInstructions,
+                                      ApprovedPlanContext approvedPlan, String repoInstructions,
                                       List<String> lessons) {
+        return buildImplementationPrompt(issueDetails, previousDiff, previousAssessment,
+                previousCiLogs, resumed, lastFailureReason, approvedPlan, repoInstructions,
+                lessons, null);
+    }
+
+    private String buildImplementationPrompt(JsonNode issueDetails, String previousDiff,
+                                              String previousAssessment, String previousCiLogs,
+                                              boolean resumed, String lastFailureReason,
+                                              ApprovedPlanContext approvedPlan,
+                                              String repoInstructions, List<String> lessons,
+                                              String legacyApprovedPlan) {
         StringBuilder prompt = new StringBuilder();
         if (resumed) {
             prompt.append("Continuing the same task. New information since your last attempt:\n\n");
@@ -1623,7 +1651,8 @@ public class IssueWorkflowService {
                             + "addressing whatever prevented success last time.\n\n");
                 }
             }
-        } else {
+        }
+        if (!resumed || legacyApprovedPlan != null) {
             prompt.append("You are implementing a GitHub issue. Here are the details:\n\n");
             prompt.append("## Issue\n");
             prompt.append("Title: ").append(issueDetails.path("title").asText()).append("\n");
@@ -1640,11 +1669,21 @@ public class IssueWorkflowService {
             }
         }
 
-        // Operator-approved implementation plan (#64) — injected after the Issue section
-        if (approvedPlan != null && !approvedPlan.isBlank()) {
-            prompt.append("## Approved Plan\n");
-            prompt.append("The operator approved this implementation plan — follow it:\n\n");
-            prompt.append(approvedPlan).append("\n\n");
+        // Immutable operator-approved contract — inject the artifacts byte-for-byte.
+        if (approvedPlan != null) {
+            prompt.append("## Approved Planning Contract — Version ")
+                    .append(approvedPlan.versionNumber()).append("\n");
+            prompt.append("Mechanical implementation plan steps may adapt to the actual codebase, ")
+                    .append("but scope and acceptance criteria may not change.\n\n");
+            prompt.append("### Design Spec\n").append(approvedPlan.designSpec()).append("\n\n");
+            prompt.append("### Implementation Plan\n")
+                    .append(approvedPlan.implementationPlan()).append("\n\n");
+        } else if (legacyApprovedPlan != null) {
+            prompt.append("## Legacy approved plan\n");
+            prompt.append("Migration compatibility only: this issue was already executing before ")
+                    .append("versioned planning. Use the original GitHub issue and this legacy plan; ")
+                    .append("it is not an approved Design Spec.\n\n");
+            prompt.append(legacyApprovedPlan).append("\n\n");
         }
 
         // Repository custom instructions (#69) — standing per-repo guidance from the
