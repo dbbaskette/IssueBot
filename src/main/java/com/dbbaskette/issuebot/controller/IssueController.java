@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -79,6 +80,7 @@ public class IssueController {
     private final NotificationRepository notificationRepository;
     private final MarkdownRenderer markdownRenderer;
     private final IssueDispatchService dispatchService;
+    private final PlanningVersionRepository planningVersionRepository;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -104,7 +106,8 @@ public class IssueController {
                             TimelineAssembler timelineAssembler,
                             NotificationRepository notificationRepository,
                             MarkdownRenderer markdownRenderer,
-                            IssueDispatchService dispatchService) {
+                            IssueDispatchService dispatchService,
+                            PlanningVersionRepository planningVersionRepository) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -124,6 +127,7 @@ public class IssueController {
         this.notificationRepository = notificationRepository;
         this.markdownRenderer = markdownRenderer;
         this.dispatchService = dispatchService;
+        this.planningVersionRepository = planningVersionRepository;
     }
 
     @GetMapping
@@ -202,6 +206,7 @@ public class IssueController {
 
     @GetMapping("/{id}")
     public String detail(Model model, @PathVariable Long id,
+                         @RequestParam(required = false) Integer planVersion,
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         // URL-reachable (a clicked or bookmarked link) — a missing id is a routine "the repo
         // was removed" occurrence, not a server error, so it gets a friendly 404 (#81) rather
@@ -209,7 +214,7 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow(() -> new NotFoundException(
                 "Issue not found — it may have been removed with its repository.",
                 "/issues", "Back to the queue"));
-        populateDetailModel(model, issue, id);
+        populateDetailModel(model, issue, id, planVersion);
         model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
     }
@@ -229,7 +234,7 @@ public class IssueController {
     @GetMapping("/{id}/live-status")
     public String liveStatus(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
-        populateDetailModel(model, issue, id);
+        populateDetailModel(model, issue, id, null);
         // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
         // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
         return "issue-detail :: live-status-poll";
@@ -956,7 +961,7 @@ public class IssueController {
         return remaining;
     }
 
-    private void populateDetailModel(Model model, TrackedIssue issue, Long id) {
+    private void populateDetailModel(Model model, TrackedIssue issue, Long id, Integer requestedPlanVersion) {
         List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
@@ -978,6 +983,7 @@ public class IssueController {
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
         // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
         model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));
+        populatePlanReviewModel(model, issue, iterations, requestedPlanVersion);
         model.addAttribute("iterations", iterations);
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         // Iteration History (#90) reads newest-first; "iterations" above stays ascending
@@ -1004,6 +1010,41 @@ public class IssueController {
                 model.addAttribute("decompositionProposal", proposal);
             }
         }
+    }
+
+    private void populatePlanReviewModel(Model model, TrackedIssue issue,
+                                         List<Iteration> iterations,
+                                         Integer requestedPlanVersion) {
+        List<PlanningVersion> versions = planningVersionRepository
+                .findByIssueIdOrderByVersionNumberDesc(issue.getId());
+        PlanningVersion current = versions.isEmpty() ? null : versions.getFirst();
+        PlanningVersion selected = current;
+        if (requestedPlanVersion != null) {
+            selected = versions.stream()
+                    .filter(version -> version.getVersionNumber() == requestedPlanVersion)
+                    .findFirst()
+                    .orElse(current);
+        }
+
+        boolean historical = selected != null && current != null
+                && selected.getVersionNumber() != current.getVersionNumber();
+        List<Iteration> reviewAttempts = issue.getPlanConformanceAttempt() == 2
+                ? iterations.reversed().stream()
+                    .filter(iteration -> iteration.getReviewPassed() != null
+                            || iteration.getReviewJson() != null)
+                    .limit(2)
+                    .toList()
+                : List.of();
+
+        model.addAttribute("planningVersions", versions);
+        model.addAttribute("selectedPlanningVersion", selected);
+        model.addAttribute("currentPlanningVersion", current);
+        model.addAttribute("selectedPlanIsHistorical", historical);
+        model.addAttribute("selectedDesignSpecHtml", selected == null
+                ? null : markdownRenderer.toHtml(selected.getDesignSpec()));
+        model.addAttribute("selectedImplementationPlanHtml", selected == null
+                ? null : markdownRenderer.toHtml(selected.getImplementationPlan()));
+        model.addAttribute("planReviewAttempts", reviewAttempts);
     }
 
     /**

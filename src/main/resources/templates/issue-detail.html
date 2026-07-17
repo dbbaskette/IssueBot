@@ -50,7 +50,10 @@
                 <div th:fragment="status-actions(oob)" id="status-actions" class="flex gap-1" style="align-items:center"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                     <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${humanize.status(issue.status)}">Status</span>
-                    <a th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                    <a th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
+                                   and not (issue.planConformanceAttempt == 2
+                                            and currentPlanningVersion != null
+                                            and currentPlanningVersion.state.name() == 'APPROVED')}"
                             href="#recovery" class="btn btn-ghost btn-sm"
                             th:disabled="${processingPaused == true}"
                             th:title="${processingPaused == true ? 'Processing is paused' : 'Review recovery options'}">
@@ -83,7 +86,10 @@
 
             <!-- === FAILURE RECOVERY PANEL === -->
             <div id="recovery" class="panel mb-3 failure-recovery recovery-card"
-                 th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}">
+                 th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
+                              and not (issue.planConformanceAttempt == 2
+                                       and currentPlanningVersion != null
+                                       and currentPlanningVersion.state.name() == 'APPROVED')}">
                 <div class="panel-header">
                     <h3>Recovery</h3>
                     <span class="status status-failed">Needs attention</span>
@@ -191,29 +197,158 @@
                 </div>
             </div>
 
-            <!-- === PROPOSED PLAN CARD (plan-first mode, #64) — awaiting approval === -->
-            <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and planHtml != null}" class="panel mb-3">
-                <div class="panel-header">
-                    <h3>Proposed Plan</h3>
-                    <div class="flex gap-1">
-                        <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-plan-modal">
-                            <i class="ti ti-check" aria-hidden="true"></i> Approve plan
-                        </button>
-                        <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-plan-modal">
-                            <i class="ti ti-x" aria-hidden="true"></i> Reject with feedback
-                        </button>
+            <!-- === PLAN REVIEW DESK: one selected immutable version, focused documents === -->
+            <section th:if="${selectedPlanningVersion != null}"
+                     id="plan-review" class="panel mb-3 plan-review" data-plan-review>
+                <header class="panel-header plan-review-header">
+                    <div>
+                        <span class="eyebrow">Planning contract</span>
+                        <h3>Plan Review</h3>
+                    </div>
+                    <div class="plan-review-current" th:if="${currentPlanningVersion != null}">
+                        <span class="status"
+                              th:classappend="${'status-' + currentPlanningVersion.state.name().toLowerCase()}"
+                              th:text="${currentPlanningVersion.state}">PENDING</span>
+                        <strong th:text="${'Current version ' + currentPlanningVersion.versionNumber}">Current version 3</strong>
+                        <span th:text="${#temporals.format(currentPlanningVersion.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
+                        <span th:text="${(currentPlanningVersion.provider != null ? currentPlanningVersion.provider : 'Unknown provider') + ' · ' + (currentPlanningVersion.model != null ? currentPlanningVersion.model : 'Unknown model')}">CODEX · gpt-5.6</span>
+                    </div>
+                </header>
+
+                <div class="plan-history-banner" role="status" th:if="${selectedPlanIsHistorical}">
+                    <div>
+                        <strong>Historical version</strong>
+                        <span th:text="${'You are reviewing Version ' + selectedPlanningVersion.versionNumber + '. It is read-only.'}">You are reviewing Version 2. It is read-only.</span>
+                    </div>
+                    <a class="btn btn-ghost btn-sm"
+                       th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">Return to current version</a>
+                </div>
+
+                <div class="plan-review-body">
+                    <aside class="plan-version-rail" aria-label="Selected planning version">
+                        <span class="plan-version-number" th:text="${'v' + selectedPlanningVersion.versionNumber}">v3</span>
+                        <span class="status"
+                              th:classappend="${'status-' + selectedPlanningVersion.state.name().toLowerCase()}"
+                              th:text="${selectedPlanningVersion.state}">PENDING</span>
+                        <span class="plan-version-label"
+                              th:text="${selectedPlanIsHistorical ? 'Historical' : 'Current'}">Current</span>
+                    </aside>
+
+                    <div class="plan-review-workspace">
+                        <div class="plan-review-tabs" role="tablist" aria-label="Plan Review documents">
+                            <button type="button" id="plan-tab-design" class="plan-review-tab"
+                                    role="tab" aria-selected="true" aria-controls="plan-panel-design"
+                                    data-plan-tab="design">Design Spec</button>
+                            <button type="button" id="plan-tab-implementation" class="plan-review-tab"
+                                    role="tab" aria-selected="false" aria-controls="plan-panel-implementation"
+                                    tabindex="-1" data-plan-tab="implementation">Implementation Plan</button>
+                            <button type="button" id="plan-tab-history" class="plan-review-tab"
+                                    role="tab" aria-selected="false" aria-controls="plan-panel-history"
+                                    tabindex="-1" data-plan-tab="history"
+                                    th:text="${'History · ' + #lists.size(planningVersions)}">History · 3</button>
+                        </div>
+
+                        <div id="plan-panel-design" class="plan-review-panel" role="tabpanel"
+                             tabindex="0" aria-labelledby="plan-tab-design">
+                            <!--/* Both document fields are independently sanitized by MarkdownRenderer. */-->
+                            <div class="plan-doc markdown-body" th:if="${selectedDesignSpecHtml != null}"
+                                 th:utext="${selectedDesignSpecHtml}">design spec</div>
+                            <p class="plan-document-empty" th:if="${selectedDesignSpecHtml == null}">No Design Spec was stored for this version.</p>
+                        </div>
+
+                        <div id="plan-panel-implementation" class="plan-review-panel" role="tabpanel"
+                             tabindex="0" aria-labelledby="plan-tab-implementation" hidden>
+                            <div class="plan-doc markdown-body" th:if="${selectedImplementationPlanHtml != null}"
+                                 th:utext="${selectedImplementationPlanHtml}">implementation plan</div>
+                            <p class="plan-document-empty" th:if="${selectedImplementationPlanHtml == null}">No Implementation Plan was stored for this version.</p>
+                        </div>
+
+                        <div id="plan-panel-history" class="plan-review-panel" role="tabpanel"
+                             tabindex="0" aria-labelledby="plan-tab-history" hidden>
+                            <ol class="plan-version-history">
+                                <li th:each="version : ${planningVersions}"
+                                    th:classappend="${version.versionNumber == selectedPlanningVersion.versionNumber ? 'selected' : ''}">
+                                    <a class="plan-version-link"
+                                       th:href="@{'/issues/' + ${issue.id} + '?planVersion=' + ${version.versionNumber} + '#plan-review'}">
+                                        <span class="plan-version-history-title">
+                                            <strong th:text="${'Version ' + version.versionNumber}">Version 3</strong>
+                                            <span class="status"
+                                                  th:classappend="${'status-' + version.state.name().toLowerCase()}"
+                                                  th:text="${version.state}">PENDING</span>
+                                        </span>
+                                        <span th:text="${#temporals.format(version.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
+                                        <span th:text="${(version.provider != null ? version.provider : 'Unknown provider') + ' · ' + (version.model != null ? version.model : 'Unknown model')}">CODEX · gpt-5.6</span>
+                                    </a>
+                                    <p th:if="${version.revisionFeedback != null and not #strings.isEmpty(version.revisionFeedback)}">
+                                        <strong>Operator revision:</strong>
+                                        <span th:text="${version.revisionFeedback}">Tighten rollback steps.</span>
+                                    </p>
+                                    <p th:if="${version.approvedAt != null}"
+                                       th:text="${'Approved ' + #temporals.format(version.approvedAt, 'MMM d, yyyy HH:mm')}">Approved Jul 17, 2026 10:00</p>
+                                </li>
+                            </ol>
+                        </div>
                     </div>
                 </div>
-                <div class="panel-body">
-                    <!--/* planHtml is markdown rendered by MarkdownRenderer with escapeHtml+sanitizeUrls,
-                           so the model's literal HTML can't execute — safe to emit via th:utext. */-->
-                    <div class="plan-doc markdown-body" th:utext="${planHtml}">plan</div>
-                </div>
-            </div>
 
-            <!-- === DESIGN & PLAN DOC (any other status that has a stored plan, e.g. the
-                     autonomous superpowers methodology, or a completed issue) — collapsible === -->
-            <details th:if="${planHtml != null and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
+                <div class="plan-review-actions"
+                     th:if="${not selectedPlanIsHistorical
+                              and currentPlanningVersion != null
+                              and currentPlanningVersion.state.name() == 'PENDING'
+                              and issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
+                    <form class="plan-revision-form" th:action="@{'/issues/' + ${issue.id} + '/plan/revise'}" method="post">
+                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.versionNumber}">
+                        <label for="plan-revision-feedback">What should change?</label>
+                        <textarea id="plan-revision-feedback" name="feedback" rows="3" required maxlength="4000"
+                                  data-plan-revision-guidance
+                                  placeholder="Describe the missing requirement or incorrect approach."></textarea>
+                        <button type="submit" class="btn btn-ghost" data-plan-revise disabled>Revise Spec &amp; Plan</button>
+                    </form>
+                    <form class="plan-approval-form" th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
+                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.versionNumber}">
+                        <p>Approve both documents as the implementation contract.</p>
+                        <button type="submit" class="btn btn-primary"
+                                th:text="${'Approve Version ' + currentPlanningVersion.versionNumber}">Approve Version 3</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- === NEEDS GUIDANCE: implementation-only retry against approved contract === -->
+            <section th:if="${issue.planConformanceAttempt == 2
+                              and selectedPlanningVersion != null
+                              and currentPlanningVersion.state.name() == 'APPROVED'
+                              and not selectedPlanIsHistorical}"
+                     class="panel mb-3 plan-guidance-panel" aria-labelledby="plan-guidance-title">
+                <div class="panel-header">
+                    <div>
+                        <span class="eyebrow">Implementation conformance</span>
+                        <h3 id="plan-guidance-title">Needs guidance after review 2</h3>
+                    </div>
+                    <span class="status status-failed">Action required</span>
+                </div>
+                <div class="panel-body">
+                    <p>The approved Design Spec and Implementation Plan will not change. Your guidance applies only to the next implementation attempt.</p>
+                    <ol class="plan-review-attempts">
+                        <li th:each="attempt, stats : ${planReviewAttempts}">
+                            <div class="plan-review-attempt-heading">
+                                <strong th:text="${'Review attempt ' + (2 - stats.index)}">Review attempt 2</strong>
+                                <span class="status status-failed">Did not conform</span>
+                            </div>
+                            <p th:if="${attempt.reviewModel != null}" th:text="${'Review model: ' + attempt.reviewModel}">Review model</p>
+                            <pre th:if="${attempt.reviewJson != null}" th:text="${attempt.reviewJson}">Findings and test evidence</pre>
+                        </li>
+                    </ol>
+                    <form class="plan-guidance-form" th:action="@{'/issues/' + ${issue.id} + '/plan/retry-implementation'}" method="post">
+                        <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
+                        <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
+                                  placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
+                        <button type="submit" class="btn btn-primary">Retry Implementation</button>
+                    </form>
+                </div>
+            </section>
+
+            <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
+            <details th:if="${selectedPlanningVersion == null and planHtml != null}"
                      class="panel mb-3 plan-doc-panel secondary-section plan-section"
                      th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
                 <summary class="panel-header">
@@ -533,38 +668,6 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
                     <button type="submit" class="btn btn-danger btn-sm">Reject &amp; escalate</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- === Approve Plan Modal === -->
-    <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}"
-         id="approve-plan-modal" class="modal-backdrop" data-modal hidden>
-        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="approve-plan-modal-title">
-            <h3 id="approve-plan-modal-title" style="margin:0 0 0.5rem">Approve Plan</h3>
-            <p class="text-sm text-muted" style="margin:0 0 1rem">Starts implementation using this plan. The issue is queued and resumes on the next poll cycle (~60s).</p>
-            <form th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm">Approve plan</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- === Reject Plan Modal === -->
-    <div th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and issue.implementationPlan != null}"
-         id="reject-plan-modal" class="modal-backdrop" data-modal hidden>
-        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="reject-plan-modal-title">
-            <h3 id="reject-plan-modal-title" style="margin:0 0 0.5rem">Reject Plan</h3>
-            <p class="text-sm text-muted" style="margin:0 0 1rem">Feedback for the next plan (required). After 2 rejections the issue escalates to needs-human.</p>
-            <form th:action="@{'/issues/' + ${issue.id} + '/plan/reject'}" method="post">
-                <textarea name="feedback" rows="4" class="modal-textarea" required data-modal-autofocus
-                          placeholder="e.g. The plan misses the caching layer — include how invalidation is handled"></textarea>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
-                    <button type="submit" class="btn btn-danger btn-sm">Reject plan</button>
                 </div>
             </form>
         </div>

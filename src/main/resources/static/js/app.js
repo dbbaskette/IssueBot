@@ -1776,6 +1776,56 @@
     }
   });
 
+  // --- Plan Review desk ---------------------------------------------------
+  // Event delegation keeps tabs working after htmx replaces #content. Each
+  // review card owns its tab/panel state so a future page can safely host more
+  // than one review fragment without id/query leakage between them.
+  function activatePlanTab(tab, focusTab) {
+    var root = tab && tab.closest('[data-plan-review]');
+    if (!root) { return; }
+    var tabs = Array.prototype.slice.call(root.querySelectorAll('[data-plan-tab]'));
+    tabs.forEach(function (item) {
+      var selected = item === tab;
+      item.setAttribute('aria-selected', String(selected));
+      item.setAttribute('tabindex', selected ? '0' : '-1');
+      var panel = root.querySelector('#' + item.getAttribute('aria-controls'));
+      if (panel) { panel.hidden = !selected; }
+    });
+    if (focusTab) { tab.focus(); }
+  }
+
+  document.addEventListener('click', function (event) {
+    var tab = event.target.closest && event.target.closest('[data-plan-tab]');
+    if (tab) { activatePlanTab(tab, false); }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    var tab = event.target.closest && event.target.closest('[data-plan-tab]');
+    if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { return; }
+    var tabs = Array.prototype.slice.call(
+      tab.closest('[data-plan-review]').querySelectorAll('[data-plan-tab]')
+    );
+    var index = tabs.indexOf(tab);
+    if (event.key === 'Home') { index = 0; }
+    else if (event.key === 'End') { index = tabs.length - 1; }
+    else if (event.key === 'ArrowLeft') { index = (index - 1 + tabs.length) % tabs.length; }
+    else { index = (index + 1) % tabs.length; }
+    event.preventDefault();
+    activatePlanTab(tabs[index], true);
+  });
+
+  function syncPlanRevisionButton(textarea) {
+    var form = textarea && textarea.closest('.plan-revision-form');
+    var button = form && form.querySelector('[data-plan-revise]');
+    if (button) { button.disabled = textarea.value.trim().length === 0; }
+  }
+
+  document.addEventListener('input', function (event) {
+    if (event.target.matches && event.target.matches('[data-plan-revision-guidance]')) {
+      syncPlanRevisionButton(event.target);
+    }
+  });
+
   // --- Init ---------------------------------------------------------------
   function init() {
     syncThemeIcon();
@@ -1785,6 +1835,7 @@
     initCostCharts();
     updateBulkActionBar();
     UpdateStamps.markAllVisible();
+    document.querySelectorAll('[data-plan-revision-guidance]').forEach(syncPlanRevisionButton);
   }
 
   if (document.readyState === 'loading') {

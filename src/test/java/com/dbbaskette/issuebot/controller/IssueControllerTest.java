@@ -51,7 +51,8 @@ class IssueControllerTest {
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
+                    mock(PlanningVersionRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -78,7 +79,8 @@ class IssueControllerTest {
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
+                    mock(PlanningVersionRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -105,7 +107,8 @@ class IssueControllerTest {
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
+                    mock(PlanningVersionRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -126,7 +129,8 @@ class IssueControllerTest {
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
+                    mock(PlanningVersionRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -154,7 +158,8 @@ class IssueControllerTest {
                 mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
+                    mock(PlanningVersionRepository.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -187,6 +192,7 @@ class IssueControllerTest {
         final IssueGuidanceRepository guidanceRepository = mock(IssueGuidanceRepository.class);
         final IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
         final ProcessingControlService control = mock(ProcessingControlService.class);
+        final PlanningVersionRepository planningVersions = mock(PlanningVersionRepository.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -201,6 +207,7 @@ class IssueControllerTest {
             when(issues.findById(1L)).thenReturn(Optional.of(issue));
             when(issues.findByIdWithApprovedPlanningVersion(1L)).thenReturn(Optional.of(issue));
             when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
+            when(planningVersions.findByIssueIdOrderByVersionNumberDesc(1L)).thenReturn(List.of());
             try {
                 when(gitHubApiClient.listOpenPullRequests("acme", "widgets", GitOperationsService.BRANCH_PREFIX))
                         .thenReturn(List.of());
@@ -216,7 +223,7 @@ class IssueControllerTest {
                     cancellationService, guidanceRepository, new ObjectMapper(),
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(),
-                    new IssueDispatchService(issues, control));
+                    new IssueDispatchService(issues, control), planningVersions);
         }
     }
 
@@ -813,7 +820,7 @@ class IssueControllerTest {
         when(f.costRepository.totalCostForIssue(f.issue)).thenReturn(new java.math.BigDecimal("0.50"));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         org.assertj.core.api.Assertions.assertThat((java.math.BigDecimal) model.getAttribute("effectiveBudget"))
                 .isEqualByComparingTo(new java.math.BigDecimal("2.00"));
@@ -828,7 +835,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("effectiveBudget")).isNull();
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(0);
@@ -843,7 +850,7 @@ class IssueControllerTest {
         when(f.costRepository.totalCostForIssue(f.issue)).thenReturn(new java.math.BigDecimal("0.44"));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(100);
     }
@@ -853,9 +860,82 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isNull();
+    }
+
+    @Test
+    void detailSelectsRequestedPlanningVersionAndRendersBothDocumentsIndependently() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        PlanningVersion current = PlanningVersion.pending(f.issue, 3,
+                "# Current design", "# Current plan", "CODEX", "gpt-5.6", "new guidance");
+        PlanningVersion historical = PlanningVersion.pending(f.issue, 2,
+                "# Historical design", "# Historical plan", "CODEX", "gpt-5.6", "old guidance");
+        historical.supersede();
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(current, historical));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, 2, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("currentPlanningVersion"))
+                .isSameAs(current);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanningVersion"))
+                .isSameAs(historical);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanIsHistorical"))
+                .isEqualTo(true);
+        org.assertj.core.api.Assertions.assertThat((String) model.getAttribute("selectedDesignSpecHtml"))
+                .contains("Historical design");
+        org.assertj.core.api.Assertions.assertThat((String) model.getAttribute("selectedImplementationPlanHtml"))
+                .contains("Historical plan");
+    }
+
+    @Test
+    void detailFallsBackToLatestVersionForUnknownSelection() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        PlanningVersion current = PlanningVersion.pending(f.issue, 3,
+                "# Current design", "# Current plan", "CODEX", "gpt-5.6", null);
+        PlanningVersion older = PlanningVersion.pending(f.issue, 2,
+                "# Older design", "# Older plan", "CODEX", "gpt-5.6", null);
+        older.supersede();
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(current, older));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, 99, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanningVersion"))
+                .isSameAs(current);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanIsHistorical"))
+                .isEqualTo(false);
+    }
+
+    @Test
+    void detailLoadsTwoMostRecentReviewBearingAttemptsAfterSecondMiss() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = PlanningVersion.pending(f.issue, 1,
+                "# Approved design", "# Approved plan", "CODEX", "gpt-5.6", null);
+        approved.approve(java.time.LocalDateTime.now());
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(approved));
+        Iteration first = new Iteration(f.issue, 1);
+        first.setReviewPassed(false);
+        Iteration nonReview = new Iteration(f.issue, 2);
+        Iteration second = new Iteration(f.issue, 3);
+        second.setReviewJson("second findings");
+        Iteration third = new Iteration(f.issue, 4);
+        third.setReviewPassed(false);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(first, nonReview, second, third));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null, null);
+
+        @SuppressWarnings("unchecked")
+        List<Iteration> attempts = (List<Iteration>) model.getAttribute("planReviewAttempts");
+        org.assertj.core.api.Assertions.assertThat(attempts).containsExactly(third, second);
     }
 
     // === Friendly not-found (#81) ===
@@ -872,7 +952,7 @@ class IssueControllerTest {
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         NotFoundException ex = org.junit.jupiter.api.Assertions.assertThrows(NotFoundException.class,
-                () -> f.controller.detail(model, 999L, null));
+                () -> f.controller.detail(model, 999L, null, null));
 
         org.assertj.core.api.Assertions.assertThat(ex.getMessage())
                 .isEqualTo("Issue not found — it may have been removed with its repository.");
@@ -968,7 +1048,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(first, second));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isSameAs(second);
     }
@@ -988,7 +1068,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(first, second, third));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         @SuppressWarnings("unchecked")
         List<Iteration> newestFirst = (List<Iteration>) model.getAttribute("iterationsNewestFirst");
@@ -1010,7 +1090,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         org.assertj.core.api.Assertions.assertThat(
                 (List<?>) model.getAttribute("timeline")).isEmpty();
@@ -1027,7 +1107,7 @@ class IssueControllerTest {
         when(f.costRepository.findByIssue(f.issue)).thenReturn(List.of());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null);
+        f.controller.detail(model, 1L, null, null);
 
         @SuppressWarnings("unchecked")
         List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline> timeline =
@@ -1119,7 +1199,8 @@ class IssueControllerTest {
                 workflowService, eventService,
                 gitHubApiClient, properties, mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
+                    mock(PlanningVersionRepository.class));
     }
 
     @Test
