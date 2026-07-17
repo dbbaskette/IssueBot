@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.util.HumanizeHelper;
+import com.dbbaskette.issuebot.model.Event;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -78,7 +79,8 @@ class DashboardTileRenderTest {
         context.setVariable("awaitingPlanApproval", 9L);
         context.setVariable("repoCount", 10L);
         context.setVariable("totalCost", new BigDecimal("12.34"));
-        context.setVariable("events", List.of());
+        context.setVariable("events", List.of(new Event("WORKFLOW_ERROR",
+                "ClaudeCodeResult{success=false, exitCode=1}")));
         // Mirrors what UiModelAdvice publishes on every real request.
         context.setVariable("humanize", new HumanizeHelper());
 
@@ -121,5 +123,23 @@ class DashboardTileRenderTest {
             assertThat(hxGetMatcher.find()).as("tag %s has an hx-get attribute", tag).isTrue();
             assertThat(hrefMatcher.group(1)).isEqualTo(hxGetMatcher.group(1));
         }
+    }
+
+    @Test
+    void metricsAreGroupedByOperatorPriority_withSecondaryCountsCollapsed() {
+        String html = renderLiveFragment();
+
+        assertThat(html).contains("Needs attention", "Active work", "Overview");
+        assertThat(html).contains("class=\"metric-secondary\"");
+        assertThat(html).contains("More workflow counts");
+    }
+
+    @Test
+    void recentEventMessagesLiveBehindTechnicalDetailsDisclosure() {
+        // The template must not render event.message as an always-visible sibling in the feed.
+        String html = renderLiveFragment();
+        assertThat(html).contains("class=\"event-summary");
+        assertThat(html).contains("Technical details");
+        assertThat(html).contains("class=\"event-technical");
     }
 }

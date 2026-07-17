@@ -348,7 +348,7 @@ public class IssueWorkflowService {
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             if (!implResult.isSuccess()) {
-                log.warn("Claude Code returned failure for iteration {}", iterationNum);
+                log.warn("{} returned failure for iteration {}", claudeCode.providerDisplayName(), iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
 
@@ -369,8 +369,8 @@ public class IssueWorkflowService {
                     return;
                 }
 
-                previousFeedback = "Claude Code failed: " + implResult.getErrorMessage();
-                reviewFeedback = false; // Claude Code failure is not review feedback
+                previousFeedback = claudeCode.providerDisplayName() + " failed: " + implResult.getErrorMessage();
+                reviewFeedback = false; // implementation-provider failure is not review feedback
                 continue;
             }
 
@@ -800,7 +800,7 @@ public class IssueWorkflowService {
             prompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + prompt;
         }
 
-        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
+        sseService.broadcastClaudeLog(issueId, "[system] Launching " + claudeCode.providerDisplayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
                 + (resumed ? " (resuming session)" : "") + "...");
         ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
@@ -838,7 +838,8 @@ public class IssueWorkflowService {
             if (superpowers) {
                 coldPrompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + coldPrompt;
             }
-            sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
+            sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
+                    + claudeCode.providerDisplayName() + " session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
         }
@@ -1830,6 +1831,24 @@ public class IssueWorkflowService {
                 }
                 case "stderr" -> {
                     text = "[stderr] " + node.path("text").asText("");
+                }
+                case "thread.started", "turn.started" -> text = null;
+                case "turn.completed" -> text = "[result] Agent turn complete";
+                case "turn.failed", "error" -> {
+                    JsonNode error = node.path("error");
+                    String message = error.isTextual() ? error.asText()
+                            : error.path("message").asText(node.path("message").asText("Agent turn failed"));
+                    text = "[error] " + message;
+                }
+                case "item.completed" -> {
+                    JsonNode item = node.path("item");
+                    String itemType = item.path("type").asText("");
+                    text = switch (itemType) {
+                        case "agent_message" -> item.path("text").asText("");
+                        case "command_execution" -> "[command] " + item.path("command").asText("");
+                        case "file_change" -> "[files] Changes applied";
+                        default -> null;
+                    };
                 }
                 default -> {
                     String raw = node.toString();

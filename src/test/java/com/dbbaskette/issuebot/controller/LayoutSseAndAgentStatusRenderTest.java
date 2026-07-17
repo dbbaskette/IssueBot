@@ -122,6 +122,7 @@ class LayoutSseAndAgentStatusRenderTest {
         context.setVariable("events", List.of());
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("processingPaused", false);
+        context.setVariable("currentPath", "/issues?status=FAILED");
 
         TemplateSpec spec = new TemplateSpec("layout", null,
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -133,7 +134,10 @@ class LayoutSseAndAgentStatusRenderTest {
     @Test
     void fullPageOffersPauseConfirmationAndPausedStateOffersResume() {
         String running = renderFullDashboardPage(true);
-        assertThat(running).contains("Pause processing", "pause-processing-modal", "action=\"/processing/pause\"");
+        assertThat(running).contains("class=\"processing-rail", "Processing active", "Pause processing",
+                "pause-processing-modal", "action=\"/processing/pause\"");
+        assertThat(running).contains("name=\"returnTo\" value=\"/issues?status=FAILED\"");
+        assertThat(running.indexOf("class=\"processing-rail")).isLessThan(running.indexOf("id=\"content\""));
 
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("contentTemplate", "dashboard");
@@ -154,11 +158,13 @@ class LayoutSseAndAgentStatusRenderTest {
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("currentPath", "/issues/14");
         StringWriter writer = new StringWriter();
         templateEngine.process(new TemplateSpec("layout", null,
                 (org.thymeleaf.templatemode.TemplateMode) null, null), context, writer);
 
-        assertThat(writer.toString()).contains("Processing paused", "action=\"/processing/resume\"");
+        assertThat(writer.toString()).contains("class=\"processing-rail", "Processing paused",
+                "action=\"/processing/resume\"", "name=\"returnTo\" value=\"/issues/14\"");
     }
 
     @Test

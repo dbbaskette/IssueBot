@@ -20,25 +20,37 @@
          to 0 whenever the request was triggered by one of these fields directly, but leaves it
          alone for the tbody's own SSE-triggered request and for pager link clicks (which pass
          their own explicit page param). -->
-    <form id="filter-form" class="filter-bar" onsubmit="return false">
+    <form id="filter-form" class="filter-bar queue-toolbar" onsubmit="return false">
         <input type="hidden" name="page" th:value="${currentPage}">
-        <input type="search" name="q" th:value="${searchQuery}"
+        <input class="queue-search" type="search" name="q" th:value="${searchQuery}"
                placeholder="Search title or #issue number"
                aria-label="Search issues by title or number"
                hx-get="/issues" hx-target="#content" hx-include="#filter-form"
                hx-trigger="input changed delay:400ms, search"
                hx-indicator="#issue-refresh-indicator">
-        <select hx-get="/issues" hx-target="#content" name="status" hx-include="#filter-form"
+        <select class="queue-filter" hx-get="/issues" hx-target="#content" name="status" hx-include="#filter-form"
                 hx-indicator="#issue-refresh-indicator">
-            <option value="">All Statuses</option>
-            <option th:each="s : ${statuses}" th:value="${s}" th:text="${s}" th:selected="${s.name() == selectedStatus}">STATUS</option>
+            <option value="">All statuses</option>
+            <option th:each="s : ${statuses}" th:value="${s}" th:text="${humanize.status(s)}" th:selected="${s.name() == selectedStatus}">Status</option>
         </select>
-        <select hx-get="/issues" hx-target="#content" name="repoId" hx-include="#filter-form"
+        <select class="queue-filter" hx-get="/issues" hx-target="#content" name="repoId" hx-include="#filter-form"
                 hx-indicator="#issue-refresh-indicator">
-            <option value="">All Repos</option>
+            <option value="">All repositories</option>
             <option th:each="repo : ${repos}" th:value="${repo.id}" th:text="${repo.fullName()}" th:selected="${repo.id == selectedRepoId}">owner/repo</option>
         </select>
     </form>
+    <nav class="view-chips" aria-label="Common issue views">
+        <a class="view-chip" href="/issues?status=FAILED" hx-get="/issues?status=FAILED" hx-target="#content" hx-push-url="true">
+            <i class="ti ti-alert-triangle" aria-hidden="true"></i> Needs attention
+        </a>
+        <a class="view-chip" href="/issues?status=IN_PROGRESS" hx-get="/issues?status=IN_PROGRESS" hx-target="#content" hx-push-url="true">
+            <i class="ti ti-player-play" aria-hidden="true"></i> Active
+        </a>
+        <a class="view-chip" href="/issues?status=PENDING" hx-get="/issues?status=PENDING" hx-target="#content" hx-push-url="true">
+            <i class="ti ti-clock" aria-hidden="true"></i> Waiting
+        </a>
+        <a class="view-chip" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">All issues</a>
+    </nav>
 
     <!-- Bulk action bar (#87) — hidden until ≥1 row is checked (app.js toggles this).
          Start/Retry submit the shared #bulk-form directly (each guards eligibility
@@ -66,7 +78,7 @@
         <input type="hidden" name="repoId" th:value="${selectedRepoId}">
         <input type="hidden" name="q" th:value="${searchQuery}">
         <input type="hidden" name="page" th:value="${currentPage}">
-        <div class="panel" hx-ext="sse" sse-connect="/api/events/stream">
+        <div class="panel queue-table-panel" hx-ext="sse" sse-connect="/api/events/stream">
             <table class="data-table">
                 <thead>
                     <tr>
@@ -152,10 +164,12 @@
         <td th:text="${issue.repo.fullName()}">owner/repo</td>
         <td th:text="${'#' + issue.issueNumber}">#1</td>
         <td th:text="${issue.issueTitle}">Issue title</td>
-        <td>
+        <td class="issue-status-cell">
             <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
-                  th:title="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN') ? issue.lastFailureReason : null}"
-                  th:text="${issue.status}">PENDING</span>
+                  th:text="${humanize.status(issue.status)}">Pending</span>
+            <span class="failure-inline"
+                  th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN') and issue.lastFailureReason != null}"
+                  th:text="${issue.lastFailureReason}">Failure reason</span>
         </td>
         <td class="text-sm">
             <span th:if="${issue.status.name() != 'BLOCKED' or issue.blockedByIssues == null}"

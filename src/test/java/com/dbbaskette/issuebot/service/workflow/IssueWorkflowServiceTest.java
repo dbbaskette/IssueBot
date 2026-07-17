@@ -1067,6 +1067,24 @@ class IssueWorkflowServiceTest {
         assertEquals("[tool_use] Bash", captor.getValue());
     }
 
+    @Test
+    void streamClaudeLog_codexAgentMessageBroadcastsReadableText() {
+        String line = "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Implemented the fix\"}}";
+
+        workflowService.streamClaudeLog(7L, line);
+
+        verify(sseService).broadcastClaudeLog(7L, "Implemented the fix");
+    }
+
+    @Test
+    void streamClaudeLog_codexLifecycleNoiseIsSuppressed() {
+        workflowService.streamClaudeLog(7L,
+                "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}");
+        workflowService.streamClaudeLog(7L, "{\"type\":\"turn.started\"}");
+
+        verify(sseService, never()).broadcastClaudeLog(anyLong(), anyString());
+    }
+
     // === Review-blocker summary (so an exhausted review's "needs human" is actionable) ===
 
     @Test

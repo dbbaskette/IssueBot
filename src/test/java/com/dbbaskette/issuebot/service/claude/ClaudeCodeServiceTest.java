@@ -2,11 +2,13 @@ package com.dbbaskette.issuebot.service.claude;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
+import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for the command-line assembly used to invoke the Claude Code CLI.
@@ -149,5 +151,42 @@ class ClaudeCodeServiceTest {
 
         assertTrue(msg.contains("REAL_ERROR_TAIL"), msg);
         assertFalse(msg.contains("INIT_HEAD_LINE"), "must use the tail (the error), not the init head");
+    }
+
+    @Test
+    void selectedCodexProviderRoutesExecutionAndAuthChecksToCodexCli() {
+        IssueBotProperties properties = new IssueBotProperties();
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        CodexCliService codex = mock(CodexCliService.class);
+        ClaudeCodeService facade = new ClaudeCodeService(properties,
+                new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new WorkflowCancellationService(), codex);
+        ClaudeCodeResult expected = new ClaudeCodeResult();
+        when(codex.executeImplementation(anyString(), any(), anyString(), any(), any(), any()))
+                .thenReturn(expected);
+        when(codex.checkCliAvailable()).thenReturn(true);
+        when(codex.checkAuthentication()).thenReturn(true);
+
+        assertSame(expected, facade.executeImplementation("prompt", java.nio.file.Path.of("."),
+                "gpt-5.6-sol", null, 1L, null));
+        assertTrue(facade.checkCliAvailable());
+        assertTrue(facade.checkAuthentication());
+        assertEquals("Codex CLI", facade.providerDisplayName());
+    }
+
+    @Test
+    void resolvedModelKeepsItsProviderAcrossGlobalProviderSwitch() {
+        IssueBotProperties properties = new IssueBotProperties();
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        ClaudeCodeService facade = new ClaudeCodeService(properties,
+                new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new WorkflowCancellationService(), mock(CodexCliService.class));
+
+        assertFalse(facade.routesToCodex("claude-opus-4-8"));
+        assertTrue(facade.routesToCodex("gpt-5.6-sol"));
+
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        assertTrue(facade.routesToCodex("gpt-5.6-terra"));
+        assertFalse(facade.routesToCodex("claude-sonnet-5"));
     }
 }

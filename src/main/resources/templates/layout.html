@@ -84,15 +84,6 @@
             <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" th:attr="aria-current=${activePage == 'setup'} ? 'page' : null" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
         </ul>
         <footer>
-            <button th:if="${processingPaused != true}" type="button" class="btn btn-ghost btn-sm processing-control"
-                    data-modal-open="pause-processing-modal" title="Stop current and future issue processing">
-                <i class="ti ti-player-pause" aria-hidden="true"></i> Pause processing
-            </button>
-            <form th:if="${processingPaused == true}" action="/processing/resume" method="post" class="processing-control">
-                <input type="hidden" name="returnTo" value="/">
-                <span class="status status-pending">Processing paused</span>
-                <button type="submit" class="btn btn-primary btn-sm">Resume</button>
-            </form>
             <!--
               Refreshed independently of any page-specific poll (the sidebar is static
               chrome shared by every page) via its own small fragment endpoint — see
@@ -112,9 +103,33 @@
             </button>
         </footer>
     </nav>
-    <main id="content">
-        <div th:replace="~{${contentTemplate} :: content}"></div>
-    </main>
+    <div class="app-shell">
+        <section class="processing-rail" th:classappend="${processingPaused == true ? 'is-paused' : 'is-active'}"
+                 aria-label="Global processing status">
+            <div class="processing-rail-state">
+                <span class="processing-rail-icon" aria-hidden="true">
+                    <i th:class="${processingPaused == true ? 'ti ti-player-pause-filled' : 'ti ti-activity-heartbeat'}"></i>
+                </span>
+                <div>
+                    <strong th:text="${processingPaused == true ? 'Processing paused' : 'Processing active'}">Processing active</strong>
+                    <span th:text="${processingPaused == true ? 'Current and future issue work is stopped.' : 'IssueBot can start and continue queued work.'}">IssueBot can start and continue queued work.</span>
+                </div>
+            </div>
+            <button th:if="${processingPaused != true}" type="button" class="btn btn-danger btn-sm"
+                    data-modal-open="pause-processing-modal" title="Stop current and future issue processing">
+                <i class="ti ti-player-pause" aria-hidden="true"></i> Pause processing
+            </button>
+            <form th:if="${processingPaused == true}" action="/processing/resume" method="post">
+                <input type="hidden" name="returnTo" th:value="${currentPath != null ? currentPath : '/'}">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="ti ti-player-play" aria-hidden="true"></i> Resume processing
+                </button>
+            </form>
+        </section>
+        <main id="content">
+            <div th:replace="~{${contentTemplate} :: content}"></div>
+        </main>
+    </div>
     <!-- Notification panel at <body> level (NOT inside .sidebar): position:fixed here
          resolves against the viewport, so it can't be clipped by the sidebar's
          backdrop-filter containing block + overflow-x:hidden. Kept out of #content so
@@ -127,7 +142,7 @@
             <h3 id="pause-processing-title" style="margin:0 0 0.5rem">Pause all processing?</h3>
             <p class="text-sm text-muted">Current workflows will stop at their next safe checkpoint and return to Pending. New starts and retries will remain disabled until you resume.</p>
             <form action="/processing/pause" method="post">
-                <input type="hidden" name="returnTo" value="/">
+                <input type="hidden" name="returnTo" th:value="${currentPath != null ? currentPath : '/'}">
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Keep processing</button>
                     <button type="submit" class="btn btn-danger btn-sm">Pause processing</button>

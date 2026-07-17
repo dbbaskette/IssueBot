@@ -310,7 +310,7 @@ class IssueDetailGoalCardRenderTest {
         String html = render(baseContext(issue, null));
 
         assertThat(html).contains("name=\"continueSession\"");
-        assertThat(html).contains("Continue previous Claude session");
+        assertThat(html).contains("Continue previous agent session");
     }
 
     @Test
@@ -338,7 +338,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).contains("Claude session");
+        assertThat(html).contains("Agent session");
         // Truncated to exactly the first 8 chars + ellipsis in the visible text...
         assertThat(html).contains("sess-abc…");
         assertThat(html).doesNotContain("sess-abcd…");
@@ -358,7 +358,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).doesNotContain("Claude session");
+        assertThat(html).doesNotContain("Agent session");
     }
 
     // === Activity log humanization (#80) ===

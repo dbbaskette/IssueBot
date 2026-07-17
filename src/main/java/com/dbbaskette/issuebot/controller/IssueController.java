@@ -30,6 +30,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -80,6 +81,9 @@ public class IssueController {
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
+
+    @Autowired(required = false)
+    private CodexModelCatalog codexModelCatalog;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -205,8 +209,16 @@ public class IssueController {
                 "Issue not found — it may have been removed with its repository.",
                 "/issues", "Back to the queue"));
         populateDetailModel(model, issue, id);
-        model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
+        model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
+    }
+
+    private List<?> selectedModelCatalog() {
+        if (properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
+            return codexModelCatalog == null
+                    ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
+        }
+        return com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS;
     }
 
     /**

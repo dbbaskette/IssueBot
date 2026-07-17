@@ -79,6 +79,7 @@ public class SetupController {
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
+        addProviderAttributes(model);
 
         model.addAttribute("webhookPath", "/webhooks/github");
         model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());
@@ -138,6 +139,7 @@ public class SetupController {
      */
     @GetMapping("/setup/prereqs")
     public String prereqs(Model model) {
+        addProviderAttributes(model);
         // Fresh CLI check (don't rely on stale cache)
         boolean cliAvailable = claudeCodeService.checkCliAvailable();
         model.addAttribute("cliAvailable", cliAvailable);
@@ -186,5 +188,12 @@ public class SetupController {
         model.addAttribute("allPassed", cliAvailable && cliAuthenticated && githubTokenValid && workDirOk);
 
         return "setup :: prereqs";
+    }
+
+    private void addProviderAttributes(Model model) {
+        model.addAttribute("agentProvider", properties.getAgentProvider());
+        model.addAttribute("agentProviderName", properties.getAgentProvider().getDisplayName());
+        model.addAttribute("codexProvider",
+                properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX);
     }
 }

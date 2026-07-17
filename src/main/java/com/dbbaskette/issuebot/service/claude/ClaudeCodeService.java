@@ -1,10 +1,12 @@
 package com.dbbaskette.issuebot.service.claude;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -24,14 +26,24 @@ public class ClaudeCodeService {
     private final IssueBotProperties properties;
     private final StreamJsonParser parser;
     private final WorkflowCancellationService cancellationService;
+    private final CodexCliService codexCliService;
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
+    @Autowired
     public ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
-                              WorkflowCancellationService cancellationService) {
+                              WorkflowCancellationService cancellationService,
+                              CodexCliService codexCliService) {
         this.properties = properties;
         this.parser = parser;
         this.cancellationService = cancellationService;
+        this.codexCliService = codexCliService;
+    }
+
+    /** Unit-test convenience constructor; production injection always supplies the Codex runner. */
+    ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
+                      WorkflowCancellationService cancellationService) {
+        this(properties, parser, cancellationService, null);
     }
 
     /**
@@ -42,6 +54,10 @@ public class ClaudeCodeService {
     public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
                                                     String model, String resumeSessionId,
                                                     Long issueId, Consumer<String> lineCallback) {
+        if (routesToCodex(model)) {
+            return codexCliService.executeImplementation(prompt, workingDirectory, model,
+                    resumeSessionId, issueId, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
@@ -54,6 +70,9 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
                                             String model, Long issueId, Consumer<String> lineCallback) {
+        if (routesToCodex(model)) {
+            return codexCliService.executeReview(prompt, workingDirectory, model, issueId, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
@@ -66,6 +85,9 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executeUtility(String prompt, Path workingDirectory,
                                              Consumer<String> lineCallback) {
+        if (useCodex()) {
+            return codexCliService.executeUtility(prompt, workingDirectory, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, config.getUtilityModel(),
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
@@ -80,6 +102,9 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executePlanning(String prompt, Path workingDirectory,
                                              String model, Long issueId, Consumer<String> lineCallback) {
+        if (routesToCodex(model)) {
+            return codexCliService.executePlanning(prompt, workingDirectory, model, issueId, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
@@ -322,6 +347,7 @@ public class ClaudeCodeService {
      * Check if the Claude Code CLI is installed and accessible.
      */
     public boolean checkCliAvailable() {
+        if (useCodex()) return codexCliService.checkCliAvailable();
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "--version");
             pb.redirectErrorStream(true);
@@ -349,6 +375,7 @@ public class ClaudeCodeService {
      * Result is cached after first check.
      */
     public boolean checkAuthentication() {
+        if (useCodex()) return codexCliService.checkAuthentication();
         if (cliAuthenticated != null) {
             return cliAuthenticated;
         }
@@ -385,13 +412,39 @@ public class ClaudeCodeService {
     }
 
     public boolean isCliAvailable() {
-        return cliAvailable;
+        return useCodex() ? codexCliService.isCliAvailable() : cliAvailable;
     }
 
     /**
      * Clear the cached auth result so the next checkAuthentication() call re-verifies.
      */
     public void clearAuthCache() {
+        if (useCodex()) {
+            codexCliService.clearAuthCache();
+            return;
+        }
         cliAuthenticated = null;
+    }
+
+    public String providerDisplayName() {
+        return properties.getAgentProvider().getDisplayName();
+    }
+
+    public IssueBotProperties.AgentProvider provider() {
+        return properties.getAgentProvider();
+    }
+
+    private boolean useCodex() {
+        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+                && codexCliService != null;
+    }
+
+    /** Preserve the provider of already-resolved/in-flight models across a global switch. */
+    boolean routesToCodex(String model) {
+        if (codexCliService == null) return false;
+        if (model != null && model.startsWith("claude-")) return false;
+        if (model != null && (model.startsWith("gpt-") || model.startsWith("o3")
+                || model.startsWith("o4"))) return true;
+        return useCodex();
     }
 }

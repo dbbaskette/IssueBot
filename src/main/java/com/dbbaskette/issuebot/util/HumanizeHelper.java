@@ -20,4 +20,8 @@ public class HumanizeHelper {
     public String eventType(String rawEventType) {
         return Humanize.eventType(rawEventType);
     }
+
+    public String status(Object rawStatus) {
+        return Humanize.status(rawStatus == null ? null : rawStatus.toString());
+    }
 }

@@ -71,68 +71,106 @@
             </div>
         </div>
 
-        <div class="metrics-grid">
-            <a class="metric-tile is-link ok" href="/issues?status=COMPLETED"
-               hx-get="/issues?status=COMPLETED" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-circle-check"></i> Completed</div>
-                <div class="value" th:text="${completed}">0</div>
-            </a>
-            <a class="metric-tile is-link accent" href="/issues?status=IN_PROGRESS"
-               hx-get="/issues?status=IN_PROGRESS" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-loader"></i> In Progress</div>
-                <div class="value" th:text="${inProgress}">0</div>
-            </a>
-            <a class="metric-tile is-link" href="/issues?status=PENDING"
-               hx-get="/issues?status=PENDING" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-clock"></i> Pending</div>
-                <div class="value" th:text="${pending}">0</div>
-            </a>
-            <a class="metric-tile is-link" href="/issues?status=QUEUED"
-               hx-get="/issues?status=QUEUED" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-stack-2"></i> Queued</div>
-                <div class="value" th:text="${queued}">0</div>
-            </a>
-            <a class="metric-tile is-link danger" href="/issues?status=BLOCKED"
-               hx-get="/issues?status=BLOCKED" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-ban"></i> Blocked</div>
-                <div class="value" th:text="${blocked}">0</div>
-            </a>
-            <!--/* Deep-links to the Needs You inbox's needs-human group (#91) rather than the
-                   filtered queue — FAILED issues always need a human decision (retry or leave
-                   it), so the inbox (with failure reason + retry link) is the better landing
-                   spot than a bare filtered table. */-->
-            <a class="metric-tile is-link danger" href="/inbox#needs-human"
-               hx-get="/inbox#needs-human" hx-target="#content" hx-push-url="/inbox#needs-human">
-                <div class="label"><i class="ti ti-alert-triangle"></i> Failed</div>
-                <div class="value" th:text="${failed}">0</div>
-            </a>
-            <a class="metric-tile is-link" href="/issues?status=DECOMPOSED"
-               hx-get="/issues?status=DECOMPOSED" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-git-branch"></i> Decomposed</div>
-                <div class="value" th:text="${decomposed}">0</div>
-            </a>
-            <!--/* Deep-links to the Needs You inbox (#91) — both groups are exactly the
-                   "awaiting X approval" checkpoints the inbox exists to collect in one place. */-->
-            <a class="metric-tile is-link accent" href="/inbox#split-proposals"
-               hx-get="/inbox#split-proposals" hx-target="#content" hx-push-url="/inbox#split-proposals">
-                <div class="label"><i class="ti ti-git-fork"></i> Awaiting Split OK</div>
-                <div class="value" th:text="${awaitingDecomposition}">0</div>
-            </a>
-            <a class="metric-tile is-link accent" href="/inbox#plan-approvals"
-               hx-get="/inbox#plan-approvals" hx-target="#content" hx-push-url="/inbox#plan-approvals">
-                <div class="label"><i class="ti ti-clipboard-check"></i> Awaiting Plan OK</div>
-                <div class="value" th:text="${awaitingPlanApproval}">0</div>
-            </a>
-            <a class="metric-tile is-link" href="/repositories"
-               hx-get="/repositories" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-folders"></i> Watched Repos</div>
-                <div class="value" th:text="${repoCount}">0</div>
-            </a>
-            <a class="metric-tile is-link" href="/costs"
-               hx-get="/costs" hx-target="#content" hx-push-url="true">
-                <div class="label"><i class="ti ti-coin"></i> Total Cost</div>
-                <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
-            </a>
+        <div class="metric-groups">
+            <section class="metric-group attention-group">
+                <div class="metric-group-heading">
+                    <div>
+                        <span class="eyebrow">Intervention</span>
+                        <h3>Needs attention</h3>
+                    </div>
+                    <a href="/inbox" hx-get="/inbox" hx-target="#content" hx-push-url="true" class="text-sm">Open inbox</a>
+                </div>
+                <div class="metric-strip" th:if="${failed > 0 or blocked > 0 or awaitingDecomposition > 0 or awaitingPlanApproval > 0}">
+                    <a th:if="${failed > 0}" class="metric-tile is-link danger" href="/inbox#needs-human"
+                       hx-get="/inbox#needs-human" hx-target="#content" hx-push-url="/inbox#needs-human">
+                        <div class="label"><i class="ti ti-alert-triangle"></i> Failed</div>
+                        <div class="value" th:text="${failed}">0</div>
+                    </a>
+                    <a th:if="${blocked > 0}" class="metric-tile is-link danger" href="/issues?status=BLOCKED"
+                       hx-get="/issues?status=BLOCKED" hx-target="#content" hx-push-url="true">
+                        <div class="label"><i class="ti ti-ban"></i> Blocked</div>
+                        <div class="value" th:text="${blocked}">0</div>
+                    </a>
+                    <a th:if="${awaitingDecomposition > 0}" class="metric-tile is-link accent" href="/inbox#split-proposals"
+                       hx-get="/inbox#split-proposals" hx-target="#content" hx-push-url="/inbox#split-proposals">
+                        <div class="label"><i class="ti ti-git-fork"></i> Split review</div>
+                        <div class="value" th:text="${awaitingDecomposition}">0</div>
+                    </a>
+                    <a th:if="${awaitingPlanApproval > 0}" class="metric-tile is-link accent" href="/inbox#plan-approvals"
+                       hx-get="/inbox#plan-approvals" hx-target="#content" hx-push-url="/inbox#plan-approvals">
+                        <div class="label"><i class="ti ti-clipboard-check"></i> Plan review</div>
+                        <div class="value" th:text="${awaitingPlanApproval}">0</div>
+                    </a>
+                </div>
+                <p class="metric-empty" th:unless="${failed > 0 or blocked > 0 or awaitingDecomposition > 0 or awaitingPlanApproval > 0}">
+                    <i class="ti ti-circle-check" aria-hidden="true"></i> Nothing needs intervention.
+                </p>
+            </section>
+
+            <section class="metric-group active-group">
+                <div class="metric-group-heading">
+                    <div>
+                        <span class="eyebrow">Execution</span>
+                        <h3>Active work</h3>
+                    </div>
+                </div>
+                <div class="metric-strip" th:if="${inProgress > 0}">
+                    <a class="metric-tile is-link accent" href="/issues?status=IN_PROGRESS"
+                       hx-get="/issues?status=IN_PROGRESS" hx-target="#content" hx-push-url="true">
+                        <div class="label"><i class="ti ti-loader"></i> In progress</div>
+                        <div class="value" th:text="${inProgress}">0</div>
+                    </a>
+                </div>
+                <p class="metric-empty" th:unless="${inProgress > 0}">
+                    <i class="ti ti-player-pause" aria-hidden="true"></i> No issue is running right now.
+                </p>
+            </section>
+
+            <section class="metric-group overview-group">
+                <div class="metric-group-heading">
+                    <div>
+                        <span class="eyebrow">Footprint</span>
+                        <h3>Overview</h3>
+                    </div>
+                </div>
+                <div class="metric-strip">
+                    <a class="metric-tile is-link ok" href="/issues?status=COMPLETED"
+                       hx-get="/issues?status=COMPLETED" hx-target="#content" hx-push-url="true">
+                        <div class="label"><i class="ti ti-circle-check"></i> Completed</div>
+                        <div class="value" th:text="${completed}">0</div>
+                    </a>
+                    <a class="metric-tile is-link" href="/repositories"
+                       hx-get="/repositories" hx-target="#content" hx-push-url="true">
+                        <div class="label"><i class="ti ti-folders"></i> Watched repos</div>
+                        <div class="value" th:text="${repoCount}">0</div>
+                    </a>
+                    <a class="metric-tile is-link" href="/costs"
+                       hx-get="/costs" hx-target="#content" hx-push-url="true">
+                        <div class="label"><i class="ti ti-coin"></i> Total cost</div>
+                        <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
+                    </a>
+                </div>
+                <details class="metric-secondary">
+                    <summary>More workflow counts</summary>
+                    <div class="metric-strip">
+                        <a class="metric-tile is-link" href="/issues?status=PENDING"
+                           hx-get="/issues?status=PENDING" hx-target="#content" hx-push-url="true">
+                            <div class="label"><i class="ti ti-clock"></i> Pending</div>
+                            <div class="value" th:text="${pending}">0</div>
+                        </a>
+                        <a class="metric-tile is-link" href="/issues?status=QUEUED"
+                           hx-get="/issues?status=QUEUED" hx-target="#content" hx-push-url="true">
+                            <div class="label"><i class="ti ti-stack-2"></i> Queued</div>
+                            <div class="value" th:text="${queued}">0</div>
+                        </a>
+                        <a class="metric-tile is-link" href="/issues?status=DECOMPOSED"
+                           hx-get="/issues?status=DECOMPOSED" hx-target="#content" hx-push-url="true">
+                            <div class="label"><i class="ti ti-git-branch"></i> Decomposed</div>
+                            <div class="value" th:text="${decomposed}">0</div>
+                        </a>
+                    </div>
+                </details>
+            </section>
         </div>
 
         <div class="panel glass-card">
@@ -141,7 +179,7 @@
             </div>
             <div class="panel-body">
                 <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
-                    <li th:each="event : ${events}"
+                    <li th:each="event : ${events}" class="event-summary"
                         th:with="hasIssue=${event.issue != null}"
                         th:classappend="${hasIssue} ? 'is-link' : ''"
                         th:attr="hx-get=${hasIssue} ? '/issues/' + ${event.issue.id} : null,
@@ -173,7 +211,14 @@
                                 <span th:text="${humanize.eventType(event.eventType)}">Event</span>
                             </span>
                         </span>
-                        <span th:text="${event.message}">Event message</span>
+                        <span class="event-context" th:if="${event.issue != null}"
+                              th:text="${event.issue.repo.fullName() + ' #' + event.issue.issueNumber}">owner/repo #1</span>
+                        <span class="event-context" th:if="${event.issue == null and event.repo != null}"
+                              th:text="${event.repo.fullName()}">owner/repo</span>
+                        <details class="event-technical" onclick="event.stopPropagation()">
+                            <summary>Technical details</summary>
+                            <pre th:text="${event.message}">Event message</pre>
+                        </details>
                     </li>
                 </ul>
                 <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events yet. Configure a repository and label an issue <code>agent-ready</code> to get started.</p>
@@ -198,7 +243,7 @@
         <div class="modal glass-card" role="dialog" aria-modal="true"
              th:attr="aria-labelledby=${'stop-modal-' + rv.issue().id + '-title'}">
             <h3 th:id="${'stop-modal-' + rv.issue().id + '-title'}" style="margin:0 0 0.5rem">Stop Issue</h3>
-            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the active agent process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
             <form th:action="@{'/issues/' + ${rv.issue().id} + '/cancel'}" method="post">
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>

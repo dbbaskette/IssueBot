@@ -29,26 +29,29 @@ public class StartupValidator {
     public void validate() {
         log.info("=== IssueBot Startup Validation ===");
 
-        validateClaudeCode();
+        validateAgentCli();
         validateGitHubToken();
 
         log.info("=== Startup Validation Complete ===");
     }
 
-    private void validateClaudeCode() {
+    private void validateAgentCli() {
+        String provider = claudeCodeService.providerDisplayName();
         if (claudeCodeService.checkCliAvailable()) {
-            log.info("[OK] Claude Code CLI is installed");
+            log.info("[OK] {} is installed", provider);
         } else {
-            log.warn("[WARN] Claude Code CLI not found. Install it before processing issues.");
-            log.warn("       See: https://docs.anthropic.com/en/docs/claude-code");
+            log.warn("[WARN] {} not found. Install it before processing issues.", provider);
             return;
         }
 
         // Only check auth if CLI is available
         if (claudeCodeService.checkAuthentication()) {
-            log.info("[OK] Claude Code authentication verified");
+            log.info("[OK] {} subscription authentication verified", provider);
         } else {
-            log.warn("[WARN] Claude Code authentication failed. Run 'claude' in a terminal to log in.");
+            String command = properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+                    ? "codex login" : "claude";
+            log.warn("[WARN] {} subscription authentication failed. Run '{}' in a terminal to log in.",
+                    provider, command);
         }
     }
 

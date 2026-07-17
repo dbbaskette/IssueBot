@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -161,7 +162,7 @@ class IssueDetailLayoutRenderTest {
         String html = renderContent(issue, List.of(iter));
 
         int summaryStart = html.indexOf("iteration-entry-summary");
-        int summaryEnd = html.indexOf("</summary>");
+        int summaryEnd = html.indexOf("</summary>", summaryStart);
         String summary = html.substring(summaryStart, summaryEnd);
 
         assertThat(summary).contains("claude-opus-4-8");
@@ -208,19 +209,19 @@ class IssueDetailLayoutRenderTest {
     }
 
     @Test
-    void contentFragment_stillRendersModalsOutsideTheGrid_forFailedIssue() {
-        TrackedIssue issue = issue(9L, 9, IssueStatus.FAILED);
+    void contentFragment_stillRendersActionModalsOutsideTheGrid() {
+        TrackedIssue issue = issue(9L, 9, IssueStatus.QUEUED);
         String html = renderContent(issue, List.of());
 
-        assertThat(html).contains("id=\"retry-modal\"");
+        assertThat(html).contains("id=\"start-modal\"");
         assertThat(html).contains("modal-backdrop");
-        // The retry modal is physically after the ENTIRE grid — including the right
+        // The start modal is physically after the ENTIRE grid — including the right
         // column's terminal panel — not interleaved inside .detail-grid-left/-right.
         // Anchoring on the grid-right marker (the last grid content) catches a modal
         // accidentally nested anywhere inside the grid, which the old >Goal< anchor
         // (left column, early) could not. See the MODALS comment in issue-detail.html.
         int gridRight = html.indexOf("detail-grid-right");
-        int retryModal = html.indexOf("id=\"retry-modal\"");
+        int retryModal = html.indexOf("id=\"start-modal\"");
         assertThat(gridRight).isGreaterThan(-1);
         assertThat(gridRight).isLessThan(retryModal);
         // And no modal markup appears between the grid's start and the grid-right marker.
@@ -291,5 +292,47 @@ class IssueDetailLayoutRenderTest {
         assertThat(html).contains("Suggested next step", "Fix the failing assertions before retrying");
         assertThat(html).contains("Technical details", "three assertions failed");
         assertThat(html).contains("name=\"instructions\"");
+    }
+
+    @Test
+    void failedIssueMakesRecoveryCanonical_andOmitsDuplicateRetryModal() {
+        TrackedIssue failed = issue(15L, 15, IssueStatus.FAILED);
+        failed.setLastFailureReason("Tests failed");
+
+        String html = renderContent(failed, List.of());
+
+        assertThat(html).contains("id=\"recovery\"", "class=\"panel mb-3 failure-recovery recovery-card\"");
+        assertThat(html).contains("href=\"#recovery\"");
+        assertThat(html).doesNotContain("id=\"retry-modal\"");
+    }
+
+    @Test
+    void failedIssueCollapsesSecondarySectionsByDefault() {
+        TrackedIssue failed = issue(16L, 16, IssueStatus.FAILED);
+        failed.setLastFailureReason("Tests failed");
+        WebContext context = baseContext(failed, List.of());
+        context.setVariable("planHtml", "<p>Plan</p>");
+
+        String html = render(context, "content");
+
+        assertThat(html).contains("secondary-section goal-section", "secondary-section history-section",
+                "secondary-section activity-section");
+        assertThat(html).doesNotContain("secondary-section goal-section\" open");
+        assertThat(html).doesNotContain("secondary-section history-section\" open");
+        assertThat(html).doesNotContain("secondary-section activity-section\" open");
+    }
+
+    @Test
+    void activityLogShowsReadableSummary_andHidesRawMessageInDisclosure() {
+        TrackedIssue failed = issue(17L, 17, IssueStatus.FAILED);
+        failed.setLastFailureReason("Tests failed");
+        Event event = new Event("PHASE_LOCAL_CHECKS_FAILED", "ClaudeCodeResult{success=false, exitCode=1}");
+        WebContext context = baseContext(failed, List.of());
+        context.setVariable("events", List.of(event));
+
+        String html = render(context, "content");
+
+        assertThat(html).contains("Local Checks Failed", "class=\"event-summary", "Technical details");
+        assertThat(html).containsPattern("class=\"event-technical[^\"]*\"[\\s\\S]*ClaudeCodeResult");
     }
 }

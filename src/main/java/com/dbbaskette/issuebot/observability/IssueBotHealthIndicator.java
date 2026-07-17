@@ -24,9 +24,10 @@ public class IssueBotHealthIndicator implements HealthIndicator {
     public Health health() {
         Health.Builder builder = Health.up();
 
-        // Claude Code CLI
+        // Selected coding-agent CLI
         boolean cliAvailable = claudeCodeService.isCliAvailable();
-        builder.withDetail("claudeCodeCli", cliAvailable ? "available" : "unavailable");
+        builder.withDetail("agentProvider", claudeCodeService.providerDisplayName());
+        builder.withDetail("agentCli", cliAvailable ? "available" : "unavailable");
 
         // GitHub token configured
         String token = properties.getGithub().getToken();

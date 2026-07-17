@@ -16,22 +16,36 @@ public class ModelResolver {
 
     public String implementationModel(TrackedIssue issue) {
         String fromIssue = blankToNull(issue.getImplModelOverride());
-        if (fromIssue != null) return fromIssue;
+        if (isCompatible(fromIssue)) return fromIssue;
         String fromRepo = blankToNull(issue.getRepo().getImplementationModel());
-        if (fromRepo != null) return fromRepo;
-        return properties.getClaudeCode().getImplementationModel();
+        if (isCompatible(fromRepo)) return fromRepo;
+        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+                ? properties.getCodexCli().getImplementationModel()
+                : properties.getClaudeCode().getImplementationModel();
     }
 
     public String reviewModel(TrackedIssue issue) {
         String fromIssue = blankToNull(issue.getReviewModelOverride());
-        if (fromIssue != null) return fromIssue;
+        if (isCompatible(fromIssue)) return fromIssue;
         String fromRepo = blankToNull(issue.getRepo().getReviewModel());
-        if (fromRepo != null) return fromRepo;
-        return properties.getClaudeCode().getReviewModel();
+        if (isCompatible(fromRepo)) return fromRepo;
+        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+                ? properties.getCodexCli().getReviewModel()
+                : properties.getClaudeCode().getReviewModel();
     }
 
     public String utilityModel() {
-        return properties.getClaudeCode().getUtilityModel();
+        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+                ? properties.getCodexCli().getUtilityModel()
+                : properties.getClaudeCode().getUtilityModel();
+    }
+
+    private boolean isCompatible(String model) {
+        if (model == null) return false;
+        if (properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
+            return !model.startsWith("claude-");
+        }
+        return !model.startsWith("gpt-") && !model.startsWith("o3") && !model.startsWith("o4");
     }
 
     private static String blankToNull(String s) {

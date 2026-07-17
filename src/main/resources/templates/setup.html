@@ -28,12 +28,12 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Claude Code CLI</td>
+                        <td th:text="${agentProviderName}">Agent CLI</td>
                         <td><span class="status status-queued">CHECKING</span></td>
                         <td style="color: var(--text-tertiary)">Verifying CLI installation...</td>
                     </tr>
                     <tr>
-                        <td>Claude Code Auth</td>
+                        <td th:text="${agentProviderName + ' Auth'}">Agent CLI Auth</td>
                         <td><span class="status status-queued">CHECKING</span></td>
                         <td style="color: var(--text-tertiary)">Verifying authentication...</td>
                     </tr>
@@ -179,6 +179,7 @@
             Below is an example configuration:
         </p>
         <pre id="example-config" class="diff-viewer">issuebot:
+  agent-provider: claude-code # or: codex
   poll-interval-seconds: 60
   max-concurrent-issues: 3
   work-directory: ${user.home}/.issuebot/repos
@@ -186,9 +187,13 @@
     implementation-model: claude-opus-4-6
     review-model: claude-sonnet-4-6
     max-turns-per-invocation: 30
-    timeout-minutes: 10
+    timeout-minutes: 45
     review-max-turns: 15
-    review-timeout-minutes: 5
+    review-timeout-minutes: 20
+  codex-cli:
+    implementation-model: gpt-5.6-sol
+    review-model: gpt-5.6-terra
+    utility-model: gpt-5.6-luna
   github:
     token: ${GITHUB_TOKEN}
   notifications:
@@ -220,25 +225,33 @@
         </thead>
         <tbody>
             <tr>
-                <td>Claude Code CLI</td>
+                <td th:text="${agentProviderName}">Agent CLI</td>
                 <td>
                     <span class="status" th:classappend="${cliAvailable ? 'status-completed' : 'status-failed'}"
                           th:text="${cliAvailable ? 'OK' : 'MISSING'}">OK</span>
                 </td>
-                <td th:if="${cliAvailable}">Claude Code CLI is installed and accessible.</td>
-                <td th:unless="${cliAvailable}">
+                <td th:if="${cliAvailable}" th:text="${agentProviderName + ' is installed and accessible.'}">Agent CLI is installed.</td>
+                <td th:if="${!cliAvailable and !codexProvider}">
                     Install Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>
+                </td>
+                <td th:if="${!cliAvailable and codexProvider}">
+                    Install Codex CLI, then run <code>codex login</code> and choose ChatGPT login.
                 </td>
             </tr>
             <tr>
-                <td>Claude Code Auth</td>
+                <td th:text="${agentProviderName + ' Auth'}">Agent CLI Auth</td>
                 <td>
                     <span class="status" th:classappend="${cliAuthenticated ? 'status-completed' : 'status-failed'}"
                           th:text="${cliAuthenticated ? 'OK' : 'FAILED'}">OK</span>
                 </td>
-                <td th:if="${cliAuthenticated}">Authentication verified (Pro/Max subscription).</td>
-                <td th:unless="${cliAuthenticated}">
+                <td th:if="${cliAuthenticated}" th:text="${codexProvider ? 'ChatGPT subscription login verified.' : 'Claude subscription login verified.'}">
+                    Subscription authentication verified.
+                </td>
+                <td th:if="${!cliAuthenticated and !codexProvider}">
                     Run <code>claude</code> in a terminal and complete login.
+                </td>
+                <td th:if="${!cliAuthenticated and codexProvider}">
+                    Run <code>codex login</code> and choose ChatGPT login. API-key login is not used by IssueBot.
                 </td>
             </tr>
             <tr>

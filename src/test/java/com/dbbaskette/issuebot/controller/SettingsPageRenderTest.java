@@ -57,6 +57,17 @@ class SettingsPageRenderTest {
         context.setVariable("config", config);
         context.setVariable("agentRunning", true);
         context.setVariable("modelCatalog", List.of());
+        context.setVariable("claudeModelCatalog", List.of());
+        context.setVariable("codexModelCatalog", List.of(
+                new com.dbbaskette.issuebot.service.codex.CodexModelCatalog.ModelInfo(
+                        "gpt-5.6-sol", "GPT-5.6-Sol", "Frontier")));
+        context.setVariable("agentProvider", IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        context.setVariable("claudeImplementationModel", "claude-sonnet-5");
+        context.setVariable("claudeReviewModel", "claude-sonnet-5");
+        context.setVariable("claudeUtilityModel", "claude-haiku-4-5");
+        context.setVariable("codexImplementationModel", "gpt-5.6-sol");
+        context.setVariable("codexReviewModel", "gpt-5.6-terra");
+        context.setVariable("codexUtilityModel", "gpt-5.6-luna");
         context.setVariable("implementationModel", "claude-sonnet-5");
         context.setVariable("reviewModel", "claude-sonnet-5");
         context.setVariable("utilityModel", "claude-haiku-4-5");
@@ -89,5 +100,15 @@ class SettingsPageRenderTest {
         assertThat(html).contains("Discard changes?");
         assertThat(html).contains("Reverts the editor above to the config file currently saved on disk");
         assertThat(html).contains("hx-get=\"/settings\"");
+    }
+
+    @Test
+    void providerAndCodexSubscriptionModelsAreRendered() {
+        String html = render();
+
+        assertThat(html).contains("name=\"agentProvider\"");
+        assertThat(html).contains("Codex CLI (ChatGPT subscription)");
+        assertThat(html).contains("value=\"gpt-5.6-sol\"");
+        assertThat(html).doesNotContain("OPENAI_API_KEY");
     }
 }

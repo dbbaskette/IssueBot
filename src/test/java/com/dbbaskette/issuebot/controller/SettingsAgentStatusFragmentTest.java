@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.junit.jupiter.api.Test;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
@@ -24,7 +25,8 @@ class SettingsAgentStatusFragmentTest {
         IssuePollingService pollingService = mock(IssuePollingService.class);
         when(pollingService.isEnabled()).thenReturn(enabled);
         return new SettingsController(new IssueBotProperties(), pollingService,
-                mock(TrackedIssueRepository.class), mock(NotificationRepository.class));
+                mock(TrackedIssueRepository.class), mock(NotificationRepository.class),
+                mock(CodexModelCatalog.class));
     }
 
     @Test

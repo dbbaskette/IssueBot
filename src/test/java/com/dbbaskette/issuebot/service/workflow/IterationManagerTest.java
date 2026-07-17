@@ -193,6 +193,20 @@ class IterationManagerTest {
     }
 
     @Test
+    void shouldSkipRetry_repeatedCodexFailure() {
+        TrackedIssue issue = createIssue(2);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(false);
+        result.setOutputTokens(10_000);
+        result.setFilesChanged(java.util.List.of("src/Foo.java"));
+
+        String reason = iterationManager.shouldSkipRetry(issue, result, null,
+                "Codex CLI failed: compilation error");
+        assertNotNull(reason);
+        assertTrue(reason.contains("failed again"));
+    }
+
+    @Test
     void shouldSkipRetry_allowsRetryWithReviewFeedback() {
         TrackedIssue issue = createIssue(2);
         ClaudeCodeResult result = new ClaudeCodeResult();
