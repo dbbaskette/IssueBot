@@ -204,28 +204,63 @@ public class IssueWorkflowService {
                 + trackedIssue.getResolvedImplModel() + " / "
                 + trackedIssue.getResolvedReviewModel() + ")", repo, trackedIssue);
 
-        // === Phase 1: Setup ===
+        // === Authoritative Plan First gate ===
+        // The immutable approved version is the only normal implementation contract.
+        // Classify it before full setup: an unapproved issue may update a local base checkout
+        // for planning, but cannot create a feature branch, generate CI, commit, or push.
+        ApprovedPlanContext approvedPlan = null;
+        String legacyApprovedPlan = null;
+        boolean requiresPlanning = false;
+        if (trackedIssue.effectivePlanFirst()) {
+            Optional<ApprovedPlanContext> existing = planFirstService.approvedContext(trackedIssue);
+            PlanningVersion legacyVersion = legacyApprovedVersion(trackedIssue);
+            if (existing.isPresent()) {
+                approvedPlan = existing.get();
+            } else if (legacyVersion != null) {
+                String immutableLegacyPlan = legacyVersion.getImplementationPlan();
+                if (trackedIssue.getCurrentIteration() > 0
+                        && immutableLegacyPlan != null
+                        && !immutableLegacyPlan.isBlank()) {
+                    // Migration-only exception: an already executing legacy issue may finish
+                    // its current run without masquerading as a validated Design Spec.
+                    legacyApprovedPlan = immutableLegacyPlan;
+                } else {
+                    requiresPlanning = true;
+                }
+            } else if (trackedIssue.isPlanApproved()) {
+                failMissingApprovedPlanningVersion(trackedIssue);
+                return;
+            } else {
+                requiresPlanning = true;
+            }
+        }
+
         String branchName;
         Path repoPath;
         JsonNode issueDetails;
+        if (requiresPlanning) {
+            try {
+                try (Git ignored = gitOps.prepareForPlanning(
+                        repo.getOwner(), repo.getName(), repo.getBranch())) {
+                    // The checkout itself is the planning input; no repository mutation follows.
+                }
+                repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
+                issueDetails = fetchIssueDetails(repo, issueNumber);
+                planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
+            } catch (Exception e) {
+                failSetup(trackedIssue, repo, issueNumber, e);
+            }
+            return;
+        }
+
+        // === Phase 1: Full implementation setup ===
         try {
             phaseSetup(trackedIssue);
             branchName = trackedIssue.getBranchName();
             repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
-            log.info("Fetching issue details from GitHub for {} #{}...", repo.fullName(), issueNumber);
-            issueDetails = gitHubApi.getIssue(repo.getOwner(), repo.getName(), issueNumber);
-            log.info("Issue details fetched: title='{}', body length={}",
-                    issueDetails.path("title").asText(),
-                    issueDetails.path("body").asText("").length());
+            issueDetails = fetchIssueDetails(repo, issueNumber);
         } catch (Exception e) {
-            log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, e);
-            trackedIssue.setStatus(IssueStatus.FAILED);
-            trackedIssue.setCurrentPhase(null);
-            recordFailure(trackedIssue, FailureCategory.SETUP,
-                    "Setup failed: " + e.getMessage(), "SETUP", e.toString(),
-                    "Check repository access, credentials, and the local checkout before retrying.",
-                    FailureRetryability.OPERATOR_ACTION_REQUIRED);
-            eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
+            failSetup(trackedIssue, repo, issueNumber, e);
             return;
         }
 
@@ -254,34 +289,11 @@ public class IssueWorkflowService {
             }
         }
 
-        // === Authoritative Plan First gate ===
-        // The immutable approved version is the only normal implementation contract.
-        // Planning failures and invalid approval state stop here; neither can fall through
-        // to an implementation invocation.
-        ApprovedPlanContext approvedPlan = null;
-        String legacyApprovedPlan = null;
-        if (trackedIssue.effectivePlanFirst()) {
-            Optional<ApprovedPlanContext> existing = planFirstService.approvedContext(trackedIssue);
-            if (existing.isPresent()) {
-                approvedPlan = existing.get();
-            } else if (isLegacyApprovedVersion(trackedIssue)) {
-                if (trackedIssue.getCurrentIteration() > 0
-                        && trackedIssue.getImplementationPlan() != null
-                        && !trackedIssue.getImplementationPlan().isBlank()) {
-                    // Migration-only exception: an already executing legacy issue may finish
-                    // its current run without masquerading as a validated Design Spec.
-                    legacyApprovedPlan = trackedIssue.getImplementationPlan();
-                } else {
-                    planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
-                    return;
-                }
-            } else if (trackedIssue.isPlanApproved()) {
-                failMissingApprovedPlanningVersion(trackedIssue);
-                return;
-            } else {
-                planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
-                return;
-            }
+        if (trackedIssue.effectivePlanFirst() && approvedPlan == null && legacyApprovedPlan == null) {
+            // Defensive invariant: every Plan First path reaching implementation must carry
+            // either an immutable versioned contract or the narrow legacy migration artifact.
+            failMissingApprovedPlanningVersion(trackedIssue);
+            return;
         }
 
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
@@ -716,11 +728,12 @@ public class IssueWorkflowService {
         }
     }
 
-    private boolean isLegacyApprovedVersion(TrackedIssue issue) {
+    private PlanningVersion legacyApprovedVersion(TrackedIssue issue) {
         PlanningVersion version = issue.getApprovedPlanningVersion();
         return issue.isPlanApproved()
                 && version != null
-                && version.getState() == PlanningVersionState.LEGACY;
+                && version.getState() == PlanningVersionState.LEGACY
+                ? version : null;
     }
 
     private void failMissingApprovedPlanningVersion(TrackedIssue issue) {
@@ -731,6 +744,26 @@ public class IssueWorkflowService {
                 "Regenerate and approve a complete planning version before retrying.",
                 FailureRetryability.OPERATOR_ACTION_REQUIRED);
         eventService.log("PLAN_APPROVAL_INVARIANT_FAILED", reason, issue.getRepo(), issue);
+    }
+
+    private JsonNode fetchIssueDetails(WatchedRepo repo, int issueNumber) {
+        log.info("Fetching issue details from GitHub for {} #{}...", repo.fullName(), issueNumber);
+        JsonNode issueDetails = gitHubApi.getIssue(repo.getOwner(), repo.getName(), issueNumber);
+        log.info("Issue details fetched: title='{}', body length={}",
+                issueDetails.path("title").asText(),
+                issueDetails.path("body").asText("").length());
+        return issueDetails;
+    }
+
+    private void failSetup(TrackedIssue issue, WatchedRepo repo, int issueNumber, Exception error) {
+        log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, error);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setCurrentPhase(null);
+        recordFailure(issue, FailureCategory.SETUP,
+                "Setup failed: " + error.getMessage(), "SETUP", error.toString(),
+                "Check repository access, credentials, and the local checkout before retrying.",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+        eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + error.getMessage(), repo, issue);
     }
 
     /**

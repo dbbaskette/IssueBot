@@ -821,6 +821,9 @@ class IntegrationWorkflowTest {
         // No implementation tokens spent before approval
         verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
+        verify(gitOps).prepareForPlanning("owner", "repo", "main");
+        verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
+        verify(ciTemplateService, never()).ensureCiWorkflow(any(), anyString());
     }
 
     @Test
@@ -840,6 +843,9 @@ class IntegrationWorkflowTest {
         verify(claudeCode, never()).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
+        verify(gitOps).prepareForPlanning("owner", "repo", "main");
+        verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
+        verify(ciTemplateService, never()).ensureCiWorkflow(any(), anyString());
     }
 
     @Test

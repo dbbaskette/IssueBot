@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -44,6 +45,7 @@ class IssueWorkflowServiceTest {
     private ObjectMapper objectMapper;
 
     // Named mocks needed by tests that introspect interactions
+    private GitOperationsService gitOps;
     private GitHubApiClient gitHubApi;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
@@ -57,6 +59,7 @@ class IssueWorkflowServiceTest {
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
+    private CiTemplateService ciTemplateService;
 
     @Test
     void recordsStructuredFailureForRecoveryUi() {
@@ -76,6 +79,7 @@ class IssueWorkflowServiceTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
+        gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
@@ -89,12 +93,13 @@ class IssueWorkflowServiceTest {
         eventService = mock(EventService.class);
         cancellationService = new WorkflowCancellationService();
         sseService = mock(SseService.class);
+        ciTemplateService = mock(CiTemplateService.class);
         workflowService = new IssueWorkflowService(
-                mock(GitOperationsService.class),
+                gitOps,
                 gitHubApi,
                 claudeCode,
                 codeReviewService,
-                mock(CiTemplateService.class),
+                ciTemplateService,
                 mock(LocalVerificationService.class),
                 issueRepository,
                 iterationRepository,
@@ -247,6 +252,7 @@ class IssueWorkflowServiceTest {
     void planFirstGenerationFailureStopsBeforeImplementation() throws Exception {
         TrackedIssue issue = planFirstWorkflowIssue();
         IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(gitOps.prepareForPlanning("owner", "repo", "main")).thenReturn(mock(Git.class));
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
         when(planFirstService.generateVersion(eq(issue), any(JsonNode.class), any()))
                 .thenReturn(PlanFirstService.PlanningOutcome.FAILED);
@@ -255,6 +261,11 @@ class IssueWorkflowServiceTest {
 
         verify(claudeCode, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(gitOps).prepareForPlanning("owner", "repo", "main");
+        verify(spy, never()).phaseSetup(any());
+        verify(gitOps, never()).cloneOrPull(anyString(), anyString(), anyString());
+        verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
+        verify(ciTemplateService, never()).ensureCiWorkflow(any(), anyString());
     }
 
     @Test
@@ -297,9 +308,10 @@ class IssueWorkflowServiceTest {
         TrackedIssue issue = planFirstWorkflowIssue();
         issue.setCurrentIteration(1);
         issue.setPlanApproved(true);
-        issue.setImplementationPlan("legacy implementation plan");
+        issue.setImplementationPlan("mutable plan that must be ignored");
         PlanningVersion legacyVersion = mock(PlanningVersion.class);
         when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        when(legacyVersion.getImplementationPlan()).thenReturn("immutable legacy implementation plan");
         issue.setApprovedPlanningVersion(legacyVersion);
         IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
@@ -315,7 +327,8 @@ class IssueWorkflowServiceTest {
 
         verify(claudeCode).executeImplementation(
                 argThat(prompt -> prompt.contains("Legacy approved plan")
-                        && prompt.contains("legacy implementation plan")
+                        && prompt.contains("immutable legacy implementation plan")
+                        && !prompt.contains("mutable plan that must be ignored")
                         && prompt.contains("## Issue")
                         && !prompt.contains("## Approved Planning Contract")
                         && !prompt.contains("### Design Spec")),
@@ -330,6 +343,7 @@ class IssueWorkflowServiceTest {
         issue.setImplementationPlan("legacy implementation plan");
         PlanningVersion legacyVersion = mock(PlanningVersion.class);
         when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        when(legacyVersion.getImplementationPlan()).thenReturn("legacy implementation plan");
         issue.setApprovedPlanningVersion(legacyVersion);
         IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
@@ -341,6 +355,52 @@ class IssueWorkflowServiceTest {
         verify(planFirstService).generateVersion(eq(issue), any(), any());
         verify(claudeCode, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
+    void approvedPlanFirstIssueRunsFullSetupBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.getRepo().setCiEnabled(true);
+        Git git = mock(Git.class);
+        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(git);
+        when(gitOps.createBranch(git, 42, "Fix the bug")).thenReturn("issuebot/issue-42-fix-the-bug");
+        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
+        when(ciTemplateService.detectBuildTool(Path.of("/tmp/repo"))).thenReturn("maven");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(14L, 3, "approved spec", "approved plan")));
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the bug");
+        details.put("body", "Details");
+        details.putArray("labels");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(details);
+
+        workflowService.processIssue(issue, null);
+
+        verify(gitOps).cloneOrPull("owner", "repo", "main");
+        verify(gitOps).createBranch(git, 42, "Fix the bug");
+        verify(ciTemplateService).ensureCiWorkflow(Path.of("/tmp/repo"), "maven");
+        verify(gitOps, never()).prepareForPlanning(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void explicitPlanFirstOptOutRunsFullSetup() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setPlanFirstOverride(false);
+        Git git = mock(Git.class);
+        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(git);
+        when(gitOps.createBranch(git, 42, "Fix the bug")).thenReturn("issuebot/issue-42-fix-the-bug");
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the bug");
+        details.put("body", "Details");
+        details.putArray("labels");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(details);
+
+        workflowService.processIssue(issue, null);
+
+        verify(gitOps).cloneOrPull("owner", "repo", "main");
+        verify(gitOps).createBranch(git, 42, "Fix the bug");
+        verify(gitOps, never()).prepareForPlanning(anyString(), anyString(), anyString());
+        verifyNoInteractions(planFirstService);
     }
 
     private TrackedIssue planFirstWorkflowIssue() {
