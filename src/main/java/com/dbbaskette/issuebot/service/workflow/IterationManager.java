@@ -13,10 +13,12 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -73,6 +75,29 @@ public class IterationManager {
         int current = trackedIssue.getCurrentIteration();
         log.debug("canIterate check: currentIteration={}, maxIterations={}", current, maxIterations);
         return trackedIssue.isPlanCorrectionPending() || current < maxIterations;
+    }
+
+    /**
+     * Persist a completed review verdict and its plan-conformance transition atomically.
+     * Keeping these writes in a separate Spring-managed component ensures the transaction
+     * is applied when the workflow calls this method; a crash cannot leave a durable failed
+     * verdict without the pending correction or second-miss state needed for recovery.
+     */
+    @Transactional
+    public void persistCompletedReviewVerdict(TrackedIssue trackedIssue, Iteration iteration,
+                                               CodeReviewResult reviewResult,
+                                               ApprovedPlanContext approvedPlan) {
+        iteration.setReviewPassed(reviewResult.passed());
+        iteration.setReviewJson(reviewResult.rawJson());
+        iteration.setReviewModel(reviewResult.modelUsed());
+        iterationRepository.save(iteration);
+
+        if (approvedPlan != null && !reviewResult.invocationFailed()) {
+            int conformanceAttempt = trackedIssue.getPlanConformanceAttempt() + 1;
+            trackedIssue.setPlanConformanceAttempt(conformanceAttempt);
+            trackedIssue.setPlanCorrectionPending(!reviewResult.passed() && conformanceAttempt == 1);
+            issueRepository.save(trackedIssue);
+        }
     }
 
     /**

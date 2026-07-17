@@ -1246,18 +1246,8 @@ public class IssueWorkflowService {
                 reviewResult.inputTokens(), reviewResult.outputTokens(),
                 reviewResult.modelUsed(), "REVIEW");
 
-        // Store review result on iteration
-        iteration.setReviewPassed(reviewResult.passed());
-        iteration.setReviewJson(reviewResult.rawJson());
-        iteration.setReviewModel(reviewResult.modelUsed());
-        iterationRepository.save(iteration);
-
-        if (approvedPlan != null && !reviewResult.invocationFailed()) {
-            int conformanceAttempt = trackedIssue.getPlanConformanceAttempt() + 1;
-            trackedIssue.setPlanConformanceAttempt(conformanceAttempt);
-            trackedIssue.setPlanCorrectionPending(!reviewResult.passed() && conformanceAttempt == 1);
-            issueRepository.save(trackedIssue);
-        }
+        iterationManager.persistCompletedReviewVerdict(
+                trackedIssue, iteration, reviewResult, approvedPlan);
 
         log.info("Review result for {} #{}: passed={}, scores=[spec={}, correct={}, quality={}]",
                 repo.fullName(), trackedIssue.getIssueNumber(), reviewResult.passed(),

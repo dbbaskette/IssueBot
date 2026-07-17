@@ -8,14 +8,17 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -106,6 +109,69 @@ class IterationManagerTest {
         issue.setPlanCorrectionPending(true);
 
         assertTrue(iterationManager.canIterate(issue));
+    }
+
+    @Test
+    void firstFailedPlanVerdictCommitsReviewAndPendingCorrectionInOneTransaction() throws Exception {
+        TrackedIssue issue = createIssue(1);
+        Iteration iteration = new Iteration(issue, 1);
+        CodeReviewResult verdict = completedVerdict(false, "first conformance miss");
+        ApprovedPlanContext approvedPlan = new ApprovedPlanContext(7L, 2, "spec", "plan");
+
+        iterationManager.persistCompletedReviewVerdict(issue, iteration, verdict, approvedPlan);
+
+        assertFalse(iteration.getReviewPassed());
+        assertEquals(verdict.rawJson(), iteration.getReviewJson());
+        assertEquals("review-model", iteration.getReviewModel());
+        assertEquals(1, issue.getPlanConformanceAttempt());
+        assertTrue(issue.isPlanCorrectionPending(),
+                "a committed first miss must always be recoverable as pending correction");
+        InOrder commit = inOrder(iterationRepository, issueRepository);
+        commit.verify(iterationRepository).save(iteration);
+        commit.verify(issueRepository).save(issue);
+        assertNotNull(IterationManager.class.getDeclaredMethod("persistCompletedReviewVerdict",
+                        TrackedIssue.class, Iteration.class, CodeReviewResult.class, ApprovedPlanContext.class)
+                .getAnnotation(Transactional.class),
+                "both repository writes must share one transactional service boundary");
+    }
+
+    @Test
+    void secondFailedPlanVerdictCommitsReviewAndSecondMissStateTogether() {
+        TrackedIssue issue = createIssue(2);
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(true);
+        Iteration iteration = new Iteration(issue, 2);
+        CodeReviewResult verdict = completedVerdict(false, "second conformance miss");
+
+        iterationManager.persistCompletedReviewVerdict(issue, iteration, verdict,
+                new ApprovedPlanContext(7L, 2, "spec", "plan"));
+
+        assertFalse(iteration.getReviewPassed());
+        assertEquals(2, issue.getPlanConformanceAttempt());
+        assertFalse(issue.isPlanCorrectionPending(),
+                "the second completed miss must not look like another correction retry");
+        InOrder commit = inOrder(iterationRepository, issueRepository);
+        commit.verify(iterationRepository).save(iteration);
+        commit.verify(issueRepository).save(issue);
+    }
+
+    @Test
+    void invocationFailureStoresReviewStateWithoutAdvancingConformanceAttempt() {
+        TrackedIssue issue = createIssue(1);
+        Iteration iteration = new Iteration(issue, 1);
+        CodeReviewResult invocationFailure = CodeReviewResult.failed(
+                "review process exited", 3, 2, "review-model");
+
+        iterationManager.persistCompletedReviewVerdict(issue, iteration, invocationFailure,
+                new ApprovedPlanContext(7L, 2, "spec", "plan"));
+
+        assertFalse(iteration.getReviewPassed());
+        assertNull(iteration.getReviewJson());
+        assertEquals("review-model", iteration.getReviewModel());
+        assertEquals(0, issue.getPlanConformanceAttempt());
+        assertFalse(issue.isPlanCorrectionPending());
+        verify(iterationRepository).save(iteration);
+        verify(issueRepository, never()).save(any());
     }
 
     @Test
@@ -350,5 +416,12 @@ class IterationManagerTest {
         assertTrue(comment.getValue().contains("Review Could Not Run"), comment.getValue());
         assertFalse(comment.getValue().contains("Budget Exhausted"), comment.getValue());
         assertFalse(comment.getValue().contains("could not be satisfied"), comment.getValue());
+    }
+
+    private CodeReviewResult completedVerdict(boolean passed, String summary) {
+        return new CodeReviewResult(passed, summary,
+                0.8, 0.9, 0.9, 0.9, 0.9, 0.9, 1.0,
+                List.of(), "", "{\"passed\":" + passed + "}",
+                3, 2, "review-model", null, List.of());
     }
 }
