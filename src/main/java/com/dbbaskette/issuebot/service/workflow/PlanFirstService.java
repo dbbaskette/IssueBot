@@ -83,14 +83,22 @@ public class PlanFirstService {
      * must never continue into implementation after {@link PlanningOutcome#FAILED}.
      */
     public PlanningOutcome generateVersion(TrackedIssue trackedIssue, JsonNode issueDetails, Path repoPath) {
+        PlanningVersion version;
+        String feedback;
         try {
             String model = requireResolvedModel(trackedIssue);
             String provider = requireResolvedProvider(trackedIssue);
-            String feedback = normalize(trackedIssue.getPlanFeedback());
+            feedback = normalize(trackedIssue.getPlanFeedback());
             String prompt = buildPlanningPrompt(issueDetails, feedback);
 
-            ClaudeCodeResult result = agent.executePlanning(
-                    prompt, repoPath, model, trackedIssue.getId(), null);
+            ClaudeCodeResult result;
+            agent.pinProvider(trackedIssue.getResolvedAgentProvider());
+            try {
+                result = agent.executePlanning(
+                        prompt, repoPath, model, trackedIssue.getId(), null);
+            } finally {
+                agent.clearPinnedProvider();
+            }
             requireSuccessfulResult(result);
 
             PlanArtifactParser.PlanningArtifact artifact =
@@ -98,7 +106,7 @@ public class PlanFirstService {
             int nextVersion = versions.findFirstByIssueIdOrderByVersionNumberDesc(trackedIssue.getId())
                     .map(previous -> previous.getVersionNumber() + 1)
                     .orElse(1);
-            PlanningVersion version = PlanningVersion.pending(trackedIssue, nextVersion,
+            version = PlanningVersion.pending(trackedIssue, nextVersion,
                     artifact.designSpec(), artifact.implementationPlan(), provider, model, feedback);
 
             versions.save(version);
@@ -107,22 +115,25 @@ public class PlanFirstService {
             trackedIssue.setCurrentPhase(null);
             trackedIssue.setLastFailureReason(null);
             issues.save(trackedIssue);
-
-            publishProposalAudit(trackedIssue, version);
-            boolean revision = feedback != null;
-            events.log(revision ? "PLAN_REVISION_GENERATED" : "PLAN_PROPOSED",
-                    (revision ? "Generated plan revision version " : "Proposed planning version ")
-                            + nextVersion + " — awaiting approval",
-                    trackedIssue.getRepo(), trackedIssue);
-            notifications.info(revision ? "Plan Revision Generated" : "Plan Proposed",
-                    trackedIssue.getRepo().fullName() + " #" + trackedIssue.getIssueNumber()
-                            + " — version " + nextVersion + " awaits approval",
-                    trackedIssue);
-            return PlanningOutcome.AWAITING_APPROVAL;
         } catch (Exception e) {
             failPlanning(trackedIssue, e);
             return PlanningOutcome.FAILED;
         }
+
+        boolean revision = feedback != null;
+        runAfterPersistence("publish planning proposal audit",
+                () -> publishProposalAudit(trackedIssue, version));
+        runAfterPersistence("record planning proposal event",
+                () -> events.log(revision ? "PLAN_REVISION_GENERATED" : "PLAN_PROPOSED",
+                        (revision ? "Generated plan revision version " : "Proposed planning version ")
+                                + version.getVersionNumber() + " — awaiting approval",
+                        trackedIssue.getRepo(), trackedIssue));
+        runAfterPersistence("send planning proposal notification",
+                () -> notifications.info(revision ? "Plan Revision Generated" : "Plan Proposed",
+                        trackedIssue.getRepo().fullName() + " #" + trackedIssue.getIssueNumber()
+                                + " — version " + version.getVersionNumber() + " awaits approval",
+                        trackedIssue));
+        return PlanningOutcome.AWAITING_APPROVAL;
     }
 
     /** Approves both artifacts in exactly the latest pending version. */
@@ -142,14 +153,19 @@ public class PlanFirstService {
         versions.save(current);
         issues.save(issue);
 
-        publishApprovalAudit(issue, current);
-        events.log("PLAN_APPROVED",
-                "Approved planning version " + current.getVersionNumber() + " — queued for implementation",
-                issue.getRepo(), issue);
-        notifications.info("Plan Approved",
-                issue.getRepo().fullName() + " #" + issue.getIssueNumber()
-                        + " — version " + current.getVersionNumber() + " queued for implementation",
-                issue);
+        runAfterPersistence("publish planning approval audit",
+                () -> publishApprovalAudit(issue, current));
+        runAfterPersistence("record planning approval event",
+                () -> events.log("PLAN_APPROVED",
+                        "Approved planning version " + current.getVersionNumber()
+                                + " — queued for implementation",
+                        issue.getRepo(), issue));
+        runAfterPersistence("send planning approval notification",
+                () -> notifications.info("Plan Approved",
+                        issue.getRepo().fullName() + " #" + issue.getIssueNumber()
+                                + " — version " + current.getVersionNumber()
+                                + " queued for implementation",
+                        issue));
     }
 
     /** Supersedes exactly the latest pending version and queues a guided regeneration. */
@@ -172,14 +188,17 @@ public class PlanFirstService {
         issue.setStatus(IssueStatus.PENDING);
         issues.save(issue);
 
-        publishRevisionAudit(issue, current, guidance);
-        events.log("PLAN_REVISION_REQUESTED",
-                "Revision requested for planning version " + current.getVersionNumber(),
-                issue.getRepo(), issue);
-        notifications.info("Plan Revision Requested",
-                issue.getRepo().fullName() + " #" + issue.getIssueNumber()
-                        + " — version " + current.getVersionNumber() + " will be regenerated",
-                issue);
+        runAfterPersistence("publish planning revision audit",
+                () -> publishRevisionAudit(issue, current, guidance));
+        runAfterPersistence("record planning revision event",
+                () -> events.log("PLAN_REVISION_REQUESTED",
+                        "Revision requested for planning version " + current.getVersionNumber(),
+                        issue.getRepo(), issue));
+        runAfterPersistence("send planning revision notification",
+                () -> notifications.info("Plan Revision Requested",
+                        issue.getRepo().fullName() + " #" + issue.getIssueNumber()
+                                + " — version " + current.getVersionNumber() + " will be regenerated",
+                        issue));
     }
 
     /** Returns the complete immutable approved contract, never a pending or migrated legacy plan. */
@@ -273,10 +292,12 @@ public class PlanFirstService {
         issue.setCurrentPhase(null);
         issue.setLastFailureReason(reason);
         issues.save(issue);
-        events.log("PLAN_FAILED", reason, issue.getRepo(), issue);
-        notifications.warn("Planning Failed",
-                issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " — " + reason,
-                issue);
+        runAfterPersistence("record planning failure event",
+                () -> events.log("PLAN_FAILED", reason, issue.getRepo(), issue));
+        runAfterPersistence("send planning failure notification",
+                () -> notifications.warn("Planning Failed",
+                        issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " — " + reason,
+                        issue));
     }
 
     private void publishProposalAudit(TrackedIssue issue, PlanningVersion version) {
@@ -310,9 +331,23 @@ public class PlanFirstService {
             }
             log.warn("Failed to publish Plan First audit comment to {} #{}: {}",
                     repo.fullName(), issue.getIssueNumber(), detail);
-            events.log("PLAN_AUDIT_FAILED",
-                    bound("GitHub audit comment failed: " + detail, MAX_FAILURE_REASON_CHARS),
-                    repo, issue);
+            String failureDetail = detail;
+            runAfterPersistence("record GitHub audit failure event",
+                    () -> events.log("PLAN_AUDIT_FAILED",
+                            bound("GitHub audit comment failed: " + failureDetail,
+                                    MAX_FAILURE_REASON_CHARS),
+                            repo, issue));
+        }
+    }
+
+    private void runAfterPersistence(String action, Runnable sideEffect) {
+        try {
+            sideEffect.run();
+        } catch (Exception e) {
+            String detail = normalize(e.getMessage());
+            log.warn("Failed to {}: {}", action,
+                    detail != null ? bound(detail, MAX_FAILURE_REASON_CHARS)
+                            : e.getClass().getSimpleName());
         }
     }
 
@@ -337,15 +372,12 @@ public class PlanFirstService {
     /** Compatibility bridge until the controller submits an explicit version id. */
     @Deprecated
     public void approvePlan(TrackedIssue issue) {
-        PlanningVersion current = requireCurrentPending(issue);
-        approvePlan(issue.getId(), current.getId());
+        throw new IllegalStateException("Planning version id is required");
     }
 
     /** Compatibility bridge until the controller submits an explicit version id. */
     @Deprecated
     public RejectOutcome rejectPlan(TrackedIssue issue, String feedback) {
-        PlanningVersion current = requireCurrentPending(issue);
-        requestRevision(issue.getId(), current.getId(), feedback);
-        return RejectOutcome.REGENERATING;
+        throw new IllegalStateException("Planning version id is required");
     }
 }

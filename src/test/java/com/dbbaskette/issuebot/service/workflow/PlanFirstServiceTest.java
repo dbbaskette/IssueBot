@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Path;
@@ -93,6 +94,34 @@ class PlanFirstServiceTest {
                 eq(REPO_PATH), eq("gpt-5.6-sol"), eq(8L), isNull());
         verify(events).log(eq("PLAN_PROPOSED"), contains("version 1"), eq(issue.getRepo()), eq(issue));
         verify(notifications).info(eq("Plan Proposed"), contains("version 1"), eq(issue));
+    }
+
+    @Test
+    void generationPinsResolvedProviderAroundPlannerExecution() {
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
+
+        InOrder routing = inOrder(agent);
+        routing.verify(agent).pinProvider(AgentProvider.CODEX);
+        routing.verify(agent).executePlanning(anyString(), eq(REPO_PATH),
+                eq("gpt-5.6-sol"), eq(8L), isNull());
+        routing.verify(agent).clearPinnedProvider();
+    }
+
+    @Test
+    void generationClearsPinnedProviderWhenPlannerThrows() {
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenThrow(new IllegalStateException("planner crashed"));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(FAILED);
+
+        InOrder routing = inOrder(agent);
+        routing.verify(agent).pinProvider(AgentProvider.CODEX);
+        routing.verify(agent).executePlanning(anyString(), eq(REPO_PATH),
+                eq("gpt-5.6-sol"), eq(8L), isNull());
+        routing.verify(agent).clearPinnedProvider();
     }
 
     @Test
@@ -182,6 +211,60 @@ class PlanFirstServiceTest {
         verify(versions).save(any(PlanningVersion.class));
         verify(issues).save(issue);
         verify(events).log(eq("PLAN_AUDIT_FAILED"), contains("GitHub unavailable"), eq(issue.getRepo()), eq(issue));
+    }
+
+    @Test
+    void proposalEventFailureAfterPersistencePreservesAwaitingApprovalAndStillNotifies() {
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
+        doThrow(new RuntimeException("event store unavailable"))
+                .when(events).log(eq("PLAN_PROPOSED"), anyString(), eq(issue.getRepo()), eq(issue));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(issue.getLastFailureReason()).isNull();
+        verify(versions).save(any(PlanningVersion.class));
+        verify(issues, times(1)).save(issue);
+        verify(notifications).info(eq("Plan Proposed"), contains("version 1"), eq(issue));
+        verify(notifications, never()).warn(eq("Planning Failed"), anyString(), any());
+    }
+
+    @Test
+    void proposalNotificationFailureAfterPersistencePreservesAwaitingApproval() {
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
+        doThrow(new RuntimeException("notification store unavailable"))
+                .when(notifications).info(eq("Plan Proposed"), anyString(), eq(issue));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(issue.getLastFailureReason()).isNull();
+        verify(versions).save(any(PlanningVersion.class));
+        verify(issues, times(1)).save(issue);
+        verify(events).log(eq("PLAN_PROPOSED"), contains("version 1"), eq(issue.getRepo()), eq(issue));
+        verify(notifications, never()).warn(eq("Planning Failed"), anyString(), any());
+    }
+
+    @Test
+    void githubAndAuditEventFailuresAfterPersistencePreserveStateAndContinueTelemetry() {
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
+        doThrow(new RuntimeException("GitHub unavailable"))
+                .when(gitHub).addComment(anyString(), anyString(), anyInt(), anyString());
+        doThrow(new RuntimeException("event store unavailable"))
+                .when(events).log(eq("PLAN_AUDIT_FAILED"), anyString(), eq(issue.getRepo()), eq(issue));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(issue.getLastFailureReason()).isNull();
+        verify(versions).save(any(PlanningVersion.class));
+        verify(issues, times(1)).save(issue);
+        verify(events).log(eq("PLAN_PROPOSED"), contains("version 1"), eq(issue.getRepo()), eq(issue));
+        verify(notifications).info(eq("Plan Proposed"), contains("version 1"), eq(issue));
+        verify(notifications, never()).warn(eq("Planning Failed"), anyString(), any());
     }
 
     @Test
@@ -354,6 +437,24 @@ class PlanFirstServiceTest {
 
         assertThat(service.proposePlan(issue, details, REPO_PATH)).isTrue();
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.FAILED);
+    }
+
+    @Test
+    void compatibilityApprovalFailsClosedWithoutSelectingAnyVersion() {
+        assertThatThrownBy(() -> service.approvePlan(issue))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Planning version id is required");
+
+        verifyNoInteractions(issues, versions, gitHub);
+    }
+
+    @Test
+    void compatibilityRevisionFailsClosedWithoutSelectingAnyVersion() {
+        assertThatThrownBy(() -> service.rejectPlan(issue, "feedback"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Planning version id is required");
+
+        verifyNoInteractions(issues, versions, gitHub);
     }
 
     private ClaudeCodeResult success(String output) {
