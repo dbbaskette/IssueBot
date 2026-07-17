@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 @Service
 public class IssueDispatchService {
@@ -53,12 +55,34 @@ public class IssueDispatchService {
         return ClaimResult.claimed(issue);
     }
 
-    public synchronized ClaimResult claimRetry(Long issueId) {
+    public ClaimResult claimRetry(Long issueId) {
+        return claimRetry(issueId, issue -> null);
+    }
+
+    /**
+     * Claims a retry only when the fresh repository copy also satisfies the caller's
+     * workflow-specific eligibility rule. The additional guard runs under the same
+     * synchronization as pause, status, and per-repository serialization checks so a
+     * stale controller copy cannot make an ineligible retry runnable.
+     */
+    public ClaimResult claimRetry(Long issueId,
+                                  Predicate<TrackedIssue> eligibility,
+                                  String ineligibleReason) {
+        return claimRetry(issueId,
+                issue -> eligibility.test(issue) ? null : ineligibleReason);
+    }
+
+    public synchronized ClaimResult claimRetry(Long issueId,
+                                               Function<TrackedIssue, String> additionalGate) {
         if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
-        TrackedIssue issue = issues.findById(issueId).orElse(null);
+        TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return ClaimResult.rejected("Cannot retry issue in " + issue.getStatus() + " status");
+        }
+        String additionalRejection = additionalGate.apply(issue);
+        if (additionalRejection != null) {
+            return ClaimResult.rejected(additionalRejection);
         }
         List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
         if (!active.isEmpty()) {

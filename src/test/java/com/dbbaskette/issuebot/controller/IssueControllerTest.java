@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
@@ -183,6 +185,8 @@ class IssueControllerTest {
         final CostTrackingRepository costRepository = mock(CostTrackingRepository.class);
         final EventService eventService = mock(EventService.class);
         final IssueGuidanceRepository guidanceRepository = mock(IssueGuidanceRepository.class);
+        final IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
+        final ProcessingControlService control = mock(ProcessingControlService.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -195,6 +199,7 @@ class IssueControllerTest {
             issue.setId(1L);
             issue.setStatus(initialStatus);
             when(issues.findById(1L)).thenReturn(Optional.of(issue));
+            when(issues.findByIdWithApprovedPlanningVersion(1L)).thenReturn(Optional.of(issue));
             when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
             try {
                 when(gitHubApiClient.listOpenPullRequests("acme", "widgets", GitOperationsService.BRANCH_PREFIX))
@@ -206,11 +211,12 @@ class IssueControllerTest {
             controller = new IssueController(issues, repos,
                     iterationRepository, eventRepository,
                     costRepository, mock(IssuePollingService.class),
-                    mock(IssueWorkflowService.class), eventService,
+                    workflowService, eventService,
                     gitHubApiClient, properties, decompositionService, planFirstService,
                     cancellationService, guidanceRepository, new ObjectMapper(),
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues));
+                    mock(NotificationRepository.class), new MarkdownRenderer(),
+                    new IssueDispatchService(issues, control));
         }
     }
 
@@ -490,138 +496,224 @@ class IssueControllerTest {
     // === Plan-first mode (#64) ===
 
     @Test
-    void approvePlanEndpointGuardsStatus() {
-        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
-
-        f.controller.approvePlan(1L, null, f.redirectAttributes);
-
-        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
-        verify(f.planFirstService, never()).approvePlan(any());
-    }
-
-    @Test
-    void approvePlanEndpointCallsService() {
+    void approvePlanPassesExpectedVersionAndRedirectsToPlanCard() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
 
-        String view = f.controller.approvePlan(1L, null, f.redirectAttributes);
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
 
-        verify(f.planFirstService).approvePlan(f.issue);
+        verify(f.planFirstService).approvePlan(1L, 13L);
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("next poll cycle"));
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
     @Test
-    void approvePlanEndpointFlashesServiceFailure() {
+    void approvePlanFlashesStaleActionAndReloadsPlanCard() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
-        doThrow(new IllegalStateException("Issue is not awaiting plan approval: PENDING"))
-                .when(f.planFirstService).approvePlan(any());
+        doThrow(new IllegalStateException("Stale approval: current pending version is 4"))
+                .when(f.planFirstService).approvePlan(1L, 13L);
 
-        f.controller.approvePlan(1L, null, f.redirectAttributes);
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
 
-        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("not awaiting plan approval"));
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Stale approval"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
     @Test
-    void rejectPlanEndpointGuardsStatus() {
-        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
-
-        f.controller.rejectPlan(1L, "some feedback", null, f.redirectAttributes);
-
-        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
-        verify(f.planFirstService, never()).rejectPlan(any(), anyString());
-    }
-
-    @Test
-    void rejectPlanEndpointRequiresFeedback() {
+    void revisePlanRequiresGuidance() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
 
-        f.controller.rejectPlan(1L, "   ", null, f.redirectAttributes);
+        String view = f.controller.revisePlan(1L, 13L, "   ", f.redirectAttributes);
 
-        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Feedback is required"));
-        verify(f.planFirstService, never()).rejectPlan(any(), anyString());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("guidance"));
+        verifyNoInteractions(f.planFirstService);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
     @Test
-    void rejectPlanEndpointDelegatesWithTrimmedFeedback() {
+    void revisePlanPassesExpectedVersionAndTrimmedGuidance() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
-        when(f.planFirstService.rejectPlan(any(), anyString()))
-                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
 
-        String view = f.controller.rejectPlan(1L, "  Consider the caching layer  ", null, f.redirectAttributes);
+        String view = f.controller.revisePlan(
+                1L, 13L, "  Consider the caching layer  ", f.redirectAttributes);
 
-        verify(f.planFirstService).rejectPlan(f.issue, "Consider the caching layer");
+        verify(f.planFirstService).requestRevision(1L, 13L, "Consider the caching layer");
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("regenerates"));
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
-    }
-
-    // === returnTo (#91 Needs You inbox) ===
-
-    @Test
-    void approvePlanWithReturnToInboxRedirectsToInbox() {
-        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
-
-        String view = f.controller.approvePlan(1L, "inbox", f.redirectAttributes);
-
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/inbox");
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
     @Test
-    void approvePlanWithoutReturnToKeepsOriginalBehavior() {
+    void revisePlanAcceptsGuidanceAtFourThousandCharacterBoundary() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        String feedback = "x".repeat(4000);
 
-        String view = f.controller.approvePlan(1L, null, f.redirectAttributes);
+        f.controller.revisePlan(1L, 13L, feedback, f.redirectAttributes);
 
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+        verify(f.planFirstService).requestRevision(1L, 13L, feedback);
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
     }
 
     @Test
-    void approvePlanWithArbitraryReturnToValueIsNotHonored() {
+    void revisePlanRejectsGuidanceAboveFourThousandCharactersWithFriendlyFlash() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
 
-        String view = f.controller.approvePlan(1L, "somethingElse", f.redirectAttributes);
+        String view = f.controller.revisePlan(
+                1L, 13L, "x".repeat(4001), f.redirectAttributes);
 
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+        verifyNoInteractions(f.planFirstService);
+        verify(f.redirectAttributes).addFlashAttribute(
+                eq("error"), contains("4,000 characters or fewer"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
     @Test
-    void rejectPlanWithReturnToInboxRedirectsToInbox() {
+    void revisePlanFlashesStaleActionAndReloadsPlanCard() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
-        when(f.planFirstService.rejectPlan(any(), anyString()))
-                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
+        doThrow(new IllegalStateException("Stale revision: current pending version is 4"))
+                .when(f.planFirstService).requestRevision(1L, 13L, "Still wrong");
 
-        String view = f.controller.rejectPlan(1L, "feedback", "inbox", f.redirectAttributes);
+        String view = f.controller.revisePlan(1L, 13L, "Still wrong", f.redirectAttributes);
 
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/inbox");
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Stale revision"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
     @Test
-    void rejectPlanWithoutReturnToKeepsOriginalBehavior() {
-        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
-        when(f.planFirstService.rejectPlan(any(), anyString()))
-                .thenReturn(PlanFirstService.RejectOutcome.REGENERATING);
+    void guidedRetryKeepsApprovedVersionAndResetsOnlyConformanceCycle() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        PlanningVersion approvedVersion = approvedVersion(f.issue, 3);
+        f.issue.setApprovedPlanningVersion(approvedVersion);
+        f.issue.setPlanConformanceAttempt(2);
+        f.issue.setPlanCorrectionPending(true);
+        f.issue.setCurrentIteration(4);
+        f.issue.setCurrentReviewIteration(2);
+        f.issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        f.issue.setCooldownUntil(java.time.LocalDateTime.now().plusHours(1));
 
-        String view = f.controller.rejectPlan(1L, "feedback", null, f.redirectAttributes);
+        String view = f.controller.retryPlanImplementation(
+                f.issue.getId(), "Handle the null branch", f.redirectAttributes);
 
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getApprovedPlanningVersion())
+                .isSameAs(approvedVersion);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPlanConformanceAttempt()).isZero();
+        org.assertj.core.api.Assertions.assertThat(f.issue.isPlanCorrectionPending()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(f.issue.getCurrentIteration()).isZero();
+        org.assertj.core.api.Assertions.assertThat(f.issue.getCurrentReviewIteration()).isZero();
+        org.assertj.core.api.Assertions.assertThat(f.issue.getCurrentPhase()).isNull();
+        org.assertj.core.api.Assertions.assertThat(f.issue.getCooldownUntil()).isNull();
+        verify(f.guidanceRepository).save(argThat(g ->
+                g.getIssueId().equals(f.issue.getId())
+                        && g.getGuidance().contains("null branch")));
+        verify(f.eventService).log(eq("PLAN_IMPLEMENTATION_RETRY"), contains("Plan v3"),
+                eq(f.issue.getRepo()), same(f.issue));
+        verify(f.gitHubApiClient).addComment(eq("acme"), eq("widgets"), eq(42),
+                argThat(comment -> comment.contains("Plan v3") && comment.contains("null branch")));
+        verify(f.workflowService).processIssueAsync(same(f.issue), eq("Handle the null branch"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
-    /**
-     * The escalation flash must branch on the service's RETURNED outcome, never on the
-     * controller's own entity — the service mutates a fresh re-read copy (open-in-view
-     * off, no shared transaction), so the controller's instance stays stale. This test
-     * deliberately leaves the controller's entity untouched (planRejections = 0) and
-     * only stubs the return value: the escalated flash must still fire.
-     */
     @Test
-    void rejectPlanEndpointFlashesEscalationOnServiceOutcome_notStaleEntity() {
-        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
-        when(f.planFirstService.rejectPlan(any(), anyString()))
-                .thenReturn(PlanFirstService.RejectOutcome.ESCALATED);
+    void guidedRetryRequiresSecondMissStateAndApprovedNonLegacyVersion() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        PlanningVersion legacyVersion = mock(PlanningVersion.class);
+        when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        f.issue.setApprovedPlanningVersion(legacyVersion);
+        f.issue.setPlanConformanceAttempt(2);
 
-        f.controller.rejectPlan(1L, "Still wrong", null, f.redirectAttributes);
+        String view = f.controller.retryPlanImplementation(
+                f.issue.getId(), "Try a narrower change", f.redirectAttributes);
 
-        org.assertj.core.api.Assertions.assertThat(f.issue.getPlanRejections()).isZero(); // stale copy untouched
-        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("escalated to needs-human"));
+        verify(f.guidanceRepository, never()).save(any());
+        verify(f.workflowService, never()).processIssueAsync(any(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("second"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
+    }
+
+    @Test
+    void guidedRetryRequiresNonblankGuidance() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
+        f.issue.setPlanConformanceAttempt(2);
+
+        String view = f.controller.retryPlanImplementation(
+                f.issue.getId(), "   ", f.redirectAttributes);
+
+        verify(f.guidanceRepository, never()).save(any());
+        verify(f.workflowService, never()).processIssueAsync(any(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Guidance"));
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
+    }
+
+    @Test
+    void guidedRetryRespectsGlobalPause() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
+        f.issue.setPlanConformanceAttempt(2);
+        when(f.control.isPaused()).thenReturn(true);
+
+        f.controller.retryPlanImplementation(
+                f.issue.getId(), "Try a narrower change", f.redirectAttributes);
+
+        verify(f.issues, never()).save(any());
+        verify(f.guidanceRepository, never()).save(any());
+        verify(f.workflowService, never()).processIssueAsync(any(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("paused"));
+    }
+
+    @Test
+    void guidedRetryRespectsGlobalConcurrencyLimit() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
+        f.issue.setPlanConformanceAttempt(2);
+        when(f.properties.getMaxConcurrentIssues()).thenReturn(0);
+
+        f.controller.retryPlanImplementation(
+                f.issue.getId(), "Try a narrower change", f.redirectAttributes);
+
+        verify(f.issues, never()).save(any());
+        verify(f.guidanceRepository, never()).save(any());
+        verify(f.workflowService, never()).processIssueAsync(any(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Global concurrency limit"));
+    }
+
+    @Test
+    void guidedRetryReusesExistingImplementationPullRequest() throws Exception {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
+        f.issue.setPlanConformanceAttempt(2);
+        com.fasterxml.jackson.databind.node.ObjectNode existingPr = new ObjectMapper().createObjectNode();
+        existingPr.put("number", 77);
+        when(f.gitHubApiClient.listOpenPullRequests(
+                "acme", "widgets", GitOperationsService.BRANCH_PREFIX))
+                .thenReturn(List.of(existingPr));
+
+        f.controller.retryPlanImplementation(
+                f.issue.getId(), "Address the remaining review finding", f.redirectAttributes);
+
+        verify(f.workflowService).processIssueAsync(
+                same(f.issue), eq("Address the remaining review finding"));
+        verify(f.redirectAttributes, never()).addFlashAttribute(
+                eq("error"), contains("open IssueBot PR"));
+    }
+
+    @Test
+    void guidedRetryBoundsGuidanceToColumnLimit() {
+        Fixture f = new Fixture(IssueStatus.COOLDOWN);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
+        f.issue.setPlanConformanceAttempt(2);
+
+        f.controller.retryPlanImplementation(
+                f.issue.getId(), "x".repeat(4100), f.redirectAttributes);
+
+        ArgumentCaptor<IssueGuidance> guidance = ArgumentCaptor.forClass(IssueGuidance.class);
+        verify(f.guidanceRepository).save(guidance.capture());
+        org.assertj.core.api.Assertions.assertThat(guidance.getValue().getGuidance()).hasSize(4000);
+    }
+
+    private static PlanningVersion approvedVersion(TrackedIssue issue, int number) {
+        PlanningVersion version = PlanningVersion.pending(
+                issue, number, "approved spec", "approved plan", "test", "test", null);
+        version.approve(java.time.LocalDateTime.now());
+        return version;
     }
 
     @Test
@@ -1093,6 +1185,8 @@ class IssueControllerTest {
         when(issues.findById(1L)).thenReturn(Optional.of(failed));
         when(issues.findById(2L)).thenReturn(Optional.of(cooldown));
         when(issues.findById(3L)).thenReturn(Optional.of(queued));
+        when(issues.findByIdWithApprovedPlanningVersion(1L)).thenReturn(Optional.of(failed));
+        when(issues.findByIdWithApprovedPlanningVersion(2L)).thenReturn(Optional.of(cooldown));
         when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
         try {
             when(gitHubApiClient.listOpenPullRequests(any(), any(), any())).thenReturn(List.of());

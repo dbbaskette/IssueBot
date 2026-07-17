@@ -370,6 +370,29 @@ class PlanFirstServiceTest {
     }
 
     @Test
+    void revisionAcceptsGuidanceAtFourThousandCharacterBoundary() {
+        PlanningVersion current = pendingVersion(issue, 2, 7L);
+        issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(issues.findById(8L)).thenReturn(Optional.of(issue));
+        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        String feedback = "x".repeat(4000);
+
+        service.requestRevision(8L, 7L, feedback);
+
+        assertThat(issue.getPlanFeedback()).isEqualTo(feedback);
+        verify(issues).save(issue);
+    }
+
+    @Test
+    void revisionRejectsGuidanceAboveFourThousandCharactersBeforeReadingState() {
+        assertThatThrownBy(() -> service.requestRevision(8L, 7L, "x".repeat(4001)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Revision guidance must be 4,000 characters or fewer");
+
+        verifyNoInteractions(issues, versions, gitHub);
+    }
+
+    @Test
     void staleRevisionCannotSupersedeCurrentVersion() {
         PlanningVersion current = pendingVersion(issue, 3, 9L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);

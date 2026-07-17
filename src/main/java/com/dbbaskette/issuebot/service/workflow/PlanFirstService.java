@@ -29,6 +29,8 @@ import java.util.Optional;
 @Service
 public class PlanFirstService {
 
+    private static final int MAX_REVISION_GUIDANCE_CHARS = 4000;
+
     static final String PLANNING_METHODOLOGY = """
             You are producing a DESIGN SPEC and IMPLEMENTATION PLAN before any code is written.
             Make no code changes and create no files. Inspect the issue and relevant code, state
@@ -173,6 +175,9 @@ public class PlanFirstService {
         String guidance = normalize(feedback);
         if (guidance == null) {
             throw new IllegalArgumentException("Revision guidance is required");
+        }
+        if (guidance.length() > MAX_REVISION_GUIDANCE_CHARS) {
+            throw new IllegalArgumentException("Revision guidance must be 4,000 characters or fewer");
         }
 
         TrackedIssue issue = requireIssue(issueId);

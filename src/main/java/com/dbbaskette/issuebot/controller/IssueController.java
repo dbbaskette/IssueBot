@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
@@ -721,75 +722,125 @@ public class IssueController {
 
     @PostMapping("/{id}/plan/approve")
     public String approvePlan(@PathVariable Long id,
-                              @RequestParam(required = false) String returnTo,
+                              @RequestParam Long versionId,
                               RedirectAttributes redirectAttributes) {
-        TrackedIssue issue = issueRepository.findById(id).orElse(null);
-        if (issue == null) {
-            redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
-        }
-
-        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot approve plan for issue in " + issue.getStatus() + " status");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
-        }
-
         try {
-            planFirstService.approvePlan(issue);
+            planFirstService.approvePlan(id, versionId);
         } catch (Exception e) {
             log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+            return planReviewRedirect(id);
         }
 
         redirectAttributes.addFlashAttribute("success",
                 "Plan approved — queued, implementation resumes on the next poll cycle (~60s)");
-        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+        return planReviewRedirect(id);
     }
 
-    @PostMapping("/{id}/plan/reject")
-    public String rejectPlan(@PathVariable Long id,
+    @PostMapping("/{id}/plan/revise")
+    public String revisePlan(@PathVariable Long id,
+                             @RequestParam Long versionId,
                              @RequestParam(required = false) String feedback,
-                             @RequestParam(required = false) String returnTo,
                              RedirectAttributes redirectAttributes) {
-        TrackedIssue issue = issueRepository.findById(id).orElse(null);
-        if (issue == null) {
-            redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
-        }
-
-        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot reject plan for issue in " + issue.getStatus() + " status");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
-        }
-
         if (feedback == null || feedback.isBlank()) {
             redirectAttributes.addFlashAttribute("error",
-                    "Feedback is required when rejecting a plan — it drives the next plan");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+                    "Revision guidance is required — it drives the next planning version");
+            return planReviewRedirect(id);
+        }
+        String revisionGuidance = feedback.strip();
+        if (revisionGuidance.length() > 4000) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Revision guidance must be 4,000 characters or fewer");
+            return planReviewRedirect(id);
         }
 
-        // Branch on the service's returned outcome — the service mutates a fresh
-        // re-read copy of the issue, so this controller's entity is stale after the call.
-        PlanFirstService.RejectOutcome outcome;
         try {
-            outcome = planFirstService.rejectPlan(issue, feedback.trim());
+            planFirstService.requestRevision(id, versionId, revisionGuidance);
         } catch (Exception e) {
-            log.warn("Failed to reject plan for issue {}: {}", id, e.getMessage());
+            log.warn("Failed to revise plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+            return planReviewRedirect(id);
         }
 
-        if (outcome == PlanFirstService.RejectOutcome.ESCALATED) {
-            redirectAttributes.addFlashAttribute("success",
-                    "Plan rejected twice — issue escalated to needs-human");
-        } else {
-            redirectAttributes.addFlashAttribute("success",
-                    "Plan rejected — a new plan is queued and regenerates on the next poll cycle (~60s)");
+        redirectAttributes.addFlashAttribute("success",
+                "Plan revision requested — a new version regenerates on the next poll cycle (~60s)");
+        return planReviewRedirect(id);
+    }
+
+    @PostMapping("/{id}/plan/retry-implementation")
+    public String retryPlanImplementation(@PathVariable Long id,
+                                          @RequestParam(required = false) String guidance,
+                                          RedirectAttributes redirectAttributes) {
+        if (guidance == null || guidance.isBlank()) {
+            redirectAttributes.addFlashAttribute("error", "Guidance is required to retry implementation");
+            return planReviewRedirect(id);
         }
-        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+
+        String text = guidance.trim();
+        if (text.length() > 4000) {
+            text = text.substring(0, 4000);
+        }
+
+        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(
+                id, this::planImplementationRetryRejection);
+        if (!claim.claimed()) {
+            redirectAttributes.addFlashAttribute("error", claim.reason());
+            return planReviewRedirect(id);
+        }
+
+        TrackedIssue issue = claim.issue();
+        issue.setCurrentIteration(0);
+        issue.setCurrentReviewIteration(0);
+        issue.setPlanConformanceAttempt(0);
+        issue.setCooldownUntil(null);
+        issue.setCurrentPhase(null);
+        issue.setPlanCorrectionPending(false);
+        issueRepository.save(issue);
+
+        guidanceRepository.save(new IssueGuidance(issue.getId(), text));
+        int versionNumber = issue.getApprovedPlanningVersion().getVersionNumber();
+        eventService.log("PLAN_IMPLEMENTATION_RETRY",
+                "Retrying implementation against unchanged approved Plan v" + versionNumber
+                        + " with operator guidance",
+                issue.getRepo(), issue);
+
+        try {
+            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
+                    issue.getIssueNumber(),
+                    "**IssueBot guided implementation retry (approved Plan v" + versionNumber
+                            + " unchanged):** " + text);
+        } catch (Exception e) {
+            log.warn("Failed to post guided retry comment on #{}: {}",
+                    issue.getIssueNumber(), e.getMessage());
+        }
+
+        workflowService.processIssueAsync(issue, text);
+        redirectAttributes.addFlashAttribute("success",
+                "Implementation retry started against unchanged approved Plan v" + versionNumber);
+        return planReviewRedirect(id);
+    }
+
+    private static boolean eligibleForPlanImplementationRetry(TrackedIssue issue) {
+        return issue.getPlanConformanceAttempt() == 2
+                && issue.getApprovedPlanningVersion() != null
+                && issue.getApprovedPlanningVersion().getState() == PlanningVersionState.APPROVED;
+    }
+
+    private String planImplementationRetryRejection(TrackedIssue issue) {
+        if (!eligibleForPlanImplementationRetry(issue)) {
+            return "Guided retry is only available after the second Plan First conformance miss "
+                    + "with an approved non-legacy planning version";
+        }
+        long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
+        if (activeCount >= properties.getMaxConcurrentIssues()) {
+            return "Global concurrency limit reached (" + activeCount + "/"
+                    + properties.getMaxConcurrentIssues() + "). Wait for an active issue to finish.";
+        }
+        return null;
+    }
+
+    private static String planReviewRedirect(Long id) {
+        return "redirect:/issues/" + id + "#plan-review";
     }
 
     private static String normalize(String s) {
