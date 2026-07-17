@@ -106,6 +106,10 @@ class IntegrationWorkflowTest {
         repo.setId(1L);
         repo.setBranch("main");
         repo.setMode(RepoMode.AUTONOMOUS);
+        // Most integration cases exercise the ordinary implementation pipeline. The production
+        // repository default is Plan First, so this fixture declares its opt-out explicitly;
+        // Plan First cases opt back in within their own setup.
+        repo.setPlanFirst(false);
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the login bug");
         issue.setId(1L);
         return issue;
@@ -882,37 +886,9 @@ class IntegrationWorkflowTest {
     }
 
     @Test
-    void obsoleteSuperpowersToggleDoesNotCreateAnAutonomousPlanningBranch() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setSuperpowersMethodology(true);
-        issue.getRepo().setCiEnabled(false);
-        ObjectNode issueDetails = createIssueDetails();
-        setupCommonMocks(issue, issueDetails);
-
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
-                .thenReturn(successResult());
-        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
-        ObjectNode prNode = objectMapper.createObjectNode();
-        prNode.put("number", 402);
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(false))).thenReturn(prNode);
-        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
-
-        workflowService.processIssue(issue);
-
-        verifyNoInteractions(planFirstService);
-        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
-        assertFalse(promptCaptor.getValue().contains("Approved Planning Contract"));
-        assertFalse(promptCaptor.getValue().contains("finish with real, committed CODE changes"));
-    }
-
-    @Test
     void planFirstDisabled_neverInvokesPlanner_andPromptHasNoPlanSection() throws Exception {
         TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(false);
         issue.getRepo().setCiEnabled(false);
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);

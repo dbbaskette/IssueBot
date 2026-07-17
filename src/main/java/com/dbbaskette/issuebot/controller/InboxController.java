@@ -1,18 +1,23 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
+import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
+import com.dbbaskette.issuebot.util.ElapsedFormatter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,31 +25,28 @@ import java.util.Map;
 /**
  * The "Needs You" inbox (#91) — every checkpoint that blocks on the operator, grouped by type,
  * on one page: PR approvals, plan approvals, split proposals, and needs-human (FAILED/COOLDOWN)
- * issues. Deliberately read-mostly: all four groups are simple status queries, and the actions
- * on the page post to the SAME endpoints the Approvals page and issue-detail page already use
- * ({@link ApprovalController#approve}/{@link ApprovalController#reject},
- * {@code IssueController}'s plan/decomposition approve/reject) with {@code returnTo=inbox} so the
+ * issues. Deliberately read-mostly: plan approvals route to the issue's Plan Review card, while
+ * PR and decomposition actions reuse their existing endpoints with {@code returnTo=inbox} so the
  * operator lands back here instead of on the originating page.
  */
 @Controller
 public class InboxController {
 
-    /** "first ~10 lines" from the issue spec — whichever of these two limits is hit first. */
-    static final int PLAN_EXCERPT_MAX_LINES = 10;
-    static final int PLAN_EXCERPT_MAX_CHARS = 800;
-
     private final TrackedIssueRepository issueRepository;
+    private final PlanningVersionRepository planningVersionRepository;
     private final IssuePollingService pollingService;
     private final NotificationRepository notificationRepository;
     private final ApprovalCardAssembler cardAssembler;
     private final ObjectMapper objectMapper;
 
     public InboxController(TrackedIssueRepository issueRepository,
+                            PlanningVersionRepository planningVersionRepository,
                             IssuePollingService pollingService,
                             NotificationRepository notificationRepository,
                             ApprovalCardAssembler cardAssembler,
                             ObjectMapper objectMapper) {
         this.issueRepository = issueRepository;
+        this.planningVersionRepository = planningVersionRepository;
         this.pollingService = pollingService;
         this.notificationRepository = notificationRepository;
         this.cardAssembler = cardAssembler;
@@ -62,13 +64,19 @@ public class InboxController {
 
         ApprovalCardAssembler.Cards cards = cardAssembler.assemble(approvals);
 
-        Map<Long, String> planExcerpts = new HashMap<>();
-        Map<Long, Boolean> planTruncated = new HashMap<>();
-        for (TrackedIssue issue : planApprovals) {
-            String plan = issue.getImplementationPlan();
-            String excerpt = planExcerpt(plan);
-            planExcerpts.put(issue.getId(), excerpt);
-            planTruncated.put(issue.getId(), plan != null && !excerpt.equals(plan));
+        Map<Long, PlanningVersion> planVersions = new HashMap<>();
+        if (!planApprovals.isEmpty()) {
+            List<Long> issueIds = planApprovals.stream().map(TrackedIssue::getId).toList();
+            for (PlanningVersion version : planningVersionRepository.findByIssueIdInAndState(
+                    issueIds, PlanningVersionState.PENDING)) {
+                planVersions.merge(version.getIssue().getId(), version,
+                        (left, right) -> left.getVersionNumber() >= right.getVersionNumber() ? left : right);
+            }
+        }
+        Map<Long, String> planAges = new HashMap<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (Map.Entry<Long, PlanningVersion> entry : planVersions.entrySet()) {
+            planAges.put(entry.getKey(), ElapsedFormatter.format(entry.getValue().getCreatedAt(), now));
         }
 
         Map<Long, List<String>> proposalTitles = new HashMap<>();
@@ -88,8 +96,8 @@ public class InboxController {
         model.addAttribute("reviewScores", cards.reviewScores());
 
         model.addAttribute("planApprovals", planApprovals);
-        model.addAttribute("planExcerpts", planExcerpts);
-        model.addAttribute("planTruncated", planTruncated);
+        model.addAttribute("planVersions", planVersions);
+        model.addAttribute("planAges", planAges);
 
         model.addAttribute("splitProposals", splitProposals);
         model.addAttribute("proposalTitles", proposalTitles);
@@ -110,24 +118,5 @@ public class InboxController {
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         return ViewResolver.view("inbox", hx != null);
-    }
-
-    /**
-     * First {@link #PLAN_EXCERPT_MAX_LINES} lines of {@code plan}, further clipped to
-     * {@link #PLAN_EXCERPT_MAX_CHARS} characters if still over — whichever limit bites first.
-     * Package-private static so the render/controller tests can assert on it directly (mirrors
-     * {@code IssueController#budgetPct}'s testing convention).
-     */
-    static String planExcerpt(String plan) {
-        if (plan == null || plan.isBlank()) {
-            return "";
-        }
-        String[] lines = plan.split("\n", -1);
-        int lineLimit = Math.min(lines.length, PLAN_EXCERPT_MAX_LINES);
-        String joined = String.join("\n", java.util.Arrays.copyOfRange(lines, 0, lineLimit));
-        if (joined.length() > PLAN_EXCERPT_MAX_CHARS) {
-            joined = joined.substring(0, PLAN_EXCERPT_MAX_CHARS);
-        }
-        return joined;
     }
 }

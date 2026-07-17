@@ -105,4 +105,16 @@ class RepositoriesPageRenderTest {
 
         assertThat(html).doesNotContain("hx-confirm");
     }
+
+    @Test
+    void newRepositoryShowsPlanFirstAsRecommendedDefaultWithoutLegacyToggle() {
+        String html = render(List.of(), Map.of(), Map.of());
+
+        assertThat(html).contains("Plan First (recommended)")
+                .contains("id=\"plan-first\"")
+                .contains("checked")
+                .doesNotContain("Superpowers methodology — auto design")
+                .doesNotContain("superpowersMethodology")
+                .doesNotContain("superpowers-methodology");
+    }
 }

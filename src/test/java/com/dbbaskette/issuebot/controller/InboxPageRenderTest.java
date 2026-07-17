@@ -1,10 +1,12 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
+import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -79,7 +81,11 @@ class InboxPageRenderTest {
     }
 
     private InboxController controller(TrackedIssueRepository issues) {
-        return new InboxController(issues, mock(IssuePollingService.class), mock(NotificationRepository.class),
+        return controller(issues, mock(PlanningVersionRepository.class));
+    }
+
+    private InboxController controller(TrackedIssueRepository issues, PlanningVersionRepository versions) {
+        return new InboxController(issues, versions, mock(IssuePollingService.class), mock(NotificationRepository.class),
                 new ApprovalCardAssembler(mock(IterationRepository.class), mock(GitHubApiClient.class)),
                 new ObjectMapper());
     }
@@ -160,11 +166,13 @@ class InboxPageRenderTest {
 
         // Per-issue content actually rendered.
         assertThat(html).contains("Approval issue");
-        assertThat(html).contains("Step one");
+        assertThat(html).contains("Plan awaiting approval");
+        assertThat(html).doesNotContain("Step one");
         assertThat(html).contains("Sub A");
         assertThat(html).contains("Budget exceeded");
 
-        // Every action form on the page carries returnTo=inbox (approve/reject x 3 groups).
+        // Every action form on the page carries returnTo=inbox. Plan approval is intentionally
+        // only a link now, while PR and split actions keep their existing Inbox return path.
         long formCount = html.lines().filter(l -> l.contains("<form ")).count();
         long returnToInboxCount = html.lines().filter(l -> l.contains("name=\"returnTo\" value=\"inbox\"")).count();
         assertThat(formCount).isGreaterThan(0);
@@ -172,7 +180,7 @@ class InboxPageRenderTest {
     }
 
     @Test
-    void planApprovalCard_showsExpandableFullPlanOnlyWhenTruncated() {
+    void planApprovalCardDoesNotEmbedEvenAShortPlan() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
 
@@ -190,7 +198,40 @@ class InboxPageRenderTest {
 
         String html = render(model);
 
-        assertThat(html).contains("Just one short line");
+        assertThat(html).contains("href=\"/issues/1#plan-review\"");
+        assertThat(html).doesNotContain("Just one short line");
         assertThat(html).doesNotContain("Show full plan");
+    }
+
+    @Test
+    void planApprovalInboxLinksToCurrentVersionInsteadOfEmbeddingPlan() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue planApproval = new TrackedIssue(repo, 42, "Plan issue");
+        planApproval.setId(8L);
+        planApproval.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        planApproval.setImplementationPlan("full plan");
+        PlanningVersion current = PlanningVersion.pending(
+                planApproval, 3, "design spec", "full plan", "CODEX", "gpt-5.6-sol", null);
+        PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
+
+        when(issues.findByStatusOrderByIdDesc(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL))
+                .thenReturn(List.of(planApproval));
+        when(issues.findByStatusInOrderByIdDesc(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        when(versions.findByIssueIdInAndState(List.of(8L),
+                com.dbbaskette.issuebot.model.PlanningVersionState.PENDING)).thenReturn(List.of(current));
+
+        Model model = new ExtendedModelMap();
+        controller(issues, versions).inbox(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("Plan v3 awaiting approval")
+                .contains("href=\"/issues/8#plan-review\"")
+                .contains("CODEX · gpt-5.6-sol")
+                .contains("Review spec &amp; plan")
+                .doesNotContain("full plan")
+                .doesNotContain("reject-plan-modal-8");
     }
 }

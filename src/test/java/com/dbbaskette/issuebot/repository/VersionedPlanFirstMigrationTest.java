@@ -20,6 +20,31 @@ import static org.assertj.core.api.Assertions.assertThat;
 class VersionedPlanFirstMigrationTest {
 
     @Test
+    void migrationDropsObsoleteAutonomousSuperpowersColumn() throws Exception {
+        String url = "jdbc:h2:mem:remove_autonomous_superpowers_" + UUID.randomUUID()
+                + ";DB_CLOSE_DELAY=-1";
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("27").load().migrate();
+
+        try (Connection connection = DriverManager.getConnection(url, "sa", "");
+             PreparedStatement statement = connection.prepareStatement(
+                     "INSERT INTO watched_repos (owner, name, superpowers_methodology) "
+                             + "VALUES ('legacy', 'autonomous', TRUE)")) {
+            statement.executeUpdate();
+            assertThat(hasColumn(connection, "WATCHED_REPOS", "SUPERPOWERS_METHODOLOGY")).isTrue();
+        }
+
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration").load().migrate();
+
+        try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
+            assertThat(hasColumn(connection, "WATCHED_REPOS", "SUPERPOWERS_METHODOLOGY")).isFalse();
+            assertThat(longColumn(connection,
+                    "SELECT COUNT(*) FROM watched_repos WHERE owner = 'legacy' AND name = 'autonomous'"))
+                    .isEqualTo(1L);
+        }
+    }
+
+    @Test
     void migrationEnablesPlanFirstAndConvertsStoredPlanToLegacyVersion() throws Exception {
         String url = "jdbc:h2:mem:versioned_plan_first_" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
         Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration").target("26").load().migrate();
@@ -112,6 +137,12 @@ class VersionedPlanFirstMigrationTest {
     private void bind(PreparedStatement statement, Object... parameters) throws Exception {
         for (int i = 0; i < parameters.length; i++) {
             statement.setObject(i + 1, parameters[i]);
+        }
+    }
+
+    private boolean hasColumn(Connection connection, String table, String column) throws Exception {
+        try (ResultSet columns = connection.getMetaData().getColumns(null, null, table, column)) {
+            return columns.next();
         }
     }
 }

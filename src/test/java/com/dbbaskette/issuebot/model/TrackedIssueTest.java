@@ -55,11 +55,11 @@ class TrackedIssueTest {
     }
 
     @Test
-    void effectivePlanFirst_falseByDefault() {
+    void effectivePlanFirst_trueByDefault() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
 
-        assertEquals(false, issue.effectivePlanFirst());
+        assertEquals(true, issue.effectivePlanFirst());
     }
 
     @Test
