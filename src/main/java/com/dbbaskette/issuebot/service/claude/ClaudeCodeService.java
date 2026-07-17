@@ -197,7 +197,7 @@ public class ClaudeCodeService {
                 long duration = System.currentTimeMillis() - startTime;
 
                 if (!finished) {
-                    process.destroyForcibly();
+                    terminateTimedOutProcess(process);
                     stdoutReader.join(3000);
                     stderrReader.join(3000);
                     log.warn("Claude Code timed out after {} minutes. stdout length={}, stderr: {}",
@@ -302,6 +302,10 @@ public class ClaudeCodeService {
         parsed.setErrorMessage("Claude Code timed out after " + timeoutMinutes + " minutes"
                 + (stderr != null && !stderr.isBlank() ? ". stderr: " + stderr.trim() : ""));
         return parsed;
+    }
+
+    static void terminateTimedOutProcess(Process process) {
+        WorkflowCancellationService.terminateProcessTree(process);
     }
 
     /**

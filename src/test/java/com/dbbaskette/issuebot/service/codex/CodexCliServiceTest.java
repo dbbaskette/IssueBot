@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 class CodexCliServiceTest {
 
@@ -33,5 +34,20 @@ class CodexCliServiceTest {
         assertThat(command).containsSubsequence("exec", "resume");
         assertThat(command).contains("thread-123", "--model", "gpt-5.6-terra", "-");
         assertThat(command).doesNotContain("--ephemeral");
+    }
+
+    @Test
+    void timeoutTerminationKillsChildBeforeCodexProcess() {
+        Process parent = mock(Process.class);
+        ProcessHandle child = mock(ProcessHandle.class);
+        when(parent.descendants()).thenReturn(java.util.stream.Stream.of(child));
+        when(parent.isAlive()).thenReturn(true);
+        when(child.isAlive()).thenReturn(true);
+
+        CodexCliService.terminateTimedOutProcess(parent);
+
+        var order = inOrder(child, parent);
+        order.verify(child).destroyForcibly();
+        order.verify(parent).destroyForcibly();
     }
 }

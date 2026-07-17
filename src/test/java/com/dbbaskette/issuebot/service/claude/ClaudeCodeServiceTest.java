@@ -196,4 +196,19 @@ class ClaudeCodeServiceTest {
 
         facade.clearPinnedProvider();
     }
+
+    @Test
+    void timeoutTerminationKillsChildBeforeClaudeProcess() {
+        Process parent = mock(Process.class);
+        ProcessHandle child = mock(ProcessHandle.class);
+        when(parent.descendants()).thenReturn(java.util.stream.Stream.of(child));
+        when(parent.isAlive()).thenReturn(true);
+        when(child.isAlive()).thenReturn(true);
+
+        ClaudeCodeService.terminateTimedOutProcess(parent);
+
+        var order = inOrder(child, parent);
+        order.verify(child).destroyForcibly();
+        order.verify(parent).destroyForcibly();
+    }
 }

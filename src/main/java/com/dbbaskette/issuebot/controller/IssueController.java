@@ -303,6 +303,14 @@ public class IssueController {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return "Cannot retry issue in " + issue.getStatus() + " status";
         }
+        if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
+                && issue.getResolvedAgentProvider() != properties.getAgentProvider()) {
+            String previousProvider = issue.getResolvedAgentProvider() == null
+                    ? "an unknown provider" : issue.getResolvedAgentProvider().getDisplayName();
+            return "The previous session belongs to " + previousProvider
+                    + " and cannot continue with " + properties.getAgentProvider().getDisplayName()
+                    + ". Retry without continuing the previous session.";
+        }
 
         // Fetch open IssueBot PRs once for both cleanup and gate check
         WatchedRepo retryRepo = issue.getRepo();

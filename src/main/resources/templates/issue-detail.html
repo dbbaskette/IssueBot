@@ -132,10 +132,15 @@
                                     <option value="skip">Skip plan approval</option>
                                 </select>
                             </div>
-                            <label th:if="${issue.claudeSessionId != null}" class="check-row">
+                            <label th:if="${issue.claudeSessionId != null and issue.resolvedAgentProvider != null and ((codexProvider == true and issue.resolvedAgentProvider.name() == 'CODEX') or (codexProvider != true and issue.resolvedAgentProvider.name() == 'CLAUDE_CODE'))}" class="check-row">
                                 <input type="checkbox" name="continueSession" value="true">
                                 Continue previous agent session
                             </label>
+                            <p class="text-sm text-muted"
+                               th:if="${issue.claudeSessionId != null and (issue.resolvedAgentProvider == null or not ((codexProvider == true and issue.resolvedAgentProvider.name() == 'CODEX') or (codexProvider != true and issue.resolvedAgentProvider.name() == 'CLAUDE_CODE')))}"
+                               th:text="${issue.resolvedAgentProvider != null ? 'Previous ' + issue.resolvedAgentProvider.displayName + ' session cannot continue with ' + (codexProvider == true ? 'Codex CLI' : 'Claude Code') + '.' : 'The previous session predates provider tracking and cannot be continued. Retry will start a fresh session.'}">
+                                The previous session cannot be continued with the selected provider.
+                            </p>
                         </details>
                         <div class="modal-actions">
                             <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingPaused == true}"
