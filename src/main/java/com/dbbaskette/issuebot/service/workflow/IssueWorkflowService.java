@@ -36,6 +36,7 @@ import java.math.RoundingMode;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -170,6 +171,11 @@ public class IssueWorkflowService {
         try {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
+        RecoveryResumePhase recoveryResumePhase = RecoveryResumePhase.from(trackedIssue);
+        if (recoveryResumePhase != null) {
+            log.info("Resuming claimed Plan First correction for {} #{} from phase {}",
+                    repo.fullName(), issueNumber, recoveryResumePhase);
+        }
 
         log.info("Starting workflow for {} #{}: {}", repo.fullName(), issueNumber,
                 trackedIssue.getIssueTitle());
@@ -195,7 +201,9 @@ public class IssueWorkflowService {
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
         // drives the dashboard's elapsed-time display — #86).
         trackedIssue.setStartedAt(LocalDateTime.now());
-        trackedIssue.setCurrentPhase("SETUP");
+        if (recoveryResumePhase == null) {
+            trackedIssue.setCurrentPhase("SETUP");
+        }
         trackedIssue.setLastFailureReason(null);
         trackedIssue.setSuspensionReason(null);
         trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
@@ -258,7 +266,11 @@ public class IssueWorkflowService {
 
         // === Phase 1: Full implementation setup ===
         try {
-            phaseSetup(trackedIssue);
+            if (recoveryResumePhase == null) {
+                phaseSetup(trackedIssue);
+            } else {
+                phaseRecoveryResumeSetup(trackedIssue);
+            }
             branchName = trackedIssue.getBranchName();
             repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
             issueDetails = fetchIssueDetails(repo, issueNumber);
@@ -271,7 +283,8 @@ public class IssueWorkflowService {
         List<String> criteria = AcceptanceCriteriaParser.parse(issueDetails.path("body").asText(""));
 
         // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
-        if (repo.isPreScreenEnabled() && repo.getDecompositionMode() != DecompositionMode.OFF) {
+        if (recoveryResumePhase == null
+                && repo.isPreScreenEnabled() && repo.getDecompositionMode() != DecompositionMode.OFF) {
             try {
                 IssueDecompositionService.PreScreenResult screenResult =
                         decompositionService.preScreen(issueDetails, repoPath);
@@ -313,25 +326,30 @@ public class IssueWorkflowService {
         int prNumber = 0;
 
         List<Iteration> persistedCorrectionIterations = List.of();
-        if (approvedPlan != null && trackedIssue.isPlanCorrectionPending()) {
+        if (approvedPlan != null
+                && (trackedIssue.isPlanCorrectionPending() || recoveryResumePhase != null)) {
             persistedCorrectionIterations =
                     iterationRepository.findByIssueOrderByIterationNumAsc(trackedIssue);
-            for (int i = persistedCorrectionIterations.size() - 1; i >= 0; i--) {
-                Iteration persisted = persistedCorrectionIterations.get(i);
-                if (persisted.getReviewJson() != null && !persisted.getReviewJson().isBlank()) {
-                    String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
-                            + persisted.getReviewJson();
-                    previousFeedback = previousFeedback == null
-                            ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
-                    previousDiff = persisted.getDiff();
-                    reviewFeedback = true;
-                    break;
+            if (trackedIssue.isPlanCorrectionPending()) {
+                for (int i = persistedCorrectionIterations.size() - 1; i >= 0; i--) {
+                    Iteration persisted = persistedCorrectionIterations.get(i);
+                    if (persisted.getReviewJson() != null && !persisted.getReviewJson().isBlank()) {
+                        String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
+                                + persisted.getReviewJson();
+                        previousFeedback = previousFeedback == null
+                                ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
+                        previousDiff = persisted.getDiff();
+                        reviewFeedback = true;
+                        break;
+                    }
                 }
             }
         }
         final List<Iteration> correctionIterations = persistedCorrectionIterations;
 
-        while (iterationManager.canIterate(trackedIssue)) {
+        while (recoveryResumePhase != null || iterationManager.canIterate(trackedIssue)) {
+            RecoveryResumePhase resumePhase = recoveryResumePhase;
+            recoveryResumePhase = null;
             // Re-read entity from DB to pick up any external changes (e.g., maxIterations edits)
             trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
             repo = trackedIssue.getRepo();
@@ -359,26 +377,40 @@ public class IssueWorkflowService {
                         repo, trackedIssue);
             }
 
-            int iterationNum = trackedIssue.getCurrentIteration() + 1;
+            int iterationNum = resumePhase == null
+                    ? trackedIssue.getCurrentIteration() + 1
+                    : trackedIssue.getCurrentIteration();
             int maxIterations = repo.getMaxIterations();
-            trackedIssue.setCurrentIteration(iterationNum);
-            trackedIssue.setCurrentPhase("IMPLEMENTATION");
-            boolean correctionClaim = trackedIssue.isPlanCorrectionPending();
-            if (correctionClaim) {
-                trackedIssue.setPlanCorrectionPending(false);
+            boolean correctionClaim = resumePhase == null && trackedIssue.isPlanCorrectionPending();
+            if (resumePhase == null) {
+                trackedIssue.setCurrentIteration(iterationNum);
+                trackedIssue.setCurrentPhase("IMPLEMENTATION");
+                if (correctionClaim) {
+                    trackedIssue.setPlanCorrectionPending(false);
+                }
+                // Persist the iteration claim, phase transition, and pending-flag consumption
+                // atomically. Recovery can therefore distinguish the pre-claim handoff
+                // (pending correction at the stale review phase) from claimed implementation.
+                issueRepository.save(trackedIssue);
             }
-            // Persist the iteration claim, phase transition, and pending-flag consumption
-            // atomically. Recovery can therefore distinguish the pre-claim handoff
-            // (pending correction at the stale review phase) from claimed implementation.
-            issueRepository.save(trackedIssue);
 
-            Iteration iteration = correctionClaim
+            Iteration iteration = (correctionClaim || resumePhase != null)
                     ? correctionIterations.stream()
                             .filter(candidate -> candidate.getIterationNum() == iterationNum)
-                            .filter(candidate -> candidate.getCompletedAt() == null)
+                            .filter(candidate -> resumePhase != null
+                                    || candidate.getCompletedAt() == null)
                             .findFirst()
                             .orElse(null)
                     : null;
+            if (resumePhase != null && iteration == null) {
+                // Recovery only preserves a post-implementation checkpoint when this durable
+                // iteration exists. Refuse to synthesize one or to repeat implementation if the
+                // database changed between recovery and dispatch.
+                log.warn("Cannot resume claimed correction for {} #{} from {}: durable iteration {} is missing",
+                        repo.fullName(), issueNumber, resumePhase, iterationNum);
+                iterationManager.handleMaxIterationsReached(trackedIssue);
+                return;
+            }
             if (iteration == null) {
                 iteration = new Iteration(trackedIssue, iterationNum);
                 iteration.setImplModel(trackedIssue.getResolvedImplModel());
@@ -391,30 +423,32 @@ public class IssueWorkflowService {
                     "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
             // === Phase 2: Implementation (Opus) ===
-            ClaudeCodeResult implResult;
-            try {
-                implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
-                        previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
-                        approvedPlan, legacyApprovedPlan);
-                iteration.setClaudeOutput(implResult.getOutput());
-                if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
-                    iteration.setClaudeSessionId(implResult.getSessionId());
+            ClaudeCodeResult implResult = null;
+            if (resumePhase == null) {
+                try {
+                    implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
+                            previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
+                            approvedPlan, legacyApprovedPlan);
+                    iteration.setClaudeOutput(implResult.getOutput());
+                    if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
+                        iteration.setClaudeSessionId(implResult.getSessionId());
+                    }
+                    trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
+                } catch (Exception e) {
+                    log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
+                    iteration.setCompletedAt(LocalDateTime.now());
+                    iterationRepository.save(iteration);
+                    eventService.log("PHASE_IMPL_FAILED",
+                            "Implementation failed: " + e.getMessage(), repo, trackedIssue);
+                    previousFeedback = "Implementation failed: " + e.getMessage();
+                    reviewFeedback = false; // impl exception is not review feedback
+                    continue;
                 }
-                trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
-            } catch (Exception e) {
-                log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
-                iteration.setCompletedAt(LocalDateTime.now());
-                iterationRepository.save(iteration);
-                eventService.log("PHASE_IMPL_FAILED",
-                        "Implementation failed: " + e.getMessage(), repo, trackedIssue);
-                previousFeedback = "Implementation failed: " + e.getMessage();
-                reviewFeedback = false; // impl exception is not review feedback
-                continue;
             }
 
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
-            if (!implResult.isSuccess()) {
+            if (resumePhase == null && !implResult.isSuccess()) {
                 log.warn("{} returned failure for iteration {}", claudeCode.providerDisplayName(), iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
@@ -443,24 +477,27 @@ public class IssueWorkflowService {
 
             // Post implementation response to issue only when addressing code-review feedback
             // (not for human instructions or CI/impl errors — those would be misleading)
-            if (reviewFeedback) {
+            if (resumePhase == null && reviewFeedback) {
                 postImplementationResponseToIssue(trackedIssue, implResult, previousFeedback, iterationNum);
             }
             reviewFeedback = false; // reset for this iteration's fresh state
 
             // Get diff after implementation
-            String diff;
-            try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
-                diff = gitOps.diff(git, repo.getBranch());
-                iteration.setDiff(diff);
-            } catch (Exception e) {
-                diff = "";
-                log.warn("Failed to get diff after implementation", e);
+            String diff = iteration.getDiff();
+            if (resumePhase == null || diff == null) {
+                try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
+                    diff = gitOps.diff(git, repo.getBranch());
+                    iteration.setDiff(diff);
+                } catch (Exception e) {
+                    diff = "";
+                    log.warn("Failed to get diff after implementation", e);
+                }
             }
 
             // === Phase 2.5: Local Verification Commands (operator-defined, before CI) ===
             List<String> verificationCommands = LocalVerificationService.parseCommands(repo.getVerificationCommands());
-            if (!verificationCommands.isEmpty()) {
+            if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS)
+                    && !verificationCommands.isEmpty()) {
                 trackedIssue.setCurrentPhase("LOCAL_CHECKS");
                 issueRepository.save(trackedIssue);
                 eventService.log("PHASE_LOCAL_CHECKS", "Starting local verification commands", repo, trackedIssue);
@@ -516,31 +553,44 @@ public class IssueWorkflowService {
             }
 
             // === Phase 3: CI Verification ===
-            boolean ciPassed;
-            trackedIssue.setCurrentPhase("CI_VERIFICATION");
-            issueRepository.save(trackedIssue);
+            boolean ciPassed = true;
+            boolean durableCiCheckpoint = resumePhase == RecoveryResumePhase.CI_VERIFICATION
+                    && iteration.getCompletedAt() != null && iteration.getCiResult() != null;
+            if (durableCiCheckpoint
+                    && !"PASSED".equals(iteration.getCiResult())
+                    && !"SKIPPED".equals(iteration.getCiResult())) {
+                // This iteration already consumed its implementation and ended in CI failure.
+                // Preserve ordinary max-iteration behavior; never manufacture another correction.
+                iterationManager.handleMaxIterationsReached(trackedIssue);
+                return;
+            }
+            if (runsPhase(resumePhase, RecoveryResumePhase.CI_VERIFICATION)
+                    && !durableCiCheckpoint) {
+                trackedIssue.setCurrentPhase("CI_VERIFICATION");
+                issueRepository.save(trackedIssue);
 
-            try {
-                if (repo.isCiEnabled()) {
-                    ciPassed = phaseCiVerification(trackedIssue, branchName);
-                    iteration.setCiResult(ciPassed ? "PASSED" : "FAILED");
-                } else {
-                    ciPassed = phaseCommitAndPush(trackedIssue, branchName);
-                    iteration.setCiResult("SKIPPED");
-                    eventService.log("PHASE_CI_SKIPPED", "CI disabled — skipped check polling", repo, trackedIssue);
+                try {
+                    if (repo.isCiEnabled()) {
+                        ciPassed = phaseCiVerification(trackedIssue, branchName);
+                        iteration.setCiResult(ciPassed ? "PASSED" : "FAILED");
+                    } else {
+                        ciPassed = phaseCommitAndPush(trackedIssue, branchName);
+                        iteration.setCiResult("SKIPPED");
+                        eventService.log("PHASE_CI_SKIPPED", "CI disabled — skipped check polling", repo, trackedIssue);
+                    }
+                } catch (Exception e) {
+                    log.error("Phase 3 (CI) failed, iteration {}", iterationNum, e);
+                    iteration.setCiResult("ERROR");
+                    iteration.setCompletedAt(LocalDateTime.now());
+                    iterationRepository.save(iteration);
+                    previousDiff = diff;
+                    previousCiLogs = "CI verification error: " + e.getMessage();
+                    continue;
                 }
-            } catch (Exception e) {
-                log.error("Phase 3 (CI) failed, iteration {}", iterationNum, e);
-                iteration.setCiResult("ERROR");
+
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
-                previousDiff = diff;
-                previousCiLogs = "CI verification error: " + e.getMessage();
-                continue;
             }
-
-            iteration.setCompletedAt(LocalDateTime.now());
-            iterationRepository.save(iteration);
 
             if (!ciPassed) {
                 log.info("CI checks failed for iteration {}", iterationNum);
@@ -571,45 +621,69 @@ public class IssueWorkflowService {
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             // === Phase 4: PR Creation (draft) ===
-            try {
-                trackedIssue.setCurrentPhase("PR_CREATION");
-                issueRepository.save(trackedIssue);
-                prNumber = phasePrCreation(trackedIssue, issueDetails, branchName, iterationNum);
-            } catch (Exception e) {
-                log.error("Phase 4 (PR Creation) failed", e);
-                trackedIssue.setStatus(IssueStatus.FAILED);
-                trackedIssue.setCurrentPhase(null);
-                recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
-                        "PR creation failed: " + e.getMessage(), "PR_CREATION", e.toString(),
-                        "Check GitHub permissions and branch state, then retry.",
-                        FailureRetryability.OPERATOR_ACTION_REQUIRED);
-                eventService.log("PHASE_PR_CREATION_FAILED",
-                        "PR creation failed: " + e.getMessage(), repo, trackedIssue);
-                return;
+            if (runsPhase(resumePhase, RecoveryResumePhase.PR_CREATION)) {
+                try {
+                    trackedIssue.setCurrentPhase("PR_CREATION");
+                    issueRepository.save(trackedIssue);
+                    prNumber = phasePrCreation(trackedIssue, issueDetails, branchName, iterationNum);
+                } catch (Exception e) {
+                    log.error("Phase 4 (PR Creation) failed", e);
+                    trackedIssue.setStatus(IssueStatus.FAILED);
+                    trackedIssue.setCurrentPhase(null);
+                    recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
+                            "PR creation failed: " + e.getMessage(), "PR_CREATION", e.toString(),
+                            "Check GitHub permissions and branch state, then retry.",
+                            FailureRetryability.OPERATOR_ACTION_REQUIRED);
+                    eventService.log("PHASE_PR_CREATION_FAILED",
+                            "PR creation failed: " + e.getMessage(), repo, trackedIssue);
+                    return;
+                }
+            } else {
+                prNumber = trackedIssue.getPrNumber() == null ? 0 : trackedIssue.getPrNumber();
             }
 
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             // === Phase 5: Independent Review (Sonnet) ===
-            trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
-            issueRepository.save(trackedIssue);
+            CodeReviewResult reviewResult = null;
+            boolean completionResume = resumePhase == RecoveryResumePhase.COMPLETION;
+            boolean persistedReviewVerdict = (resumePhase == RecoveryResumePhase.INDEPENDENT_REVIEW
+                    || completionResume)
+                    && iteration.getReviewPassed() != null;
+            if (runsPhase(resumePhase, RecoveryResumePhase.INDEPENDENT_REVIEW)
+                    && !persistedReviewVerdict) {
+                trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
+                issueRepository.save(trackedIssue);
 
-            CodeReviewResult reviewResult = phaseIndependentReview(
-                    trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria,
-                    approvedPlan);
+                reviewResult = phaseIndependentReview(
+                        trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria,
+                        approvedPlan);
+            }
+
+            if (persistedReviewVerdict) {
+                reviewResult = restorePersistedReview(iteration);
+            }
+
+            if (persistedReviewVerdict && !reviewResult.passed()) {
+                iterationManager.handlePlanConformanceFailure(trackedIssue,
+                        approvedPlan.versionNumber(), "Persisted second review did not pass",
+                        iteration.getReviewJson());
+                return;
+            }
 
             // Post review to issue thread (regardless of pass/fail)
-            if (reviewResult != null) {
+            if (reviewResult != null && !completionResume) {
                 postReviewToIssue(trackedIssue, reviewResult, iterationNum);
             }
 
-            if (reviewResult == null) {
+            if (reviewResult == null && !persistedReviewVerdict
+                    && resumePhase != RecoveryResumePhase.COMPLETION) {
                 // Review invocation failed — treat as failed review
                 log.warn("Review returned null (invocation error) — skipping to completion");
                 eventService.log("PHASE_REVIEW_SKIPPED",
                         "Review invocation failed — proceeding without review",
                         repo, trackedIssue);
-            } else if (reviewResult.invocationFailed()) {
+            } else if (reviewResult != null && reviewResult.invocationFailed()) {
                 // The review couldn't run even after in-phase retries — the code was never judged,
                 // so re-implementing would burn iterations "fixing" a non-problem. Escalate straight
                 // to needs-human with the "could not run" framing (an environment/config issue).
@@ -619,7 +693,7 @@ public class IssueWorkflowService {
                                 + "code was not evaluated.\n\nDetails: " + reviewResult.summary(),
                         true);
                 return;
-            } else if (!reviewResult.passed()) {
+            } else if (reviewResult != null && !reviewResult.passed()) {
                 // A real verdict: the code fell short. Iterate (re-implement) if budget remains.
                 if (approvedPlan != null && trackedIssue.getPlanConformanceAttempt() >= 2) {
                     iterationManager.handlePlanConformanceFailure(trackedIssue,
@@ -646,7 +720,7 @@ public class IssueWorkflowService {
             }
 
             // Route non-blocking review findings per the repo's follow-up mode
-            if (reviewResult != null && reviewResult.passed()) {
+            if (reviewResult != null && reviewResult.passed() && !completionResume) {
                 try {
                     followUpService.handleNonBlockingFindings(trackedIssue, issueDetails, reviewResult, prNumber);
                 } catch (Exception e) {
@@ -659,7 +733,13 @@ public class IssueWorkflowService {
             try {
                 trackedIssue.setCurrentPhase("COMPLETION");
                 issueRepository.save(trackedIssue);
-                phaseCompletion(trackedIssue, issueDetails, branchName, iterationNum, diff, prNumber, reviewResult);
+                if (completionResume) {
+                    phaseRecoveryCompletion(trackedIssue, issueDetails, branchName,
+                            iterationNum, diff, prNumber, reviewResult);
+                } else {
+                    phaseCompletion(trackedIssue, issueDetails, branchName,
+                            iterationNum, diff, prNumber, reviewResult);
+                }
                 captureLessons(trackedIssue, "completed successfully", previousFeedback, previousCiLogs, repoPath);
                 return; // Success!
             } catch (Exception e) {
@@ -859,6 +939,24 @@ public class IssueWorkflowService {
 
         eventService.log("PHASE_SETUP_COMPLETE",
                 "Setup complete, branch: " + trackedIssue.getBranchName(), repo, trackedIssue);
+    }
+
+    /**
+     * Re-enter a post-implementation recovery checkpoint without resetting the checkout or
+     * recreating its feature branch. The normal setup path deliberately cleans working state and
+     * force-recreates the branch, which would destroy the corrective implementation being resumed.
+     */
+    private void phaseRecoveryResumeSetup(TrackedIssue trackedIssue) throws Exception {
+        String branchName = trackedIssue.getBranchName();
+        if (branchName == null || branchName.isBlank()) {
+            throw new IllegalStateException("Cannot resume workflow without its persisted feature branch");
+        }
+        WatchedRepo repo = trackedIssue.getRepo();
+        try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
+            gitOps.checkout(git, branchName);
+        }
+        eventService.log("PHASE_RECOVERY_RESUME",
+                "Resuming workflow on existing branch " + branchName, repo, trackedIssue);
     }
 
     /**
@@ -1065,14 +1163,37 @@ public class IssueWorkflowService {
     void phaseCompletion(TrackedIssue trackedIssue, JsonNode issueDetails,
                           String branchName, int iterationCount, String diff, int prNumber,
                           CodeReviewResult reviewResult) {
+        completeWorkflow(trackedIssue, iterationCount, prNumber, reviewResult, false);
+    }
+
+    void phaseRecoveryCompletion(TrackedIssue trackedIssue, JsonNode issueDetails,
+                                 String branchName, int iterationCount, String diff, int prNumber,
+                                 CodeReviewResult reviewResult) {
+        completeWorkflow(trackedIssue, iterationCount, prNumber, reviewResult, true);
+    }
+
+    private void completeWorkflow(TrackedIssue trackedIssue, int iterationCount, int prNumber,
+                                  CodeReviewResult reviewResult, boolean recoveryResume) {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_COMPLETION", "Starting completion phase", repo, trackedIssue);
 
         boolean isApprovalGated = repo.getMode() == RepoMode.APPROVAL_GATED;
+        boolean merged = false;
+        boolean prReady = !isApprovalGated;
+        if (recoveryResume) {
+            try {
+                JsonNode persistedPr = gitHubApi.getPullRequest(
+                        repo.getOwner(), repo.getName(), prNumber);
+                merged = persistedPr.path("merged").asBoolean(false);
+                prReady = !persistedPr.path("draft").asBoolean(false);
+            } catch (Exception e) {
+                log.warn("Could not reconcile PR #{} during completion recovery: {}",
+                        prNumber, e.getMessage());
+            }
+        }
 
         // Mark draft PR as ready (only needed for approval-gated repos that create draft PRs)
-        boolean prReady = !isApprovalGated; // non-draft PRs are already ready
-        if (isApprovalGated) {
+        if (isApprovalGated && !prReady && !merged) {
             try {
                 gitHubApi.markPrReady(repo.getOwner(), repo.getName(), prNumber);
                 prReady = true;
@@ -1089,28 +1210,26 @@ public class IssueWorkflowService {
 
         // Post review to PR now that it's no longer a draft
         // (submitting reviews on draft PRs can interfere with merge)
-        if (reviewResult != null && prNumber > 0) {
+        if (reviewResult != null && prNumber > 0 && !merged) {
             postReviewToGitHub(trackedIssue, prNumber, reviewResult);
         }
 
         String prUrl = "https://github.com/" + repo.fullName() + "/pull/" + prNumber;
-        BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
+        if (!recoveryResume) {
+            BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
+            gitHubApi.addComment(repo.getOwner(), repo.getName(), trackedIssue.getIssueNumber(),
+                    "IssueBot has created a pull request: " + prUrl
+                            + "\n\nIterations: " + iterationCount
+                            + " | Estimated cost: $" + totalCost.setScale(4, RoundingMode.HALF_UP));
 
-        // Comment on the issue
-        gitHubApi.addComment(repo.getOwner(), repo.getName(), trackedIssue.getIssueNumber(),
-                "IssueBot has created a pull request: " + prUrl
-                        + "\n\nIterations: " + iterationCount
-                        + " | Estimated cost: $" + totalCost.setScale(4, RoundingMode.HALF_UP));
-
-        // Update labels
-        gitHubApi.addLabels(repo.getOwner(), repo.getName(),
-                trackedIssue.getIssueNumber(), List.of("issuebot-pr-created"));
-        gitHubApi.removeLabel(repo.getOwner(), repo.getName(),
-                trackedIssue.getIssueNumber(), "agent-ready");
+            gitHubApi.addLabels(repo.getOwner(), repo.getName(),
+                    trackedIssue.getIssueNumber(), List.of("issuebot-pr-created"));
+            gitHubApi.removeLabel(repo.getOwner(), repo.getName(),
+                    trackedIssue.getIssueNumber(), "agent-ready");
+        }
 
         // Auto-merge if enabled, not approval-gated, and PR was successfully marked ready
-        boolean merged = false;
-        if (repo.isAutoMerge() && !isApprovalGated) {
+        if (repo.isAutoMerge() && !isApprovalGated && !merged) {
             if (!prReady) {
                 log.warn("Skipping auto-merge for PR #{} — PR is still a draft", prNumber);
                 eventService.log("AUTO_MERGE_SKIPPED",
@@ -2006,5 +2125,81 @@ public class IssueWorkflowService {
     private String truncate(String text, int maxLength) {
         if (text == null) return "";
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "\n... (truncated)";
+    }
+
+    private boolean runsPhase(RecoveryResumePhase resumePhase, RecoveryResumePhase phase) {
+        return resumePhase == null || resumePhase.ordinal() <= phase.ordinal();
+    }
+
+    private CodeReviewResult restorePersistedReview(Iteration iteration) {
+        try {
+            JsonNode root = objectMapper.readTree(iteration.getReviewJson());
+            List<CodeReviewResult.ReviewFinding> findings = new ArrayList<>();
+            for (JsonNode finding : root.path("findings")) {
+                findings.add(new CodeReviewResult.ReviewFinding(
+                        finding.path("severity").asText("medium"),
+                        finding.path("category").asText(""),
+                        finding.path("file").asText(""),
+                        finding.hasNonNull("line") ? finding.path("line").asInt() : null,
+                        finding.path("finding").asText(""),
+                        finding.path("suggestion").asText("")));
+            }
+            List<CodeReviewResult.CriterionVerdict> criterionVerdicts = new ArrayList<>();
+            for (JsonNode criterion : root.path("criteria")) {
+                criterionVerdicts.add(CodeReviewResult.CriterionVerdict.lenient(
+                        criterion.path("text").asText(""),
+                        criterion.path("verdict").asText(""),
+                        criterion.path("note").asText("")));
+            }
+            return new CodeReviewResult(
+                    Boolean.TRUE.equals(iteration.getReviewPassed()),
+                    root.path("summary").asText("Persisted independent review"),
+                    root.path("specComplianceScore").asDouble(),
+                    root.path("correctnessScore").asDouble(),
+                    root.path("codeQualityScore").asDouble(),
+                    root.path("testCoverageScore").asDouble(),
+                    root.path("architectureFitScore").asDouble(),
+                    root.path("regressionsScore").asDouble(),
+                    root.path("securityScore").asDouble(1.0),
+                    findings, root.path("advice").asText(""), iteration.getReviewJson(),
+                    0, 0, iteration.getReviewModel(), null, criterionVerdicts);
+        } catch (Exception e) {
+            log.warn("Could not restore persisted review JSON for iteration {}: {}",
+                    iteration.getIterationNum(), e.getMessage());
+            return new CodeReviewResult(
+                    Boolean.TRUE.equals(iteration.getReviewPassed()),
+                    "Persisted independent review", 0, 0, 0, 0, 0, 0, 1,
+                    List.of(), "", iteration.getReviewJson(), 0, 0,
+                    iteration.getReviewModel(), null, List.of());
+        }
+    }
+
+    /**
+     * A recovery-only checkpoint after the single corrective implementation has already run.
+     * The phase is intentionally carried on {@link TrackedIssue}; recovery preserves it only
+     * when a matching durable iteration exists, so normal retries cannot enter this path.
+     */
+    private enum RecoveryResumePhase {
+        LOCAL_CHECKS,
+        CI_VERIFICATION,
+        PR_CREATION,
+        INDEPENDENT_REVIEW,
+        COMPLETION;
+
+        private static RecoveryResumePhase from(TrackedIssue issue) {
+            if (issue.getApprovedPlanningVersion() == null
+                    || issue.getPlanConformanceAttempt() < 1
+                    || issue.getPlanConformanceAttempt() > 2
+                    || issue.isPlanCorrectionPending()
+                    || issue.getCurrentIteration() <= 0
+                    || issue.getCurrentPhase() == null) {
+                return null;
+            }
+            try {
+                return valueOf(issue.getCurrentPhase().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
     }
 }

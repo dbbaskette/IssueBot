@@ -1,9 +1,11 @@
 package com.dbbaskette.issuebot.service.polling;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -27,6 +29,7 @@ import static org.mockito.Mockito.when;
 class OrphanedRunRecoveryTest {
 
     private TrackedIssueRepository issueRepository;
+    private IterationRepository iterationRepository;
     private PlanningVersionRepository versionRepository;
     private EventService eventService;
     private OrphanedRunRecovery recovery;
@@ -35,9 +38,11 @@ class OrphanedRunRecoveryTest {
     @BeforeEach
     void setUp() {
         issueRepository = mock(TrackedIssueRepository.class);
+        iterationRepository = mock(IterationRepository.class);
         versionRepository = mock(PlanningVersionRepository.class);
         eventService = mock(EventService.class);
-        recovery = new OrphanedRunRecovery(issueRepository, versionRepository, eventService);
+        recovery = new OrphanedRunRecovery(
+                issueRepository, iterationRepository, versionRepository, eventService);
         repo = new WatchedRepo("owner", "repo");
     }
 
@@ -120,7 +125,10 @@ class OrphanedRunRecoveryTest {
                 orphan, 2, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
         approved.approve(java.time.LocalDateTime.now());
         orphan.setApprovedPlanningVersion(approved);
+        Iteration unexecutedClaim = new Iteration(orphan, 2);
         when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
+                .thenReturn(List.of(unexecutedClaim));
 
         recovery.requeueOrphanedRuns();
 
@@ -132,6 +140,90 @@ class OrphanedRunRecoveryTest {
         assertNull(orphan.getCurrentPhase());
         verify(issueRepository).save(orphan);
         verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void completedCorrectionImplementationIsNotRearmedWhenTerminalHandlingWasInterrupted() {
+        TrackedIssue orphan = claimedCorrection(102, "IMPLEMENTATION");
+        Iteration completedClaim = new Iteration(orphan, 2);
+        completedClaim.setCompletedAt(java.time.LocalDateTime.now());
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
+                .thenReturn(List.of(completedClaim));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(2, orphan.getCurrentIteration());
+        assertEquals(1, orphan.getPlanConformanceAttempt());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+        assertNull(orphan.getCurrentPhase());
+        verify(issueRepository).save(orphan);
+        verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void postImplementationCorrectionPhasesKeepTheirResumeCheckpoint() {
+        for (String phase : List.of(
+                "LOCAL_CHECKS", "CI_VERIFICATION", "PR_CREATION",
+                "INDEPENDENT_REVIEW", "COMPLETION")) {
+            TrackedIssue orphan = claimedCorrection(200 + phase.length(), phase);
+            if ("COMPLETION".equals(phase)) {
+                orphan.setPlanConformanceAttempt(2);
+            }
+            Iteration claimed = new Iteration(orphan, 2);
+            claimed.setCompletedAt(java.time.LocalDateTime.now());
+            when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS))
+                    .thenReturn(List.of(orphan));
+            when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
+                    .thenReturn(List.of(claimed));
+
+            recovery.requeueOrphanedRuns();
+
+            assertEquals(IssueStatus.PENDING, orphan.getStatus(), phase);
+            assertEquals(2, orphan.getCurrentIteration(), phase);
+            assertEquals("COMPLETION".equals(phase) ? 2 : 1,
+                    orphan.getPlanConformanceAttempt(), phase);
+            assertEquals(false, orphan.isPlanCorrectionPending(), phase);
+            assertEquals(phase, orphan.getCurrentPhase(), phase);
+        }
+        verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void persistedSecondReviewVerdictKeepsReviewCheckpointWithoutRearmingCorrection() {
+        TrackedIssue orphan = claimedCorrection(219, "INDEPENDENT_REVIEW");
+        orphan.setPlanConformanceAttempt(2);
+        Iteration reviewed = new Iteration(orphan, 2);
+        reviewed.setCompletedAt(java.time.LocalDateTime.now());
+        reviewed.setReviewPassed(true);
+        reviewed.setReviewJson("{\"passed\":true}");
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
+                .thenReturn(List.of(reviewed));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals("INDEPENDENT_REVIEW", orphan.getCurrentPhase());
+        assertEquals(2, orphan.getCurrentIteration());
+        assertEquals(2, orphan.getPlanConformanceAttempt());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+    }
+
+    private TrackedIssue claimedCorrection(int issueNumber, String phase) {
+        TrackedIssue orphan = new TrackedIssue(repo, issueNumber, "Claimed corrective pass");
+        orphan.setId((long) issueNumber);
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentIteration(2);
+        orphan.setCurrentPhase(phase);
+        orphan.setPlanConformanceAttempt(1);
+        orphan.setPlanCorrectionPending(false);
+        PlanningVersion approved = PlanningVersion.pending(
+                orphan, 2, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        orphan.setApprovedPlanningVersion(approved);
+        return orphan;
     }
 
     @Test

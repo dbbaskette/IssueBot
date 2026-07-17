@@ -1,9 +1,11 @@
 package com.dbbaskette.issuebot.service.polling;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -33,13 +35,16 @@ public class OrphanedRunRecovery {
     private static final Logger log = LoggerFactory.getLogger(OrphanedRunRecovery.class);
 
     private final TrackedIssueRepository issueRepository;
+    private final IterationRepository iterationRepository;
     private final PlanningVersionRepository versionRepository;
     private final EventService eventService;
 
     public OrphanedRunRecovery(TrackedIssueRepository issueRepository,
+                               IterationRepository iterationRepository,
                                PlanningVersionRepository versionRepository,
                                EventService eventService) {
         this.issueRepository = issueRepository;
+        this.iterationRepository = iterationRepository;
         this.versionRepository = versionRepository;
         this.eventService = eventService;
     }
@@ -64,7 +69,7 @@ public class OrphanedRunRecovery {
             log.info("Recovering interrupted issue {} #{} from phase {} to {}",
                     issue.getRepo().fullName(), issue.getIssueNumber(),
                     issue.getCurrentPhase(), recoveredStatus);
-            if (action == RecoveryAction.RESTORE_CLAIMED_CORRECTION) {
+            if (action == RecoveryAction.RESTORE_UNEXECUTED_CORRECTION) {
                 // The second implementation claim consumed the ordinary iteration budget just
                 // before work began. Roll back only that claim so normal dispatch can replay it;
                 // the approved version and completed-verdict count remain immutable.
@@ -72,7 +77,9 @@ public class OrphanedRunRecovery {
                 issue.setPlanCorrectionPending(true);
             }
             issue.setStatus(recoveredStatus);
-            issue.setCurrentPhase(null);
+            if (action != RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION) {
+                issue.setCurrentPhase(null);
+            }
             issueRepository.save(issue);
             eventService.log("ISSUE_RECOVERED",
                     action == RecoveryAction.AWAITING_PLAN_APPROVAL
@@ -91,7 +98,21 @@ public class OrphanedRunRecovery {
             return RecoveryAction.REQUEUE;
         }
         if (isClaimedCorrection(issue)) {
-            return RecoveryAction.RESTORE_CLAIMED_CORRECTION;
+            Iteration current = currentIteration(issue);
+            if ("IMPLEMENTATION".equalsIgnoreCase(issue.getCurrentPhase())) {
+                // Only an incomplete durable iteration proves the claim had not reached its
+                // terminal implementation handling. Missing/completed state is conservative:
+                // never grant another corrective implementation.
+                return issue.getPlanConformanceAttempt() == 1
+                        && current != null && current.getCompletedAt() == null
+                        ? RecoveryAction.RESTORE_UNEXECUTED_CORRECTION
+                        : RecoveryAction.REQUEUE;
+            }
+            if (current != null && isPostImplementationPhase(issue.getCurrentPhase())) {
+                // Keep the exact durable phase as the workflow resume checkpoint. The iteration
+                // claim and correction budget stay consumed; implementation must not run again.
+                return RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION;
+            }
         }
         if (issue.getApprovedPlanningVersion() != null) {
             return RecoveryAction.REQUEUE;
@@ -114,16 +135,32 @@ public class OrphanedRunRecovery {
 
     private boolean isClaimedCorrection(TrackedIssue issue) {
         return issue.getApprovedPlanningVersion() != null
-                && issue.getPlanConformanceAttempt() == 1
+                && issue.getPlanConformanceAttempt() >= 1
+                && issue.getPlanConformanceAttempt() <= 2
                 && !issue.isPlanCorrectionPending()
-                && issue.getCurrentIteration() > 0
-                && "IMPLEMENTATION".equalsIgnoreCase(issue.getCurrentPhase());
+                && issue.getCurrentIteration() > 0;
+    }
+
+    private Iteration currentIteration(TrackedIssue issue) {
+        return iterationRepository.findByIssueOrderByIterationNumAsc(issue).stream()
+                .filter(iteration -> iteration.getIterationNum() == issue.getCurrentIteration())
+                .reduce((first, second) -> second)
+                .orElse(null);
+    }
+
+    private boolean isPostImplementationPhase(String phase) {
+        return "LOCAL_CHECKS".equalsIgnoreCase(phase)
+                || "CI_VERIFICATION".equalsIgnoreCase(phase)
+                || "PR_CREATION".equalsIgnoreCase(phase)
+                || "INDEPENDENT_REVIEW".equalsIgnoreCase(phase)
+                || "COMPLETION".equalsIgnoreCase(phase);
     }
 
     private enum RecoveryAction {
         NONE,
         REQUEUE,
-        RESTORE_CLAIMED_CORRECTION,
+        RESTORE_UNEXECUTED_CORRECTION,
+        RESUME_POST_IMPLEMENTATION_CORRECTION,
         AWAITING_PLAN_APPROVAL
     }
 }
