@@ -23,6 +23,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
+import com.dbbaskette.issuebot.service.review.ReviewTestEvidence;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
@@ -32,6 +33,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -49,6 +51,8 @@ class PlanConformanceWorkflowTest {
     private IterationRepository iterationRepository;
     private CostTrackingRepository costRepository;
     private PlanFirstService planFirstService;
+    private LocalVerificationService localVerificationService;
+    private IterationManager iterationManager;
     private IssueWorkflowService workflow;
     private ObjectMapper objectMapper;
     private ApprovedPlanContext approvedPlan;
@@ -63,18 +67,19 @@ class PlanConformanceWorkflowTest {
         iterationRepository = mock(IterationRepository.class);
         costRepository = mock(CostTrackingRepository.class);
         planFirstService = mock(PlanFirstService.class);
+        localVerificationService = mock(LocalVerificationService.class);
         objectMapper = new ObjectMapper();
         approvedPlan = new ApprovedPlanContext(4L, 2, "spec contract", "plan contract");
 
         WatchedRepoRepository repoRepository = mock(WatchedRepoRepository.class);
         when(repoRepository.findById(any())).thenReturn(Optional.empty());
-        IterationManager iterationManager = new IterationManager(
+        iterationManager = new IterationManager(
                 issueRepository, repoRepository, iterationRepository, gitHubApi,
                 mock(EventService.class), mock(NotificationService.class));
 
         workflow = new IssueWorkflowService(
                 gitOps, gitHubApi, agent, reviewer, mock(CiTemplateService.class),
-                mock(LocalVerificationService.class), issueRepository, iterationRepository,
+                localVerificationService, issueRepository, iterationRepository,
                 costRepository, mock(EventService.class), mock(SseService.class),
                 mock(NotificationService.class), iterationManager,
                 mock(IssueDecompositionService.class), planFirstService, mock(FollowUpService.class),
@@ -88,8 +93,14 @@ class PlanConformanceWorkflowTest {
     void firstPlanConformanceMissGetsExactlyOneCorrectionBeyondNormalMax() throws Exception {
         TrackedIssue issue = planFirstIssue();
         arrangeWorkflow(issue);
+        List<String> savedClaims = new ArrayList<>();
+        doAnswer(invocation -> {
+            TrackedIssue saved = invocation.getArgument(0);
+            savedClaims.add(saved.getCurrentIteration() + ":" + saved.isPlanCorrectionPending());
+            return saved;
+        }).when(issueRepository).save(any(TrackedIssue.class));
         when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any()))
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
                 .thenReturn(failedConformance("first miss"), passedConformance());
 
         workflow.processIssue(issue);
@@ -103,8 +114,10 @@ class PlanConformanceWorkflowTest {
         assertThat(promptCaptor.getAllValues().get(1))
                 .contains("Assessment Feedback")
                 .contains("first miss");
+        assertThat(savedClaims).contains("2:false").doesNotContain("2:true");
+        assertThat(iterationManager.canIterate(issue)).isFalse();
         verify(reviewer, times(2)).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any());
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());
     }
 
     @Test
@@ -112,7 +125,7 @@ class PlanConformanceWorkflowTest {
         TrackedIssue issue = planFirstIssue();
         arrangeWorkflow(issue);
         when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any()))
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
                 .thenReturn(failedConformance("first miss"), failedConformance("second miss"));
 
         workflow.processIssue(issue);
@@ -126,7 +139,7 @@ class PlanConformanceWorkflowTest {
         verify(agent, times(2)).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
         verify(reviewer, times(2)).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any());
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());
         verify(iterationRepository, atLeastOnce()).save(argThat(iteration ->
                 iteration.getIterationNum() == 1
                         && iteration.getReviewJson() != null
@@ -142,16 +155,83 @@ class PlanConformanceWorkflowTest {
         TrackedIssue issue = planFirstIssue();
         arrangeWorkflow(issue);
         when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any()))
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
                 .thenReturn(CodeReviewResult.failed("review unavailable", 0, 0, "review-model"));
 
         workflow.processIssue(issue);
 
         assertThat(issue.getPlanConformanceAttempt()).isZero();
         assertThat(issue.isPlanCorrectionPending()).isFalse();
+        assertThat(issue.getStatus()).isIn(IssueStatus.FAILED, IssueStatus.COOLDOWN);
         verify(reviewer, times(5)).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any());
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());
         verify(agent).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
+    void thrownReviewInvocationsRetryThenEscalateWithoutConformanceVerdict() throws Exception {
+        TrackedIssue issue = planFirstIssue();
+        arrangeWorkflow(issue);
+        when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
+                .thenThrow(new IllegalStateException("review process crashed"));
+
+        workflow.processIssue(issue);
+
+        assertThat(issue.getPlanConformanceAttempt()).isZero();
+        assertThat(issue.getStatus()).isIn(IssueStatus.FAILED, IssueStatus.COOLDOWN);
+        assertThat(issue.getStatus()).isNotEqualTo(IssueStatus.COMPLETED);
+        verify(gitHubApi).addLabels("owner", "repo", 42, List.of("needs-human"));
+        verify(reviewer, times(5)).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());
+        verify(agent).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
+    void reviewReceivesCurrentLocalAndCiEvidence() throws Exception {
+        TrackedIssue issue = planFirstIssue();
+        issue.getRepo().setVerificationCommands("verify");
+        arrangeWorkflow(issue);
+        when(localVerificationService.run(any(), anyList(), anyInt(), any()))
+                .thenReturn(new LocalVerificationService.Result(true, null, "passed"));
+        when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(ReviewTestEvidence.class), any()))
+                .thenReturn(passedConformance());
+
+        workflow.processIssue(issue);
+
+        verify(reviewer).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan),
+                argThat(evidence -> "PASSED".equals(evidence.localVerificationResult())
+                        && "SKIPPED".equals(evidence.ciResult())), any());
+    }
+
+    @Test
+    void restartedCorrectionRehydratesPersistedReviewAndAugmentsWithHumanInstructions() throws Exception {
+        TrackedIssue issue = planFirstIssue();
+        issue.setCurrentIteration(1);
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(true);
+        arrangeWorkflow(issue);
+        Iteration prior = new Iteration(issue, 1);
+        String persistedVerdict = "{\"passed\":false,\"summary\":\"persisted conformance miss\","
+                + "\"findings\":[{\"finding\":\"stored missing deliverable\"}]}";
+        prior.setReviewJson(persistedVerdict);
+        prior.setReviewPassed(false);
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(prior));
+        when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
+                .thenReturn(passedConformance());
+
+        workflow.processIssue(issue, "Keep the public API stable");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(agent).executeImplementation(
+                promptCaptor.capture(), any(), anyString(), any(), anyLong(), any());
+        assertThat(promptCaptor.getValue())
+                .contains(persistedVerdict)
+                .contains("Keep the public API stable");
+        assertThat(issue.isPlanCorrectionPending()).isFalse();
     }
 
     private TrackedIssue planFirstIssue() {

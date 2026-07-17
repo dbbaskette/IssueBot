@@ -1136,19 +1136,14 @@ class IssueWorkflowServiceTest {
                 new java.math.BigDecimal("0.50"), new java.math.BigDecimal("0.01"));
     }
 
-    /**
-     * When reviewCode() throws, currentReviewIteration must remain unchanged
-     * and the issue must NOT be saved with an incremented review iteration.
-     */
     @Test
-    void phaseIndependentReview_reviewCodeThrows_doesNotIncrementReviewIteration() throws Exception {
+    void phaseIndependentReview_reviewCodeThrows_retriesAndReturnsInvocationFailure() throws Exception {
         // --- Arrange ---
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
 
         TrackedIssue issue = new TrackedIssue(repo, 7, "Add caching");
         issue.setId(10L);
-        // baseline: 0 review iterations consumed
         issue.setCurrentReviewIteration(0);
 
         ObjectNode issueDetails = objectMapper.createObjectNode();
@@ -1158,20 +1153,20 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
+        workflowService.reviewRetryBackoffBaseMs = 0;
 
         // --- Act ---
         CodeReviewResult result = workflowService.phaseIndependentReview(
                 issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration, List.of(), null);
 
         // --- Assert ---
-        assertNull(result, "Should return null on review invocation error");
-        assertEquals(0, issue.getCurrentReviewIteration(),
-                "currentReviewIteration must not be incremented when reviewCode throws");
-        // The issue must NOT have been saved with an incremented counter
-        verify(issueRepository, never()).save(argThat(
-                i -> i instanceof TrackedIssue ti && ti.getCurrentReviewIteration() > 0));
+        assertNotNull(result);
+        assertTrue(result.invocationFailed());
+        assertEquals(1, issue.getCurrentReviewIteration());
+        verify(codeReviewService, times(5)).reviewCode(
+                any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
     }
 
     // === Terminal QoL (#84) — per-line SSE cap lifted from 500 to 10,000 chars ===

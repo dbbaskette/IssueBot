@@ -50,6 +50,19 @@ public class CodeReviewService {
                                          String repoInstructions,
                                          ApprovedPlanContext approvedPlan,
                                          Consumer<String> lineCallback) {
+        return reviewCode(repoPath, issueTitle, issueBody, baseBranch, model, issueId,
+                criteria, securityReview, reviewPassThreshold, repoInstructions, approvedPlan,
+                ReviewTestEvidence.notRun(), lineCallback);
+    }
+
+    public CodeReviewResult reviewCode(Path repoPath, String issueTitle, String issueBody,
+                                         String baseBranch, String model, Long issueId,
+                                         List<String> criteria,
+                                         boolean securityReview, double reviewPassThreshold,
+                                         String repoInstructions,
+                                         ApprovedPlanContext approvedPlan,
+                                         ReviewTestEvidence testEvidence,
+                                         Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
 
         // 1. Get changed files and diff
@@ -73,7 +86,7 @@ public class CodeReviewService {
         // 2. Build the review prompt
         String prompt = reviewPromptBuilder.buildReviewPrompt(
                 issueTitle, issueBody, changedFiles, diff, criteria, securityReview, reviewPassThreshold,
-                repoInstructions, approvedPlan);
+                repoInstructions, approvedPlan, testEvidence);
 
         // 3. Invoke the review model via CLI
         ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);

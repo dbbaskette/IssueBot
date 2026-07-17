@@ -56,6 +56,18 @@ public class ReviewPromptBuilder {
                                       boolean securityReview, double threshold,
                                       String repoInstructions,
                                       ApprovedPlanContext approvedPlan) {
+        return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
+                securityReview, threshold, repoInstructions, approvedPlan,
+                ReviewTestEvidence.notRun());
+    }
+
+    public String buildReviewPrompt(String issueTitle, String issueBody,
+                                      List<String> changedFiles, String diff,
+                                      List<String> criteria,
+                                      boolean securityReview, double threshold,
+                                      String repoInstructions,
+                                      ApprovedPlanContext approvedPlan,
+                                      ReviewTestEvidence testEvidence) {
         // Locale.ROOT: the prompt must always render "0.70", never "0,70"
         String thresholdText = String.format(java.util.Locale.ROOT, "%.2f", threshold);
         List<String> effectiveCriteria = criteria != null ? criteria : List.of();
@@ -102,6 +114,13 @@ public class ReviewPromptBuilder {
                     .append("Treat any high-severity unmet acceptance criterion or required plan deliverable as blocking. ")
                     .append("Set passed to false for every such blocking finding.\n");
         }
+
+        ReviewTestEvidence effectiveEvidence = testEvidence != null
+                ? testEvidence : ReviewTestEvidence.notRun();
+        prompt.append("\n## Test Evidence\n\n")
+                .append("- Local verification: ")
+                .append(effectiveEvidence.localVerificationResult()).append("\n")
+                .append("- CI: ").append(effectiveEvidence.ciResult()).append("\n");
 
         prompt.append("""
 

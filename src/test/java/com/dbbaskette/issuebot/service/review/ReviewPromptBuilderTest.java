@@ -140,4 +140,18 @@ class ReviewPromptBuilderTest {
         assertThat(prompt.indexOf("## Approved Design Spec — Version 2"))
                 .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
     }
+
+    @Test
+    void reviewPromptIncludesExplicitTestEvidenceBeforeDiff() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, new ApprovedPlanContext(4L, 2, "spec contract", "plan contract"),
+                new ReviewTestEvidence(null, "SKIPPED"));
+
+        assertThat(prompt).contains("## Test Evidence")
+                .contains("Local verification: NOT_RUN")
+                .contains("CI: SKIPPED");
+        assertThat(prompt.indexOf("## Test Evidence"))
+                .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
+    }
 }

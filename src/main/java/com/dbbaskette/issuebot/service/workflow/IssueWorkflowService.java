@@ -21,6 +21,7 @@ import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.review.AcceptanceCriteriaParser;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
+import com.dbbaskette.issuebot.service.review.ReviewTestEvidence;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
@@ -309,6 +310,23 @@ public class IssueWorkflowService {
         String previousCiLogs = null;
         int prNumber = 0;
 
+        if (approvedPlan != null && trackedIssue.isPlanCorrectionPending()) {
+            List<Iteration> persistedIterations =
+                    iterationRepository.findByIssueOrderByIterationNumAsc(trackedIssue);
+            for (int i = persistedIterations.size() - 1; i >= 0; i--) {
+                Iteration persisted = persistedIterations.get(i);
+                if (persisted.getReviewJson() != null && !persisted.getReviewJson().isBlank()) {
+                    String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
+                            + persisted.getReviewJson();
+                    previousFeedback = previousFeedback == null
+                            ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
+                    previousDiff = persisted.getDiff();
+                    reviewFeedback = true;
+                    break;
+                }
+            }
+        }
+
         while (iterationManager.canIterate(trackedIssue)) {
             // Re-read entity from DB to pick up any external changes (e.g., maxIterations edits)
             trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
@@ -340,13 +358,12 @@ public class IssueWorkflowService {
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
             int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
-            issueRepository.save(trackedIssue);
             if (trackedIssue.isPlanCorrectionPending()) {
-                // The corrective slot is consumed only after its implementation iteration
-                // has been durably claimed above.
                 trackedIssue.setPlanCorrectionPending(false);
-                issueRepository.save(trackedIssue);
             }
+            // Persist the iteration claim and pending-flag consumption atomically so a
+            // re-read can never observe a claimed correction that still appears available.
+            issueRepository.save(trackedIssue);
 
             Iteration iteration = new Iteration(trackedIssue, iterationNum);
             iteration.setImplModel(trackedIssue.getResolvedImplModel());
@@ -1189,16 +1206,16 @@ public class IssueWorkflowService {
                         repo.getReviewPassThreshold().doubleValue(),
                         repo.getCustomInstructions(),
                         approvedPlan,
+                        new ReviewTestEvidence(
+                                iteration.getLocalCheckResult(), iteration.getCiResult()),
                         line -> streamClaudeLog(issueId, line));
             } catch (Exception e) {
                 log.error("Independent review failed", e);
                 eventService.log("PHASE_REVIEW_FAILED",
                         "Review invocation error: " + e.getMessage(), repo, trackedIssue);
-                // Roll back the slot we optimistically claimed at the top — a thrown review never
-                // produced a verdict, and the caller proceeds to completion without one.
-                trackedIssue.setCurrentReviewIteration(trackedIssue.getCurrentReviewIteration() - 1);
-                issueRepository.save(trackedIssue);
-                return null;
+                reviewResult = CodeReviewResult.failed(
+                        "Review invocation failed: " + e.getMessage(), 0, 0,
+                        trackedIssue.getResolvedReviewModel());
             }
             if (!reviewResult.invocationFailed() || attempt >= maxReviewInvocationAttempts) {
                 break; // a real verdict (pass/fail), or retries exhausted → let the caller escalate
