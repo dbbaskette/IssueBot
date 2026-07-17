@@ -17,7 +17,9 @@ IssueBot is a locally-running agent that automates software development tasks en
 ```mermaid
 flowchart LR
     A[GitHub Issue<br>agent-ready] --> B[IssueBot<br>Polling]
-    B --> C[Setup<br>Clone & Branch]
+    B --> P[Plan First<br>Spec + Plan]
+    P -->|Revise| P
+    P -->|Approve both| C[Setup<br>Clone & Branch]
     C --> D[Implement<br>Opus]
     D --> E[CI Verify<br>Push & Check]
     E -->|Fail| F{Retry<br>Smart?}
@@ -44,6 +46,14 @@ flowchart LR
 
 If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
 
+### Plan First approval contract
+
+Plan First is enabled by default for every repository and can be explicitly disabled for a repository or overridden for an individual issue when it is started or retried. Before IssueBot can create a feature branch or modify code, the implementation model produces one structured planning version containing both a **Design Spec** and an **Implementation Plan**. The issue page presents those artifacts in separate tabs, with a third **History** tab for every immutable numbered version.
+
+Revision guidance creates a new version and supersedes the prior pending version without deleting or editing it. One approval action approves the selected current version's Design Spec and Implementation Plan together; that exact version is then pinned as the implementation and independent-review contract.
+
+Plan First review uses a fixed two-attempt conformance cycle. The first miss automatically schedules one corrective implementation using the review findings. A second miss stops in Needs Guidance. An operator can then retry with implementation guidance, which starts a fresh two-attempt cycle against the same approved version—the guidance does not revise the spec, plan, or version history.
+
 ## Key Features
 
 - **Dual-Model Architecture** - Implementation and review use independently configurable models (default: Opus 4.8 for implementation, Sonnet 5 for review), settable at the global, per-repo, and per-issue level for checks and balances
@@ -52,7 +62,7 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 - **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
 - **Noise-Controlled Findings** - Non-blocking review findings are routed per the per-repo `follow-up-mode` setting: `ROLLING_BACKLOG` (default) dedupes findings into a single per-repo backlog issue capped at 50 items, `COMMENT_ONLY` posts a summary comment on the original issue instead of opening a new one, `PER_ISSUE` is the legacy one-follow-up-issue-per-completed-issue behavior, and `OFF` keeps findings in the PR review comment only
 - **Approval-Gated Issue Splitting** - When an issue is too large, IssueBot proposes a sub-issue breakdown and waits for you to approve or reject it from the dashboard (`PROPOSE`, the default); `AUTO` creates sub-issues immediately and `OFF` disables splitting, all per repo. One split level only (sub-issues are never re-split further), capped at 10 open sub-issues per repo, and the parent stays open as a tracking issue that auto-closes once all sub-issues are closed
-- **Superpowers Methodology** (opt-in, per repo) - Runs the same discipline you'd use interactively at the Claude Code prompt: an autonomous design/spec + implementation-plan pass up front (the `brainstorming` + `writing-plans` methodology), then implementation against that plan with test-driven development and the `executing-plans` methodology. No approval gate — the plan is generated, recorded (stored on the issue + posted as a GitHub comment), and the build proceeds. The methodology is embedded in IssueBot's own phase prompts (not the superpowers plugin's `SessionStart` hook, which — firing uncontrolled on every headless call — derailed implementation into writing spec docs instead of code); the implementation prompt carries an explicit "finish with committed code, not a design doc" guard
+- **Versioned Plan First** (default on) - Generates separate Design Spec and Implementation Plan artifacts before code changes, keeps immutable version history, and requires one approval for both artifacts. The approved version governs implementation and independent review; one automatic correction is allowed before the issue stops for guidance, and a guided retry preserves the approved version. Repositories and individual issues can explicitly opt out when this approval contract is not appropriate
 - **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
 - **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
 - **Cancel Running Issues** - A Stop button on the issue-detail page kills the running Claude Code process at the next workflow checkpoint
@@ -139,7 +149,8 @@ To wipe the database and all cloned repos:
 1. Open the dashboard at `http://localhost:8090`
 2. Navigate to **Repositories** and add a GitHub repository
 3. Label a GitHub issue with `agent-ready`
-4. IssueBot picks it up on the next poll cycle (default: 60s) and starts the 6-phase workflow
+4. IssueBot proposes a Design Spec and Implementation Plan on the next poll cycle (default: 60s)
+5. Review or revise the version, then approve both artifacts once to start implementation
 
 ### Configuration
 
@@ -175,6 +186,7 @@ issuebot:
       auto-merge: false
       follow-up-mode: ROLLING_BACKLOG
       decomposition-mode: PROPOSE
+      plan-first: true
       pre-screen-enabled: true
       # implementation-model: claude-opus-4-8   # optional per-repo override; omit to inherit global
       # review-model: claude-sonnet-5           # optional per-repo override; omit to inherit global
@@ -194,7 +206,7 @@ Autonomy is spread across six settings (mode, auto-start, auto-merge, decomposit
 | `auto-merge` | off | off | on |
 | `decomposition-mode` | `PROPOSE` | `PROPOSE` | `AUTO` |
 | `follow-up-mode` | `COMMENT_ONLY` | `ROLLING_BACKLOG` | `ROLLING_BACKLOG` |
-| `plan-first` | on | off | off |
+| `plan-first` | on | on | on |
 
 ### Repository Settings
 
@@ -209,6 +221,7 @@ Autonomy is spread across six settings (mode, auto-start, auto-merge, decomposit
 | `auto-merge` | `false` | Auto-merge PRs via squash after review passes |
 | `follow-up-mode` | `ROLLING_BACKLOG` | How non-blocking review findings are captured: `ROLLING_BACKLOG` (deduped per-repo backlog issue, capped at 50 items), `COMMENT_ONLY` (summary comment on the original issue), `PER_ISSUE` (legacy: one follow-up issue per completed issue), or `OFF` (PR review comment only) |
 | `decomposition-mode` | `PROPOSE` | How oversized issues are split: `PROPOSE` (bot proposes, you approve from the dashboard), `AUTO` (legacy: splits immediately), or `OFF` (never split, escalate instead) |
+| `plan-first` | `true` | Require a versioned Design Spec and Implementation Plan with one approval before implementation. Disable at repository level, or use the per-issue start/retry override, to opt out explicitly |
 | `pre-screen-enabled` | `true` | Run a cheap utility-model pass before implementation to catch oversized issues early |
 | `implementation-model` | inherit global | Per-repo override of the implementation model |
 | `review-model` | inherit global | Per-repo override of the review model |

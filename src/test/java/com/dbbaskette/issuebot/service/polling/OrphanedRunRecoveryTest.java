@@ -1,14 +1,17 @@
 package com.dbbaskette.issuebot.service.polling;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -24,6 +27,7 @@ import static org.mockito.Mockito.when;
 class OrphanedRunRecoveryTest {
 
     private TrackedIssueRepository issueRepository;
+    private PlanningVersionRepository versionRepository;
     private EventService eventService;
     private OrphanedRunRecovery recovery;
     private WatchedRepo repo;
@@ -31,14 +35,109 @@ class OrphanedRunRecoveryTest {
     @BeforeEach
     void setUp() {
         issueRepository = mock(TrackedIssueRepository.class);
+        versionRepository = mock(PlanningVersionRepository.class);
         eventService = mock(EventService.class);
-        recovery = new OrphanedRunRecovery(issueRepository, eventService);
+        recovery = new OrphanedRunRecovery(issueRepository, versionRepository, eventService);
         repo = new WatchedRepo("owner", "repo");
     }
 
     @Test
-    void requeuesStrandedInProgressToPending_clearingPhase() {
+    void requeuesInterruptedPlanningFromPersistedSetupPhaseWithoutCurrentVersionOnce() {
         TrackedIssue orphan = new TrackedIssue(repo, 96, "Sub-task");
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentPhase("SETUP");
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS))
+                .thenReturn(List.of(orphan), List.of());
+        when(versionRepository.findFirstByIssueIdOrderByVersionNumberDesc(orphan.getId()))
+                .thenReturn(Optional.empty());
+
+        recovery.requeueOrphanedRuns();
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertNull(orphan.getCurrentPhase());
+        verify(issueRepository).save(orphan);
+        verify(eventService).log(eq("ISSUE_RECOVERED"), anyString(), eq(repo), eq(orphan));
+        verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void interruptedPlanningWithPendingVersionReturnsToAwaitingApprovalWithoutDuplication() {
+        TrackedIssue orphan = new TrackedIssue(repo, 96, "Sub-task");
+        orphan.setId(96L);
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentPhase("SETUP");
+        PlanningVersion pending = PlanningVersion.pending(
+                orphan, 3, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(versionRepository.findFirstByIssueIdOrderByVersionNumberDesc(96L))
+                .thenReturn(Optional.of(pending));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.AWAITING_PLAN_APPROVAL, orphan.getStatus());
+        assertNull(orphan.getCurrentPhase());
+        verify(issueRepository).save(orphan);
+        verify(versionRepository, never()).save(any());
+        verify(eventService).log(eq("ISSUE_RECOVERED"), anyString(), eq(repo), eq(orphan));
+    }
+
+    @Test
+    void requeuesInterruptedCorrectionWithoutResettingApprovedContractOrAttempt() {
+        TrackedIssue orphan = new TrackedIssue(repo, 97, "Corrective pass");
+        orphan.setId(97L);
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentPhase("INDEPENDENT_REVIEW");
+        orphan.setPlanConformanceAttempt(1);
+        orphan.setPlanCorrectionPending(true);
+        PlanningVersion approved = PlanningVersion.pending(
+                orphan, 2, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        orphan.setApprovedPlanningVersion(approved);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertNull(orphan.getCurrentPhase());
+        assertEquals(1, orphan.getPlanConformanceAttempt());
+        assertEquals(true, orphan.isPlanCorrectionPending());
+        assertEquals(approved, orphan.getApprovedPlanningVersion());
+        verify(issueRepository).save(orphan);
+        verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void restoresEligibilityWhenCorrectionIterationWasClaimedBeforeRestart() {
+        TrackedIssue orphan = new TrackedIssue(repo, 101, "Claimed corrective pass");
+        orphan.setId(101L);
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentIteration(2);
+        orphan.setCurrentPhase("IMPLEMENTATION");
+        orphan.setPlanConformanceAttempt(1);
+        orphan.setPlanCorrectionPending(false);
+        PlanningVersion approved = PlanningVersion.pending(
+                orphan, 2, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        orphan.setApprovedPlanningVersion(approved);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(1, orphan.getCurrentIteration());
+        assertEquals(1, orphan.getPlanConformanceAttempt());
+        assertEquals(true, orphan.isPlanCorrectionPending());
+        assertEquals(approved, orphan.getApprovedPlanningVersion());
+        assertNull(orphan.getCurrentPhase());
+        verify(issueRepository).save(orphan);
+        verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void explicitPlanFirstOptOutPreservesLegacyInProgressRecovery() {
+        repo.setPlanFirst(false);
+        TrackedIssue orphan = new TrackedIssue(repo, 98, "Ordinary implementation");
         orphan.setStatus(IssueStatus.IN_PROGRESS);
         orphan.setCurrentPhase("IMPLEMENTATION");
         when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
@@ -48,7 +147,46 @@ class OrphanedRunRecoveryTest {
         assertEquals(IssueStatus.PENDING, orphan.getStatus());
         assertNull(orphan.getCurrentPhase());
         verify(issueRepository).save(orphan);
-        verify(eventService).log(eq("ISSUE_RECOVERED"), anyString(), eq(repo), eq(orphan));
+        verifyNoInteractions(versionRepository);
+    }
+
+    @Test
+    void approvedPlanFirstRunPreservesApprovedVersionDuringLegacyRecovery() {
+        TrackedIssue orphan = new TrackedIssue(repo, 99, "Approved implementation");
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentPhase("CI_VERIFICATION");
+        orphan.setPlanConformanceAttempt(1);
+        PlanningVersion approved = PlanningVersion.pending(
+                orphan, 4, "approved spec", "approved plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        orphan.setApprovedPlanningVersion(approved);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertNull(orphan.getCurrentPhase());
+        assertEquals(1, orphan.getPlanConformanceAttempt());
+        assertEquals(approved, orphan.getApprovedPlanningVersion());
+        assertEquals("approved spec", approved.getDesignSpec());
+        assertEquals("approved plan", approved.getImplementationPlan());
+        verify(issueRepository).save(orphan);
+        verify(versionRepository, never()).save(any());
+    }
+
+    @Test
+    void invalidUnapprovedPlanFirstImplementationIsLeftUntouched() {
+        TrackedIssue orphan = new TrackedIssue(repo, 100, "Invalid implementation");
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentPhase("IMPLEMENTATION");
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.IN_PROGRESS, orphan.getStatus());
+        assertEquals("IMPLEMENTATION", orphan.getCurrentPhase());
+        verify(issueRepository, never()).save(any());
+        verifyNoInteractions(versionRepository, eventService);
     }
 
     @Test
@@ -67,19 +205,29 @@ class OrphanedRunRecoveryTest {
         // would be lost. Recovery is scoped by the query (IN_PROGRESS only), never fetch-all-filter.
         TrackedIssue awaitingApproval = new TrackedIssue(repo, 50, "Waiting on human");
         awaitingApproval.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
-        TrackedIssue orphan = new TrackedIssue(repo, 96, "Sub-task");
-        orphan.setStatus(IssueStatus.IN_PROGRESS);
-        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        TrackedIssue failed = new TrackedIssue(repo, 51, "Needs guidance");
+        failed.setStatus(IssueStatus.FAILED);
+        failed.setPlanConformanceAttempt(2);
+        TrackedIssue cooldown = new TrackedIssue(repo, 52, "Cooling down");
+        cooldown.setStatus(IssueStatus.COOLDOWN);
+        cooldown.setPlanConformanceAttempt(2);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of());
 
         recovery.requeueOrphanedRuns();
 
-        // The orphan was reset; the awaiting issue was never fetched, saved, or mutated.
-        assertEquals(IssueStatus.PENDING, orphan.getStatus());
         assertEquals(IssueStatus.AWAITING_PLAN_APPROVAL, awaitingApproval.getStatus());
-        verify(issueRepository).save(orphan);
+        assertEquals(IssueStatus.FAILED, failed.getStatus());
+        assertEquals(2, failed.getPlanConformanceAttempt());
+        assertEquals(IssueStatus.COOLDOWN, cooldown.getStatus());
+        assertEquals(2, cooldown.getPlanConformanceAttempt());
         verify(issueRepository, never()).save(awaitingApproval);
+        verify(issueRepository, never()).save(failed);
+        verify(issueRepository, never()).save(cooldown);
         verify(issueRepository, never()).findByStatus(IssueStatus.AWAITING_APPROVAL);
         verify(issueRepository, never()).findByStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         verify(issueRepository, never()).findByStatus(IssueStatus.AWAITING_DECOMPOSITION);
+        verify(issueRepository, never()).findByStatus(IssueStatus.FAILED);
+        verify(issueRepository, never()).findByStatus(IssueStatus.COOLDOWN);
+        verifyNoInteractions(versionRepository, eventService);
     }
 }

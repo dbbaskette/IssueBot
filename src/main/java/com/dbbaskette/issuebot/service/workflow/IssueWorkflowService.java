@@ -241,6 +241,8 @@ public class IssueWorkflowService {
         JsonNode issueDetails;
         if (requiresPlanning) {
             try {
+                trackedIssue.setCurrentPhase("PLANNING");
+                issueRepository.save(trackedIssue);
                 try (Git ignored = gitOps.prepareForPlanning(
                         repo.getOwner(), repo.getName(), repo.getBranch())) {
                     // The checkout itself is the planning input; no repository mutation follows.
@@ -310,11 +312,12 @@ public class IssueWorkflowService {
         String previousCiLogs = null;
         int prNumber = 0;
 
+        List<Iteration> persistedCorrectionIterations = List.of();
         if (approvedPlan != null && trackedIssue.isPlanCorrectionPending()) {
-            List<Iteration> persistedIterations =
+            persistedCorrectionIterations =
                     iterationRepository.findByIssueOrderByIterationNumAsc(trackedIssue);
-            for (int i = persistedIterations.size() - 1; i >= 0; i--) {
-                Iteration persisted = persistedIterations.get(i);
+            for (int i = persistedCorrectionIterations.size() - 1; i >= 0; i--) {
+                Iteration persisted = persistedCorrectionIterations.get(i);
                 if (persisted.getReviewJson() != null && !persisted.getReviewJson().isBlank()) {
                     String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
                             + persisted.getReviewJson();
@@ -326,6 +329,7 @@ public class IssueWorkflowService {
                 }
             }
         }
+        final List<Iteration> correctionIterations = persistedCorrectionIterations;
 
         while (iterationManager.canIterate(trackedIssue)) {
             // Re-read entity from DB to pick up any external changes (e.g., maxIterations edits)
@@ -358,16 +362,28 @@ public class IssueWorkflowService {
             int iterationNum = trackedIssue.getCurrentIteration() + 1;
             int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
-            if (trackedIssue.isPlanCorrectionPending()) {
+            trackedIssue.setCurrentPhase("IMPLEMENTATION");
+            boolean correctionClaim = trackedIssue.isPlanCorrectionPending();
+            if (correctionClaim) {
                 trackedIssue.setPlanCorrectionPending(false);
             }
-            // Persist the iteration claim and pending-flag consumption atomically so a
-            // re-read can never observe a claimed correction that still appears available.
+            // Persist the iteration claim, phase transition, and pending-flag consumption
+            // atomically. Recovery can therefore distinguish the pre-claim handoff
+            // (pending correction at the stale review phase) from claimed implementation.
             issueRepository.save(trackedIssue);
 
-            Iteration iteration = new Iteration(trackedIssue, iterationNum);
-            iteration.setImplModel(trackedIssue.getResolvedImplModel());
-            iterationRepository.save(iteration);
+            Iteration iteration = correctionClaim
+                    ? correctionIterations.stream()
+                            .filter(candidate -> candidate.getIterationNum() == iterationNum)
+                            .filter(candidate -> candidate.getCompletedAt() == null)
+                            .findFirst()
+                            .orElse(null)
+                    : null;
+            if (iteration == null) {
+                iteration = new Iteration(trackedIssue, iterationNum);
+                iteration.setImplModel(trackedIssue.getResolvedImplModel());
+                iterationRepository.save(iteration);
+            }
 
             log.info("Iteration counter updated: {}/{} for {} #{}",
                     iterationNum, maxIterations, repo.fullName(), issueNumber);
@@ -377,8 +393,6 @@ public class IssueWorkflowService {
             // === Phase 2: Implementation (Opus) ===
             ClaudeCodeResult implResult;
             try {
-                trackedIssue.setCurrentPhase("IMPLEMENTATION");
-                issueRepository.save(trackedIssue);
                 implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
                         previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
                         approvedPlan, legacyApprovedPlan);
