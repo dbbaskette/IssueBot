@@ -218,7 +218,8 @@ class PlanConformanceWorkflowTest {
                 + "\"findings\":[{\"finding\":\"stored missing deliverable\"}]}";
         prior.setReviewJson(persistedVerdict);
         prior.setReviewPassed(false);
-        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(prior));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(java.util.Optional.of(prior));
         when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
                 anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
                 .thenReturn(passedConformance());

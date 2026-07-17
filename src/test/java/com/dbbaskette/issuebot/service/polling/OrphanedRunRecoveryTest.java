@@ -127,8 +127,8 @@ class OrphanedRunRecoveryTest {
         orphan.setApprovedPlanningVersion(approved);
         Iteration unexecutedClaim = new Iteration(orphan, 2);
         when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
-        when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
-                .thenReturn(List.of(unexecutedClaim));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(101L, 2))
+                .thenReturn(Optional.of(unexecutedClaim));
 
         recovery.requeueOrphanedRuns();
 
@@ -148,8 +148,8 @@ class OrphanedRunRecoveryTest {
         Iteration completedClaim = new Iteration(orphan, 2);
         completedClaim.setCompletedAt(java.time.LocalDateTime.now());
         when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
-        when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
-                .thenReturn(List.of(completedClaim));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 2)).thenReturn(Optional.of(completedClaim));
 
         recovery.requeueOrphanedRuns();
 
@@ -175,8 +175,8 @@ class OrphanedRunRecoveryTest {
             claimed.setCompletedAt(java.time.LocalDateTime.now());
             when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS))
                     .thenReturn(List.of(orphan));
-            when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
-                    .thenReturn(List.of(claimed));
+            when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                    orphan.getId(), 2)).thenReturn(Optional.of(claimed));
 
             recovery.requeueOrphanedRuns();
 
@@ -199,8 +199,8 @@ class OrphanedRunRecoveryTest {
         reviewed.setReviewPassed(true);
         reviewed.setReviewJson("{\"passed\":true}");
         when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
-        when(iterationRepository.findByIssueOrderByIterationNumAsc(orphan))
-                .thenReturn(List.of(reviewed));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 2)).thenReturn(Optional.of(reviewed));
 
         recovery.requeueOrphanedRuns();
 
@@ -208,6 +208,127 @@ class OrphanedRunRecoveryTest {
         assertEquals("INDEPENDENT_REVIEW", orphan.getCurrentPhase());
         assertEquals(2, orphan.getCurrentIteration());
         assertEquals(2, orphan.getPlanConformanceAttempt());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+    }
+
+    @Test
+    void firstReviewInvocationFailureKeepsCheckpointWithZeroConformanceAttempts() {
+        TrackedIssue orphan = claimedCorrection(218, "INDEPENDENT_REVIEW");
+        orphan.setCurrentIteration(1);
+        orphan.setPlanConformanceAttempt(0);
+        Iteration reviewed = new Iteration(orphan, 1);
+        reviewed.setCompletedAt(java.time.LocalDateTime.now());
+        reviewed.setReviewPassed(false);
+        reviewed.setReviewJson(null);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 1)).thenReturn(Optional.of(reviewed));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals("INDEPENDENT_REVIEW", orphan.getCurrentPhase());
+        assertEquals(1, orphan.getCurrentIteration());
+        assertEquals(0, orphan.getPlanConformanceAttempt());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+    }
+
+    @Test
+    void duplicateIterationNumbersUseNewestStableIdForCurrentGuidedRetry() {
+        TrackedIssue orphan = claimedCorrection(220, "IMPLEMENTATION");
+        Iteration priorRun = new Iteration(orphan, 2);
+        priorRun.setId(10L);
+        priorRun.setCompletedAt(java.time.LocalDateTime.now());
+        priorRun.setDiff("stale prior-run diff");
+        Iteration currentRun = new Iteration(orphan, 2);
+        currentRun.setId(20L);
+        currentRun.setDiff("current guided-retry diff");
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 2)).thenReturn(Optional.of(currentRun));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(1, orphan.getCurrentIteration());
+        assertEquals(true, orphan.isPlanCorrectionPending());
+        verify(iterationRepository).findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 2);
+    }
+
+    @Test
+    void persistedLocalFailureBelowBudgetReturnsToOrdinaryNextIterationSemantics() {
+        TrackedIssue orphan = claimedCorrection(221, "LOCAL_CHECKS");
+        orphan.setCurrentIteration(1);
+        Iteration failed = new Iteration(orphan, 1);
+        failed.setId(21L);
+        failed.setLocalCheckResult("FAILED");
+        failed.setCompletedAt(java.time.LocalDateTime.now());
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 1)).thenReturn(Optional.of(failed));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(1, orphan.getCurrentIteration());
+        assertNull(orphan.getCurrentPhase());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+    }
+
+    @Test
+    void persistedCiFailureAtMaxBudgetReturnsToOrdinaryTerminalSemantics() {
+        TrackedIssue orphan = claimedCorrection(222, "CI_VERIFICATION");
+        Iteration failed = new Iteration(orphan, 2);
+        failed.setId(22L);
+        failed.setCiResult("FAILED");
+        failed.setCompletedAt(java.time.LocalDateTime.now());
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 2)).thenReturn(Optional.of(failed));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(2, orphan.getCurrentIteration());
+        assertNull(orphan.getCurrentPhase());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+    }
+
+    @Test
+    void persistedLocalFailureAtMaxBudgetReturnsToOrdinaryTerminalSemantics() {
+        TrackedIssue orphan = claimedCorrection(223, "LOCAL_CHECKS");
+        Iteration failed = new Iteration(orphan, 2);
+        failed.setId(23L);
+        failed.setLocalCheckResult("FAILED");
+        failed.setCompletedAt(java.time.LocalDateTime.now());
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 2)).thenReturn(Optional.of(failed));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(2, orphan.getCurrentIteration());
+        assertNull(orphan.getCurrentPhase());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+    }
+
+    @Test
+    void persistedCiFailureBelowBudgetReturnsToOrdinaryNextIterationSemantics() {
+        TrackedIssue orphan = claimedCorrection(224, "CI_VERIFICATION");
+        orphan.setCurrentIteration(1);
+        Iteration failed = new Iteration(orphan, 1);
+        failed.setId(24L);
+        failed.setCiResult("FAILED");
+        failed.setCompletedAt(java.time.LocalDateTime.now());
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                orphan.getId(), 1)).thenReturn(Optional.of(failed));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(1, orphan.getCurrentIteration());
+        assertNull(orphan.getCurrentPhase());
         assertEquals(false, orphan.isPlanCorrectionPending());
     }
 

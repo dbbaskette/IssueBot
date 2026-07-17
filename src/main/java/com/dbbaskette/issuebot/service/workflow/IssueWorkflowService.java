@@ -173,7 +173,7 @@ public class IssueWorkflowService {
         int issueNumber = trackedIssue.getIssueNumber();
         RecoveryResumePhase recoveryResumePhase = RecoveryResumePhase.from(trackedIssue);
         if (recoveryResumePhase != null) {
-            log.info("Resuming claimed Plan First correction for {} #{} from phase {}",
+            log.info("Resuming durable Plan First checkpoint for {} #{} from phase {}",
                     repo.fullName(), issueNumber, recoveryResumePhase);
         }
 
@@ -325,27 +325,26 @@ public class IssueWorkflowService {
         String previousCiLogs = null;
         int prNumber = 0;
 
-        List<Iteration> persistedCorrectionIterations = List.of();
+        Iteration persistedCurrentIteration = null;
         if (approvedPlan != null
                 && (trackedIssue.isPlanCorrectionPending() || recoveryResumePhase != null)) {
-            persistedCorrectionIterations =
-                    iterationRepository.findByIssueOrderByIterationNumAsc(trackedIssue);
-            if (trackedIssue.isPlanCorrectionPending()) {
-                for (int i = persistedCorrectionIterations.size() - 1; i >= 0; i--) {
-                    Iteration persisted = persistedCorrectionIterations.get(i);
-                    if (persisted.getReviewJson() != null && !persisted.getReviewJson().isBlank()) {
-                        String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
-                                + persisted.getReviewJson();
-                        previousFeedback = previousFeedback == null
-                                ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
-                        previousDiff = persisted.getDiff();
-                        reviewFeedback = true;
-                        break;
-                    }
-                }
+            persistedCurrentIteration = iterationRepository
+                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                            trackedIssue.getId(), trackedIssue.getCurrentIteration())
+                    .orElse(null);
+            if (trackedIssue.isPlanCorrectionPending()
+                    && persistedCurrentIteration != null
+                    && persistedCurrentIteration.getReviewJson() != null
+                    && !persistedCurrentIteration.getReviewJson().isBlank()) {
+                String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
+                        + persistedCurrentIteration.getReviewJson();
+                previousFeedback = previousFeedback == null
+                        ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
+                previousDiff = persistedCurrentIteration.getDiff();
+                reviewFeedback = true;
             }
         }
-        final List<Iteration> correctionIterations = persistedCorrectionIterations;
+        final Iteration authoritativeCurrentIteration = persistedCurrentIteration;
 
         while (recoveryResumePhase != null || iterationManager.canIterate(trackedIssue)) {
             RecoveryResumePhase resumePhase = recoveryResumePhase;
@@ -394,14 +393,15 @@ public class IssueWorkflowService {
                 issueRepository.save(trackedIssue);
             }
 
-            Iteration iteration = (correctionClaim || resumePhase != null)
-                    ? correctionIterations.stream()
-                            .filter(candidate -> candidate.getIterationNum() == iterationNum)
-                            .filter(candidate -> resumePhase != null
-                                    || candidate.getCompletedAt() == null)
-                            .findFirst()
-                            .orElse(null)
-                    : null;
+            Iteration iteration = resumePhase != null
+                    ? authoritativeCurrentIteration
+                    : correctionClaim
+                            ? iterationRepository
+                                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                                            trackedIssue.getId(), iterationNum)
+                                    .filter(candidate -> candidate.getCompletedAt() == null)
+                                    .orElse(null)
+                            : null;
             if (resumePhase != null && iteration == null) {
                 // Recovery only preserves a post-implementation checkpoint when this durable
                 // iteration exists. Refuse to synthesize one or to repeat implementation if the
@@ -662,6 +662,14 @@ public class IssueWorkflowService {
 
             if (persistedReviewVerdict) {
                 reviewResult = restorePersistedReview(iteration);
+            }
+
+            if (persistedReviewVerdict && reviewResult.invocationFailed()) {
+                iterationManager.handleMaxReviewIterationsReached(trackedIssue,
+                        "Persisted independent review invocation failed",
+                        "The independent review could not run (environment/CLI error), so the "
+                                + "code was not evaluated.", true);
+                return;
             }
 
             if (persistedReviewVerdict && !reviewResult.passed()) {
@@ -1267,7 +1275,12 @@ public class IssueWorkflowService {
 
         // Update tracked issue status
         trackedIssue.setCurrentPhase(null);
-        if (isApprovalGated) {
+        if (merged) {
+            trackedIssue.setStatus(IssueStatus.COMPLETED);
+            notificationService.info("Issue Completed",
+                    repo.fullName() + " #" + trackedIssue.getIssueNumber()
+                            + " — PR #" + prNumber + " is merged", trackedIssue);
+        } else if (isApprovalGated) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
             notificationService.info("PR Ready for Review",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
@@ -2175,7 +2188,7 @@ public class IssueWorkflowService {
     }
 
     /**
-     * A recovery-only checkpoint after the single corrective implementation has already run.
+     * A recovery-only checkpoint after a Plan First implementation has already run.
      * The phase is intentionally carried on {@link TrackedIssue}; recovery preserves it only
      * when a matching durable iteration exists, so normal retries cannot enter this path.
      */
@@ -2188,7 +2201,7 @@ public class IssueWorkflowService {
 
         private static RecoveryResumePhase from(TrackedIssue issue) {
             if (issue.getApprovedPlanningVersion() == null
-                    || issue.getPlanConformanceAttempt() < 1
+                    || issue.getPlanConformanceAttempt() < 0
                     || issue.getPlanConformanceAttempt() > 2
                     || issue.isPlanCorrectionPending()
                     || issue.getCurrentIteration() <= 0

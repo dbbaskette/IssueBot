@@ -108,9 +108,18 @@ public class OrphanedRunRecovery {
                         ? RecoveryAction.RESTORE_UNEXECUTED_CORRECTION
                         : RecoveryAction.REQUEUE;
             }
-            if (current != null && isPostImplementationPhase(issue.getCurrentPhase())) {
-                // Keep the exact durable phase as the workflow resume checkpoint. The iteration
-                // claim and correction budget stay consumed; implementation must not run again.
+        }
+        if (isResumablePostImplementationCheckpoint(issue)) {
+            Iteration current = currentIteration(issue);
+            if (current != null) {
+                if (isPersistedVerificationFailure(issue.getCurrentPhase(), current)) {
+                    // A failed verification already consumed this iteration. Clear the phase and
+                    // let the ordinary iteration budget choose next-iteration versus terminal.
+                    return RecoveryAction.REQUEUE;
+                }
+                // Keep the exact durable phase as the workflow resume checkpoint. This includes
+                // a first-review invocation failure, whose conformance count intentionally stays
+                // zero because the code was never judged.
                 return RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION;
             }
         }
@@ -141,10 +150,18 @@ public class OrphanedRunRecovery {
                 && issue.getCurrentIteration() > 0;
     }
 
+    private boolean isResumablePostImplementationCheckpoint(TrackedIssue issue) {
+        return issue.getApprovedPlanningVersion() != null
+                && issue.getPlanConformanceAttempt() >= 0
+                && issue.getPlanConformanceAttempt() <= 2
+                && !issue.isPlanCorrectionPending()
+                && issue.getCurrentIteration() > 0
+                && isPostImplementationPhase(issue.getCurrentPhase());
+    }
+
     private Iteration currentIteration(TrackedIssue issue) {
-        return iterationRepository.findByIssueOrderByIterationNumAsc(issue).stream()
-                .filter(iteration -> iteration.getIterationNum() == issue.getCurrentIteration())
-                .reduce((first, second) -> second)
+        return iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                        issue.getId(), issue.getCurrentIteration())
                 .orElse(null);
     }
 
@@ -154,6 +171,17 @@ public class OrphanedRunRecovery {
                 || "PR_CREATION".equalsIgnoreCase(phase)
                 || "INDEPENDENT_REVIEW".equalsIgnoreCase(phase)
                 || "COMPLETION".equalsIgnoreCase(phase);
+    }
+
+    private boolean isPersistedVerificationFailure(String phase, Iteration iteration) {
+        if (iteration.getCompletedAt() == null) {
+            return false;
+        }
+        return ("LOCAL_CHECKS".equalsIgnoreCase(phase)
+                && "FAILED".equalsIgnoreCase(iteration.getLocalCheckResult()))
+                || ("CI_VERIFICATION".equalsIgnoreCase(phase)
+                && ("FAILED".equalsIgnoreCase(iteration.getCiResult())
+                    || "ERROR".equalsIgnoreCase(iteration.getCiResult())));
     }
 
     private enum RecoveryAction {
