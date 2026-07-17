@@ -46,4 +46,13 @@ class PlanArtifactParserTest {
         assertThatThrownBy(() -> parser.parse(output))
                 .hasMessageContaining("20,000");
     }
+
+    @Test
+    void rejectsDuplicateImplementationPlanHeadingInPlanBody() {
+        String output = "# Design Spec\ns\n# Implementation Plan\np\n# Implementation Plan\np2";
+
+        assertThatThrownBy(() -> parser.parse(output))
+                .isInstanceOf(InvalidPlanningArtifactException.class)
+                .hasMessageContaining("duplicate");
+    }
 }

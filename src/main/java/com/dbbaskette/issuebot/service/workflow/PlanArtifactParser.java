@@ -31,7 +31,9 @@ public final class PlanArtifactParser {
         if (plan.isBlank()) {
             throw invalid("Implementation Plan is blank");
         }
-        if (spec.contains("\n" + PLAN_HEADING) || plan.contains("\n" + SPEC_HEADING)) {
+        if (spec.contains("\n" + PLAN_HEADING)
+                || plan.contains("\n" + SPEC_HEADING)
+                || plan.contains("\n" + PLAN_HEADING)) {
             throw invalid("Planner output contains duplicate or reordered top-level sections");
         }
         if (spec.length() > MAX_SECTION_CHARS || plan.length() > MAX_SECTION_CHARS) {
