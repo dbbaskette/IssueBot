@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockServletContext;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.thymeleaf.TemplateSpec;
 import org.thymeleaf.context.WebContext;
 import org.thymeleaf.spring6.SpringTemplateEngine;
@@ -58,6 +59,7 @@ class IssueDetailPlanReviewRenderTest {
     void latestPendingVersionShowsSeparatedTabsAndOneApprovalBar() {
         TrackedIssue issue = issueAwaitingApproval();
         PlanningVersion v3Pending = pending(issue, 3, "# Design three", "# Plan three", null);
+        ReflectionTestUtils.setField(v3Pending, "id", 9003L);
         PlanningVersion v2Superseded = pending(issue, 2, "# Design two", "# Plan two", "Tighten rollback steps");
         v2Superseded.supersede();
 
@@ -71,7 +73,8 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("role=\"tabpanel\"")
                 .contains("Approve Version 3")
                 .contains("Revise Spec &amp; Plan")
-                .contains("name=\"versionId\" value=\"3\"");
+                .doesNotContain("name=\"versionId\" value=\"3\"");
+        assertThat(occurrences(html, "name=\"versionId\" value=\"9003\"")).isEqualTo(2);
         assertThat(occurrences(html, "class=\"plan-review-actions\"")).isEqualTo(1);
     }
 
@@ -87,11 +90,13 @@ class IssueDetailPlanReviewRenderTest {
         assertThat(html).contains("Historical version")
                 .contains("Return to current version")
                 .contains("href=\"/issues/42?planVersion=2#plan-review\"")
+                .contains("aria-current=\"page\"")
                 .contains("href=\"/issues/42#plan-review\"")
                 .contains("Historical design")
                 .contains("Use fewer services")
                 .doesNotContain("Approve Version 2")
                 .doesNotContain("name=\"versionId\" value=\"2\"");
+        assertThat(occurrences(html, "aria-current=\"page\"")).isEqualTo(1);
         assertThat(html).doesNotContain("class=\"plan-review-actions\"");
     }
 

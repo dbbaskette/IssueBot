@@ -269,6 +269,7 @@
                                 <li th:each="version : ${planningVersions}"
                                     th:classappend="${version.versionNumber == selectedPlanningVersion.versionNumber ? 'selected' : ''}">
                                     <a class="plan-version-link"
+                                       th:attr="aria-current=${version.versionNumber == selectedPlanningVersion.versionNumber ? 'page' : null}"
                                        th:href="@{'/issues/' + ${issue.id} + '?planVersion=' + ${version.versionNumber} + '#plan-review'}">
                                         <span class="plan-version-history-title">
                                             <strong th:text="${'Version ' + version.versionNumber}">Version 3</strong>
@@ -297,7 +298,7 @@
                               and currentPlanningVersion.state.name() == 'PENDING'
                               and issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
                     <form class="plan-revision-form" th:action="@{'/issues/' + ${issue.id} + '/plan/revise'}" method="post">
-                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.versionNumber}">
+                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
                         <label for="plan-revision-feedback">What should change?</label>
                         <textarea id="plan-revision-feedback" name="feedback" rows="3" required maxlength="4000"
                                   data-plan-revision-guidance
@@ -305,7 +306,7 @@
                         <button type="submit" class="btn btn-ghost" data-plan-revise disabled>Revise Spec &amp; Plan</button>
                     </form>
                     <form class="plan-approval-form" th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
-                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.versionNumber}">
+                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
                         <p>Approve both documents as the implementation contract.</p>
                         <button type="submit" class="btn btn-primary"
                                 th:text="${'Approve Version ' + currentPlanningVersion.versionNumber}">Approve Version 3</button>

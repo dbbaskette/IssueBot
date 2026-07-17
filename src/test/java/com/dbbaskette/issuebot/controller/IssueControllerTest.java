@@ -23,12 +23,17 @@ import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class IssueControllerTest {
 
@@ -866,6 +871,39 @@ class IssueControllerTest {
     }
 
     @Test
+    void detailHttpFallsBackToLatestVersionForMalformedAndOverflowSelections() throws Exception {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        PlanningVersion current = PlanningVersion.pending(f.issue, 3,
+                "# Current design", "# Current plan", "CODEX", "gpt-5.6", null);
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(current));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(f.controller).build();
+
+        for (String requested : List.of("not-a-number", "999999999999999999999999")) {
+            mvc.perform(get("/issues/1").param("planVersion", requested))
+                    .andExpect(status().isOk())
+                    .andExpect(model().attribute("selectedPlanningVersion", current));
+        }
+    }
+
+    @Test
+    void detailHttpFallsBackToLatestVersionForAbsentAndUnknownSelections() throws Exception {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        PlanningVersion current = PlanningVersion.pending(f.issue, 3,
+                "# Current design", "# Current plan", "CODEX", "gpt-5.6", null);
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(current));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(f.controller).build();
+
+        mvc.perform(get("/issues/1"))
+                .andExpect(status().isOk())
+                .andExpect(model().attribute("selectedPlanningVersion", current));
+        mvc.perform(get("/issues/1").param("planVersion", "99"))
+                .andExpect(status().isOk())
+                .andExpect(model().attribute("selectedPlanningVersion", current));
+    }
+
+    @Test
     void detailSelectsRequestedPlanningVersionAndRendersBothDocumentsIndependently() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
         PlanningVersion current = PlanningVersion.pending(f.issue, 3,
@@ -877,7 +915,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(current, historical));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, 2, null);
+        f.controller.detail(model, 1L, "2", null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("currentPlanningVersion"))
                 .isSameAs(current);
@@ -903,7 +941,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(current, older));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, 99, null);
+        f.controller.detail(model, 1L, "99", null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanningVersion"))
                 .isSameAs(current);

@@ -206,7 +206,7 @@ public class IssueController {
 
     @GetMapping("/{id}")
     public String detail(Model model, @PathVariable Long id,
-                         @RequestParam(required = false) Integer planVersion,
+                         @RequestParam(required = false) String planVersion,
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         // URL-reachable (a clicked or bookmarked link) — a missing id is a routine "the repo
         // was removed" occurrence, not a server error, so it gets a friendly 404 (#81) rather
@@ -214,9 +214,20 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow(() -> new NotFoundException(
                 "Issue not found — it may have been removed with its repository.",
                 "/issues", "Back to the queue"));
-        populateDetailModel(model, issue, id, planVersion);
+        populateDetailModel(model, issue, id, parseRequestedPlanVersion(planVersion));
         model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
+    }
+
+    private static Integer parseRequestedPlanVersion(String planVersion) {
+        if (planVersion == null || planVersion.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(planVersion.strip());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private List<?> selectedModelCatalog() {
