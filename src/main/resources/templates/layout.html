@@ -84,20 +84,6 @@
             <li><a th:classappend="${activePage == 'setup' ? 'active' : ''}" th:attr="aria-current=${activePage == 'setup'} ? 'page' : null" href="/setup" hx-get="/setup" hx-target="#content" hx-push-url="true">Setup</a></li>
         </ul>
         <footer>
-            <!--
-              Refreshed independently of any page-specific poll (the sidebar is static
-              chrome shared by every page) via its own small fragment endpoint — see
-              SettingsController#agentStatusFragment. th:fragment="agent-status" makes
-              this same markup addressable as "layout :: agent-status" for that endpoint's
-              response; on a normal full-page render th:fragment is a no-op and the div
-              renders in place as usual (same trick as the "toasts" fragment below).
-            -->
-            <div class="agent-status" id="agent-status-chip" th:fragment="agent-status"
-                 hx-get="/settings/fragments/agent-status" hx-trigger="every 30s"
-                 hx-target="this" hx-swap="outerHTML">
-                <span class="status-dot" th:classappend="${agentRunning != null and agentRunning ? 'running' : 'paused'}"></span>
-                <span th:text="${agentRunning != null and agentRunning ? 'Agent Running' : 'Agent Paused'}">Agent Running</span>
-            </div>
             <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="Toggle light or dark theme">
                 <i class="ti ti-moon" aria-hidden="true"></i>
             </button>

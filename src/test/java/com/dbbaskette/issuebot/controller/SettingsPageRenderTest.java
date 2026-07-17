@@ -111,4 +111,11 @@ class SettingsPageRenderTest {
         assertThat(html).contains("value=\"gpt-5.6-sol\"");
         assertThat(html).doesNotContain("OPENAI_API_KEY");
     }
+
+    @Test
+    void settingsDoesNotExposeIndependentLegacyPauseControl() {
+        String html = render();
+
+        assertThat(html).doesNotContain("Pause Agent", "Resume Agent", "Polling is", "Agent paused");
+    }
 }

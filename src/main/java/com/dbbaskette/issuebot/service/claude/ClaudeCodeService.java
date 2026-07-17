@@ -27,6 +27,7 @@ public class ClaudeCodeService {
     private final StreamJsonParser parser;
     private final WorkflowCancellationService cancellationService;
     private final CodexCliService codexCliService;
+    private final ThreadLocal<IssueBotProperties.AgentProvider> pinnedProvider = new ThreadLocal<>();
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
@@ -54,7 +55,7 @@ public class ClaudeCodeService {
     public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
                                                     String model, String resumeSessionId,
                                                     Long issueId, Consumer<String> lineCallback) {
-        if (routesToCodex(model)) {
+        if (useCodex()) {
             return codexCliService.executeImplementation(prompt, workingDirectory, model,
                     resumeSessionId, issueId, lineCallback);
         }
@@ -70,7 +71,7 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
                                             String model, Long issueId, Consumer<String> lineCallback) {
-        if (routesToCodex(model)) {
+        if (useCodex()) {
             return codexCliService.executeReview(prompt, workingDirectory, model, issueId, lineCallback);
         }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
@@ -102,7 +103,7 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executePlanning(String prompt, Path workingDirectory,
                                              String model, Long issueId, Consumer<String> lineCallback) {
-        if (routesToCodex(model)) {
+        if (useCodex()) {
             return codexCliService.executePlanning(prompt, workingDirectory, model, issueId, lineCallback);
         }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
@@ -427,24 +428,30 @@ public class ClaudeCodeService {
     }
 
     public String providerDisplayName() {
-        return properties.getAgentProvider().getDisplayName();
+        return effectiveProvider().getDisplayName();
     }
 
     public IssueBotProperties.AgentProvider provider() {
         return properties.getAgentProvider();
     }
 
-    private boolean useCodex() {
-        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
-                && codexCliService != null;
+    /** Pin every invocation on the current workflow thread to one persisted provider. */
+    public void pinProvider(IssueBotProperties.AgentProvider provider) {
+        if (provider == null) pinnedProvider.remove();
+        else pinnedProvider.set(provider);
     }
 
-    /** Preserve the provider of already-resolved/in-flight models across a global switch. */
-    boolean routesToCodex(String model) {
-        if (codexCliService == null) return false;
-        if (model != null && model.startsWith("claude-")) return false;
-        if (model != null && (model.startsWith("gpt-") || model.startsWith("o3")
-                || model.startsWith("o4"))) return true;
-        return useCodex();
+    public void clearPinnedProvider() {
+        pinnedProvider.remove();
+    }
+
+    private IssueBotProperties.AgentProvider effectiveProvider() {
+        IssueBotProperties.AgentProvider pinned = pinnedProvider.get();
+        return pinned != null ? pinned : properties.getAgentProvider();
+    }
+
+    private boolean useCodex() {
+        return effectiveProvider() == IssueBotProperties.AgentProvider.CODEX
+                && codexCliService != null;
     }
 }

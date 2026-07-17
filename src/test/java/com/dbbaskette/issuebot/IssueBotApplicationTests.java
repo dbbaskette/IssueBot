@@ -6,7 +6,8 @@ import org.springframework.test.context.TestPropertySource;
 
 @SpringBootTest
 @TestPropertySource(properties = {
-        "issuebot.github.token=test-token"
+        "issuebot.github.token=test-token",
+        "spring.datasource.url=jdbc:h2:mem:issuebot-context;DB_CLOSE_DELAY=-1"
 })
 class IssueBotApplicationTests {
 

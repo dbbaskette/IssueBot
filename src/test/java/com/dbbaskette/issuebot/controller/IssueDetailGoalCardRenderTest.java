@@ -294,7 +294,8 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("currently FAILED");
+        assertThat(html).contains("currently Failed");
+        assertThat(html).doesNotContain("currently FAILED");
     }
 
     // === Session continuity (#67) ===

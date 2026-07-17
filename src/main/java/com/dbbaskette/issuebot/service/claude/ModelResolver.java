@@ -15,21 +15,29 @@ public class ModelResolver {
     }
 
     public String implementationModel(TrackedIssue issue) {
+        return implementationModel(issue, properties.getAgentProvider());
+    }
+
+    public String implementationModel(TrackedIssue issue, IssueBotProperties.AgentProvider provider) {
         String fromIssue = blankToNull(issue.getImplModelOverride());
-        if (isCompatible(fromIssue)) return fromIssue;
+        if (isCompatible(fromIssue, provider)) return fromIssue;
         String fromRepo = blankToNull(issue.getRepo().getImplementationModel());
-        if (isCompatible(fromRepo)) return fromRepo;
-        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+        if (isCompatible(fromRepo, provider)) return fromRepo;
+        return provider == IssueBotProperties.AgentProvider.CODEX
                 ? properties.getCodexCli().getImplementationModel()
                 : properties.getClaudeCode().getImplementationModel();
     }
 
     public String reviewModel(TrackedIssue issue) {
+        return reviewModel(issue, properties.getAgentProvider());
+    }
+
+    public String reviewModel(TrackedIssue issue, IssueBotProperties.AgentProvider provider) {
         String fromIssue = blankToNull(issue.getReviewModelOverride());
-        if (isCompatible(fromIssue)) return fromIssue;
+        if (isCompatible(fromIssue, provider)) return fromIssue;
         String fromRepo = blankToNull(issue.getRepo().getReviewModel());
-        if (isCompatible(fromRepo)) return fromRepo;
-        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+        if (isCompatible(fromRepo, provider)) return fromRepo;
+        return provider == IssueBotProperties.AgentProvider.CODEX
                 ? properties.getCodexCli().getReviewModel()
                 : properties.getClaudeCode().getReviewModel();
     }
@@ -40,9 +48,9 @@ public class ModelResolver {
                 : properties.getClaudeCode().getUtilityModel();
     }
 
-    private boolean isCompatible(String model) {
+    private boolean isCompatible(String model, IssueBotProperties.AgentProvider provider) {
         if (model == null) return false;
-        if (properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
+        if (provider == IssueBotProperties.AgentProvider.CODEX) {
             return !model.startsWith("claude-");
         }
         return !model.startsWith("gpt-") && !model.startsWith("o3") && !model.startsWith("o4");

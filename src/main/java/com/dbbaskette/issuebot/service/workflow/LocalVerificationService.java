@@ -164,8 +164,7 @@ public class LocalVerificationService {
      * (e.g. ./mvnw forks a test JVM); destroying only the direct child would orphan them.
      */
     private static void killProcessTree(Process process) {
-        process.descendants().forEach(ProcessHandle::destroyForcibly);
-        process.destroyForcibly();
+        WorkflowCancellationService.terminateProcessTree(process);
     }
 
     /** Grace period for the output reader to drain after the command has ended. */

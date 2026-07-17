@@ -285,7 +285,7 @@
                     <div class="text-sm text-muted">
                         On exhaustion: escalates to needs-human with 24 h cooldown<span
                                 th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                                th:text="' — currently ' + ${issue.status}"></span>
+                                th:text="' — currently ' + ${humanize.status(issue.status)}"></span>
                     </div>
                 </div>
             </details>

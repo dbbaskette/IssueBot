@@ -175,18 +175,25 @@ class ClaudeCodeServiceTest {
     }
 
     @Test
-    void resolvedModelKeepsItsProviderAcrossGlobalProviderSwitch() {
+    void pinnedProviderRoutesCustomModelAcrossGlobalProviderSwitch() {
         IssueBotProperties properties = new IssueBotProperties();
         properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        CodexCliService codex = mock(CodexCliService.class);
         ClaudeCodeService facade = new ClaudeCodeService(properties,
                 new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new WorkflowCancellationService(), mock(CodexCliService.class));
+                new WorkflowCancellationService(), codex);
+        ClaudeCodeResult expected = new ClaudeCodeResult();
+        when(codex.executeImplementation(anyString(), any(), anyString(), any(), any(), any()))
+                .thenReturn(expected);
 
-        assertFalse(facade.routesToCodex("claude-opus-4-8"));
-        assertTrue(facade.routesToCodex("gpt-5.6-sol"));
-
+        facade.pinProvider(IssueBotProperties.AgentProvider.CODEX);
         properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        assertTrue(facade.routesToCodex("gpt-5.6-terra"));
-        assertFalse(facade.routesToCodex("claude-sonnet-5"));
+
+        assertSame(expected, facade.executeImplementation("prompt", java.nio.file.Path.of("."),
+                "codex-mini-latest", null, 1L, null));
+        verify(codex).executeImplementation("prompt", java.nio.file.Path.of("."),
+                "codex-mini-latest", null, 1L, null);
+
+        facade.clearPinnedProvider();
     }
 }

@@ -6,37 +6,6 @@
 
     <div class="page-header">
         <h2>Settings</h2>
-        <div class="flex gap-1">
-            <form th:if="${agentRunning}" hx-post="/settings/pause" hx-target="#content"
-                  hx-disabled-elt="find button[type='submit']">
-                <button type="submit" class="btn btn-outline">
-                    <i class="ti ti-player-pause" aria-hidden="true"></i> Pause Agent
-                </button>
-            </form>
-            <form th:if="${!agentRunning}" hx-post="/settings/resume" hx-target="#content"
-                  hx-disabled-elt="find button[type='submit']">
-                <button type="submit" class="btn btn-success">
-                    <i class="ti ti-player-play" aria-hidden="true"></i> Resume Agent
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <!-- Agent control / status -->
-    <div class="glass-card mb-3">
-        <div class="flex-between">
-            <div>
-                <strong>Agent</strong>
-                <div class="text-sm text-muted">
-                    Polling is
-                    <span th:if="${agentRunning}" style="color:var(--ok);font-weight:600">running</span>
-                    <span th:unless="${agentRunning}" style="color:var(--text-tertiary);font-weight:600">paused</span>.
-                </div>
-            </div>
-            <span class="status"
-                  th:classappend="${agentRunning ? 'status-completed' : 'status-queued'}"
-                  th:text="${agentRunning ? 'RUNNING' : 'PAUSED'}">RUNNING</span>
-        </div>
     </div>
 
     <!-- Models -->

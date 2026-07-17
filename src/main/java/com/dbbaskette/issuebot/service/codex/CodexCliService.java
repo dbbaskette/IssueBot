@@ -82,7 +82,7 @@ public class CodexCliService {
                 boolean finished = process.waitFor(timeoutMinutes, TimeUnit.MINUTES);
                 long duration = System.currentTimeMillis() - started;
                 if (!finished) {
-                    process.destroyForcibly();
+                    WorkflowCancellationService.terminateProcessTree(process);
                     outReader.join(3000);
                     errReader.join(3000);
                     ClaudeCodeResult result = parser.parse(stdout.toString());
@@ -171,7 +171,7 @@ public class CodexCliService {
             Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {
-                process.destroyForcibly();
+                WorkflowCancellationService.terminateProcessTree(process);
                 return new CommandCheck(-1, "timed out");
             }
             String output;

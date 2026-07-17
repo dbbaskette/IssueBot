@@ -53,47 +53,6 @@ class LayoutSseAndAgentStatusRenderTest {
         webExchange = webApplication.buildExchange(request, response);
     }
 
-    private String renderAgentStatusFragment(boolean agentRunning) {
-        WebContext context = new WebContext(webExchange, Locale.US);
-        context.setVariable("agentRunning", agentRunning);
-
-        TemplateSpec spec = new TemplateSpec("layout", Set.of("agent-status"),
-                (org.thymeleaf.templatemode.TemplateMode) null, null);
-        StringWriter writer = new StringWriter();
-        templateEngine.process(spec, context, writer);
-        return writer.toString();
-    }
-
-    @Test
-    void agentStatusFragment_showsRunning_whenAgentRunningTrue() {
-        String html = renderAgentStatusFragment(true);
-
-        assertThat(html).contains("id=\"agent-status-chip\"");
-        assertThat(html).contains("status-dot running");
-        assertThat(html).contains("Agent Running");
-        assertThat(html).doesNotContain("Agent Paused");
-    }
-
-    @Test
-    void agentStatusFragment_showsPaused_whenAgentRunningFalse() {
-        String html = renderAgentStatusFragment(false);
-
-        assertThat(html).contains("status-dot paused");
-        assertThat(html).contains("Agent Paused");
-        assertThat(html).doesNotContain("Agent Running");
-    }
-
-    @Test
-    void agentStatusFragment_pollsItsOwnEndpointEvery30s() {
-        String html = renderAgentStatusFragment(true);
-
-        // Self-refreshing outerHTML swap — matches the fragment endpoint added to
-        // SettingsController (mounted under its /settings request mapping).
-        assertThat(html).contains("hx-get=\"/settings/fragments/agent-status\"");
-        assertThat(html).contains("hx-trigger=\"every 30s\"");
-        assertThat(html).contains("hx-swap=\"outerHTML\"");
-    }
-
     /**
      * Renders the whole non-HTMX "layout" view (contentTemplate="dashboard") the way a real
      * full-page GET / would, to verify the header's SSE dot and the agent-status chip are both
@@ -177,11 +136,11 @@ class LayoutSseAndAgentStatusRenderTest {
     }
 
     @Test
-    void fullPage_includesAgentStatusChipAndDashboardStampWiring() {
+    void fullPage_usesOnlyGlobalProcessingControlAndDashboardStampWiring() {
         String html = renderFullDashboardPage(true);
 
-        assertThat(html).contains("id=\"agent-status-chip\"");
-        assertThat(html).contains("Agent Running");
+        assertThat(html).doesNotContain("id=\"agent-status-chip\"", "Agent Running", "Agent Paused");
+        assertThat(html).contains("Processing active", "Pause processing");
         // Dashboard's own last-updated stamp + the id the JS afterSwap listener keys off.
         assertThat(html).contains("data-updated-stamp=\"dashboard\"");
         assertThat(html).contains("id=\"dashboard-live\"");

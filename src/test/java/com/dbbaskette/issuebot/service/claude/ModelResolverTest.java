@@ -69,4 +69,16 @@ class ModelResolverTest {
         assertThat(resolver.reviewModel(issue)).isEqualTo("gpt-5.6-terra");
         assertThat(resolver.utilityModel()).isEqualTo("gpt-5.6-luna");
     }
+
+    @Test
+    void explicitProviderKeepsResolvedModelsStableAcrossGlobalSwitch() {
+        properties.getCodexCli().setImplementationModel("codex-mini-latest");
+        properties.getCodexCli().setReviewModel("codex-review-latest");
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+
+        assertThat(resolver.implementationModel(issue, IssueBotProperties.AgentProvider.CODEX))
+                .isEqualTo("codex-mini-latest");
+        assertThat(resolver.reviewModel(issue, IssueBotProperties.AgentProvider.CODEX))
+                .isEqualTo("codex-review-latest");
+    }
 }

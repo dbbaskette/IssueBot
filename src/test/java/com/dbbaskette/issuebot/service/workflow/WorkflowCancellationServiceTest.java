@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 class WorkflowCancellationServiceTest {
 
@@ -24,6 +25,22 @@ class WorkflowCancellationServiceTest {
         service.requestCancel(1L);
         p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
         assertThat(p.isAlive()).isFalse();
+    }
+
+    @Test
+    void cancelDestroysDescendantProcessesBeforeReturning() throws Exception {
+        Process parent = mock(Process.class);
+        ProcessHandle child = mock(ProcessHandle.class);
+        when(parent.descendants()).thenReturn(java.util.stream.Stream.of(child));
+        when(parent.isAlive()).thenReturn(true);
+        when(child.isAlive()).thenReturn(true);
+        service.registerProcess(1L, parent);
+
+        service.requestCancel(1L);
+
+        var order = inOrder(child, parent);
+        order.verify(child).destroyForcibly();
+        order.verify(parent).destroyForcibly();
     }
 
     @Test

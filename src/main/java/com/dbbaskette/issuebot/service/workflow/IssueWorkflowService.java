@@ -11,6 +11,7 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
+import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -165,6 +166,9 @@ public class IssueWorkflowService {
     }
 
     public void processIssue(TrackedIssue trackedIssue, String additionalInstructions) {
+        IssueBotProperties.AgentProvider executionProvider = claudeCode.provider();
+        claudeCode.pinProvider(executionProvider);
+        try {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 
@@ -178,6 +182,15 @@ public class IssueWorkflowService {
         // Captured before it is cleared just below: a continue-session retry's first
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
+        IssueBotProperties.AgentProvider previousProvider = trackedIssue.getResolvedAgentProvider();
+        if (trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
+                && previousProvider != executionProvider) {
+            trackedIssue.setClaudeSessionId(null);
+            eventService.log("SESSION_PROVIDER_CHANGED",
+                    "Previous agent session was discarded because the execution provider changed",
+                    repo, trackedIssue);
+        }
+        trackedIssue.setResolvedAgentProvider(executionProvider);
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         // Workflow entry point for both a fresh start and a retry (IssueController.retry sets
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
@@ -186,8 +199,8 @@ public class IssueWorkflowService {
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
         trackedIssue.setSuspensionReason(null);
-        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
-        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
+        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
+        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionProvider));
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
                 + trackedIssue.getResolvedImplModel() + " / "
@@ -613,6 +626,9 @@ public class IssueWorkflowService {
         }
         captureLessons(trackedIssue, "failed after max iterations", previousFeedback, previousCiLogs, repoPath);
         iterationManager.handleMaxIterationsReached(trackedIssue);
+        } finally {
+            claudeCode.clearPinnedProvider();
+        }
     }
 
     /**
