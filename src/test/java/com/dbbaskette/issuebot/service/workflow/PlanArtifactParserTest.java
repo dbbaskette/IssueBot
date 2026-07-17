@@ -55,4 +55,13 @@ class PlanArtifactParserTest {
                 .isInstanceOf(InvalidPlanningArtifactException.class)
                 .hasMessageContaining("duplicate");
     }
+
+    @Test
+    void rejectsDuplicateDesignSpecHeadingInSpecBody() {
+        String output = "# Design Spec\ns\n# Design Spec\ns2\n# Implementation Plan\np";
+
+        assertThatThrownBy(() -> parser.parse(output))
+                .isInstanceOf(InvalidPlanningArtifactException.class)
+                .hasMessageContaining("duplicate");
+    }
 }
