@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.review;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
+import com.dbbaskette.issuebot.service.workflow.ApprovedPlanContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
@@ -47,6 +48,7 @@ public class CodeReviewService {
                                          List<String> criteria,
                                          boolean securityReview, double reviewPassThreshold,
                                          String repoInstructions,
+                                         ApprovedPlanContext approvedPlan,
                                          Consumer<String> lineCallback) {
         log.info("Starting independent code review in {} against branch {}", repoPath, baseBranch);
 
@@ -71,7 +73,7 @@ public class CodeReviewService {
         // 2. Build the review prompt
         String prompt = reviewPromptBuilder.buildReviewPrompt(
                 issueTitle, issueBody, changedFiles, diff, criteria, securityReview, reviewPassThreshold,
-                repoInstructions);
+                repoInstructions, approvedPlan);
 
         // 3. Invoke the review model via CLI
         ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);
@@ -176,7 +178,7 @@ public class CodeReviewService {
                     passed, specCompliance, correctness, codeQuality, testCoverage,
                     architectureFit, regressions, security, findings.size(), criteria.size());
 
-            return new CodeReviewResult(
+            CodeReviewResult parsed = new CodeReviewResult(
                     passed, summary,
                     specCompliance, correctness, codeQuality, testCoverage,
                     architectureFit, regressions, security,
@@ -185,6 +187,17 @@ public class CodeReviewService {
                     result.getCostUsd(),
                     criteria
             );
+            if (parsed.passed() && parsed.hasBlockingSpecFinding()) {
+                return new CodeReviewResult(
+                        false, parsed.summary(),
+                        parsed.specComplianceScore(), parsed.correctnessScore(),
+                        parsed.codeQualityScore(), parsed.testCoverageScore(),
+                        parsed.architectureFitScore(), parsed.regressionsScore(), parsed.securityScore(),
+                        parsed.findings(), parsed.advice(), parsed.rawJson(),
+                        parsed.inputTokens(), parsed.outputTokens(), parsed.modelUsed(), parsed.costUsd(),
+                        parsed.criteria());
+            }
+            return parsed;
         } catch (Exception e) {
             log.warn("Failed to parse review JSON: {}", e.getMessage());
             return CodeReviewResult.failed(

@@ -341,6 +341,12 @@ public class IssueWorkflowService {
             int maxIterations = repo.getMaxIterations();
             trackedIssue.setCurrentIteration(iterationNum);
             issueRepository.save(trackedIssue);
+            if (trackedIssue.isPlanCorrectionPending()) {
+                // The corrective slot is consumed only after its implementation iteration
+                // has been durably claimed above.
+                trackedIssue.setPlanCorrectionPending(false);
+                issueRepository.save(trackedIssue);
+            }
 
             Iteration iteration = new Iteration(trackedIssue, iterationNum);
             iteration.setImplModel(trackedIssue.getResolvedImplModel());
@@ -558,7 +564,8 @@ public class IssueWorkflowService {
             issueRepository.save(trackedIssue);
 
             CodeReviewResult reviewResult = phaseIndependentReview(
-                    trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria);
+                    trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria,
+                    approvedPlan);
 
             // Post review to issue thread (regardless of pass/fail)
             if (reviewResult != null) {
@@ -583,7 +590,13 @@ public class IssueWorkflowService {
                 return;
             } else if (!reviewResult.passed()) {
                 // A real verdict: the code fell short. Iterate (re-implement) if budget remains.
-                if (!iterationManager.canReviewIterate(trackedIssue)) {
+                if (approvedPlan != null && trackedIssue.getPlanConformanceAttempt() >= 2) {
+                    iterationManager.handlePlanConformanceFailure(trackedIssue,
+                            approvedPlan.versionNumber(), summarizeReviewBlockers(reviewResult),
+                            buildReviewFeedback(reviewResult));
+                    return;
+                }
+                if (approvedPlan == null && !iterationManager.canReviewIterate(trackedIssue)) {
                     // Carry the actual blockers into the failure — otherwise "needs human"
                     // is a dead end with nothing to act on. Concise summary → the dashboard
                     // failure reason; full human-readable findings → the GitHub comment.
@@ -1133,7 +1146,8 @@ public class IssueWorkflowService {
     CodeReviewResult phaseIndependentReview(TrackedIssue trackedIssue, JsonNode issueDetails,
                                              Path repoPath, String branchName,
                                              int prNumber, Iteration iteration,
-                                             List<String> criteria) {
+                                             List<String> criteria,
+                                             ApprovedPlanContext approvedPlan) {
         WatchedRepo repo = trackedIssue.getRepo();
         String reviewModelLabel = trackedIssue.getResolvedReviewModel() != null
                 ? trackedIssue.getResolvedReviewModel() : "the review model";
@@ -1174,6 +1188,7 @@ public class IssueWorkflowService {
                         repo.isSecurityReviewEnabled(),
                         repo.getReviewPassThreshold().doubleValue(),
                         repo.getCustomInstructions(),
+                        approvedPlan,
                         line -> streamClaudeLog(issueId, line));
             } catch (Exception e) {
                 log.error("Independent review failed", e);
@@ -1219,6 +1234,13 @@ public class IssueWorkflowService {
         iteration.setReviewJson(reviewResult.rawJson());
         iteration.setReviewModel(reviewResult.modelUsed());
         iterationRepository.save(iteration);
+
+        if (approvedPlan != null && !reviewResult.invocationFailed()) {
+            int conformanceAttempt = trackedIssue.getPlanConformanceAttempt() + 1;
+            trackedIssue.setPlanConformanceAttempt(conformanceAttempt);
+            trackedIssue.setPlanCorrectionPending(!reviewResult.passed() && conformanceAttempt == 1);
+            issueRepository.save(trackedIssue);
+        }
 
         log.info("Review result for {} #{}: passed={}, scores=[spec={}, correct={}, quality={}]",
                 repo.fullName(), trackedIssue.getIssueNumber(), reviewResult.passed(),

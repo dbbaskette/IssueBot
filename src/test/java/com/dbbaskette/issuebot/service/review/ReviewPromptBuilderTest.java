@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.review;
 
+import com.dbbaskette.issuebot.service.workflow.ApprovedPlanContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -121,5 +122,22 @@ class ReviewPromptBuilderTest {
         assertThat(prompt).contains("## Repository Owner Requirements");
         assertThat(prompt).contains("Never modify files under /legacy");
         assertThat(prompt).contains("Treat violations of these requirements as findings.");
+    }
+
+    @Test
+    void reviewPromptIncludesApprovedVersionAndBlockingRules() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of("criterion"), false, 0.70,
+                null, new ApprovedPlanContext(4L, 2, "spec contract", "plan contract"));
+
+        assertThat(prompt).contains("## Approved Design Spec — Version 2")
+                .contains("spec contract")
+                .contains("## Approved Implementation Plan")
+                .contains("plan contract")
+                .contains("high-severity unmet acceptance criterion")
+                .contains("Set passed to false")
+                .contains("required plan deliverable");
+        assertThat(prompt.indexOf("## Approved Design Spec — Version 2"))
+                .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
     }
 }

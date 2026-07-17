@@ -98,6 +98,17 @@ class IterationManagerTest {
     }
 
     @Test
+    void canIterate_allowsPendingPlanCorrectionBeyondOrdinaryLimit() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setMaxIterations(1);
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        issue.setCurrentIteration(1);
+        issue.setPlanCorrectionPending(true);
+
+        assertTrue(iterationManager.canIterate(issue));
+    }
+
+    @Test
     void isCooldownExpired_noCooldown() {
         TrackedIssue issue = new TrackedIssue();
         issue.setStatus(IssueStatus.PENDING);

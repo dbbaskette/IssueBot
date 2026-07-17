@@ -111,4 +111,38 @@ class CodeReviewServiceParseTest {
 
         assertThat(result.criteria()).isEmpty();
     }
+
+    @Test
+    void highSpecFindingBlocksEvenWhenModelSaysPassed() {
+        String json = """
+                {"passed": true, "summary": "ok",
+                 "specComplianceScore": 0.95, "correctnessScore": 0.95, "codeQualityScore": 0.95,
+                 "testCoverageScore": 0.95, "architectureFitScore": 0.95, "regressionsScore": 0.95,
+                 "securityScore": 1.0,
+                 "findings": [{"severity": "HIGH", "category": "SPEC_COMPLIANCE",
+                   "file": "src/Main.java", "line": 1, "finding": "Required plan step missing",
+                   "suggestion": "Implement it"}], "advice": ""}
+                """;
+
+        CodeReviewResult result = service.parseReviewResponse(resultWithOutput(json));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.hasBlockingSpecFinding()).isTrue();
+    }
+
+    @Test
+    void unmetCriterionBlocksEvenWhenModelSaysPassed() {
+        String json = """
+                {"passed": true, "summary": "ok",
+                 "specComplianceScore": 0.95, "correctnessScore": 0.95, "codeQualityScore": 0.95,
+                 "testCoverageScore": 0.95, "architectureFitScore": 0.95, "regressionsScore": 0.95,
+                 "securityScore": 1.0, "findings": [], "advice": "",
+                 "criteria": [{"text": "Required behavior", "verdict": "UNMET", "note": "Missing"}]}
+                """;
+
+        CodeReviewResult result = service.parseReviewResponse(resultWithOutput(json));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.hasBlockingSpecFinding()).isTrue();
+    }
 }

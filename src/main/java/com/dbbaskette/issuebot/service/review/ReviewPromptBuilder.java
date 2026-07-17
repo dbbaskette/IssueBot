@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.review;
 
+import com.dbbaskette.issuebot.service.workflow.ApprovedPlanContext;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -29,7 +30,7 @@ public class ReviewPromptBuilder {
                                       List<String> criteria,
                                       boolean securityReview, double threshold) {
         return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
-                securityReview, threshold, null);
+                securityReview, threshold, null, null);
     }
 
     /**
@@ -42,6 +43,19 @@ public class ReviewPromptBuilder {
                                       List<String> criteria,
                                       boolean securityReview, double threshold,
                                       String repoInstructions) {
+        return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
+                securityReview, threshold, repoInstructions, null);
+    }
+
+    /**
+     * @param approvedPlan immutable approved Plan First contract, or null for ordinary reviews
+     */
+    public String buildReviewPrompt(String issueTitle, String issueBody,
+                                      List<String> changedFiles, String diff,
+                                      List<String> criteria,
+                                      boolean securityReview, double threshold,
+                                      String repoInstructions,
+                                      ApprovedPlanContext approvedPlan) {
         // Locale.ROOT: the prompt must always render "0.70", never "0,70"
         String thresholdText = String.format(java.util.Locale.ROOT, "%.2f", threshold);
         List<String> effectiveCriteria = criteria != null ? criteria : List.of();
@@ -75,6 +89,18 @@ public class ReviewPromptBuilder {
 
         if (repoInstructions != null && !repoInstructions.isBlank()) {
             prompt.append(buildRepoInstructionsSection(repoInstructions));
+        }
+
+        if (approvedPlan != null) {
+            prompt.append("\n## Approved Design Spec — Version ")
+                    .append(approvedPlan.versionNumber()).append("\n\n")
+                    .append(approvedPlan.designSpec()).append("\n\n")
+                    .append("## Approved Implementation Plan\n\n")
+                    .append(approvedPlan.implementationPlan()).append("\n\n")
+                    .append("The approved Design Spec is the binding scope and acceptance contract. ")
+                    .append("Tie each blocking finding to an acceptance criterion or required plan deliverable.\n")
+                    .append("Treat any high-severity unmet acceptance criterion or required plan deliverable as blocking. ")
+                    .append("Set passed to false for every such blocking finding.\n");
         }
 
         prompt.append("""

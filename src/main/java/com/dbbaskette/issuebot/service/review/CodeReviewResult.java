@@ -68,6 +68,19 @@ public record CodeReviewResult(
     }
 
     /**
+     * Server-side conformance guard: model-supplied {@code passed=true} cannot override
+     * a high-severity spec finding or an explicitly unmet acceptance criterion.
+     */
+    public boolean hasBlockingSpecFinding() {
+        boolean highSpec = findings != null && findings.stream().anyMatch(finding ->
+                "high".equalsIgnoreCase(finding.severity())
+                        && "spec_compliance".equalsIgnoreCase(finding.category()));
+        boolean unmetCriterion = criteria != null && criteria.stream().anyMatch(criterion ->
+                "unmet".equalsIgnoreCase(criterion.verdict()));
+        return highSpec || unmetCriterion;
+    }
+
+    /**
      * Create a failed result for error cases (e.g. JSON parse failure).
      */
     public static CodeReviewResult failed(String reason, long inputTokens, long outputTokens, String model) {

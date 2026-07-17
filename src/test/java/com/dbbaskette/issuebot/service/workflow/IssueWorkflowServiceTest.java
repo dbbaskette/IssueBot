@@ -1158,12 +1158,12 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
 
         // --- Act ---
         CodeReviewResult result = workflowService.phaseIndependentReview(
-                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration, List.of());
+                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration, List.of(), null);
 
         // --- Assert ---
         assertNull(result, "Should return null on review invocation error");
