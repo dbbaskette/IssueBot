@@ -381,27 +381,27 @@ public class IssueWorkflowService {
                     : trackedIssue.getCurrentIteration();
             int maxIterations = repo.getMaxIterations();
             boolean correctionClaim = resumePhase == null && trackedIssue.isPlanCorrectionPending();
-            if (resumePhase == null) {
+            Iteration iteration = null;
+            if (correctionClaim) {
+                // The separately proxied manager commits the issue claim and its authoritative
+                // iteration row in one transaction. Reuse the returned row below.
+                iteration = iterationManager.claimPlanCorrectionIteration(
+                        trackedIssue, iterationNum);
+                // Synchronize this detached workflow object only after the transactional proxy
+                // returns successfully. A rolled-back claim therefore remains pending if the
+                // async error handler later persists this object.
                 trackedIssue.setCurrentIteration(iterationNum);
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
-                if (correctionClaim) {
-                    trackedIssue.setPlanCorrectionPending(false);
-                }
-                // Persist the iteration claim, phase transition, and pending-flag consumption
-                // atomically. Recovery can therefore distinguish the pre-claim handoff
-                // (pending correction at the stale review phase) from claimed implementation.
+                trackedIssue.setPlanCorrectionPending(false);
+            } else if (resumePhase == null) {
+                trackedIssue.setCurrentIteration(iterationNum);
+                trackedIssue.setCurrentPhase("IMPLEMENTATION");
                 issueRepository.save(trackedIssue);
             }
 
-            Iteration iteration = resumePhase != null
-                    ? authoritativeCurrentIteration
-                    : correctionClaim
-                            ? iterationRepository
-                                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
-                                            trackedIssue.getId(), iterationNum)
-                                    .filter(candidate -> candidate.getCompletedAt() == null)
-                                    .orElse(null)
-                            : null;
+            if (resumePhase != null) {
+                iteration = authoritativeCurrentIteration;
+            }
             if (resumePhase != null && iteration == null) {
                 // Recovery only preserves a post-implementation checkpoint when this durable
                 // iteration exists. Refuse to synthesize one or to repeat implementation if the

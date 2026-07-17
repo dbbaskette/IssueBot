@@ -996,7 +996,14 @@ class IntegrationWorkflowTest {
         Iteration firstAttempt = new Iteration(issue, 1);
         firstAttempt.setReviewJson("{\"summary\":\"missing rollback\"}");
         firstAttempt.setDiff("+ first attempt");
+        Iteration priorGuidedRetry = new Iteration(issue, 2);
+        priorGuidedRetry.setId(190L);
+        priorGuidedRetry.setCompletedAt(LocalDateTime.now());
+        priorGuidedRetry.setDiff("stale guided-retry iteration");
         Iteration interruptedClaim = new Iteration(issue, 2);
+        interruptedClaim.setId(202L);
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(firstAttempt, priorGuidedRetry, interruptedClaim));
         when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 2))
                 .thenReturn(Optional.of(interruptedClaim));
         when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
@@ -1479,9 +1486,9 @@ class IntegrationWorkflowTest {
         });
         WatchedRepoRepository lifecycleRepos = mock(WatchedRepoRepository.class);
         when(lifecycleRepos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
-        IterationManager authoritativeIterations = new IterationManager(
+        IterationManager authoritativeIterations = spy(new IterationManager(
                 issueRepository, lifecycleRepos, iterationRepository,
-                gitHubApi, eventService, notificationService);
+                gitHubApi, eventService, notificationService));
 
         IssueWorkflowService lifecycleWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
@@ -1561,6 +1568,10 @@ class IntegrationWorkflowTest {
         verify(guidanceRepository).save(argThat(guidance ->
                 guidance.getIssueId().equals(issue.getId())
                         && guidance.getGuidance().equals("test rollback on network failure")));
+        verify(authoritativeIterations).claimPlanCorrectionIteration(any(TrackedIssue.class), eq(2));
+        assertEquals(1, storedIterations.stream()
+                .filter(iteration -> iteration.getIterationNum() == 2)
+                .count(), "the atomic claim row must be reused by the workflow");
     }
 
     private ClaudeCodeResult planningResult(String spec, String plan) {

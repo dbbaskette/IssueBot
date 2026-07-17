@@ -78,6 +78,42 @@ public class IterationManager {
     }
 
     /**
+     * Atomically claims the single Plan First correction and creates its durable iteration row.
+     * The returned row is the authoritative row for this run even when a guided retry previously
+     * used the same iteration number.
+     */
+    @Transactional
+    public Iteration claimPlanCorrectionIteration(TrackedIssue trackedIssue, int iterationNum) {
+        TrackedIssue claimTarget = issueRepository.findById(trackedIssue.getId())
+                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        if (!claimTarget.isPlanCorrectionPending()) {
+            throw new IllegalStateException("Plan correction is not pending");
+        }
+        if (iterationNum != claimTarget.getCurrentIteration() + 1) {
+            throw new IllegalArgumentException("Correction iteration must advance by one");
+        }
+
+        Iteration authoritative = iterationRepository
+                .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                        claimTarget.getId(), iterationNum)
+                .filter(candidate -> candidate.getCompletedAt() == null)
+                .orElse(null);
+
+        claimTarget.setCurrentIteration(iterationNum);
+        claimTarget.setCurrentPhase("IMPLEMENTATION");
+        claimTarget.setPlanCorrectionPending(false);
+        issueRepository.save(claimTarget);
+        issueRepository.flush();
+
+        if (authoritative != null) {
+            return authoritative;
+        }
+        Iteration iteration = new Iteration(claimTarget, iterationNum);
+        iteration.setImplModel(claimTarget.getResolvedImplModel());
+        return iterationRepository.save(iteration);
+    }
+
+    /**
      * Persist a completed review verdict and its plan-conformance transition atomically.
      * Keeping these writes in a separate Spring-managed component ensures the transaction
      * is applied when the workflow calls this method; a crash cannot leave a durable failed
