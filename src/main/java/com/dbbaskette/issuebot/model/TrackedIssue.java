@@ -109,6 +109,16 @@ public class TrackedIssue {
     @Column(name = "plan_feedback")
     private String planFeedback;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "approved_planning_version_id")
+    private PlanningVersion approvedPlanningVersion;
+
+    @Column(name = "plan_conformance_attempt", nullable = false)
+    private int planConformanceAttempt = 0;
+
+    @Column(name = "plan_correction_pending", nullable = false)
+    private boolean planCorrectionPending = false;
+
     public TrackedIssue() {}
 
     public TrackedIssue(WatchedRepo repo, int issueNumber, String issueTitle) {
@@ -222,6 +232,21 @@ public class TrackedIssue {
 
     public String getPlanFeedback() { return planFeedback; }
     public void setPlanFeedback(String planFeedback) { this.planFeedback = planFeedback; }
+
+    public PlanningVersion getApprovedPlanningVersion() { return approvedPlanningVersion; }
+    public void setApprovedPlanningVersion(PlanningVersion approvedPlanningVersion) {
+        this.approvedPlanningVersion = approvedPlanningVersion;
+    }
+
+    public int getPlanConformanceAttempt() { return planConformanceAttempt; }
+    public void setPlanConformanceAttempt(int planConformanceAttempt) {
+        this.planConformanceAttempt = planConformanceAttempt;
+    }
+
+    public boolean isPlanCorrectionPending() { return planCorrectionPending; }
+    public void setPlanCorrectionPending(boolean planCorrectionPending) {
+        this.planCorrectionPending = planCorrectionPending;
+    }
 
     /**
      * Effective spend ceiling for this issue (#66): the per-issue override wins over
