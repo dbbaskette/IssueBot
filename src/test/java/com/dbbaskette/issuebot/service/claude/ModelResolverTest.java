@@ -55,4 +55,30 @@ class ModelResolverTest {
         issue.setImplModelOverride("");
         assertThat(resolver.implementationModel(issue)).isEqualTo("global-impl");
     }
+
+    @Test
+    void codexProviderUsesCodexDefaultsAndIgnoresClaudeOverrides() {
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        properties.getCodexCli().setImplementationModel("gpt-5.6-sol");
+        properties.getCodexCli().setReviewModel("gpt-5.6-terra");
+        properties.getCodexCli().setUtilityModel("gpt-5.6-luna");
+        repo.setImplementationModel("claude-opus-4-8");
+        issue.setReviewModelOverride("claude-sonnet-5");
+
+        assertThat(resolver.implementationModel(issue)).isEqualTo("gpt-5.6-sol");
+        assertThat(resolver.reviewModel(issue)).isEqualTo("gpt-5.6-terra");
+        assertThat(resolver.utilityModel()).isEqualTo("gpt-5.6-luna");
+    }
+
+    @Test
+    void explicitProviderKeepsResolvedModelsStableAcrossGlobalSwitch() {
+        properties.getCodexCli().setImplementationModel("codex-mini-latest");
+        properties.getCodexCli().setReviewModel("codex-review-latest");
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+
+        assertThat(resolver.implementationModel(issue, IssueBotProperties.AgentProvider.CODEX))
+                .isEqualTo("codex-mini-latest");
+        assertThat(resolver.reviewModel(issue, IssueBotProperties.AgentProvider.CODEX))
+                .isEqualTo("codex-review-latest");
+    }
 }

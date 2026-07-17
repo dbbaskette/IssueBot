@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.model;
 
+import com.dbbaskette.issuebot.config.IssueBotProperties;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -70,6 +71,10 @@ public class TrackedIssue {
 
     @Column(name = "resolved_review_model")
     private String resolvedReviewModel;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "resolved_agent_provider")
+    private IssueBotProperties.AgentProvider resolvedAgentProvider;
 
     @Column(name = "last_failure_reason", length = 2000)
     private String lastFailureReason;
@@ -182,6 +187,11 @@ public class TrackedIssue {
 
     public String getResolvedReviewModel() { return resolvedReviewModel; }
     public void setResolvedReviewModel(String resolvedReviewModel) { this.resolvedReviewModel = resolvedReviewModel; }
+
+    public IssueBotProperties.AgentProvider getResolvedAgentProvider() { return resolvedAgentProvider; }
+    public void setResolvedAgentProvider(IssueBotProperties.AgentProvider resolvedAgentProvider) {
+        this.resolvedAgentProvider = resolvedAgentProvider;
+    }
 
     public String getLastFailureReason() { return lastFailureReason; }
     public void setLastFailureReason(String lastFailureReason) { this.lastFailureReason = lastFailureReason; }

@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
@@ -129,6 +130,24 @@ class IssueWorkflowServiceTest {
         assertNotNull(issue.getStartedAt());
         assertFalse(issue.getStartedAt().isBefore(before));
         assertFalse(issue.getStartedAt().isAfter(after));
+    }
+
+    @Test
+    void processIssue_providerSwitchClearsIncompatibleSessionAndPinsNewProvider() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        issue.setClaudeSessionId("claude-session");
+        issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CODEX);
+
+        workflowService.processIssue(issue);
+
+        assertNull(issue.getClaudeSessionId());
+        assertEquals(IssueBotProperties.AgentProvider.CODEX, issue.getResolvedAgentProvider());
+        assertEquals("gpt-5.6-sol", issue.getResolvedImplModel());
+        verify(claudeCode).pinProvider(IssueBotProperties.AgentProvider.CODEX);
+        verify(claudeCode).clearPinnedProvider();
     }
 
     @Test
@@ -1065,6 +1084,24 @@ class IssueWorkflowServiceTest {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(sseService).broadcastClaudeLog(eq(7L), captor.capture());
         assertEquals("[tool_use] Bash", captor.getValue());
+    }
+
+    @Test
+    void streamClaudeLog_codexAgentMessageBroadcastsReadableText() {
+        String line = "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Implemented the fix\"}}";
+
+        workflowService.streamClaudeLog(7L, line);
+
+        verify(sseService).broadcastClaudeLog(7L, "Implemented the fix");
+    }
+
+    @Test
+    void streamClaudeLog_codexLifecycleNoiseIsSuppressed() {
+        workflowService.streamClaudeLog(7L,
+                "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}");
+        workflowService.streamClaudeLog(7L, "{\"type\":\"turn.started\"}");
+
+        verify(sseService, never()).broadcastClaudeLog(anyLong(), anyString());
     }
 
     // === Review-blocker summary (so an exhausted review's "needs human" is actionable) ===

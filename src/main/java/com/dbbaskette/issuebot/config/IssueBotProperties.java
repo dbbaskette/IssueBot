@@ -24,6 +24,12 @@ public class IssueBotProperties {
     @Valid
     private ClaudeCodeConfig claudeCode = new ClaudeCodeConfig();
 
+    @NotNull
+    private AgentProvider agentProvider = AgentProvider.CLAUDE_CODE;
+
+    @Valid
+    private CodexCliConfig codexCli = new CodexCliConfig();
+
     @Valid
     private GitHubConfig github = new GitHubConfig();
 
@@ -45,6 +51,14 @@ public class IssueBotProperties {
 
     public ClaudeCodeConfig getClaudeCode() { return claudeCode; }
     public void setClaudeCode(ClaudeCodeConfig claudeCode) { this.claudeCode = claudeCode; }
+
+    public AgentProvider getAgentProvider() { return agentProvider; }
+    public void setAgentProvider(AgentProvider agentProvider) {
+        this.agentProvider = agentProvider == null ? AgentProvider.CLAUDE_CODE : agentProvider;
+    }
+
+    public CodexCliConfig getCodexCli() { return codexCli; }
+    public void setCodexCli(CodexCliConfig codexCli) { this.codexCli = codexCli; }
 
     public GitHubConfig getGithub() { return github; }
     public void setGithub(GitHubConfig github) { this.github = github; }
@@ -96,6 +110,54 @@ public class IssueBotProperties {
         public void setReviewMaxTurns(int v) { this.reviewMaxTurns = v; }
         public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
         public void setReviewTimeoutMinutes(int v) { this.reviewTimeoutMinutes = v; }
+    }
+
+    public enum AgentProvider {
+        CLAUDE_CODE("Claude Code", "claude"),
+        CODEX("Codex CLI", "codex");
+
+        private final String displayName;
+        private final String configValue;
+
+        AgentProvider(String displayName, String configValue) {
+            this.displayName = displayName;
+            this.configValue = configValue;
+        }
+
+        public String getDisplayName() { return displayName; }
+        public String getConfigValue() { return configValue; }
+
+        public static AgentProvider fromConfig(String value) {
+            if (value == null) return CLAUDE_CODE;
+            for (AgentProvider provider : values()) {
+                if (provider.configValue.equalsIgnoreCase(value)
+                        || provider.name().equalsIgnoreCase(value.replace('-', '_'))) {
+                    return provider;
+                }
+            }
+            throw new IllegalArgumentException("Unknown agent provider: " + value);
+        }
+    }
+
+    public static class CodexCliConfig {
+        private String implementationModel = "gpt-5.6-sol";
+        private String reviewModel = "gpt-5.6-terra";
+        private String utilityModel = "gpt-5.6-luna";
+        @Min(1)
+        private int timeoutMinutes = 45;
+        @Min(1)
+        private int reviewTimeoutMinutes = 20;
+
+        public String getImplementationModel() { return implementationModel; }
+        public void setImplementationModel(String value) { this.implementationModel = value; }
+        public String getReviewModel() { return reviewModel; }
+        public void setReviewModel(String value) { this.reviewModel = value; }
+        public String getUtilityModel() { return utilityModel; }
+        public void setUtilityModel(String value) { this.utilityModel = value; }
+        public int getTimeoutMinutes() { return timeoutMinutes; }
+        public void setTimeoutMinutes(int value) { this.timeoutMinutes = value; }
+        public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
+        public void setReviewTimeoutMinutes(int value) { this.reviewTimeoutMinutes = value; }
     }
 
     public static class GitHubConfig {

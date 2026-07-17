@@ -294,7 +294,8 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("currently FAILED");
+        assertThat(html).contains("currently Failed");
+        assertThat(html).doesNotContain("currently FAILED");
     }
 
     // === Session continuity (#67) ===
@@ -306,11 +307,31 @@ class IssueDetailGoalCardRenderTest {
         issue.setId(8L);
         issue.setStatus(IssueStatus.FAILED);
         issue.setClaudeSessionId("sess-abcdef123456");
+        issue.setResolvedAgentProvider(com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider.CLAUDE_CODE);
 
-        String html = render(baseContext(issue, null));
+        WebContext context = baseContext(issue, null);
+        context.setVariable("codexProvider", false);
+        String html = render(context);
 
         assertThat(html).contains("name=\"continueSession\"");
-        assertThat(html).contains("Continue previous Claude session");
+        assertThat(html).contains("Continue previous agent session");
+    }
+
+    @Test
+    void retryModal_explainsWhyPreviousSessionCannotContinueAfterProviderSwitch() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 81, "Provider changed");
+        issue.setId(81L);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setClaudeSessionId("sess-abcdef123456");
+        issue.setResolvedAgentProvider(com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider.CODEX);
+        WebContext context = baseContext(issue, null);
+        context.setVariable("codexProvider", false);
+
+        String html = render(context);
+
+        assertThat(html).doesNotContain("name=\"continueSession\"");
+        assertThat(html).contains("Previous Codex CLI session cannot continue with Claude Code");
     }
 
     @Test
@@ -338,7 +359,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).contains("Claude session");
+        assertThat(html).contains("Agent session");
         // Truncated to exactly the first 8 chars + ellipsis in the visible text...
         assertThat(html).contains("sess-abc…");
         assertThat(html).doesNotContain("sess-abcd…");
@@ -358,7 +379,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).doesNotContain("Claude session");
+        assertThat(html).doesNotContain("Agent session");
     }
 
     // === Activity log humanization (#80) ===

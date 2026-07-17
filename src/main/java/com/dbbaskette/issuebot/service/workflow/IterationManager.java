@@ -120,13 +120,19 @@ public class IterationManager {
         // was itself an implementation failure (not review feedback or human instructions)
         if (implResult != null && !implResult.isSuccess()
                 && failureContext != null
-                && failureContext.startsWith("Claude Code failed:")
+                && isImplementationFailure(failureContext)
                 && currentIter > 1) {
             return "Implementation failed again on iteration " + currentIter
                     + " with same error type — unlikely to succeed on retry";
         }
 
         return null; // OK to retry
+    }
+
+    private static boolean isImplementationFailure(String failureContext) {
+        return failureContext.startsWith("Claude Code failed:")
+                || failureContext.startsWith("Codex CLI failed:")
+                || failureContext.startsWith("Agent failed:");
     }
 
     /**

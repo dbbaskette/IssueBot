@@ -189,6 +189,7 @@ class IssueControllerTest {
 
         Fixture(IssueStatus initialStatus) {
             when(properties.getMaxConcurrentIssues()).thenReturn(5);
+            when(properties.getAgentProvider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
             WatchedRepo repo = new WatchedRepo("acme", "widgets");
             issue = new TrackedIssue(repo, 42, "Test issue");
             issue.setId(1L);
@@ -302,12 +303,25 @@ class IssueControllerTest {
     void retryWithContinueSessionKeepsStoredSessionId() {
         Fixture f = new Fixture(IssueStatus.FAILED);
         f.issue.setClaudeSessionId("sess-old");
+        f.issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
 
         f.controller.retry(1L, null, null, null, null, null, true, f.redirectAttributes);
 
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
         verify(f.issues).save(captor.capture());
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getClaudeSessionId()).isEqualTo("sess-old");
+    }
+
+    @Test
+    void retryRejectsContinueSessionWhenProviderChanged() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setClaudeSessionId("sess-old");
+        f.issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+
+        f.controller.retry(1L, null, null, null, null, null, true, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("belongs to Codex CLI"));
+        verify(f.issues, never()).save(any());
     }
 
     /**

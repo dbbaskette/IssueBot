@@ -49,15 +49,14 @@
                 </div>
                 <div th:fragment="status-actions(oob)" id="status-actions" class="flex gap-1" style="align-items:center"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-                    <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.status}">STATUS</span>
-                    <button th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                            type="button" class="btn btn-ghost btn-sm"
+                    <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${humanize.status(issue.status)}">Status</span>
+                    <a th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
+                            href="#recovery" class="btn btn-ghost btn-sm"
                             th:disabled="${processingPaused == true}"
-                            th:title="${processingPaused == true ? 'Processing is paused' : 'Review recovery options'}"
-                            data-modal-open="retry-modal">
+                            th:title="${processingPaused == true ? 'Processing is paused' : 'Review recovery options'}">
                         <i class="ti ti-refresh" aria-hidden="true"></i>
                         <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
-                    </button>
+                    </a>
                     <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                             type="button" class="btn btn-primary btn-sm"
                             th:disabled="${processingPaused == true}"
@@ -83,15 +82,15 @@
             </div>
 
             <!-- === FAILURE RECOVERY PANEL === -->
-            <div class="panel mb-3 failure-recovery"
-                 th:if="${issue.lastFailureReason != null and (issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')}">
+            <div id="recovery" class="panel mb-3 failure-recovery recovery-card"
+                 th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}">
                 <div class="panel-header">
                     <h3>Recovery</h3>
                     <span class="status status-failed">Needs attention</span>
                 </div>
                 <div class="panel-body">
                     <h4>What happened</h4>
-                    <p th:text="${latestFailureDiagnostic != null ? latestFailureDiagnostic.summary : issue.lastFailureReason}"
+                    <p th:text="${latestFailureDiagnostic != null ? latestFailureDiagnostic.summary : (issue.lastFailureReason != null ? issue.lastFailureReason : 'No failure summary was recorded. Review the technical activity below before retrying.')}"
                        style="white-space:pre-line"></p>
                     <h4>Suggested next step</h4>
                     <p th:text="${latestFailureDiagnostic != null and latestFailureDiagnostic.suggestedAction != null ? latestFailureDiagnostic.suggestedAction : 'Review the failure details, add guidance for the next attempt, then retry.'}"></p>
@@ -115,9 +114,33 @@
                                 </select>
                             </div>
                             <div class="field-group">
+                                <label for="recoveryReviewModel">Review model</label>
+                                <select id="recoveryReviewModel" name="reviewModelOverride">
+                                    <option value="" selected>Use repo/global setting</option>
+                                    <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
+                                </select>
+                            </div>
+                            <div class="field-group">
                                 <label for="recoveryBudget">Budget override (USD)</label>
                                 <input type="number" id="recoveryBudget" name="budgetOverrideUsd" step="0.50" min="0" placeholder="Use repo setting">
                             </div>
+                            <div class="field-group">
+                                <label for="recoveryPlanFirstOverride">Plan approval</label>
+                                <select id="recoveryPlanFirstOverride" name="planFirstOverride">
+                                    <option value="" selected>Use repo setting</option>
+                                    <option value="require">Require plan approval before implementation</option>
+                                    <option value="skip">Skip plan approval</option>
+                                </select>
+                            </div>
+                            <label th:if="${issue.claudeSessionId != null and issue.resolvedAgentProvider != null and ((codexProvider == true and issue.resolvedAgentProvider.name() == 'CODEX') or (codexProvider != true and issue.resolvedAgentProvider.name() == 'CLAUDE_CODE'))}" class="check-row">
+                                <input type="checkbox" name="continueSession" value="true">
+                                Continue previous agent session
+                            </label>
+                            <p class="text-sm text-muted"
+                               th:if="${issue.claudeSessionId != null and (issue.resolvedAgentProvider == null or not ((codexProvider == true and issue.resolvedAgentProvider.name() == 'CODEX') or (codexProvider != true and issue.resolvedAgentProvider.name() == 'CLAUDE_CODE')))}"
+                               th:text="${issue.resolvedAgentProvider != null ? 'Previous ' + issue.resolvedAgentProvider.displayName + ' session cannot continue with ' + (codexProvider == true ? 'Codex CLI' : 'Claude Code') + '.' : 'The previous session predates provider tracking and cannot be continued. Retry will start a fresh session.'}">
+                                The previous session cannot be continued with the selected provider.
+                            </p>
                         </details>
                         <div class="modal-actions">
                             <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingPaused == true}"
@@ -191,7 +214,8 @@
             <!-- === DESIGN & PLAN DOC (any other status that has a stored plan, e.g. the
                      autonomous superpowers methodology, or a completed issue) — collapsible === -->
             <details th:if="${planHtml != null and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
-                     class="panel mb-3 plan-doc-panel">
+                     class="panel mb-3 plan-doc-panel secondary-section plan-section"
+                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
                 <summary class="panel-header">
                     <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
                     <span class="text-sm text-muted">click to expand</span>
@@ -202,11 +226,12 @@
             </details>
 
             <!-- === GOAL CARD === -->
-            <div class="panel mb-3 goal-card">
-                <div class="panel-header">
+            <details class="panel mb-3 goal-card secondary-section goal-section"
+                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                <summary class="panel-header">
                     <h3>Goal</h3>
                     <span class="text-sm text-muted">Done when all of these hold:</span>
-                </div>
+                </summary>
                 <div class="panel-body">
                     <div class="flex-between mb-1" th:if="${issue.repo.ciEnabled}">
                         <span class="text-sm">CI checks pass</span>
@@ -265,10 +290,10 @@
                     <div class="text-sm text-muted">
                         On exhaustion: escalates to needs-human with 24 h cooldown<span
                                 th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                                th:text="' — currently ' + ${issue.status}"></span>
+                                th:text="' — currently ' + ${humanize.status(issue.status)}"></span>
                     </div>
                 </div>
-            </div>
+            </details>
 
             <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
             <!--/* The #timeline-panel wrapper ALWAYS renders (even before iteration 1, when the
@@ -277,11 +302,13 @@
                    conditional, so nothing is visible until there's timeline data. */-->
             <div th:fragment="timeline-panel(oob)" id="timeline-panel"
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-              <div class="panel mb-3" th:if="${timeline != null and not #lists.isEmpty(timeline)}">
-                <div class="panel-header">
+              <details class="panel mb-3 secondary-section timeline-section"
+                       th:if="${timeline != null and not #lists.isEmpty(timeline)}"
+                       th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                <summary class="panel-header">
                     <h3>Timeline</h3>
                     <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
-                </div>
+                </summary>
                 <div class="panel-body">
                     <!--/* Iterations are grouped into runs (a manual retry resets the iteration counter
                            without deleting the previous run's rows — see TimelineAssembler's Runs
@@ -315,7 +342,7 @@
                     </div>
                     </th:block>
                 </div>
-              </div>
+              </details>
             </div>
 
             <!-- === LIVE-REFRESHED STATUS SECTION (metrics + phase pipeline) === -->
@@ -332,7 +359,7 @@
                         <textarea name="guidance" rows="3" class="modal-textarea" required
                                   placeholder="e.g. Check the retry logic in FooService — the bug is probably there"></textarea>
                         <p class="text-sm text-muted" style="margin:0.5rem 0 0">
-                            Queued guidance is injected at the next iteration boundary; it won't interrupt the current Claude run.
+                            Queued guidance is injected at the next iteration boundary; it won't interrupt the current agent run.
                         </p>
                         <div class="modal-actions">
                             <button type="submit" class="btn btn-primary btn-sm">
@@ -349,7 +376,7 @@
         <div class="detail-grid-right">
             <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3 live-terminal-panel" id="live-terminal-panel">
                 <div class="panel-header">
-                    <h3>Claude Code Session</h3>
+                    <h3 th:text="${agentProviderName != null ? agentProviderName + ' Session' : 'Agent Session'}">Agent Session</h3>
                     <div class="flex gap-1 terminal-toolbar" style="align-items:center;flex-wrap:wrap">
                         <span class="terminal-trim-note text-sm text-muted" id="terminal-trim-note" hidden></span>
                         <!--/* Filter box (#84): substring-hides non-matching lines live, both existing
@@ -384,7 +411,7 @@
                 </div>
                 <div class="panel-body terminal-well" style="padding:0;position:relative">
                     <div id="live-terminal" class="live-terminal" aria-live="polite" role="log">
-                        <div class="terminal-line term-system" data-raw="Waiting for Claude Code output...">Waiting for Claude Code output...</div>
+                        <div class="terminal-line term-system" data-raw="Waiting for agent output...">Waiting for agent output...</div>
                     </div>
                     <button type="button" class="terminal-jump-btn" id="terminal-jump" data-terminal-jump hidden>
                         <i class="ti ti-arrow-down" aria-hidden="true"></i> Jump to bottom
@@ -408,58 +435,6 @@
            morph swap is what matters (see the comment on .detail-grid above and
            DashboardRunningStripRenderTest, which documents the same invariant for the
            dashboard's Now Running strip). === -->
-
-    <!-- === Retry Modal === -->
-    <div th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-         id="retry-modal" class="modal-backdrop" data-modal hidden>
-        <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="retry-modal-title">
-            <h3 id="retry-modal-title" style="margin:0 0 0.5rem">Retry Issue</h3>
-            <p class="text-sm text-muted" style="margin:0 0 1rem">Optionally add instructions for the next attempt. These will be posted as a comment on the GitHub issue and provided to Claude Code.</p>
-            <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post">
-                <textarea name="instructions" rows="4" class="modal-textarea" data-modal-autofocus
-                          placeholder="e.g. Break this into smaller changes, focus on the API layer first..."></textarea>
-                <div class="field-group">
-                    <label for="retryImplModel">Implementation model for this retry (optional)</label>
-                    <select id="retryImplModel" name="implModelOverride">
-                        <option value="" selected>Use repo/global setting</option>
-                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                    </select>
-                </div>
-                <div class="field-group">
-                    <label for="retryReviewModel">Review model for this retry (optional)</label>
-                    <select id="retryReviewModel" name="reviewModelOverride">
-                        <option value="" selected>Use repo/global setting</option>
-                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                    </select>
-                </div>
-                <div class="field-group">
-                    <label for="retryBudgetOverride">Budget for this issue (USD, blank = use repo setting)</label>
-                    <input type="number" id="retryBudgetOverride" name="budgetOverrideUsd"
-                           step="0.50" min="0" placeholder="unlimited">
-                    <p class="text-sm text-muted" style="margin:0.25rem 0 0">Spend is cumulative for this issue's lifetime and is not reset by retrying — raise the budget here if it was exhausted. Blank clears any previous override, same as the model overrides above.</p>
-                </div>
-                <div class="field-group">
-                    <label for="retryPlanFirstOverride">Plan approval (this issue)</label>
-                    <select id="retryPlanFirstOverride" name="planFirstOverride">
-                        <option value="" selected>Use repo setting</option>
-                        <option value="require">Require plan approval before implementation</option>
-                        <option value="skip">Skip plan approval</option>
-                    </select>
-                </div>
-                <div class="field-group" th:if="${issue.claudeSessionId != null}">
-                    <label style="display:flex; align-items:center; gap:0.5rem; font-weight:normal">
-                        <input type="checkbox" name="continueSession" value="true">
-                        Continue previous Claude session (keeps prior context)
-                    </label>
-                    <p class="text-sm text-muted" style="margin:0.25rem 0 0">Unchecked (default) starts a fresh Claude session for this retry.</p>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm">Start Retry</button>
-                </div>
-            </form>
-        </div>
-    </div>
 
     <!-- === Start Modal === -->
     <div th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
@@ -523,7 +498,7 @@
          id="cancel-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="cancel-modal-title">
             <h3 id="cancel-modal-title" style="margin:0 0 0.5rem">Stop Issue</h3>
-            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the Claude process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">Stops the active agent process and marks this issue as failed (reason: cancelled by operator). In-flight GitHub calls finish first. You can retry afterwards.</p>
             <form th:action="@{'/issues/' + ${issue.id} + '/cancel'}" method="post">
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
@@ -596,10 +571,12 @@
     </div>
 
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
-    <div class="panel mb-3">
-        <div class="panel-header">
+    <details class="panel mb-3 secondary-section history-section"
+             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+        <summary class="panel-header">
             <h3>Iteration History</h3>
-        </div>
+            <span class="text-sm text-muted" th:text="${#lists.size(iterationsNewestFirst) + ' attempts'}">0 attempts</span>
+        </summary>
         <div class="panel-body">
             <!--/* Newest-first (#90): iterationsNewestFirst is a reversed view of the same
                    ascending "iterations" list used by latestIteration/the Timeline card above
@@ -632,7 +609,7 @@
                                   th:text="${'Review: ' + (iter.reviewPassed ? 'PASSED' : 'FAILED')}">Review: PASSED</span>
 
                             <span class="text-sm text-muted" th:if="${iter.claudeSessionId != null and not #strings.isEmpty(iter.claudeSessionId)}">
-                                Claude session:
+                                Agent session:
                                 <code class="text-sm" th:text="${#strings.substring(iter.claudeSessionId, 0, T(java.lang.Math).min(8, iter.claudeSessionId.length())) + '…'}"
                                       th:title="${iter.claudeSessionId}">sess-1234…</code>
                             </span>
@@ -655,7 +632,7 @@
                             </details>
 
                             <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">
-                                <summary class="text-sm">Claude Code Output</summary>
+                                <summary class="text-sm">Agent Output</summary>
                                 <pre class="code-output" th:text="${iter.claudeOutput}">output</pre>
                             </details>
 
@@ -679,25 +656,29 @@
             </ul>
             <p class="text-muted" th:if="${#lists.isEmpty(iterationsNewestFirst)}">No iterations yet.</p>
         </div>
-    </div>
+    </details>
 
     <!-- === ACTIVITY LOG (full width, below the grid) === -->
-    <div class="panel">
-        <div class="panel-header">
+    <details class="panel secondary-section activity-section"
+             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+        <summary class="panel-header">
             <h3>Activity Log</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(events) + ' events'}">0 events</span>
-        </div>
+        </summary>
         <div class="panel-body">
             <ul class="events-feed" th:if="${not #lists.isEmpty(events)}">
-                <li th:each="event : ${events}">
+                <li th:each="event : ${events}" class="event-summary">
                     <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm:ss')}">12:00:00</span>
                     <span class="type" th:text="${humanize.eventType(event.eventType)}">EVENT</span>
-                    <span th:text="${event.message}">message</span>
+                    <details class="event-technical">
+                        <summary>Technical details</summary>
+                        <pre th:text="${event.message}">message</pre>
+                    </details>
                 </li>
             </ul>
             <p class="text-muted" th:if="${#lists.isEmpty(events)}">No events for this issue.</p>
         </div>
-    </div>
+    </details>
 </div>
 
 <!-- === FRAGMENT: auto-refreshed status section (metrics + phase pipeline) === -->

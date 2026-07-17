@@ -12,6 +12,9 @@ import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -42,6 +45,12 @@ public class RepositoryController {
     private final RepoLessonRepository lessonRepository;
     private final IssuePollingService pollingService;
     private final NotificationRepository notificationRepository;
+
+    @Autowired(required = false)
+    private IssueBotProperties properties;
+
+    @Autowired(required = false)
+    private CodexModelCatalog codexModelCatalog;
 
     public RepositoryController(WatchedRepoRepository repoRepository,
                                  TrackedIssueRepository issueRepository,
@@ -253,12 +262,20 @@ public class RepositoryController {
         model.addAttribute("issueCounts", issueCounts);
         model.addAttribute("totalIssueCounts", totalIssueCounts);
         model.addAttribute("lessonsByRepo", lessonsByRepo);
-        model.addAttribute("modelCatalog", com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS);
+        model.addAttribute("modelCatalog", selectedModelCatalog());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
         if (error != null) model.addAttribute("error", error);
+    }
+
+    private List<?> selectedModelCatalog() {
+        if (properties != null && properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
+            return codexModelCatalog == null
+                    ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
+        }
+        return com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS;
     }
 }

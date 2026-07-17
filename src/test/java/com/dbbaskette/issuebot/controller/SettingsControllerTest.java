@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.ui.ExtendedModelMap;
@@ -24,7 +25,7 @@ class SettingsControllerTest {
     private SettingsController controller(IssueBotProperties properties, Path configFile) {
         SettingsController controller = new SettingsController(properties,
                 mock(IssuePollingService.class), mock(TrackedIssueRepository.class),
-                mock(NotificationRepository.class));
+                mock(NotificationRepository.class), mock(CodexModelCatalog.class));
         controller.setConfigPathForTests(configFile);
         return controller;
     }
@@ -62,6 +63,27 @@ class SettingsControllerTest {
         assertThat(redirectAttributes.getFlashAttributes().get("success"))
                 .isNotNull()
                 .asString().contains("no restart needed");
+    }
+
+    @Test
+    void codexModelSaveSelectsProviderAndPersistsSeparateDefaults() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        Files.writeString(configFile, "issuebot:\n  claude-code:\n    implementation-model: claude-opus-4-8\n");
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+
+        RedirectAttributesModelMap redirectAttributes = new RedirectAttributesModelMap();
+        String view = controller.saveModels(IssueBotProperties.AgentProvider.CODEX,
+                "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", redirectAttributes);
+
+        assertThat(view).isEqualTo("redirect:/settings");
+        assertThat(properties.getAgentProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+        assertThat(properties.getCodexCli().getImplementationModel()).isEqualTo("gpt-5.6-sol");
+        String written = Files.readString(configFile);
+        assertThat(written).contains("agent-provider: codex");
+        assertThat(written).contains("codex-cli:");
+        assertThat(written).contains("review-model: gpt-5.6-terra");
+        assertThat(written).contains("implementation-model: claude-opus-4-8");
     }
 
     @Test

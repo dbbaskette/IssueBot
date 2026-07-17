@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,5 +26,16 @@ class UiModelAdviceTest {
 
         properties.getNotifications().setDashboard(false);
         assertThat(advice.dashboardNotificationsEnabled()).isFalse();
+    }
+
+    @Test
+    void currentPath_preservesPathAndQueryForProcessingControlRedirects() {
+        UiModelAdvice advice = new UiModelAdvice(new IssueBotProperties(),
+                org.mockito.Mockito.mock(ProcessingControlService.class));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRequestURI("/issues/14");
+        request.setQueryString("tab=activity");
+
+        assertThat(advice.currentPath(request)).isEqualTo("/issues/14?tab=activity");
     }
 }
