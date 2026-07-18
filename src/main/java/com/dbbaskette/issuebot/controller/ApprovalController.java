@@ -68,6 +68,14 @@ public class ApprovalController {
             }
             WatchedRepo repo = issue.getRepo();
             try {
+                var pullRequest = gitHubApi.getPullRequest(
+                        repo.getOwner(), repo.getName(), issue.getPrNumber());
+                if (pullRequest != null && pullRequest.path("draft").asBoolean(false)) {
+                    gitHubApi.markPrReady(repo.getOwner(), repo.getName(), issue.getPrNumber());
+                    eventService.log("PR_MARKED_READY_ON_APPROVAL",
+                            "Marked draft PR #" + issue.getPrNumber() + " ready for review",
+                            repo, issue);
+                }
                 String prTitle = "IssueBot: " + issue.getIssueTitle()
                         + " (#" + issue.getIssueNumber() + ") (#" + issue.getPrNumber() + ")";
                 gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),

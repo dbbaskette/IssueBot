@@ -1189,7 +1189,7 @@ public class IssueWorkflowService {
     /**
      * Phase 4 — PR Creation: Create a PR on GitHub.
      * Creates as draft for approval-gated repos; non-draft otherwise so auto-merge works
-     * (GitHub's GraphQL markPullRequestAsReady mutation isn't available with all token types).
+     * (This also avoids an unnecessary draft-to-ready GraphQL transition for autonomous runs.)
      * If a PR already exists for this branch (review retry), reuse it.
      * Returns the PR number.
      */

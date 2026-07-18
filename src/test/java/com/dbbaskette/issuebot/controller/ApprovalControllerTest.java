@@ -14,6 +14,7 @@ import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -126,6 +127,38 @@ class ApprovalControllerTest {
         verify(gitHubApi).mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash"));
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
         verify(issues).save(issue);
+    }
+
+    @Test
+    void approveAndMergeMarksDraftPrReadyBeforeMerging() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
+        EventService eventService = mock(EventService.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 7, "Fix it");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setBranchName("issuebot/7");
+        issue.setPrNumber(55);
+
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(gitHubApi.getPullRequest("acme", "widgets", 55))
+                .thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode()
+                        .put("draft", true));
+
+        ApprovalController controller = controller(issues, iterations,
+                mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class),
+                mock(NotificationRepository.class));
+
+        controller.approve(new ExtendedModelMap(), 1L, true, null, null, mock(RedirectAttributes.class));
+
+        InOrder order = inOrder(gitHubApi);
+        order.verify(gitHubApi).getPullRequest("acme", "widgets", 55);
+        order.verify(gitHubApi).markPrReady("acme", "widgets", 55);
+        order.verify(gitHubApi).mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash"));
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
     }
 
     @Test
