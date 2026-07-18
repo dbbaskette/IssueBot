@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.github;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class GitHubApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubApiClient.class);
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final WebClient webClient;
 
@@ -231,13 +233,35 @@ public class GitHubApiClient {
         if (commitTitle != null) {
             payload.put("commit_title", commitTitle);
         }
-        return webClient.put()
-                .uri("/repos/{owner}/{repo}/pulls/{number}/merge", owner, repo, prNumber)
-                .bodyValue(payload)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .retryWhen(retryOnServerError())
-                .block(Duration.ofSeconds(30));
+        try {
+            return webClient.put()
+                    .uri("/repos/{owner}/{repo}/pulls/{number}/merge", owner, repo, prNumber)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .retryWhen(retryOnServerError())
+                    .block(Duration.ofSeconds(30));
+        } catch (WebClientResponseException e) {
+            throw new IllegalStateException(
+                    "GitHub refused to merge PR #" + prNumber + ": "
+                            + githubErrorDetail(e) + " (HTTP " + e.getStatusCode().value() + ")",
+                    e);
+        }
+    }
+
+    private String githubErrorDetail(WebClientResponseException error) {
+        String responseBody = error.getResponseBodyAsString();
+        if (responseBody != null && !responseBody.isBlank()) {
+            try {
+                String message = JSON.readTree(responseBody).path("message").asText();
+                if (!message.isBlank()) {
+                    return message;
+                }
+            } catch (Exception ignored) {
+                // Fall through to Spring's status description for non-JSON responses.
+            }
+        }
+        return error.getStatusText();
     }
 
     public JsonNode getPullRequest(String owner, String repo, int prNumber) {
@@ -337,7 +361,7 @@ public class GitHubApiClient {
 
         String mutation = """
                 mutation {
-                  markPullRequestAsReady(input: {pullRequestId: "%s"}) {
+                  markPullRequestReadyForReview(input: {pullRequestId: "%s"}) {
                     pullRequest { isDraft }
                   }
                 }
@@ -361,10 +385,10 @@ public class GitHubApiClient {
         }
 
         boolean stillDraft = response != null
-                && response.path("data").path("markPullRequestAsReady")
+                && response.path("data").path("markPullRequestReadyForReview")
                         .path("pullRequest").path("isDraft").asBoolean(true);
         if (stillDraft) {
-            throw new RuntimeException("PR #" + prNumber + " is still draft after markPullRequestAsReady");
+            throw new RuntimeException("PR #" + prNumber + " is still draft after markPullRequestReadyForReview");
         }
         log.info("Successfully marked PR #{} as ready (no longer draft)", prNumber);
     }
