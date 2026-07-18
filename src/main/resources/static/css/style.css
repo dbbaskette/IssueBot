@@ -1354,6 +1354,282 @@ select {
 .plan-doc-panel[open] > summary.panel-header .text-muted { visibility: hidden; }
 
 /* ============================================================
+   Review score trajectory — selected review against its baseline
+   ============================================================ */
+.review-history-card {
+    scroll-margin-top: 5rem;
+    border-color: color-mix(in srgb, var(--info) 30%, var(--hairline));
+}
+
+.review-history-header {
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.review-history-header h3 { margin-top: 0.15rem; }
+
+.review-score-overview {
+    display: flex;
+    align-items: center;
+    gap: clamp(0.9rem, 3vw, 1.6rem);
+    min-width: 0;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--hairline);
+}
+
+.review-score-overview > strong {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: clamp(2.25rem, 7vw, 3.35rem);
+    font-weight: 600;
+    letter-spacing: -0.075em;
+    line-height: 0.95;
+    white-space: nowrap;
+}
+
+.review-score-context {
+    display: grid;
+    gap: 0.28rem;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.review-score-meta {
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.review-score-meta-only { margin-bottom: 0.75rem; }
+
+.review-score-summary {
+    max-width: 72ch;
+    margin: -0.15rem 0 1rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.55;
+}
+
+.review-attempt-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-width: 0;
+    margin-bottom: 1rem;
+}
+
+.review-attempt-selector a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0.36rem 0.68rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.69rem;
+    font-weight: 600;
+}
+
+.review-attempt-selector a[aria-current="true"] {
+    border-color: color-mix(in srgb, var(--info) 48%, var(--hairline));
+    background: var(--info-soft);
+    color: var(--info);
+}
+
+.review-attempt-selector a:focus-visible {
+    outline: 2px solid var(--info);
+    outline-offset: 2px;
+}
+
+.review-dimension-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+    min-width: 0;
+}
+
+.review-dimension {
+    min-width: 0;
+    padding: 0.78rem 0.85rem 0.72rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+
+.review-dimension-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    min-width: 0;
+    margin-bottom: 0.65rem;
+}
+
+.review-dimension-heading strong {
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.review-dimension-heading span {
+    flex: 0 0 auto;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.review-score-rail {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 4px 7px;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+    padding: 1px 0;
+}
+
+.review-score-previous,
+.review-score-current {
+    grid-column: 1;
+    display: block;
+    max-width: 100%;
+    border-radius: var(--radius-pill);
+}
+
+.review-score-previous {
+    grid-row: 1;
+    background: var(--text-tertiary);
+    opacity: 0.58;
+}
+
+.review-score-current {
+    position: relative;
+    grid-row: 2;
+    min-width: 2px;
+    background: var(--info);
+}
+
+.review-score-marker {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--surface-raised);
+    border-radius: 50%;
+    background: var(--info);
+    transform: translate(50%, -50%);
+}
+
+.review-score-delta {
+    display: block;
+    margin-top: 0.48rem;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.review-score-delta.is-positive { color: var(--ok); }
+.review-score-delta.is-negative { color: var(--danger); }
+
+.review-criteria {
+    margin: 1rem 0 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--hairline);
+}
+
+.review-criteria-summary {
+    width: fit-content;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.review-criteria-list {
+    display: grid;
+    gap: 0.45rem;
+    margin: 0.7rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.review-criteria-list li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.65rem;
+    min-width: 0;
+    padding: 0.62rem 0.7rem;
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--text-tertiary);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+
+.review-criteria-list li.is-met { border-left-color: var(--ok); }
+.review-criteria-list li.is-unmet { border-left-color: var(--danger); }
+
+.review-criterion-verdict {
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.review-criteria-list li.is-met .review-criterion-verdict { color: var(--ok); }
+.review-criteria-list li.is-unmet .review-criterion-verdict { color: var(--danger); }
+
+.review-criteria-list strong,
+.review-criteria-list div > span {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.review-criteria-list strong {
+    color: var(--text-primary);
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.review-criteria-list div > span {
+    margin-top: 0.18rem;
+    color: var(--text-tertiary);
+    font-size: 0.7rem;
+    line-height: 1.45;
+}
+
+@media (max-width: 700px) {
+    .review-history-header { align-items: stretch; }
+    .review-score-overview { align-items: flex-start; }
+    .review-attempt-selector { overflow-wrap: anywhere; }
+    .review-attempt-selector a { min-width: 0; overflow-wrap: anywhere; }
+    .review-dimension-grid { grid-template-columns: minmax(0, 1fr); }
+    .review-dimension,
+    .review-criteria-list li { min-width: 0; overflow-wrap: anywhere; }
+}
+
+@media (max-width: 420px) {
+    .review-score-overview { flex-direction: column; gap: 0.65rem; }
+    .review-score-overview > strong { font-size: 2.65rem; }
+    .review-criteria-list li { grid-template-columns: minmax(0, 1fr); gap: 0.3rem; }
+}
+
+/* ============================================================
    Plan Review desk — focused contract documents + immutable rail
    ============================================================ */
 .plan-review {

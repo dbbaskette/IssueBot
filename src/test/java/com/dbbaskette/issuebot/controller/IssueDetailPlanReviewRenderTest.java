@@ -145,7 +145,8 @@ class IssueDetailPlanReviewRenderTest {
                 .doesNotContain("name=\"versionId\"")
                 .doesNotContain("action=\"/issues/42/retry\"")
                 .doesNotContain("name=\"planFirstOverride\"");
-        assertThat(occurrences(html, "Did not conform")).isEqualTo(2);
+        assertThat(occurrences(html, "class=\"status status-failed\">Did not conform</span>"))
+                .isEqualTo(2);
     }
 
     @Test
@@ -192,6 +193,132 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("action=\"/issues/42/retry\"")
                 .doesNotContain("Needs guidance after review 2")
                 .doesNotContain("Action required");
+    }
+
+    @Test
+    void scoreTrajectoryComparesSelectedAttemptAndPreservesPlanVersion() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        PlanningVersion historical = pending(issue, 2, "# Historical design", "# Historical plan", null);
+        historical.supersede();
+
+        Iteration first = review(issue, 1, false, """
+                {
+                  "summary":"Several requirements remain",
+                  "specComplianceScore":0.77,
+                  "correctnessScore":0.78,
+                  "codeQualityScore":0.77,
+                  "testCoverageScore":0.45,
+                  "architectureFitScore":0.78,
+                  "regressionsScore":0.78,
+                  "securityScore":0.78
+                }
+                """);
+        Iteration second = review(issue, 2, true, """
+                {
+                  "summary":"The implementation matches the approved plan",
+                  "specComplianceScore":0.96,
+                  "correctnessScore":0.95,
+                  "codeQualityScore":0.95,
+                  "testCoverageScore":0.94,
+                  "architectureFitScore":0.96,
+                  "regressionsScore":0.95,
+                  "securityScore":0.94,
+                  "findings":[
+                    {"severity":"low","finding":"Minor cleanup"},
+                    {"severity":"info","finding":"Documentation note"}
+                  ],
+                  "criteria":[
+                    {"text":"Contract remains immutable","verdict":"met","note":"Covered by tests"},
+                    {"text":"Retries preserve guidance","verdict":"met","note":"Verified"},
+                    {"text":"Test coverage","verdict":"met","note":"Expanded"},
+                    {"text":"No regressions","verdict":"met","note":"Suite passes"}
+                  ]
+                }
+                """);
+
+        String html = render(issue, List.of(current, historical), historical, current,
+                List.of(second, first));
+
+        assertThat(html).contains("id=\"review-history\"")
+                .contains("Implementation review")
+                .contains("Conforms to plan")
+                .contains("95%")
+                .contains("22 points from review 1")
+                .contains("Test coverage")
+                .contains("94%")
+                .contains("+49")
+                .contains("4 of 4 met")
+                .contains("aria-label=\"Test coverage: review 1 45 percent; review 2 94 percent; improved 49 points\"")
+                .contains("reviewAttempt=1")
+                .contains("review-model")
+                .contains("2 findings")
+                .contains("open=\"open\"")
+                .contains("href=\"/issues/42?planVersion=2&amp;reviewAttempt=2#review-history\"")
+                .contains("href=\"/issues/42?planVersion=2&amp;reviewAttempt=1#review-history\"")
+                .containsPattern("(?s)Review 2.*?Review 1")
+                .contains("aria-current=\"true\"");
+    }
+
+    @Test
+    void firstScoredReviewUsesUnavailableVerdictAndNewScoreLanguage() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, null, """
+                {
+                  "summary":"The reviewer returned scores without a verdict",
+                  "specComplianceScore":0.81,
+                  "testCoverageScore":0.68
+                }
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(first));
+
+        assertThat(html).contains("Review unavailable")
+                .contains(">Unavailable</span>")
+                .contains("81%")
+                .contains("First scored review")
+                .contains(">New</span>")
+                .contains("aria-label=\"Spec compliance: review 1 81 percent; first score\"")
+                .contains("aria-label=\"Test coverage: review 1 68 percent; first score\"")
+                .doesNotContain("review-attempt-selector");
+    }
+
+    @Test
+    void failedTrajectoryShowsNegativeAndUnchangedDeltasWithUnmetCriteriaFirst() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, true, """
+                {
+                  "specComplianceScore":0.90,
+                  "correctnessScore":0.80
+                }
+                """);
+        Iteration second = review(issue, 2, false, """
+                {
+                  "specComplianceScore":0.70,
+                  "correctnessScore":0.80,
+                  "securityScore":0.75,
+                  "criteria":[
+                    {"text":"Passing criterion","verdict":"met","note":"Still covered"},
+                    {"text":"Blocking criterion","verdict":"unmet","note":"Missing guard"}
+                  ]
+                }
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("Did not conform")
+                .contains(">Changes requested</span>")
+                .contains("-10 points from review 1")
+                .contains(">-20</span>")
+                .contains(">No change</span>")
+                .contains("1 of 2 met")
+                .contains("aria-label=\"Spec compliance: review 1 90 percent; review 2 70 percent; declined 20 points\"")
+                .contains("aria-label=\"Correctness: review 1 80 percent; review 2 80 percent; no change\"")
+                .contains("aria-label=\"Security: review 2 75 percent; first score for this dimension\"")
+                .containsSubsequence("Blocking criterion", "Missing guard", "Passing criterion", "Still covered");
     }
 
     @Test
@@ -318,6 +445,15 @@ class IssueDetailPlanReviewRenderTest {
         return failedReview(issue, number, """
                 {"specComplianceScore":%s,"testCoverageScore":%s}
                 """.formatted(specCompliance, testCoverage), passed);
+    }
+
+    private static Iteration review(TrackedIssue issue, int number, Boolean passed, String reviewJson) {
+        Iteration iteration = new Iteration(issue, number);
+        iteration.setReviewPassed(passed);
+        iteration.setReviewModel("review-model");
+        iteration.setReviewJson(reviewJson);
+        iteration.setLocalCheckResult("PASSED");
+        return iteration;
     }
 
     private static Iteration failedReview(TrackedIssue issue, int number, String reviewJson,

@@ -152,6 +152,97 @@
                 </div>
             </div>
 
+            <!-- === REVIEW SCORE TRAJECTORY: selected attempt against its nearest scored baseline === -->
+            <section th:if="${reviewScoreHistory != null}" th:with="history=${reviewScoreHistory}"
+                     id="review-history" class="panel mb-3 review-history-card"
+                     aria-labelledby="review-history-title">
+                <header class="panel-header review-history-header">
+                    <div>
+                        <span class="eyebrow"
+                              th:text="${'Implementation review · Attempt ' + history.selected.iterationNumber}">Implementation review</span>
+                        <h3 id="review-history-title"
+                            th:text="${history.selected.score.passed == null ? 'Review unavailable' : (history.selected.score.passed ? 'Conforms to plan' : 'Did not conform')}">Review result</h3>
+                    </div>
+                    <span class="status"
+                          th:classappend="${history.selected.score.passed == null ? 'status-pending' : (history.selected.score.passed ? 'status-completed' : 'status-failed')}"
+                          th:text="${history.selected.score.passed == null ? 'Unavailable' : (history.selected.score.passed ? 'Passed' : 'Changes requested')}">Result</span>
+                </header>
+
+                <div class="panel-body">
+                    <div class="review-score-overview" th:if="${history.selected.score.overall != null}">
+                        <strong th:text="${history.selected.overallPercent + '%'}">95%</strong>
+                        <div class="review-score-context">
+                            <span th:if="${history.previous == null}">First scored review</span>
+                            <span th:if="${history.previous != null and history.overallDeltaPoints != null and history.overallDeltaPoints != 0}"
+                                  th:text="${history.overallDeltaPoints + ' points from review ' + history.previous.iterationNumber}">22 points from review 1</span>
+                            <span th:if="${history.previous != null and history.overallDeltaPoints == 0}">No overall change</span>
+                            <span class="review-score-meta"
+                                  th:if="${history.selected.score.model != null or history.selected.score.findingCount > 0}"
+                                  th:text="${history.selected.score.model != null
+                                      ? history.selected.score.model + ' · ' + history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')
+                                      : history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')}">review-model · 2 findings</span>
+                        </div>
+                    </div>
+
+                    <div class="review-score-meta review-score-meta-only"
+                         th:if="${history.selected.score.overall == null and (history.selected.score.model != null or history.selected.score.findingCount > 0)}"
+                         th:text="${history.selected.score.model != null
+                             ? history.selected.score.model + ' · ' + history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')
+                             : history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')}">review-model · 0 findings</div>
+
+                    <p class="review-score-summary" th:if="${history.selected.score.summary != null}"
+                       th:text="${history.selected.score.summary}">Review summary</p>
+
+                    <nav th:if="${history.attempts.size() > 1}" class="review-attempt-selector"
+                         aria-label="Review attempts">
+                        <a th:each="attempt : ${history.attempts}"
+                           th:href="${selectedPlanIsHistorical
+                               ? '/issues/' + issue.id + '?planVersion=' + selectedPlanningVersion.versionNumber + '&amp;reviewAttempt=' + attempt.iterationNumber + '#review-history'
+                               : '/issues/' + issue.id + '?reviewAttempt=' + attempt.iterationNumber + '#review-history'}"
+                           th:attr="aria-current=${attempt.iterationNumber == history.selected.iterationNumber ? 'true' : null}"
+                           th:text="${'Review ' + attempt.iterationNumber}">Review 2</a>
+                    </nav>
+
+                    <div class="review-dimension-grid" th:if="${not history.dimensions.isEmpty()}">
+                        <div th:each="dimension : ${history.dimensions}" class="review-dimension">
+                            <div class="review-dimension-heading">
+                                <strong th:text="${dimension.label}">Test coverage</strong>
+                                <span th:text="${dimension.currentPercent + '%'}">94%</span>
+                            </div>
+                            <div class="review-score-rail" role="img"
+                                 th:attr="aria-label=${dimension.previousPercent == null
+                                     ? dimension.label + ': review ' + history.selected.iterationNumber + ' ' + dimension.currentPercent + ' percent; ' + (history.previous == null ? 'first score' : 'first score for this dimension')
+                                     : dimension.label + ': review ' + history.previous.iterationNumber + ' ' + dimension.previousPercent + ' percent; review ' + history.selected.iterationNumber + ' ' + dimension.currentPercent + ' percent; ' + (dimension.deltaPoints == 0 ? 'no change' : (dimension.deltaPoints > 0 ? 'improved ' + dimension.deltaPoints + ' points' : 'declined ' + (0 - dimension.deltaPoints) + ' points'))}">
+                                <span th:if="${dimension.previousPercent != null}" class="review-score-previous"
+                                      th:style="${'width:' + dimension.previousPercent + '%'}"></span>
+                                <span class="review-score-current"
+                                      th:style="${'width:' + dimension.currentPercent + '%'}"><i class="review-score-marker"></i></span>
+                            </div>
+                            <span class="review-score-delta"
+                                  th:classappend="${dimension.deltaPoints == null ? 'is-added' : (dimension.deltaPoints == 0 ? 'is-neutral' : (dimension.deltaPoints > 0 ? 'is-positive' : 'is-negative'))}"
+                                  th:text="${dimension.deltaPoints == null ? 'New' : (dimension.deltaPoints == 0 ? 'No change' : (dimension.deltaPoints > 0 ? '+' : '') + dimension.deltaPoints)}">+49</span>
+                        </div>
+                    </div>
+
+                    <details th:if="${history.criteriaTotal > 0}" class="review-criteria" open>
+                        <summary class="review-criteria-summary"
+                                 th:text="${history.criteriaMet + ' of ' + history.criteriaTotal + ' met'}">4 of 4 met</summary>
+                        <ul class="review-criteria-list">
+                            <li th:each="criterion : ${history.criteria}"
+                                th:classappend="${'is-' + criterion.verdict}">
+                                <span class="review-criterion-verdict"
+                                      th:text="${criterion.verdict == 'met' ? 'Met' : (criterion.verdict == 'unmet' ? 'Unmet' : 'Unclear')}">Met</span>
+                                <div>
+                                    <strong th:text="${criterion.text}">Criterion</strong>
+                                    <span th:if="${criterion.note != null and not #strings.isEmpty(criterion.note)}"
+                                          th:text="${criterion.note}">Criterion note</span>
+                                </div>
+                            </li>
+                        </ul>
+                    </details>
+                </div>
+            </section>
+
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
                 <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
