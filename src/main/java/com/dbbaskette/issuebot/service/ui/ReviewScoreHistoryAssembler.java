@@ -20,15 +20,15 @@ public final class ReviewScoreHistoryAssembler {
 
     public record Attempt(int iterationNumber, Long iterationId, ReviewScore score) {
         public Integer overallPercent() {
-            return score.overall() == null ? null : percent(score.overall());
+            return score.overall() == null ? null : scorePercent(score.overall());
         }
     }
 
     public record DimensionDelta(
             String key, String label, double current, Double previous, Double delta) {
-        public int currentPercent() { return percent(current); }
-        public Integer previousPercent() { return previous == null ? null : percent(previous); }
-        public Integer deltaPoints() { return delta == null ? null : percent(delta); }
+        public int currentPercent() { return scorePercent(current); }
+        public Integer previousPercent() { return previous == null ? null : scorePercent(previous); }
+        public Integer deltaPoints() { return delta == null ? null : points(delta); }
     }
 
     public record History(
@@ -48,7 +48,7 @@ public final class ReviewScoreHistoryAssembler {
         }
 
         public Integer overallDeltaPoints() {
-            return overallDelta == null ? null : percent(overallDelta);
+            return overallDelta == null ? null : points(overallDelta);
         }
     }
 
@@ -108,7 +108,11 @@ public final class ReviewScoreHistoryAssembler {
                 overallDelta, List.copyOf(criteria), met, criteria.size());
     }
 
-    private static int percent(double value) {
+    private static int scorePercent(double value) {
+        return points(Math.max(0.0, Math.min(1.0, value)));
+    }
+
+    private static int points(double value) {
         return (int) Math.round(value * 100.0);
     }
 }

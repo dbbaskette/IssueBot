@@ -196,8 +196,8 @@
                     <nav th:if="${history.attempts.size() > 1}" class="review-attempt-selector"
                          aria-label="Review attempts">
                         <a th:each="attempt : ${history.attempts}"
-                           th:href="${selectedPlanIsHistorical
-                               ? '/issues/' + issue.id + '?planVersion=' + selectedPlanningVersion.versionNumber + '&amp;reviewAttempt=' + attempt.iterationNumber + '#review-history'
+                           th:href="${requestedPlanVersion != null
+                               ? '/issues/' + issue.id + '?planVersion=' + requestedPlanVersion + '&amp;reviewAttempt=' + attempt.iterationNumber + '#review-history'
                                : '/issues/' + issue.id + '?reviewAttempt=' + attempt.iterationNumber + '#review-history'}"
                            th:attr="aria-current=${attempt.iterationNumber == history.selected.iterationNumber ? 'true' : null}"
                            th:text="${'Review ' + attempt.iterationNumber}">Review 2</a>

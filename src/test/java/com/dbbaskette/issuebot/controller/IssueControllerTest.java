@@ -970,6 +970,23 @@ class IssueControllerTest {
     }
 
     @Test
+    void detailExposesExplicitCurrentPlanVersionForReviewAttemptLinks() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        PlanningVersion current = PlanningVersion.pending(f.issue, 3,
+                "# Current design", "# Current plan", "CODEX", "gpt-5.6", null);
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(current));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, "3", null, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("requestedPlanVersion"))
+                .isEqualTo(3);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanIsHistorical"))
+                .isEqualTo(false);
+    }
+
+    @Test
     void detailFallsBackToLatestVersionForUnknownSelection() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
         PlanningVersion current = PlanningVersion.pending(f.issue, 3,

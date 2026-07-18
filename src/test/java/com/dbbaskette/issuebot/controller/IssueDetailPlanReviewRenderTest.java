@@ -322,6 +322,52 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void outOfRangeScoresRenderBoundedRailWidthsAndUnboundedRawDelta() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":-0.25}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"specComplianceScore":1.40}
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("aria-label=\"Spec compliance: review 1 0 percent; review 2 100 percent; improved 165 points\"")
+                .containsPattern("class=\"review-score-previous\"\\s+style=\"width:0%\"")
+                .containsPattern("class=\"review-score-current\"\\s+style=\"width:100%\"")
+                .contains(">+165</span>")
+                .doesNotContain("width:-25%")
+                .doesNotContain("width:140%");
+    }
+
+    @Test
+    void fractionalTrajectoryUsesRawDeltaAndPreservesExplicitCurrentPlanVersion() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":0.014}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"specComplianceScore":0.025}
+                """);
+        WebContext context = context(issue, List.of(current), current, current, List.of(second, first));
+        context.setVariable("requestedPlanVersion", 3);
+
+        String html = render(context);
+
+        assertThat(html).contains("aria-label=\"Spec compliance: review 1 1 percent; review 2 3 percent; improved 1 points\"")
+                .containsPattern("class=\"review-score-previous\"\\s+style=\"width:1%\"")
+                .containsPattern("class=\"review-score-current\"\\s+style=\"width:3%\"")
+                .contains(">+1</span>")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=2#review-history\"")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=1#review-history\"");
+        assertThat(html.indexOf("id=\"review-history\""))
+                .isLessThan(html.indexOf("id=\"plan-review\""));
+    }
+
+    @Test
     void guidanceAttemptBadgesReflectEachPersistedVerdict() {
         TrackedIssue issue = issueAwaitingApproval();
         issue.setStatus(IssueStatus.FAILED);
@@ -403,6 +449,8 @@ class IssueDetailPlanReviewRenderTest {
         context.setVariable("selectedPlanningVersion", selected);
         context.setVariable("currentPlanningVersion", current);
         context.setVariable("selectedPlanIsHistorical", selected != current);
+        context.setVariable("requestedPlanVersion",
+                selected != current ? selected.getVersionNumber() : null);
         context.setVariable("selectedDesignSpecHtml", markdownRenderer.toHtml(selected.getDesignSpec()));
         context.setVariable("selectedImplementationPlanHtml", markdownRenderer.toHtml(selected.getImplementationPlan()));
         context.setVariable("planReviewAttempts", reviewAttempts);

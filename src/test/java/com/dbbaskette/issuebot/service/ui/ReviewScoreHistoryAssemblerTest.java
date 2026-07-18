@@ -77,6 +77,42 @@ class ReviewScoreHistoryAssemblerTest {
     }
 
     @Test
+    void boundsDisplayedScorePercentagesWithoutBoundingRawDeltas() {
+        History history = ReviewScoreHistoryAssembler.assemble(
+                List.of(review(1, false, """
+                                {"specComplianceScore":-0.25}
+                                """),
+                        review(2, true, """
+                                {"specComplianceScore":1.40}
+                                """)), null);
+
+        DimensionDelta dimension = history.dimensions().getFirst();
+        assertThat(history.previous().overallPercent()).isZero();
+        assertThat(history.selected().overallPercent()).isEqualTo(100);
+        assertThat(dimension.previousPercent()).isZero();
+        assertThat(dimension.currentPercent()).isEqualTo(100);
+        assertThat(dimension.deltaPoints()).isEqualTo(165);
+        assertThat(history.overallDeltaPoints()).isEqualTo(165);
+    }
+
+    @Test
+    void derivesFractionalDeltaFromRawScoresInsteadOfRoundedEndpoints() {
+        History history = ReviewScoreHistoryAssembler.assemble(
+                List.of(review(1, false, """
+                                {"specComplianceScore":0.014}
+                                """),
+                        review(2, true, """
+                                {"specComplianceScore":0.025}
+                                """)), null);
+
+        DimensionDelta dimension = history.dimensions().getFirst();
+        assertThat(dimension.previousPercent()).isEqualTo(1);
+        assertThat(dimension.currentPercent()).isEqualTo(3);
+        assertThat(dimension.deltaPoints()).isEqualTo(1);
+        assertThat(history.overallDeltaPoints()).isEqualTo(1);
+    }
+
+    @Test
     void currentOnlyDimensionHasNoBaselineSoTheViewCanLabelItNew() {
         History history = ReviewScoreHistoryAssembler.assemble(
                 List.of(review(1, false, """

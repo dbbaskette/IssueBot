@@ -1043,6 +1043,7 @@ public class IssueController {
         model.addAttribute("selectedPlanningVersion", selected);
         model.addAttribute("currentPlanningVersion", current);
         model.addAttribute("selectedPlanIsHistorical", historical);
+        model.addAttribute("requestedPlanVersion", requestedPlanVersion);
         model.addAttribute("selectedDesignSpecHtml", selected == null
                 ? null : markdownRenderer.toHtml(selected.getDesignSpec()));
         model.addAttribute("selectedImplementationPlanHtml", selected == null
