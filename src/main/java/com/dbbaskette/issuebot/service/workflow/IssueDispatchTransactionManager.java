@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
@@ -26,15 +27,18 @@ public class IssueDispatchTransactionManager {
     private final WatchedRepoRepository repos;
     private final ProcessingControlRepository controls;
     private final IssueGuidanceRepository guidance;
+    private final IterationRepository iterations;
 
     public IssueDispatchTransactionManager(TrackedIssueRepository issues,
                                            WatchedRepoRepository repos,
                                            ProcessingControlRepository controls,
-                                           IssueGuidanceRepository guidance) {
+                                           IssueGuidanceRepository guidance,
+                                           IterationRepository iterations) {
         this.issues = issues;
         this.repos = repos;
         this.controls = controls;
         this.guidance = guidance;
+        this.iterations = iterations;
     }
 
     @Transactional
@@ -69,7 +73,7 @@ public class IssueDispatchTransactionManager {
             return IssueDispatchService.ClaimResult.rejected(
                     "Cannot retry issue in " + issue.getStatus() + " status");
         }
-        if (isSecondPlanFirstMiss(issue)) {
+        if (PlanRetryClassification.isSecondPlanFirstMiss(issue, reviewIterations(issue))) {
             return IssueDispatchService.ClaimResult.rejected(
                     "The second Plan First conformance miss requires the guided implementation retry");
         }
@@ -92,7 +96,7 @@ public class IssueDispatchTransactionManager {
             return IssueDispatchService.ClaimResult.rejected(
                     "Cannot retry issue in " + issue.getStatus() + " status");
         }
-        if (!requiresGuidedPlanRetry(issue)) {
+        if (!PlanRetryClassification.requiresGuidedPlanRetry(issue, reviewIterations(issue))) {
             return IssueDispatchService.ClaimResult.rejected(
                     "Guided retry is only available after the second Plan First conformance miss "
                             + "with an approved non-legacy planning version");
@@ -150,14 +154,8 @@ public class IssueDispatchTransactionManager {
         return IssueDispatchService.ClaimResult.claimed(saved);
     }
 
-    static boolean requiresGuidedPlanRetry(TrackedIssue issue) {
-        return isSecondPlanFirstMiss(issue)
-                && issue.getApprovedPlanningVersion() != null
-                && issue.getApprovedPlanningVersion().getState() == PlanningVersionState.APPROVED;
-    }
-
-    static boolean isSecondPlanFirstMiss(TrackedIssue issue) {
-        return issue.effectivePlanFirst() && issue.getPlanConformanceAttempt() == 2;
+    private List<Iteration> reviewIterations(TrackedIssue issue) {
+        return iterations.findByIssueOrderByIterationNumAsc(issue);
     }
 
     @FunctionalInterface

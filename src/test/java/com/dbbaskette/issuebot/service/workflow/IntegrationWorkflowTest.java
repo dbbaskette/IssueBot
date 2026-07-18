@@ -1543,7 +1543,7 @@ class IntegrationWorkflowTest {
         when(issueRepository.findByRepoAndStatusIn(eq(issue.getRepo()), anyList()))
                 .thenReturn(List.of());
         IssueDispatchService dispatch = new IssueDispatchService(
-                issueRepository, processingControl, guidanceRepository);
+                issueRepository, processingControl, guidanceRepository, iterationRepository);
         IssueBotProperties properties = new IssueBotProperties();
         RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
         IssueController controller = new IssueController(

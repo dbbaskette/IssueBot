@@ -39,7 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class IssueControllerTest {
 
     private static IssueDispatchService dispatch(TrackedIssueRepository issues) {
-        return new IssueDispatchService(issues, mock(ProcessingControlService.class));
+        return new IssueDispatchService(
+                issues, mock(ProcessingControlService.class), mock(IterationRepository.class));
     }
 
     @Test
@@ -229,7 +230,8 @@ class IssueControllerTest {
                     cancellationService, guidanceRepository, new ObjectMapper(),
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(),
-                    new IssueDispatchService(issues, control, guidanceRepository), planningVersions);
+                    new IssueDispatchService(issues, control, guidanceRepository, iterationRepository),
+                    planningVersions);
         }
     }
 
@@ -596,6 +598,7 @@ class IssueControllerTest {
         PlanningVersion approvedVersion = approvedVersion(f.issue, 3);
         f.issue.setApprovedPlanningVersion(approvedVersion);
         f.issue.setPlanConformanceAttempt(2);
+        stubPersistedMiss(f);
         f.issue.setPlanCorrectionPending(true);
         f.issue.setCurrentIteration(4);
         f.issue.setCurrentReviewIteration(2);
@@ -631,6 +634,7 @@ class IssueControllerTest {
         when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
         f.issue.setApprovedPlanningVersion(legacyVersion);
         f.issue.setPlanConformanceAttempt(2);
+        stubPersistedMiss(f);
 
         String view = f.controller.retryPlanImplementation(
                 f.issue.getId(), "Try a narrower change", f.redirectAttributes);
@@ -678,6 +682,7 @@ class IssueControllerTest {
         f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
         f.issue.setPlanConformanceAttempt(2);
         when(f.properties.getMaxConcurrentIssues()).thenReturn(0);
+        stubPersistedMiss(f);
 
         f.controller.retryPlanImplementation(
                 f.issue.getId(), "Try a narrower change", f.redirectAttributes);
@@ -693,6 +698,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.FAILED);
         f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
         f.issue.setPlanConformanceAttempt(2);
+        stubPersistedMiss(f);
         com.fasterxml.jackson.databind.node.ObjectNode existingPr = new ObjectMapper().createObjectNode();
         existingPr.put("number", 77);
         when(f.gitHubApiClient.listOpenPullRequests(
@@ -712,6 +718,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.COOLDOWN);
         f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
         f.issue.setPlanConformanceAttempt(2);
+        stubPersistedMiss(f);
 
         f.controller.retryPlanImplementation(
                 f.issue.getId(), "x".repeat(4100), f.redirectAttributes);
@@ -726,6 +733,11 @@ class IssueControllerTest {
                 issue, number, "approved spec", "approved plan", "test", "test", null);
         version.approve(java.time.LocalDateTime.now());
         return version;
+    }
+
+    private static void stubPersistedMiss(Fixture f) {
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(review(f.issue, 2, false, 0.70, 0.65)));
     }
 
     private static Fixture approvedPlanFixture(IssueStatus status, int conformanceAttempt) {
@@ -1018,6 +1030,25 @@ class IssueControllerTest {
     }
 
     @Test
+    void jsonFailureWithoutPersistedVerdictDoesNotShowGuidance() {
+        Fixture f = approvedPlanFixture(IssueStatus.FAILED, 2);
+        Iteration latest = review(f.issue, 2, false, 0.62, 0.45);
+        latest.setReviewPassed(null);
+        latest.setReviewJson("""
+                {"passed":false,"specComplianceScore":0.62,"testCoverageScore":0.45}
+                """);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(review(f.issue, 1, false, 0.55, 0.40), latest));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null, null, null);
+
+        History history = (History) model.getAttribute("reviewScoreHistory");
+        org.assertj.core.api.Assertions.assertThat(history.latest().score().passed()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
+    }
+
+    @Test
     void requestedReviewAttemptSelectsOlderComparison() {
         Fixture f = approvedPlanFixture(IssueStatus.AWAITING_APPROVAL, 3);
         when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
@@ -1269,6 +1300,8 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.FAILED);
         f.issue.getRepo().setPlanFirst(true);
         f.issue.setPlanConformanceAttempt(2);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(review(f.issue, 2, false, 0.70, 0.65)));
 
         f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
 
@@ -1277,6 +1310,39 @@ class IssueControllerTest {
         verify(f.workflowService, never()).processIssueAsync(any());
         verify(f.redirectAttributes).addFlashAttribute(
                 eq("error"), contains("guided implementation retry"));
+    }
+
+    @Test
+    void genericRetryAllowsCounterTwoWhenLatestPersistedReviewPassed() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.getRepo().setPlanFirst(true);
+        f.issue.setPlanConformanceAttempt(2);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
+                review(f.issue, 1, false, 0.60, 0.55),
+                review(f.issue, 2, true, 0.95, 0.90)));
+
+        f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
+
+        verify(f.issues).save(f.issue);
+        verify(f.workflowService).processIssueAsync(f.issue, null);
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("Retry started"));
+    }
+
+    @Test
+    void genericRetryTreatsNullPersistedVerdictAsNeutralEvenWhenJsonFails() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.getRepo().setPlanFirst(true);
+        f.issue.setPlanConformanceAttempt(2);
+        Iteration neutral = review(f.issue, 2, false, 0.70, 0.65);
+        neutral.setReviewPassed(null);
+        neutral.setReviewJson("{\"passed\":false,\"specComplianceScore\":0.70}");
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(neutral));
+
+        f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
+
+        verify(f.issues).save(f.issue);
+        verify(f.workflowService).processIssueAsync(f.issue, null);
     }
 
     /**

@@ -25,6 +25,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
+import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -324,7 +325,8 @@ public class IssueController {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return "Cannot retry issue in " + issue.getStatus() + " status";
         }
-        if (issue.effectivePlanFirst() && issue.getPlanConformanceAttempt() == 2) {
+        if (PlanRetryClassification.isSecondPlanFirstMiss(issue,
+                iterationRepository.findByIssueOrderByIterationNumAsc(issue))) {
             return "The second Plan First conformance miss requires the guided implementation retry";
         }
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
@@ -837,25 +839,6 @@ public class IssueController {
         return planReviewRedirect(id);
     }
 
-    private static boolean eligibleForPlanImplementationRetry(TrackedIssue issue) {
-        return issue.getPlanConformanceAttempt() == 2
-                && issue.getApprovedPlanningVersion() != null
-                && issue.getApprovedPlanningVersion().getState() == PlanningVersionState.APPROVED;
-    }
-
-    private String planImplementationRetryRejection(TrackedIssue issue) {
-        if (!eligibleForPlanImplementationRetry(issue)) {
-            return "Guided retry is only available after the second Plan First conformance miss "
-                    + "with an approved non-legacy planning version";
-        }
-        long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
-        if (activeCount >= properties.getMaxConcurrentIssues()) {
-            return "Global concurrency limit reached (" + activeCount + "/"
-                    + properties.getMaxConcurrentIssues() + "). Wait for an active issue to finish.";
-        }
-        return null;
-    }
-
     private static String planReviewRedirect(Long id) {
         return "redirect:/issues/" + id + "#plan-review";
     }
@@ -1002,7 +985,7 @@ public class IssueController {
                 model, issue, iterations, requestedPlanVersion, reviewHistory);
         model.addAttribute("reviewScoreHistory", reviewHistory);
         model.addAttribute("showPlanGuidance", shouldShowPlanGuidance(
-                issue, planReviewSelection, reviewHistory));
+                issue, planReviewSelection, reviewHistory, iterations));
         model.addAttribute("iterations", iterations);
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         // Iteration History (#90) reads newest-first; "iterations" above stays ascending
@@ -1070,14 +1053,15 @@ public class IssueController {
 
     private boolean shouldShowPlanGuidance(TrackedIssue issue,
                                            PlanReviewSelection selection,
-                                           History history) {
+                                           History history,
+                                           List<Iteration> iterations) {
         return (issue.getStatus() == IssueStatus.FAILED || issue.getStatus() == IssueStatus.COOLDOWN)
                 && issue.getPlanConformanceAttempt() == 2
                 && selection.current() != null
                 && selection.current().getState() == PlanningVersionState.APPROVED
                 && !selection.historical()
                 && history != null
-                && Boolean.FALSE.equals(history.latest().score().passed());
+                && PlanRetryClassification.isSecondPlanFirstMiss(issue, iterations);
     }
 
     private record PlanReviewSelection(

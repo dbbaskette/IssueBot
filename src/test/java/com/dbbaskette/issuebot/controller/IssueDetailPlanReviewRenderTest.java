@@ -210,12 +210,9 @@ class IssueDetailPlanReviewRenderTest {
         String html = render(issue, List.of(approved), approved, approved,
                 List.of(failed, passed, unavailable), true);
 
-        assertThat(html).contains("Did not conform")
-                .contains("Conformed")
-                .contains("Review unavailable")
-                .contains("status-failed")
-                .contains("status-completed")
-                .contains("status-pending");
+        assertThat(html).contains("class=\"status status-failed\">Did not conform</span>")
+                .contains("class=\"status status-completed\">Conformed</span>")
+                .contains("class=\"status status-pending\">Review unavailable</span>");
     }
 
     @Test
