@@ -75,13 +75,9 @@
             </div>
             <div th:if="${rev.overall > 0}" class="text-sm text-muted"
                  style="display:flex;flex-wrap:wrap;gap:0.4rem 1rem">
-                <span th:text="${'Spec ' + #numbers.formatDecimal(rev.specCompliance, 1, 1)}">Spec</span>
-                <span th:text="${'Correctness ' + #numbers.formatDecimal(rev.correctness, 1, 1)}">Correctness</span>
-                <span th:text="${'Quality ' + #numbers.formatDecimal(rev.codeQuality, 1, 1)}">Quality</span>
-                <span th:text="${'Tests ' + #numbers.formatDecimal(rev.testCoverage, 1, 1)}">Tests</span>
-                <span th:text="${'Architecture ' + #numbers.formatDecimal(rev.architectureFit, 1, 1)}">Architecture</span>
-                <span th:text="${'Regressions ' + #numbers.formatDecimal(rev.regressions, 1, 1)}">Regressions</span>
-                <span th:text="${'Security ' + #numbers.formatDecimal(rev.security, 1, 1)}">Security</span>
+                <span th:each="dimension : ${rev.dimensions}"
+                      th:with="label=${dimension.key == 'specCompliance' ? 'Spec' : (dimension.key == 'codeQuality' ? 'Quality' : (dimension.key == 'testCoverage' ? 'Tests' : (dimension.key == 'architectureFit' ? 'Architecture' : dimension.label)))}"
+                      th:text="${label + ' ' + #numbers.formatDecimal(dimension.value, 1, 1)}">Dimension</span>
             </div>
             <div th:if="${not #lists.isEmpty(rev.criteria)}" class="mt-1">
                 <div class="text-sm text-muted" style="font-weight:600;margin-bottom:0.3rem">Acceptance Criteria</div>

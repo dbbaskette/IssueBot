@@ -136,4 +136,39 @@ class ApprovalsDiffViewerRenderTest {
 
         assertThat(html).doesNotContain("data-diff-viewer");
     }
+
+    @Test
+    void partialReviewRendersOnlyPresentDimensions() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 11, "Partial review");
+        issue.setId(4L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setReviewPassed(true);
+        iteration.setReviewJson("""
+                {"passed": true, "specComplianceScore": 0.8}
+                """);
+
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
+
+        ApprovalController controller = new ApprovalController(issues,
+                mock(IterationManager.class), mock(GitHubApiClient.class),
+                mock(EventService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
+
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("Spec 0.8");
+        assertThat(html).doesNotContain("Correctness 0.0", "Quality 0.0", "Tests 0.0",
+                "Architecture 0.0", "Regressions 0.0", "Security 0.0");
+    }
 }
