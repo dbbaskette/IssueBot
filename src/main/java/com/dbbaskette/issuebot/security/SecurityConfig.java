@@ -28,7 +28,7 @@ public class SecurityConfig {
             http
                 .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/css/**", "/js/**", "/images/**").permitAll()
-                    .requestMatchers("/actuator/health").permitAll()
+                    .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                     // Webhook auth is the HMAC signature, not the dashboard login —
                     // GitHub can't present a browser session or basic auth credentials.
                     .requestMatchers("/webhooks/**").permitAll()

@@ -66,3 +66,13 @@ management:
   endpoint:
     health:
       show-details: always
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState,issueBotLiveness
+        readiness:
+          include: readinessState,db,diskSpace,persistentStorage
+  info:
+    build:
+      enabled: true

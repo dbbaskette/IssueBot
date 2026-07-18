@@ -4,9 +4,9 @@ Date: 2026-07-16
 
 ## Summary
 
-IssueBot will move from a native process on `dbbaskette@home-services.local` to a Docker Compose deployment. Every deployment updates the host's existing IssueBot checkout with a safe fast-forward-only Git pull, builds a versioned IssueBot image on the host, pulls an independently released execution-runner image by immutable registry digest, restarts the stack, and verifies application health and essential integrations.
+IssueBot will move from a native process on `dbbaskette@home-services.local` to a Docker Compose deployment. Every deployment updates the host's existing IssueBot checkout with a safe fast-forward-only Git pull, builds a versioned IssueBot image on the host, pulls an independently released `codex-cli-provider` image by immutable registry digest, restarts the stack, and verifies application health and essential integrations.
 
-The Compose project belongs to the IssueBot repository. The execution runner is a separate project with its own release lifecycle. This design consumes the runner through a documented compatibility contract but does not design its API, disposable job containers, credentials, or Claude/Codex provider abstraction.
+The Compose project belongs to the IssueBot repository and owns the IssueBot container plus its persistent H2 bind mount. `codex-cli-provider` is a separate project with its own image build and release lifecycle; IssueBot Compose only consumes its pinned image. This design does not build the provider or design its API, credentials, or provider internals.
 
 ## Goals
 
@@ -20,13 +20,14 @@ The Compose project belongs to the IssueBot repository. The execution runner is 
 
 ## Non-goals
 
-- Designing or implementing the reusable execution runner.
+- Designing or implementing `codex-cli-provider`.
 - Designing disposable per-job containers or their resource controls.
 - Adding the Claude/Codex provider abstraction.
 - Defining runner authentication, credential storage formats, or provider-specific behavior.
 - Publishing the IssueBot image to a registry in the first deployment version.
 - Introducing Kubernetes, Docker Swarm, or another orchestrator.
 - Replacing the embedded H2 database with an external database.
+- Adding PostgreSQL, SQLite, MinIO, or another IssueBot data service.
 
 ## Current Runtime Constraints
 
@@ -39,15 +40,15 @@ Runtime state defaults to `${user.home}/.issuebot`:
 - `repos/` contains managed repository clones and agent worktrees.
 - `logs/` contains production-profile rolling application logs.
 
-The application currently launches the `claude` executable directly with `ProcessBuilder`. An app-only container therefore cannot process issues until the independently designed execution-runner integration replaces that direct process boundary. The Docker deployment may be implemented in parallel with the runner project, but production cutover requires a compatible runner release and IssueBot integration.
+The application currently launches the `claude` executable directly with `ProcessBuilder`. An app-only container therefore cannot process issues until separate integration work replaces that direct process boundary with `codex-cli-provider`. Docker assets may be implemented in parallel, but production cutover requires a compatible provider release and IssueBot integration.
 
 The existing health endpoint includes external GitHub reachability and can report a degraded or down aggregate status when the application itself is alive. Deployment health must distinguish process liveness from operational readiness.
 
 ## Considered Approaches
 
-### 1. Remote IssueBot build with pinned runner image
+### 1. Remote IssueBot build with pinned provider image
 
-The host fast-forward-updates the IssueBot checkout, builds IssueBot locally, and pulls the runner by immutable registry digest.
+The host fast-forward-updates the IssueBot checkout, builds IssueBot locally, and pulls `codex-cli-provider` by immutable registry digest.
 
 This approach is selected. It satisfies the Git-first deployment requirement, avoids an immediate IssueBot image-publishing pipeline, and preserves an independent runner release lifecycle. Its main cost is build time and build tooling on the server.
 
@@ -64,20 +65,20 @@ The host updates and builds both projects. This avoids a registry but couples tw
 The IssueBot repository owns the production Compose file and deployment metadata. The stack contains:
 
 - `issuebot`, built from the fast-forward-updated local checkout and tagged with the Git commit SHA;
-- `execution-runner`, pulled from a registry and pinned by immutable digest; and
+- `codex-cli-provider`, built and released only by its separate project, then pulled here by immutable digest; and
 - a private Compose network used for IssueBot-to-runner traffic.
 
-Only IssueBot port `8090` is published. It binds to the intended LAN address or to loopback when an existing reverse proxy is responsible for exposure. The runner has no host-published port.
+Only IssueBot port `8090` is published. It binds to the intended LAN address or to loopback when an existing reverse proxy is responsible for exposure. `codex-cli-provider` has no host-published port.
 
-The runner image has an independently managed version and release process. Compose records a readable runner release tag for operators but resolves it to an immutable digest. IssueBot and runner expose compatible protocol versions so deployment verification can reject an incompatible pair.
+The provider image has an independently managed version and release process. IssueBot Compose never contains a provider `build:` section. It records a readable provider release tag for operators but resolves it to an immutable digest. IssueBot and the provider expose compatible protocol versions so deployment verification can reject an incompatible pair.
 
 ## Persistent Data and Filesystem Layout
 
-The existing host `~/.issuebot` directory remains the authoritative IssueBot state and is bind-mounted at a stable application-home path in the IssueBot container. This preserves the database, external configuration, repositories, worktrees, and logs across container replacement.
+The existing host `~/.issuebot` directory remains the authoritative IssueBot state and is bind-mounted at `/home/issuebot/.issuebot` in the IssueBot container. This preserves the file-backed H2 database, external configuration, repositories, worktrees, and logs across image rebuilds and container replacement. H2 remains the only IssueBot database; PostgreSQL and SQLite are not introduced.
 
 The IssueBot container runs with the host operator's UID and GID. Preflight verifies that all required paths are readable and writable by that identity before the native process is stopped. The deployment never copies live H2 files while the native process is running and never invokes `docker compose down -v`.
 
-Runner credentials, provider state, caches, and job data use runner-owned protected volumes or bind mounts. They are not stored under `~/.issuebot` and are never mounted into the IssueBot container.
+Provider credentials and provider-specific state use provider-owned protected mounts. They are not stored under `~/.issuebot` and are never mounted into the IssueBot container. MinIO is not included because IssueBot has no approved object-storage requirement.
 
 ## Image Construction and Pinning
 
@@ -107,7 +108,7 @@ The deployment preflight verifies:
 - Docker Engine and Docker Compose v2;
 - permission for `dbbaskette` to use Docker without interactive elevation;
 - Git and access to the existing IssueBot checkout and its upstream remote;
-- registry authentication and availability of the pinned runner image for the host architecture;
+- registry authentication and availability of the pinned provider image for the host architecture;
 - sufficient disk for the checkout, build cache, two application images, persistent data, logs, and backups;
 - outbound DNS and HTTPS access required by GitHub and the configured providers;
 - availability of the intended host binding for port `8090`; and
@@ -124,9 +125,9 @@ The initiating deployment script connects with the dedicated key and invokes the
 3. Require the expected branch, a non-detached `HEAD`, a clean worktree, and a configured upstream.
 4. Record the current deployment manifest and known-good versions.
 5. Run `git fetch --prune`, then `git pull --ff-only`; refuse divergence, local commits that cannot fast-forward, or uncommitted changes.
-6. Resolve and validate the configured runner digest and Compose configuration.
+6. Resolve and validate the configured provider digest and Compose configuration.
 7. Build the SHA-tagged IssueBot image while the native instance remains available.
-8. Pull the runner image by digest.
+8. Pull the provider image by digest without building it.
 9. Stop the native IssueBot process gracefully and confirm that it released port `8090` and the H2 files.
 10. Create a timestamped, integrity-checked backup of the closed H2 database and deployment metadata.
 11. Start or recreate the Compose stack with the new versions.
@@ -165,7 +166,7 @@ A deployment is successful only after all required checks pass. Degraded externa
 
 Before cutover, deployment records the current versions and backs up the closed H2 database. A failed deployment captures Compose status, health details, and sanitized logs before changing state again.
 
-Application rollback reuses the previous deployment manifest, previous IssueBot image or source SHA, and previous runner digest. It does not pull an arbitrary branch state or mutable image tag.
+Application rollback reuses the previous deployment manifest, previous IssueBot image or source SHA, and previous provider digest. It does not pull an arbitrary branch state or mutable image tag.
 
 Flyway migrations may be forward-only. Automatic rollback first determines whether the previous application version is compatible with the migrated schema. If compatibility is known, it restarts the previous versions without replacing data. If compatibility is unknown or false, the wrapper stops and reports that deliberate database restoration is required. Database restoration is never automatic because it can discard writes accepted after migration.
 
@@ -198,7 +199,7 @@ Routine operations include:
 
 - A dirty, detached, divergent, or unexpected checkout stops before build or shutdown.
 - A failed fast-forward-only pull leaves the running deployment unchanged.
-- A failed IssueBot build or runner pull leaves the running deployment unchanged.
+- A failed IssueBot build or provider pull leaves the running deployment unchanged.
 - Failure to stop the native process or release the H2 database aborts cutover and does not start a competing container.
 - Failure to create or verify the database backup aborts cutover.
 - Failed health or functional verification captures diagnostics and attempts only schema-safe application rollback.
@@ -244,6 +245,6 @@ Routine operations include:
 
 ## Delivery Boundary and Sequencing
 
-This deployment project can add Docker assets, health semantics, the restricted deployment workflow, persistence handling, and verification independently. Production cutover is gated on a separately approved execution-runner project publishing a compatible pinned image and IssueBot replacing direct local `claude` execution with that runner contract.
+This deployment project can add Docker assets, health semantics, the restricted deployment workflow, persistence handling, and verification independently. Production cutover is gated on the separate `codex-cli-provider` project publishing a compatible pinned image and IssueBot replacing direct local `claude` execution with that provider contract.
 
-The runner project remains responsible for disposable execution containers, Claude/Codex selection, credential isolation, provider authentication, and its API. This specification neither chooses nor constrains those internal designs beyond requiring a versioned compatibility and health contract suitable for Compose deployment.
+The `codex-cli-provider` project remains solely responsible for its image build, credential isolation, authentication, and API. This specification neither chooses nor constrains those internals beyond requiring a versioned compatibility and health contract suitable for Compose deployment. Other projects may consume the same provider image without inheriting IssueBot's H2 data or Compose ownership.

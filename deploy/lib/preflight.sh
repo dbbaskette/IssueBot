@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if ! declare -F die >/dev/null 2>&1; then
+  # shellcheck source=deploy/lib/common.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+fi
+
+preflight_checkout() {
+  local upstream counts ahead behind untracked
+  [[ -n "${ISSUEBOT_CHECKOUT:-}" ]] || die 'ISSUEBOT_CHECKOUT is required' || return 1
+  [[ -n "${ISSUEBOT_BRANCH:-}" ]] || die 'ISSUEBOT_BRANCH is required' || return 1
+
+  git -C "$ISSUEBOT_CHECKOUT" symbolic-ref -q HEAD >/dev/null || die 'checkout is on a detached HEAD' || return 1
+  git -C "$ISSUEBOT_CHECKOUT" diff --quiet || die 'checkout has unstaged changes' || return 1
+  git -C "$ISSUEBOT_CHECKOUT" diff --cached --quiet || die 'checkout has staged changes' || return 1
+  untracked="$(git -C "$ISSUEBOT_CHECKOUT" ls-files --others --exclude-standard)" || die 'cannot inspect checkout for untracked files' || return 1
+  [[ -z "$untracked" ]] || die 'checkout has untracked files' || return 1
+  [[ "$(git -C "$ISSUEBOT_CHECKOUT" branch --show-current)" == "$ISSUEBOT_BRANCH" ]] || die "checkout is not on expected branch: $ISSUEBOT_BRANCH" || return 1
+  upstream="$(git -C "$ISSUEBOT_CHECKOUT" rev-parse --abbrev-ref '@{upstream}')" || die 'checkout branch has no upstream' || return 1
+  [[ -n "$upstream" ]] || die 'checkout branch has no upstream' || return 1
+  counts="$(git -C "$ISSUEBOT_CHECKOUT" rev-list --left-right --count 'HEAD...@{upstream}')" || die 'cannot compare checkout with upstream' || return 1
+  read -r ahead behind <<<"$counts"
+  [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]] || die 'Git returned invalid checkout ancestry counts' || return 1
+  [[ "$ahead" == 0 ]] || die "checkout cannot fast-forward from $upstream (ahead=$ahead behind=$behind)" || return 1
+}
+
+preflight_runtime() {
+  local compose_version engine_arch
+  require_command docker || return 1
+  require_command git || return 1
+  require_command curl || return 1
+
+  docker info >/dev/null || die 'Docker engine is unavailable' || return 1
+  compose_version="$(docker compose version 2>/dev/null)" || die 'Docker Compose v2 is unavailable' || return 1
+  [[ "$compose_version" =~ (^|[[:space:]])v?2\. ]] || die "Docker Compose v2 is required: $compose_version" || return 1
+  engine_arch="$(docker info --format '{{.Architecture}}')" || die 'cannot determine Docker engine architecture' || return 1
+  case "$engine_arch" in
+    amd64|arm64) ;;
+    *) die "unsupported Docker engine architecture: $engine_arch" || return 1 ;;
+  esac
+}
+
+current_compose_owns_port_8090() {
+  local project="${COMPOSE_PROJECT_NAME:-issuebot}" containers container bindings
+  containers="$(docker ps \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter 'label=com.docker.compose.service=issuebot' \
+    --format '{{.ID}}')" || return 1
+  [[ -n "$containers" && "$containers" != *$'\n'* ]] || return 1
+  container="$containers"
+  bindings="$(docker inspect --format '{{json .HostConfig.PortBindings}}' "$container")" || return 1
+  [[ "$bindings" == *'"8090/tcp"'* && "$bindings" == *'"HostPort":"8090"'* ]]
+}
+
+preflight_storage() {
+  local available_kib pids pid command_line lsof_status listener_is_docker=true
+  [[ -n "${ISSUEBOT_HOME:-}" ]] || die 'ISSUEBOT_HOME is required' || return 1
+  [[ -n "${ISSUEBOT_SECRET_ENV:-}" ]] || die 'ISSUEBOT_SECRET_ENV is required' || return 1
+
+  require_command df || return 1
+  require_command lsof || return 1
+  require_command ps || return 1
+  [[ -d "$ISSUEBOT_HOME" && -r "$ISSUEBOT_HOME" && -w "$ISSUEBOT_HOME" ]] || die "persistent IssueBot path is not readable and writable: $ISSUEBOT_HOME" || return 1
+  [[ -d "$ISSUEBOT_HOME/repos" && -d "$ISSUEBOT_HOME/logs" ]] || die 'persistent repos and logs paths must already exist' || return 1
+
+  available_kib="$(df -Pk "$ISSUEBOT_HOME" | awk 'NR == 2 { print $4 }')" || die 'cannot inspect available storage' || return 1
+  [[ "$available_kib" =~ ^[0-9]+$ ]] || die 'cannot determine available storage' || return 1
+  (( available_kib >= 5242880 )) || die 'less than 5 GiB is available for deployment' || return 1
+
+  require_private_file "$ISSUEBOT_SECRET_ENV" || return 1
+  validate_secret_location "$ISSUEBOT_SECRET_ENV" || return 1
+  if [[ -n "${DEPLOY_ENV:-}" ]]; then
+    require_private_file "$DEPLOY_ENV" || return 1
+    validate_secret_location "$DEPLOY_ENV" || return 1
+  fi
+
+  if pids="$(lsof -nP -iTCP:8090 -sTCP:LISTEN -t 2>/dev/null)"; then
+    :
+  else
+    lsof_status=$?
+    [[ "$lsof_status" == 1 ]] || die 'cannot inspect port 8090 ownership' || return 1
+    pids=''
+  fi
+  [[ -z "$pids" ]] && return 0
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || die 'port 8090 owner could not be identified' || return 1
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || die "cannot inspect port 8090 owner PID $pid" || return 1
+    case "$command_line" in *docker*|*Docker*) ;; *) listener_is_docker=false ;; esac
+  done <<<"$pids"
+
+  if [[ "$listener_is_docker" == true ]] && current_compose_owns_port_8090; then
+    return 0
+  fi
+  [[ "${ISSUEBOT_FIRST_CUTOVER:-}" == true ]] || die 'port 8090 is not owned by the current Compose issuebot service' || return 1
+  [[ -n "${ISSUEBOT_NATIVE_PROCESS_PATTERN:-}" ]] || die 'port 8090 is owned by an unidentified process' || return 1
+  while IFS= read -r pid; do
+    command_line="$(ps -p "$pid" -o command= 2>/dev/null)" || die "cannot inspect port 8090 owner PID $pid" || return 1
+    case "$command_line" in
+      *"$ISSUEBOT_NATIVE_PROCESS_PATTERN"*) ;;
+      *) die "port 8090 is owned by an unexpected process (PID $pid)" || return 1 ;;
+    esac
+  done <<<"$pids"
+}
+
+validate_secret_location() {
+  local path="$1" checkout_real path_real
+  [[ -n "${ISSUEBOT_CHECKOUT:-}" ]] || die 'ISSUEBOT_CHECKOUT is required for secret location validation' || return 1
+  checkout_real="$(cd "$ISSUEBOT_CHECKOUT" && pwd -P)" || die 'cannot resolve ISSUEBOT_CHECKOUT' || return 1
+  path_real="$(cd "$(dirname "$path")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$path")")" || die "cannot resolve protected file location: $path" || return 1
+  case "$path_real" in
+    "$checkout_real"|"$checkout_real"/*) die "protected file must not be inside ISSUEBOT_CHECKOUT: $path" || return 1 ;;
+  esac
+  if git -C "$ISSUEBOT_CHECKOUT" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+    die "protected file must not be tracked by Git: $path"
+    return 1
+  fi
+}
+
+preflight_runner() {
+  local image repo_digests platform expected_platform engine_arch healthcheck protocol doctor provider_user provider_uid provider_group
+  image="${1:-${CODEX_CLI_PROVIDER_IMAGE:-}}"
+  [[ -n "$image" ]] || die 'CODEX_CLI_PROVIDER_IMAGE is required' || return 1
+  validate_provider_image "$image" || return 1
+  [[ -n "${CODEX_CLI_PROVIDER_PROTOCOL_VERSION:-}" ]] || die 'CODEX_CLI_PROVIDER_PROTOCOL_VERSION is required' || return 1
+
+  docker image inspect "$image" >/dev/null 2>&1 || die 'pinned provider image is not local; pull it in the lifecycle phase before provider contract checks' || return 1
+  repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image")" || die 'cannot inspect provider digest' || return 1
+  case "$repo_digests" in
+    *"$image"*) ;;
+    *) die 'local provider image does not record the configured immutable digest' || return 1 ;;
+  esac
+  engine_arch="$(docker info --format '{{.Architecture}}')" || die 'cannot determine Docker engine architecture' || return 1
+  expected_platform="linux/$engine_arch"
+  platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" || die 'cannot inspect provider platform' || return 1
+  [[ "$platform" == "$expected_platform" ]] || die "provider platform mismatch: expected $expected_platform, got $platform" || return 1
+
+  healthcheck="$(docker image inspect --format '{{json .Config.Healthcheck.Test}}' "$image")" || die 'cannot inspect provider healthcheck' || return 1
+  [[ -n "$healthcheck" && "$healthcheck" != 'null' && "$healthcheck" != '[]' ]] || die 'provider image has no embedded healthcheck' || return 1
+
+  protocol="$(docker image inspect --format '{{index .Config.Labels "com.issuebot.codex-provider.protocol"}}' "$image")" || die 'cannot inspect provider protocol label' || return 1
+  [[ "$protocol" == "$CODEX_CLI_PROVIDER_PROTOCOL_VERSION" ]] || die "provider protocol mismatch: expected $CODEX_CLI_PROVIDER_PROTOCOL_VERSION, got $protocol" || return 1
+
+  doctor="$(docker image inspect --format '{{index .Config.Labels "com.issuebot.codex-provider.doctor"}}' "$image")" || die 'cannot inspect provider doctor contract' || return 1
+  [[ "$doctor" == 'codex-cli-provider doctor --json --no-billable-work' ]] || die 'provider doctor contract is missing the exact non-billable command' || return 1
+
+  provider_user="$(docker image inspect --format '{{.Config.User}}' "$image")" || die 'cannot inspect provider runtime user' || return 1
+  [[ -n "$provider_user" ]] || die 'provider image must declare an explicit non-root runtime user' || return 1
+  [[ "$provider_user" != *:*:* ]] || die 'provider image runtime user is invalid or ambiguous' || return 1
+  provider_uid="${provider_user%%:*}"
+  provider_group=''
+  if [[ "$provider_user" == *:* ]]; then
+    provider_group="${provider_user#*:}"
+    [[ "$provider_group" =~ ^[0-9]+$ || "$provider_group" =~ ^[a-z_][a-z0-9_-]*$ ]] || die 'provider image runtime group is invalid or ambiguous' || return 1
+  fi
+  if [[ "$provider_uid" =~ ^[0-9]+$ ]]; then
+    [[ ! "$provider_uid" =~ ^0+$ ]] || die 'provider image runtime user must not resolve to UID 0' || return 1
+  elif [[ "$provider_uid" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    [[ "$provider_uid" != root ]] || die 'provider image runtime user must not be root' || return 1
+  else
+    die 'provider image runtime user is invalid or ambiguous'
+    return 1
+  fi
+}
+
+preflight_all() {
+  preflight_checkout || return 1
+  preflight_runtime || return 1
+  preflight_storage || return 1
+  preflight_runner || return 1
+}

@@ -1,0 +1,78 @@
+services:
+  issuebot:
+    build:
+      context: .
+      args:
+        APP_UID: ${APP_UID:?APP_UID is required}
+        APP_GID: ${APP_GID:?APP_GID is required}
+        VCS_REF: ${ISSUEBOT_GIT_SHA:?ISSUEBOT_GIT_SHA is required}
+        BUILD_DATE: ${BUILD_DATE:?BUILD_DATE is required}
+    image: issuebot:${ISSUEBOT_GIT_SHA:?ISSUEBOT_GIT_SHA is required}
+    user: "${APP_UID}:${APP_GID}"
+    ports:
+      - "${ISSUEBOT_BIND_ADDRESS:-127.0.0.1}:8090:8090"
+    env_file:
+      - ${ISSUEBOT_SECRET_ENV:?ISSUEBOT_SECRET_ENV is required}
+    environment:
+      HOME: /home/issuebot
+      SPRING_PROFILES_ACTIVE: prod
+    volumes:
+      - type: bind
+        source: ${ISSUEBOT_HOME:?ISSUEBOT_HOME is required}
+        target: /home/issuebot/.issuebot
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8090/actuator/health/readiness"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    depends_on:
+      codex-cli-provider:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    cpus: 1.0
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    networks:
+      - frontend
+      - backend
+
+  codex-cli-provider:
+    image: ${CODEX_CLI_PROVIDER_IMAGE:?CODEX_CLI_PROVIDER_IMAGE is required}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    cpus: 1.0
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    networks:
+      - backend
+      - egress
+
+networks:
+  frontend:
+  backend:
+    internal: true
+  egress:
