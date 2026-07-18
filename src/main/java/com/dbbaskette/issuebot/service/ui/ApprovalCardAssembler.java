@@ -4,14 +4,11 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
-import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,28 +25,6 @@ import java.util.Map;
 public class ApprovalCardAssembler {
 
     private static final Logger log = LoggerFactory.getLogger(ApprovalCardAssembler.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    /**
-     * Lightweight view of an independent code-review result, parsed from the
-     * Iteration's raw review JSON, for surfacing on the approval card.
-     */
-    public record ReviewScore(
-            boolean passed,
-            String summary,
-            double overall,
-            double specCompliance,
-            double correctness,
-            double codeQuality,
-            double testCoverage,
-            double architectureFit,
-            double regressions,
-            double security,
-            int findingCount,
-            String model,
-            List<CodeReviewResult.CriterionVerdict> criteria
-    ) {}
-
     /** Per-issue maps keyed by {@link TrackedIssue#getId()}, one entry set per assembled issue. */
     public record Cards(
             Map<Long, Iteration> lastIterations,
@@ -90,7 +65,7 @@ public class ApprovalCardAssembler {
             for (int i = iterations.size() - 1; i >= 0; i--) {
                 Iteration it = iterations.get(i);
                 if (it.getReviewPassed() != null || it.getReviewJson() != null) {
-                    ReviewScore score = parseReviewScore(it);
+                    ReviewScore score = ReviewScoreParser.parse(it);
                     if (score != null) {
                         reviewScores.put(issue.getId(), score);
                     }
@@ -179,65 +154,4 @@ public class ApprovalCardAssembler {
         return count;
     }
 
-    /**
-     * Parse the stored review JSON into a {@link ReviewScore}. Falls back to the
-     * boolean {@code reviewPassed} flag when JSON is absent or unparseable so the
-     * card can still show a pass/fail badge.
-     */
-    private ReviewScore parseReviewScore(Iteration it) {
-        Boolean passed = it.getReviewPassed();
-        String json = it.getReviewJson();
-        if (json == null || json.isBlank()) {
-            if (passed == null) {
-                return null;
-            }
-            return new ReviewScore(passed, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, it.getReviewModel(), List.of());
-        }
-        try {
-            JsonNode root = MAPPER.readTree(json);
-            double spec = root.path("specComplianceScore").asDouble(0.0);
-            double correct = root.path("correctnessScore").asDouble(0.0);
-            double quality = root.path("codeQualityScore").asDouble(0.0);
-            double tests = root.path("testCoverageScore").asDouble(0.0);
-            double arch = root.path("architectureFitScore").asDouble(0.0);
-            double regress = root.path("regressionsScore").asDouble(0.0);
-            double security = root.path("securityScore").asDouble(0.0);
-            int findings = root.path("findings").isArray() ? root.path("findings").size() : 0;
-            double[] dims = {spec, correct, quality, tests, arch, regress, security};
-            double sum = 0;
-            for (double d : dims) sum += d;
-            double overall = dims.length > 0 ? sum / dims.length : 0;
-            boolean passedFlag = root.has("passed") ? root.path("passed").asBoolean(false)
-                    : (passed != null && passed);
-            List<CodeReviewResult.CriterionVerdict> criteria = parseCriteria(root.path("criteria"));
-            return new ReviewScore(passedFlag, root.path("summary").asText(null),
-                    overall, spec, correct, quality, tests, arch, regress, security,
-                    findings, it.getReviewModel(), criteria);
-        } catch (Exception e) {
-            log.warn("Could not parse review JSON for iteration {}: {}", it.getId(), e.getMessage());
-            if (passed == null) {
-                return null;
-            }
-            return new ReviewScore(passed, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, it.getReviewModel(), List.of());
-        }
-    }
-
-    /**
-     * Parse the review JSON's "criteria" array into per-criterion verdicts
-     * (issue #61), leniently: missing/unknown verdict strings default to "unclear"
-     * via {@link CodeReviewResult.CriterionVerdict#lenient}.
-     */
-    private List<CodeReviewResult.CriterionVerdict> parseCriteria(JsonNode criteriaNode) {
-        if (!criteriaNode.isArray()) {
-            return List.of();
-        }
-        List<CodeReviewResult.CriterionVerdict> criteria = new ArrayList<>();
-        for (JsonNode c : criteriaNode) {
-            criteria.add(CodeReviewResult.CriterionVerdict.lenient(
-                    c.path("text").asText(""),
-                    c.path("verdict").asText(""),
-                    c.path("note").asText("")));
-        }
-        return criteria;
-    }
 }

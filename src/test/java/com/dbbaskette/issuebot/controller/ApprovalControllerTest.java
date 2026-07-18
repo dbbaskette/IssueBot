@@ -12,6 +12,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
+import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -294,10 +295,10 @@ class ApprovalControllerTest {
         Model model = new ExtendedModelMap();
         controller.list(model, null);
 
-        Map<Long, ApprovalCardAssembler.ReviewScore> reviewScores =
-                (Map<Long, ApprovalCardAssembler.ReviewScore>) model.getAttribute("reviewScores");
+        Map<Long, ReviewScore> reviewScores =
+                (Map<Long, ReviewScore>) model.getAttribute("reviewScores");
         assertThat(reviewScores).isNotNull();
-        ApprovalCardAssembler.ReviewScore score = reviewScores.get(1L);
+        ReviewScore score = reviewScores.get(1L);
         assertThat(score).isNotNull();
         assertThat(score.criteria()).hasSize(2);
         assertThat(score.criteria()).contains(
@@ -336,8 +337,8 @@ class ApprovalControllerTest {
         Model model = new ExtendedModelMap();
         controller.list(model, null);
 
-        Map<Long, ApprovalCardAssembler.ReviewScore> reviewScores =
-                (Map<Long, ApprovalCardAssembler.ReviewScore>) model.getAttribute("reviewScores");
+        Map<Long, ReviewScore> reviewScores =
+                (Map<Long, ReviewScore>) model.getAttribute("reviewScores");
         assertThat(reviewScores.get(1L).criteria()).isEmpty();
     }
 
