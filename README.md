@@ -4,7 +4,7 @@
 ![Java](https://img.shields.io/badge/java-21-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)
 
-An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them using Claude Code CLI, runs an independent code review with a separate model, and delivers pull requests.
+An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them with Claude Code CLI or Codex CLI, runs an independent code review with a separate model, and delivers pull requests.
 
 ## Why It Exists
 
@@ -12,7 +12,7 @@ Filing a good issue is the easy part; the work between a well-specified issue an
 
 ## How It Works
 
-IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. Both roles are configurable from the dashboard at the global, per-repo, and per-issue level (defaults: Opus 4.8 for implementation, Sonnet 5 for review).
+IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. The execution provider is configurable as either Claude Code CLI or Codex CLI, and each role's model is configurable from the dashboard at the global, per-repo, and per-issue level. Defaults are provider-specific: Claude Code uses Opus 4.8 for implementation and Sonnet 5 for review; Codex CLI uses `gpt-5.6-sol` for implementation and `gpt-5.6-terra` for review.
 
 ```mermaid
 flowchart LR
@@ -20,13 +20,13 @@ flowchart LR
     B --> P[Plan First<br>Spec + Plan]
     P -->|Revise| P
     P -->|Approve both| C[Setup<br>Clone & Branch]
-    C --> D[Implement<br>Opus]
+    C --> D[Implement<br>Selected Provider]
     D --> E[CI Verify<br>Push & Check]
     E -->|Fail| F{Retry<br>Smart?}
     F -->|Skip| G[FAILED<br>needs-human]
     F -->|Yes| D
     E -->|Pass| H[Create PR]
-    H --> I[Code Review<br>Sonnet]
+    H --> I[Code Review<br>Review Model]
     I -->|Fail| D
     I -->|Pass| J[Backlog<br>Findings]
     J --> K[Finalize &<br>Auto-Merge]
@@ -38,10 +38,10 @@ flowchart LR
 | Phase | What Happens | Model |
 |-------|-------------|-------|
 | **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
-| **2. Implementation** | Claude Code CLI writes code based on issue spec | Implementation model (default Opus 4.8) |
+| **2. Implementation** | Selected agent CLI writes code based on issue spec | Implementation model (provider-specific default) |
 | **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
 | **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
-| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (default Sonnet 5) |
+| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (provider-specific default) |
 | **6. Completion** | Post review to PR, route non-blocking review findings per repo setting (default: deduplicated rolling backlog issue), auto-merge if configured | - |
 
 If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
@@ -56,16 +56,17 @@ Plan First review uses a fixed two-attempt conformance cycle. The first miss aut
 
 ## Key Features
 
-- **Dual-Model Architecture** - Implementation and review use independently configurable models (default: Opus 4.8 for implementation, Sonnet 5 for review), settable at the global, per-repo, and per-issue level for checks and balances
+- **Dual-Provider CLI Support** - Choose Claude Code CLI with a Claude subscription login or Codex CLI with a ChatGPT subscription login from Settings; model choices update for the selected provider
+- **Dual-Model Architecture** - Implementation and review use independently configurable models, settable at the global, per-repo, and per-issue level for checks and balances
 - **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
-- **Independent Code Review** - Sonnet evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
-- **Review Feedback Loop** - Failed review findings are fed back to Opus with specific file/line references for targeted fixes
+- **Independent Code Review** - The configured review model evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
+- **Review Feedback Loop** - Failed review findings are fed back to the implementation model with specific file/line references for targeted fixes
 - **Noise-Controlled Findings** - Non-blocking review findings are routed per the per-repo `follow-up-mode` setting: `ROLLING_BACKLOG` (default) dedupes findings into a single per-repo backlog issue capped at 50 items, `COMMENT_ONLY` posts a summary comment on the original issue instead of opening a new one, `PER_ISSUE` is the legacy one-follow-up-issue-per-completed-issue behavior, and `OFF` keeps findings in the PR review comment only
 - **Approval-Gated Issue Splitting** - When an issue is too large, IssueBot proposes a sub-issue breakdown and waits for you to approve or reject it from the dashboard (`PROPOSE`, the default); `AUTO` creates sub-issues immediately and `OFF` disables splitting, all per repo. One split level only (sub-issues are never re-split further), capped at 10 open sub-issues per repo, and the parent stays open as a tracking issue that auto-closes once all sub-issues are closed
 - **Versioned Plan First** (default on) - Generates separate Design Spec and Implementation Plan artifacts before code changes, keeps immutable version history, and requires one approval for both artifacts. The approved version governs implementation and independent review; one automatic correction is allowed before the issue stops for guidance, and a guided retry preserves the approved version. Repositories and individual issues can explicitly opt out when this approval contract is not appropriate
 - **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
 - **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
-- **Cancel Running Issues** - A Stop button on the issue-detail page kills the running Claude Code process at the next workflow checkpoint
+- **Cancel Running Issues** - A Stop button on the issue-detail page stops the running agent process at the next workflow checkpoint
 - **Pause All Processing** - A persisted global control stops active workflows at safe checkpoints and prevents future automatic starts, manual starts, and retries until processing is resumed
 - **Manual Start for Pending Work** - Pending or queued issues can be started directly from the queue or issue page while preserving repository and open-PR safety gates
 - **Actionable Failure Recovery** - Failed issues show a sanitized summary, suggested next step, optional technical details, and a guidance field for the retry
@@ -87,7 +88,8 @@ Plan First review uses a fixed two-attempt conformance cycle. The first miss aut
 ## Built With
 
 - [Spring Boot 3.4.2](https://spring.io/projects/spring-boot) - Application framework
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) - Headless code generation and review
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) - Claude subscription-backed headless code generation and review
+- Codex CLI - ChatGPT subscription-backed headless code generation and review
 - [JGit 7.1.0](https://www.eclipse.org/jgit/) - Git operations in Java
 - [Thymeleaf](https://www.thymeleaf.org/) + [HTMX](https://htmx.org/) - Dashboard with SSE live updates
 - [H2 Database](https://www.h2database.com/) - Embedded SQL database
@@ -98,7 +100,9 @@ Plan First review uses a fixed two-attempt conformance cycle. The first miss aut
 ### Prerequisites
 
 - **Java 21+** - [Download](https://adoptium.net/)
-- **Claude Code CLI** - [Install guide](https://docs.anthropic.com/en/docs/claude-code) (log in via `claude` before first use)
+- **At least one agent CLI**:
+  - **Claude Code CLI** - [Install guide](https://docs.anthropic.com/en/docs/claude-code) (log in via `claude` before first use)
+  - **Codex CLI** - Install Codex CLI, make sure `codex` is on the shell `PATH` used to start IssueBot, then run `codex login` and choose ChatGPT login. If you use the bundled ChatGPT app binary directly, the path is typically `/Applications/ChatGPT.app/Contents/Resources/codex`.
 - **GitHub Personal Access Token** - With `repo` scope for the repositories you want IssueBot to manage
 
 ### Installation
@@ -160,6 +164,7 @@ IssueBot can be configured via the dashboard UI or by editing `~/.issuebot/confi
 
 ```yaml
 issuebot:
+  agent-provider: claude-code # claude-code or codex
   poll-interval-seconds: 60
   max-concurrent-issues: 3
 
@@ -171,6 +176,13 @@ issuebot:
     timeout-minutes: 45          # implementation/planning wall-clock cap
     review-max-turns: 15
     review-timeout-minutes: 20   # review/utility cap (only reads a diff, so smaller)
+
+  codex-cli:
+    implementation-model: gpt-5.6-sol
+    review-model: gpt-5.6-terra
+    utility-model: gpt-5.6-luna
+    timeout-minutes: 45
+    review-timeout-minutes: 20
 
   github:
     token: ${GITHUB_TOKEN}
@@ -190,8 +202,8 @@ issuebot:
       decomposition-mode: PROPOSE
       plan-first: true
       pre-screen-enabled: true
-      # implementation-model: claude-opus-4-8   # optional per-repo override; omit to inherit global
-      # review-model: claude-sonnet-5           # optional per-repo override; omit to inherit global
+      # implementation-model: claude-opus-4-8   # optional per-repo override; omit to inherit selected provider default
+      # review-model: claude-sonnet-5           # optional per-repo override; omit to inherit selected provider default
       allowed-paths:
         - src/
         - test/
@@ -301,7 +313,7 @@ flowchart TB
     subgraph IssueBot
         Polling[Issue Polling Service]
         Workflow[Workflow Engine]
-        Claude[Claude Code Service]
+        Agent[Agent CLI Service]
         Review[Code Review Service]
         GitOps[Git Operations]
         GitHub[GitHub API Client]
@@ -312,13 +324,13 @@ flowchart TB
 
     GH[GitHub API] --> Polling
     Polling --> Workflow
-    Workflow --> Claude
+    Workflow --> Agent
     Workflow --> Review
     Workflow --> GitOps
     Workflow --> GitHub
     Workflow --> CI
-    Claude -->|Opus| CLI[Claude Code CLI]
-    Review -->|Sonnet| CLI
+    Agent --> CLI[Claude Code CLI<br>or Codex CLI]
+    Review --> CLI
     GitHub --> GH
     Workflow --> DB
     Dashboard --> DB
@@ -337,7 +349,8 @@ src/main/java/com/dbbaskette/issuebot/
 ├── observability/       # Health indicators and Micrometer metrics
 ├── service/
 │   ├── ci/             # CI workflow template generation (Maven, Gradle, Node, Go)
-│   ├── claude/         # Claude Code CLI wrapper, stream-json parser, dual-model support
+│   ├── claude/         # Agent CLI facade, Claude Code execution, stream-json parser
+│   ├── codex/          # Codex CLI execution, auth checks, model discovery
 │   ├── dependency/     # Issue dependency resolution (GitHub native + body-text fallback)
 │   ├── event/          # Event logging and SSE broadcasting
 │   ├── git/            # JGit operations (clone, branch, diff, commit, push)
