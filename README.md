@@ -115,6 +115,8 @@ cp .env.example .env
 
 This builds the project, kills any existing instance, and starts IssueBot on port **8090**.
 
+For the hardened two-service Docker topology and operator procedures, see the [Docker deployment runbook](docs/deployment.md). `codex-cli-provider` is built, released, authenticated, and credentialed by its independent project; IssueBot only consumes a compatible image pinned by immutable digest. **Production cutover remains forbidden until that image exists and IssueBot integration has removed direct local `claude` execution.**
+
 Alternatively, build and run manually:
 
 ```bash

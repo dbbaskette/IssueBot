@@ -8,6 +8,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.test.context.TestPropertySource;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -82,11 +83,11 @@ class NotificationRepositoryTest {
         Notification unread1 = notification(Notification.Severity.INFO, "Unread 1");
         Notification unread2 = notification(Notification.Severity.WARN, "Unread 2");
         Notification alreadyRead = notification(Notification.Severity.INFO, "Already read");
-        LocalDateTime originalReadAt = LocalDateTime.now().minusDays(1);
+        LocalDateTime originalReadAt = LocalDateTime.now().minusDays(1).truncatedTo(ChronoUnit.MICROS);
         alreadyRead.setReadAt(originalReadAt);
         notificationRepository.save(alreadyRead);
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
         int updated = notificationRepository.markAllRead(now);
         // The bulk @Query UPDATE bypasses the persistence context, so the managed unread1/
         // unread2/alreadyRead instances above are now stale in the first-level cache — clear it

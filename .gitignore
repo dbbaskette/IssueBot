@@ -11,6 +11,8 @@ target/
 
 # Secrets
 .env
+deploy/production.env
+deploy/*.local.env
 
 # OS
 .DS_Store

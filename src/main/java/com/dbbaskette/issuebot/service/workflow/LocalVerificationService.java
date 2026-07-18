@@ -104,8 +104,8 @@ public class LocalVerificationService {
     private record CommandOutcome(boolean success, String output) {}
 
     private CommandOutcome runOne(Path repoPath, String command, long timeoutMillis, Consumer<String> lineCallback) {
-        // StringBuffer: written by the reader thread, read by this thread only after
-        // the reader has terminated (unbounded join) — thread-safe either way.
+        // StringBuffer is written by the reader thread and may be read after the
+        // bounded drain/forced-close sequence; synchronization keeps that handoff safe.
         StringBuffer output = new StringBuffer();
         try {
             ProcessBuilder pb = new ProcessBuilder(List.of("bash", "-lc", command));
@@ -116,20 +116,31 @@ public class LocalVerificationService {
             process.getOutputStream().close();
 
             Thread reader = Thread.ofVirtual().start(() -> {
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        output.append(line).append("\n");
-                        if (lineCallback != null) {
-                            try {
-                                lineCallback.accept(line);
-                            } catch (Exception e) {
-                                log.debug("Local verification line callback error: {}", e.getMessage());
-                            }
+                BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                StringBuilder line = new StringBuilder();
+                try {
+                    while (process.isAlive() || br.ready()) {
+                        if (!br.ready()) {
+                            Thread.sleep(10);
+                            continue;
                         }
+                        int character = br.read();
+                        if (character == -1) {
+                            break;
+                        }
+                        if (character == '\n') {
+                            appendOutputLine(output, line, lineCallback);
+                        } else if (character != '\r') {
+                            line.append((char) character);
+                        }
+                    }
+                    if (!line.isEmpty()) {
+                        appendOutputLine(output, line, lineCallback);
                     }
                 } catch (IOException e) {
                     log.warn("Error reading local verification command output", e);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
             });
 
@@ -174,9 +185,8 @@ public class LocalVerificationService {
      * Wait for the reader thread to finish, but never indefinitely: a command that
      * backgrounds a subprocess without redirecting stdout (e.g. {@code ./start-server.sh &})
      * leaves an orphan holding the pipe open, which would block readLine() — and an
-     * unbounded join here would hang the whole workflow iteration. After the grace
-     * period, force EOF by closing the stream, then the reader terminates promptly.
-     * The buffer is only ever read after the reader has fully terminated.
+     * an unbounded initial join here would hang the workflow iteration. After the
+     * grace period, force EOF by closing the stream, then wait for reader termination.
      */
     private static void awaitReader(Thread reader, Process process) throws InterruptedException {
         reader.join(READER_JOIN_MILLIS);
@@ -189,6 +199,20 @@ public class LocalVerificationService {
                 // closing is best-effort; the reader's readLine will fail either way
             }
             reader.join();
+        }
+    }
+
+    private static void appendOutputLine(StringBuffer output, StringBuilder line,
+                                         Consumer<String> lineCallback) {
+        String value = line.toString();
+        line.setLength(0);
+        output.append(value).append("\n");
+        if (lineCallback != null) {
+            try {
+                lineCallback.accept(value);
+            } catch (Exception e) {
+                log.debug("Local verification line callback error: {}", e.getMessage());
+            }
         }
     }
 
