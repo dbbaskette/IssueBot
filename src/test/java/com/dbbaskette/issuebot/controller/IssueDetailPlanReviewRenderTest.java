@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -130,11 +131,13 @@ class IssueDetailPlanReviewRenderTest {
         Iteration second = failedReview(issue, 2,
                 "{\"unmetRequirements\":[\"Keep approval immutable\"],\"testEvidence\":\"Render test failed\"}");
 
-        String html = render(issue, List.of(approved), approved, approved, List.of(second, first));
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(second, first), true);
 
         assertThat(html).contains("Needs guidance after review 2")
                 .contains("Review attempt 2")
                 .contains("Review attempt 1")
+                .contains("Did not conform")
                 .contains("Keep approval immutable")
                 .contains("Retry Implementation")
                 .contains("The approved Design Spec and Implementation Plan will not change")
@@ -142,6 +145,7 @@ class IssueDetailPlanReviewRenderTest {
                 .doesNotContain("name=\"versionId\"")
                 .doesNotContain("action=\"/issues/42/retry\"")
                 .doesNotContain("name=\"planFirstOverride\"");
+        assertThat(occurrences(html, "Did not conform")).isEqualTo(2);
     }
 
     @Test
@@ -158,13 +162,60 @@ class IssueDetailPlanReviewRenderTest {
         second.setLocalCheckResult("FAILED");
         second.setCiResult("PASSED");
 
-        String html = render(issue, List.of(approved), approved, approved, List.of(second));
+        String html = render(issue, List.of(approved), approved, approved, List.of(second), true);
 
         assertThat(html).contains("Persisted verification evidence")
                 .contains("Local checks")
                 .contains("CI verification")
                 .contains("Local checks: FAILED")
                 .contains("CI verification: PASSED");
+    }
+
+    @Test
+    void passingSecondReviewShowsPassedStateAndNormalRecoveryWithoutGuidance() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+        issue.setApprovedPlanningVersion(approved);
+
+        Iteration first = scoredReview(issue, 1, false, 0.62, 0.45);
+        Iteration second = scoredReview(issue, 2, true, 0.96, 0.94);
+
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(second, first), false);
+
+        assertThat(html).containsPattern(
+                        "(?s)Independent review passes.*?class=\"status status-completed\"[^>]*>PASSED</span>")
+                .contains("Recovery")
+                .contains("action=\"/issues/42/retry\"")
+                .doesNotContain("Needs guidance after review 2")
+                .doesNotContain("Action required");
+    }
+
+    @Test
+    void guidanceAttemptBadgesReflectEachPersistedVerdict() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+
+        Iteration unavailable = failedReview(issue, 1, "{}");
+        unavailable.setReviewPassed(null);
+        Iteration passed = scoredReview(issue, 2, true, 0.95, 0.90);
+        Iteration failed = scoredReview(issue, 3, false, 0.70, 0.65);
+
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(failed, passed, unavailable), true);
+
+        assertThat(html).contains("Did not conform")
+                .contains("Conformed")
+                .contains("Review unavailable")
+                .contains("status-failed")
+                .contains("status-completed")
+                .contains("status-pending");
     }
 
     @Test
@@ -192,7 +243,18 @@ class IssueDetailPlanReviewRenderTest {
                           PlanningVersion selected,
                           PlanningVersion current,
                           List<Iteration> reviewAttempts) {
-        return render(context(issue, versions, selected, current, reviewAttempts));
+        return render(issue, versions, selected, current, reviewAttempts, false);
+    }
+
+    private String render(TrackedIssue issue,
+                          List<PlanningVersion> versions,
+                          PlanningVersion selected,
+                          PlanningVersion current,
+                          List<Iteration> reviewAttempts,
+                          boolean showPlanGuidance) {
+        WebContext context = context(issue, versions, selected, current, reviewAttempts);
+        context.setVariable("showPlanGuidance", showPlanGuidance);
+        return render(context);
     }
 
     private WebContext context(TrackedIssue issue,
@@ -220,6 +282,9 @@ class IssueDetailPlanReviewRenderTest {
         context.setVariable("selectedDesignSpecHtml", markdownRenderer.toHtml(selected.getDesignSpec()));
         context.setVariable("selectedImplementationPlanHtml", markdownRenderer.toHtml(selected.getImplementationPlan()));
         context.setVariable("planReviewAttempts", reviewAttempts);
+        context.setVariable("reviewScoreHistory", ReviewScoreHistoryAssembler.assemble(
+                reviewAttempts.reversed(), null));
+        context.setVariable("showPlanGuidance", false);
         return context;
     }
 
@@ -248,6 +313,20 @@ class IssueDetailPlanReviewRenderTest {
         iteration.setReviewModel("review-model");
         iteration.setReviewJson(reviewJson);
         iteration.setLocalCheckResult("PASSED");
+        return iteration;
+    }
+
+    private static Iteration scoredReview(TrackedIssue issue, int number, boolean passed,
+                                          double specCompliance, double testCoverage) {
+        return failedReview(issue, number, """
+                {"specComplianceScore":%s,"testCoverageScore":%s}
+                """.formatted(specCompliance, testCoverage), passed);
+    }
+
+    private static Iteration failedReview(TrackedIssue issue, int number, String reviewJson,
+                                          boolean passed) {
+        Iteration iteration = failedReview(issue, number, reviewJson);
+        iteration.setReviewPassed(passed);
         return iteration;
     }
 

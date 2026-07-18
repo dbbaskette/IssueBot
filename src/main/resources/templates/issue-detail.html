@@ -51,9 +51,7 @@
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                     <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${humanize.status(issue.status)}">Status</span>
                     <a th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
-                                   and not (issue.planConformanceAttempt == 2
-                                            and currentPlanningVersion != null
-                                            and currentPlanningVersion.state.name() == 'APPROVED')}"
+                                   and showPlanGuidance != true}"
                             href="#recovery" class="btn btn-ghost btn-sm"
                             th:disabled="${processingPaused == true}"
                             th:title="${processingPaused == true ? 'Processing is paused' : 'Review recovery options'}">
@@ -87,9 +85,7 @@
             <!-- === FAILURE RECOVERY PANEL === -->
             <div id="recovery" class="panel mb-3 failure-recovery recovery-card"
                  th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
-                              and not (issue.planConformanceAttempt == 2
-                                       and currentPlanningVersion != null
-                                       and currentPlanningVersion.state.name() == 'APPROVED')}">
+                              and showPlanGuidance != true}">
                 <div class="panel-header">
                     <h3>Recovery</h3>
                     <span class="status status-failed">Needs attention</span>
@@ -315,10 +311,7 @@
             </section>
 
             <!-- === NEEDS GUIDANCE: implementation-only retry against approved contract === -->
-            <section th:if="${issue.planConformanceAttempt == 2
-                              and selectedPlanningVersion != null
-                              and currentPlanningVersion.state.name() == 'APPROVED'
-                              and not selectedPlanIsHistorical}"
+            <section th:if="${showPlanGuidance == true}"
                      class="panel mb-3 plan-guidance-panel" aria-labelledby="plan-guidance-title">
                 <div class="panel-header">
                     <div>
@@ -333,7 +326,11 @@
                         <li th:each="attempt, stats : ${planReviewAttempts}">
                             <div class="plan-review-attempt-heading">
                                 <strong th:text="${'Review attempt ' + (2 - stats.index)}">Review attempt 2</strong>
-                                <span class="status status-failed">Did not conform</span>
+                                <span class="status"
+                                      th:classappend="${attempt.reviewPassed == null ? 'status-pending' : (attempt.reviewPassed ? 'status-completed' : 'status-failed')}"
+                                      th:text="${attempt.reviewPassed == null ? 'Review unavailable' : (attempt.reviewPassed ? 'Conformed' : 'Did not conform')}">
+                                    Review unavailable
+                                </span>
                             </div>
                             <p th:if="${attempt.reviewModel != null}" th:text="${'Review model: ' + attempt.reviewModel}">Review model</p>
                             <div class="plan-review-evidence"

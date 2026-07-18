@@ -17,6 +17,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
@@ -727,6 +728,28 @@ class IssueControllerTest {
         return version;
     }
 
+    private static Fixture approvedPlanFixture(IssueStatus status, int conformanceAttempt) {
+        Fixture f = new Fixture(status);
+        PlanningVersion approved = approvedVersion(f.issue, 1);
+        f.issue.setApprovedPlanningVersion(approved);
+        f.issue.setPlanConformanceAttempt(conformanceAttempt);
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(f.issue.getId()))
+                .thenReturn(List.of(approved));
+        return f;
+    }
+
+    private static Iteration review(TrackedIssue issue, int number, boolean passed,
+                                    double specCompliance, double testCoverage) {
+        Iteration iteration = new Iteration(issue, number);
+        iteration.setId((long) number);
+        iteration.setReviewPassed(passed);
+        iteration.setReviewModel("review-model");
+        iteration.setReviewJson("""
+                {"specComplianceScore":%s,"testCoverageScore":%s}
+                """.formatted(specCompliance, testCoverage));
+        return iteration;
+    }
+
     @Test
     void parsePlanFirstOverride_mapsSelectValuesToTriState() {
         org.assertj.core.api.Assertions.assertThat(IssueController.parsePlanFirstOverride(null)).isNull();
@@ -830,7 +853,7 @@ class IssueControllerTest {
         when(f.costRepository.totalCostForIssue(f.issue)).thenReturn(new java.math.BigDecimal("0.50"));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         org.assertj.core.api.Assertions.assertThat((java.math.BigDecimal) model.getAttribute("effectiveBudget"))
                 .isEqualByComparingTo(new java.math.BigDecimal("2.00"));
@@ -845,7 +868,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("effectiveBudget")).isNull();
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(0);
@@ -860,7 +883,7 @@ class IssueControllerTest {
         when(f.costRepository.totalCostForIssue(f.issue)).thenReturn(new java.math.BigDecimal("0.44"));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("budgetPct")).isEqualTo(100);
     }
@@ -870,7 +893,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isNull();
     }
@@ -920,7 +943,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(current, historical));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, "2", null);
+        f.controller.detail(model, 1L, "2", null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("currentPlanningVersion"))
                 .isSameAs(current);
@@ -946,7 +969,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(current, older));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, "99", null);
+        f.controller.detail(model, 1L, "99", null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanningVersion"))
                 .isSameAs(current);
@@ -955,30 +978,76 @@ class IssueControllerTest {
     }
 
     @Test
-    void detailLoadsTwoMostRecentReviewBearingAttemptsAfterSecondMiss() {
+    void detailLoadsTwoMostRecentReviewBearingAttemptsWhenScoreHistoryExists() {
         Fixture f = new Fixture(IssueStatus.FAILED);
-        f.issue.setPlanConformanceAttempt(2);
+        f.issue.setPlanConformanceAttempt(3);
         PlanningVersion approved = PlanningVersion.pending(f.issue, 1,
                 "# Approved design", "# Approved plan", "CODEX", "gpt-5.6", null);
         approved.approve(java.time.LocalDateTime.now());
         when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
                 .thenReturn(List.of(approved));
-        Iteration first = new Iteration(f.issue, 1);
-        first.setReviewPassed(false);
+        Iteration first = review(f.issue, 1, false, 0.60, 0.50);
         Iteration nonReview = new Iteration(f.issue, 2);
-        Iteration second = new Iteration(f.issue, 3);
-        second.setReviewJson("second findings");
-        Iteration third = new Iteration(f.issue, 4);
-        third.setReviewPassed(false);
+        Iteration second = review(f.issue, 3, false, 0.75, 0.70);
+        Iteration third = review(f.issue, 4, true, 0.95, 0.94);
         when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
                 .thenReturn(List.of(first, nonReview, second, third));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         @SuppressWarnings("unchecked")
         List<Iteration> attempts = (List<Iteration>) model.getAttribute("planReviewAttempts");
         org.assertj.core.api.Assertions.assertThat(attempts).containsExactly(third, second);
+    }
+
+    @Test
+    void passingSecondReviewBuildsHistoryWithoutGuidance() {
+        Fixture f = approvedPlanFixture(IssueStatus.FAILED, 2);
+        Iteration first = review(f.issue, 1, false, 0.62, 0.45);
+        Iteration second = review(f.issue, 2, true, 0.96, 0.94);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(first, second));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null, null, null);
+
+        History history = (History) model.getAttribute("reviewScoreHistory");
+        org.assertj.core.api.Assertions.assertThat(history.selected().score().passed()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
+    }
+
+    @Test
+    void requestedReviewAttemptSelectsOlderComparison() {
+        Fixture f = approvedPlanFixture(IssueStatus.AWAITING_APPROVAL, 3);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
+                review(f.issue, 1, false, 0.60, 0.50),
+                review(f.issue, 2, false, 0.75, 0.70),
+                review(f.issue, 3, true, 0.95, 0.94)));
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.detail(model, 1L, null, "2", null);
+
+        org.assertj.core.api.Assertions.assertThat(((History) model.getAttribute("reviewScoreHistory"))
+                .selected().iterationNumber()).isEqualTo(2);
+    }
+
+    @Test
+    void genuineSecondMissShowsGuidanceForFailedAndCooldownOnly() {
+        for (IssueStatus status : List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN,
+                IssueStatus.AWAITING_APPROVAL)) {
+            Fixture f = approvedPlanFixture(status, 2);
+            when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
+                    review(f.issue, 1, false, 0.62, 0.45),
+                    review(f.issue, 2, false, 0.75, 0.70)));
+            org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+
+            f.controller.detail(model, 1L, null, null, null);
+
+            org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance"))
+                    .as("guidance for %s", status)
+                    .isEqualTo(status == IssueStatus.FAILED || status == IssueStatus.COOLDOWN);
+        }
     }
 
     // === Friendly not-found (#81) ===
@@ -995,7 +1064,7 @@ class IssueControllerTest {
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         NotFoundException ex = org.junit.jupiter.api.Assertions.assertThrows(NotFoundException.class,
-                () -> f.controller.detail(model, 999L, null, null));
+                () -> f.controller.detail(model, 999L, null, null, null));
 
         org.assertj.core.api.Assertions.assertThat(ex.getMessage())
                 .isEqualTo("Issue not found — it may have been removed with its repository.");
@@ -1091,7 +1160,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(first, second));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("latestIteration")).isSameAs(second);
     }
@@ -1111,7 +1180,7 @@ class IssueControllerTest {
                 .thenReturn(List.of(first, second, third));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         @SuppressWarnings("unchecked")
         List<Iteration> newestFirst = (List<Iteration>) model.getAttribute("iterationsNewestFirst");
@@ -1133,7 +1202,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.QUEUED);
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         org.assertj.core.api.Assertions.assertThat(
                 (List<?>) model.getAttribute("timeline")).isEmpty();
@@ -1150,7 +1219,7 @@ class IssueControllerTest {
         when(f.costRepository.findByIssue(f.issue)).thenReturn(List.of());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
-        f.controller.detail(model, 1L, null, null);
+        f.controller.detail(model, 1L, null, null, null);
 
         @SuppressWarnings("unchecked")
         List<com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline> timeline =
