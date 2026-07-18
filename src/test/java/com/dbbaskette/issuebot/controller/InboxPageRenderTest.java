@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -11,6 +12,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -233,5 +235,60 @@ class InboxPageRenderTest {
                 .contains("Review spec &amp; plan")
                 .doesNotContain("full plan")
                 .doesNotContain("reject-plan-modal-8");
+    }
+
+    @Test
+    void approvalReviewRendersValidZeroAsPercentage() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue approval = new TrackedIssue(repo, 9, "Zero review");
+        approval.setId(9L);
+        approval.setStatus(IssueStatus.AWAITING_APPROVAL);
+        Iteration review = new Iteration(approval, 1);
+        review.setId(90L);
+        review.setReviewPassed(false);
+        review.setReviewJson("{\"specComplianceScore\":0.0}");
+        when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL))
+                .thenReturn(List.of(approval));
+        when(iterations.findByIssueOrderByIterationNumAsc(approval)).thenReturn(List.of(review));
+        InboxController controller = new InboxController(issues, mock(PlanningVersionRepository.class),
+                mock(IssuePollingService.class), mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)), new ObjectMapper());
+        Model model = new ExtendedModelMap();
+        controller.inbox(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("Overall 0%")
+                .contains("REVIEW FAILED")
+                .doesNotContain("/10");
+    }
+
+    @Test
+    void approvalOperationalFailureRendersReviewUnavailableWithReason() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue approval = new TrackedIssue(repo, 10, "Unavailable review");
+        approval.setId(10L);
+        approval.setStatus(IssueStatus.AWAITING_APPROVAL);
+        Iteration review = new Iteration(approval, 2);
+        review.setId(100L);
+        review.setReviewJson(PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+        when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL))
+                .thenReturn(List.of(approval));
+        when(iterations.findByIssueOrderByIterationNumAsc(approval)).thenReturn(List.of(review));
+        InboxController controller = new InboxController(issues, mock(PlanningVersionRepository.class),
+                mock(IssuePollingService.class), mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)), new ObjectMapper());
+        Model model = new ExtendedModelMap();
+        controller.inbox(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("REVIEW UNAVAILABLE")
+                .contains("review CLI timed out")
+                .doesNotContain("REVIEW FAILED");
     }
 }

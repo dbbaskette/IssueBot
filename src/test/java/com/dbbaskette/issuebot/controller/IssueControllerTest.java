@@ -18,6 +18,8 @@ import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
@@ -1061,7 +1063,37 @@ class IssueControllerTest {
         f.controller.detail(model, 1L, null, null, null);
 
         History history = (History) model.getAttribute("reviewScoreHistory");
-        org.assertj.core.api.Assertions.assertThat(history.latest().score().passed()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(history.latest().score().passed()).isNull();
+        org.assertj.core.api.Assertions.assertThat(history.latest().score().outcome())
+                .isEqualTo(ReviewOutcome.UNAVAILABLE);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
+    }
+
+    @Test
+    void duplicateReviewNumbersUsePersistenceChronologyForSelectionEvidenceAndGuidance() {
+        Fixture f = approvedPlanFixture(IssueStatus.FAILED, 2);
+        Iteration oldest = review(f.issue, 2, false, 0.40, 0.40);
+        oldest.setId(10L);
+        Iteration prior = review(f.issue, 2, false, 0.60, 0.60);
+        prior.setId(20L);
+        Iteration latestScored = review(f.issue, 2, true, 0.90, 0.90);
+        latestScored.setId(30L);
+        Iteration unavailable = new Iteration(f.issue, 2);
+        unavailable.setId(40L);
+        unavailable.setReviewJson(PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+                .thenReturn(List.of(unavailable, oldest, latestScored, prior));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null, "20", null);
+
+        History history = (History) model.getAttribute("reviewScoreHistory");
+        org.assertj.core.api.Assertions.assertThat(history.selected().iterationId()).isEqualTo(20L);
+        org.assertj.core.api.Assertions.assertThat(history.previous().iterationId()).isEqualTo(10L);
+        org.assertj.core.api.Assertions.assertThat(history.latest().iterationId()).isEqualTo(40L);
+        @SuppressWarnings("unchecked")
+        List<Iteration> evidence = (List<Iteration>) model.getAttribute("planReviewAttempts");
+        org.assertj.core.api.Assertions.assertThat(evidence).containsExactly(unavailable, latestScored);
         org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
     }
 
@@ -1096,6 +1128,59 @@ class IssueControllerTest {
                     .as("guidance for %s", status)
                     .isEqualTo(status == IssueStatus.FAILED || status == IssueStatus.COOLDOWN);
         }
+    }
+
+    @Test
+    void guidanceStaysHiddenUntilTheSecondConformanceAttempt() {
+        Fixture f = approvedPlanFixture(IssueStatus.FAILED, 1);
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
+                review(f.issue, 1, false, 0.62, 0.45),
+                review(f.issue, 2, false, 0.75, 0.70)));
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.detail(model, 1L, null, null, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
+    }
+
+    @Test
+    void guidanceStaysHiddenWhileTheCurrentPlanningVersionIsUnapproved() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanConformanceAttempt(2);
+        PlanningVersion pending = PlanningVersion.pending(f.issue, 1,
+                "# Pending design", "# Pending plan", "CODEX", "gpt-5.6", null);
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(pending));
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
+                review(f.issue, 1, false, 0.62, 0.45),
+                review(f.issue, 2, false, 0.75, 0.70)));
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.detail(model, 1L, null, null, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
+    }
+
+    @Test
+    void guidanceStaysHiddenWhileViewingAHistoricalPlanningVersion() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.setPlanConformanceAttempt(2);
+        PlanningVersion current = approvedVersion(f.issue, 2);
+        PlanningVersion historical = PlanningVersion.pending(f.issue, 1,
+                "# Historical design", "# Historical plan", "CODEX", "gpt-5.6", null);
+        historical.supersede();
+        f.issue.setApprovedPlanningVersion(current);
+        when(f.planningVersions.findByIssueIdOrderByVersionNumberDesc(1L))
+                .thenReturn(List.of(current, historical));
+        when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
+                review(f.issue, 1, false, 0.62, 0.45),
+                review(f.issue, 2, false, 0.75, 0.70)));
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.detail(model, 1L, "1", null, null);
+
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("selectedPlanIsHistorical")).isEqualTo(true);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("showPlanGuidance")).isEqualTo(false);
     }
 
     // === Friendly not-found (#81) ===

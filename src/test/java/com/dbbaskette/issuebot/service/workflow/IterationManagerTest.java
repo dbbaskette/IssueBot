@@ -9,6 +9,9 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Transactional;
@@ -156,7 +159,8 @@ class IterationManagerTest {
     }
 
     @Test
-    void invocationFailureStoresReviewStateWithoutAdvancingConformanceAttempt() {
+    void invocationFailureStoresNeutralOperationalStateWithoutAdvancingConformanceAttempt()
+            throws Exception {
         TrackedIssue issue = createIssue(1);
         Iteration iteration = new Iteration(issue, 1);
         CodeReviewResult invocationFailure = CodeReviewResult.failed(
@@ -165,8 +169,11 @@ class IterationManagerTest {
         iterationManager.persistCompletedReviewVerdict(issue, iteration, invocationFailure,
                 new ApprovedPlanContext(7L, 2, "spec", "plan"));
 
-        assertFalse(iteration.getReviewPassed());
-        assertNull(iteration.getReviewJson());
+        assertEquals(ReviewOutcome.OPERATIONAL_ERROR, invocationFailure.outcome());
+        assertNull(iteration.getReviewPassed());
+        JsonNode persisted = new ObjectMapper().readTree(iteration.getReviewJson());
+        assertEquals("OPERATIONAL_ERROR", persisted.path("issueBotReviewOutcome").asText());
+        assertEquals("review process exited", persisted.path("failureReason").asText());
         assertEquals("review-model", iteration.getReviewModel());
         assertEquals(0, issue.getPlanConformanceAttempt());
         assertFalse(issue.isPlanCorrectionPending());

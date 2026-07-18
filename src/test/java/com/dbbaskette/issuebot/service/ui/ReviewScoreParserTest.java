@@ -3,6 +3,8 @@ package com.dbbaskette.issuebot.service.ui;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,18 +30,33 @@ class ReviewScoreParserTest {
 
     @Test
     void malformedEvidenceKeepsPersistedVerdictWithoutInventingZeroScores() {
-        ReviewScore score = ReviewScoreParser.parse(iteration(2, true, "not-json"));
+        ReviewScore score = ReviewScoreParser.parse(iteration(2, false, "not-json"));
 
-        assertThat(score.passed()).isTrue();
+        assertThat(score.outcome()).isEqualTo(ReviewOutcome.FAILED);
+        assertThat(score.passed()).isFalse();
         assertThat(score.overall()).isNull();
         assertThat(score.dimensions()).isEmpty();
     }
 
     @Test
-    void evidenceWithoutPersistedVerdictIsNeutral() {
-        ReviewScore score = ReviewScoreParser.parse(iteration(1, null, "not-json"));
+    void jsonPassedFlagNeverOverridesMissingPersistedVerdict() {
+        ReviewScore score = ReviewScoreParser.parse(iteration(1, null, """
+                {"passed":false,"summary":"Model said no","specComplianceScore":0.80}
+                """));
 
+        assertThat(score.outcome()).isEqualTo(ReviewOutcome.UNAVAILABLE);
         assertThat(score.passed()).isNull();
+        assertThat(score.overall()).isEqualTo(0.80);
+    }
+
+    @Test
+    void operationalSentinelRetainsNeutralOutcomeAndFailureReason() {
+        ReviewScore score = ReviewScoreParser.parse(iteration(1, null,
+                PersistedReviewOutcome.operationalErrorJson("review CLI timed out")));
+
+        assertThat(score.outcome()).isEqualTo(ReviewOutcome.OPERATIONAL_ERROR);
+        assertThat(score.passed()).isNull();
+        assertThat(score.failureReason()).isEqualTo("review CLI timed out");
         assertThat(score.dimensions()).isEmpty();
     }
 

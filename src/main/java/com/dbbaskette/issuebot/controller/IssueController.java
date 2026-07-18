@@ -219,7 +219,7 @@ public class IssueController {
                 "Issue not found — it may have been removed with its repository.",
                 "/issues", "Back to the queue"));
         populateDetailModel(model, issue, id, parseRequestedInteger(planVersion),
-                parseRequestedInteger(reviewAttempt));
+                parseRequestedLong(reviewAttempt));
         model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
     }
@@ -230,6 +230,17 @@ public class IssueController {
         }
         try {
             return Integer.valueOf(value.strip());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static Long parseRequestedLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value.strip());
         } catch (NumberFormatException ignored) {
             return null;
         }
@@ -958,8 +969,12 @@ public class IssueController {
     }
 
     private void populateDetailModel(Model model, TrackedIssue issue, Long id,
-                                     Integer requestedPlanVersion, Integer requestedReviewAttempt) {
-        List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
+                                     Integer requestedPlanVersion, Long requestedReviewAttempt) {
+        List<Iteration> iterations = new java.util.ArrayList<>(
+                iterationRepository.findByIssueOrderByIterationNumAsc(issue));
+        if (iterations.stream().allMatch(iteration -> iteration.getId() != null)) {
+            iterations.sort(java.util.Comparator.comparingLong(Iteration::getId));
+        }
         History reviewHistory = ReviewScoreHistoryAssembler.assemble(iterations, requestedReviewAttempt);
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));

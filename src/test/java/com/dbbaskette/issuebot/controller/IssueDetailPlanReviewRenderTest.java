@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
@@ -147,6 +148,9 @@ class IssueDetailPlanReviewRenderTest {
                 .doesNotContain("name=\"planFirstOverride\"");
         assertThat(occurrences(html, "class=\"status status-failed\">Did not conform</span>"))
                 .isEqualTo(2);
+        assertThat(occurrences(html, "Keep approval immutable")).isEqualTo(1);
+        assertThat(html.indexOf("Keep approval immutable"))
+                .isGreaterThan(html.indexOf("Iteration History"));
     }
 
     @Test
@@ -251,14 +255,10 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("+49")
                 .contains("4 of 4 met")
                 .contains("aria-label=\"Test coverage: review 1 45 percent; review 2 94 percent; improved 49 points\"")
-                .contains("reviewAttempt=1")
                 .contains("review-model")
                 .contains("2 findings")
                 .contains("open=\"open\"")
-                .contains("href=\"/issues/42?planVersion=2&amp;reviewAttempt=2#review-history\"")
-                .contains("href=\"/issues/42?planVersion=2&amp;reviewAttempt=1#review-history\"")
-                .containsPattern("(?s)Review 2.*?Review 1")
-                .contains("aria-current=\"true\"");
+                .doesNotContain("review-attempt-selector");
     }
 
     @Test
@@ -283,6 +283,30 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("aria-label=\"Spec compliance: review 1 81 percent; first score\"")
                 .contains("aria-label=\"Test coverage: review 1 68 percent; first score\"")
                 .doesNotContain("review-attempt-selector");
+    }
+
+    @Test
+    void operationalReviewFailureIsNeutralAndRetainsDiagnosticReason() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+        issue.setApprovedPlanningVersion(approved);
+        Iteration unavailable = review(issue, 2, null,
+                PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(unavailable), false);
+
+        assertThat(html).contains("Review unavailable")
+                .contains("review CLI timed out")
+                .contains("Review: UNAVAILABLE")
+                .contains("Raw JSON")
+                .doesNotContain("Did not conform")
+                .doesNotContain("Changes requested")
+                .doesNotContain("Action required")
+                .doesNotContain("Needs guidance after review 2");
     }
 
     @Test
@@ -318,6 +342,10 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("aria-label=\"Spec compliance: review 1 90 percent; review 2 70 percent; declined 20 points\"")
                 .contains("aria-label=\"Correctness: review 1 80 percent; review 2 80 percent; no change\"")
                 .contains("aria-label=\"Security: review 2 75 percent; first score for this dimension\"")
+                .contains("review-score-delta-icon")
+                .contains(">↓</span>")
+                .contains("review-criterion-icon")
+                .contains(">!</span>")
                 .containsSubsequence("Blocking criterion", "Missing guard", "Passing criterion", "Still covered");
     }
 
@@ -357,14 +385,40 @@ class IssueDetailPlanReviewRenderTest {
 
         String html = render(context);
 
-        assertThat(html).contains("aria-label=\"Spec compliance: review 1 1 percent; review 2 3 percent; improved 1 points\"")
+        assertThat(html).contains("aria-label=\"Spec compliance: review 1 1 percent; review 2 3 percent; improved 1 point\"")
                 .containsPattern("class=\"review-score-previous\"\\s+style=\"width:1%\"")
                 .containsPattern("class=\"review-score-current\"\\s+style=\"width:3%\"")
                 .contains(">+1</span>")
-                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=2#review-history\"")
-                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=1#review-history\"");
+                .contains("1 point from review 1")
+                .doesNotContain("review-attempt-selector");
         assertThat(html.indexOf("id=\"review-history\""))
                 .isLessThan(html.indexOf("id=\"plan-review\""));
+    }
+
+    @Test
+    void selectorUsesUniquePersistenceIdsAndAuditRichLabelsAfterThreeScoredAttempts() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        Iteration first = review(issue, 2, false, "{\"specComplianceScore\":0.50}");
+        first.setId(101L);
+        Iteration second = review(issue, 2, true, "{\"specComplianceScore\":0.75}");
+        second.setId(202L);
+        Iteration third = review(issue, 2, true, "{\"specComplianceScore\":0.90}");
+        third.setId(303L);
+        WebContext context = context(issue, List.of(current), current, current,
+                List.of(third, first, second));
+        context.setVariable("requestedPlanVersion", 3);
+
+        String html = render(context);
+
+        assertThat(html).contains("review-attempt-selector")
+                .contains("Review 2 · Passed · 90%")
+                .contains("Review 2 · Passed · 75%")
+                .contains("Review 2 · Did not conform · 50%")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=303#review-history\"")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=202#review-history\"")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=101#review-history\"")
+                .containsPattern("href=\"[^\"]*reviewAttempt=303[^\"]*\"\\s+aria-current=\"true\"");
     }
 
     @Test
@@ -481,6 +535,7 @@ class IssueDetailPlanReviewRenderTest {
 
     private static Iteration failedReview(TrackedIssue issue, int number, String reviewJson) {
         Iteration iteration = new Iteration(issue, number);
+        iteration.setId((long) number);
         iteration.setReviewPassed(false);
         iteration.setReviewModel("review-model");
         iteration.setReviewJson(reviewJson);
@@ -497,6 +552,7 @@ class IssueDetailPlanReviewRenderTest {
 
     private static Iteration review(TrackedIssue issue, int number, Boolean passed, String reviewJson) {
         Iteration iteration = new Iteration(issue, number);
+        iteration.setId((long) number);
         iteration.setReviewPassed(passed);
         iteration.setReviewModel("review-model");
         iteration.setReviewJson(reviewJson);

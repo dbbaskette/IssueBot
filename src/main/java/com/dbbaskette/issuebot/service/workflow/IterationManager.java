@@ -14,6 +14,8 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -123,8 +125,11 @@ public class IterationManager {
     public void persistCompletedReviewVerdict(TrackedIssue trackedIssue, Iteration iteration,
                                                CodeReviewResult reviewResult,
                                                ApprovedPlanContext approvedPlan) {
-        iteration.setReviewPassed(reviewResult.passed());
-        iteration.setReviewJson(reviewResult.rawJson());
+        ReviewOutcome outcome = reviewResult.outcome();
+        iteration.setReviewPassed(outcome.persistedVerdict());
+        iteration.setReviewJson(outcome == ReviewOutcome.OPERATIONAL_ERROR
+                ? PersistedReviewOutcome.operationalErrorJson(reviewResult.summary())
+                : reviewResult.rawJson());
         iteration.setReviewModel(reviewResult.modelUsed());
         iterationRepository.save(iteration);
 

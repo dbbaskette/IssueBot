@@ -2,6 +2,8 @@ package com.dbbaskette.issuebot.service.ui;
 
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -32,30 +34,29 @@ public final class ReviewScoreParser {
         if (persistedPassed == null && json == null) {
             return null;
         }
+        ReviewOutcome outcome = PersistedReviewOutcome.classify(persistedPassed, json);
+        String failureReason = PersistedReviewOutcome.operationalFailureReason(json);
         if (json == null || json.isBlank()) {
-            return emptyScore(persistedPassed, iteration);
+            return emptyScore(outcome, failureReason, iteration);
         }
         try {
             JsonNode root = MAPPER.readTree(json);
-            Boolean passed = persistedPassed != null ? persistedPassed : jsonPassed(root);
+            if (outcome == ReviewOutcome.OPERATIONAL_ERROR) {
+                return emptyScore(outcome, failureReason, iteration);
+            }
             List<ReviewScore.Dimension> dimensions = dimensions(root);
             Double overall = dimensions.isEmpty() ? null : dimensions.stream()
                     .mapToDouble(ReviewScore.Dimension::value)
                     .average()
                     .orElseThrow();
             int findingCount = root.path("findings").isArray() ? root.path("findings").size() : 0;
-            return new ReviewScore(passed, root.path("summary").asText(null), overall, dimensions,
-                    findingCount, iteration.getReviewModel(), criteria(root.path("criteria")));
+            return new ReviewScore(outcome, failureReason, root.path("summary").asText(null),
+                    overall, dimensions, findingCount, iteration.getReviewModel(),
+                    criteria(root.path("criteria")));
         } catch (Exception e) {
             log.warn("Could not parse review JSON for iteration {}: {}", iteration.getId(), e.getMessage());
-            return emptyScore(persistedPassed, iteration);
+            return emptyScore(outcome, failureReason, iteration);
         }
-    }
-
-    private static Boolean jsonPassed(JsonNode root) {
-        return root.has("passed") && root.path("passed").isBoolean()
-                ? root.path("passed").booleanValue()
-                : null;
     }
 
     private static List<ReviewScore.Dimension> dimensions(JsonNode root) {
@@ -84,8 +85,10 @@ public final class ReviewScoreParser {
         return criteria;
     }
 
-    private static ReviewScore emptyScore(Boolean passed, Iteration iteration) {
-        return new ReviewScore(passed, null, null, List.of(), 0, iteration.getReviewModel(), List.of());
+    private static ReviewScore emptyScore(ReviewOutcome outcome, String failureReason,
+                                          Iteration iteration) {
+        return new ReviewScore(outcome, failureReason, failureReason, null, List.of(), 0,
+                iteration.getReviewModel(), List.of());
     }
 
     private record DimensionDefinition(String jsonField, String key, String label) {}

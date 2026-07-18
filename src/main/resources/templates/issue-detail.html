@@ -174,7 +174,7 @@
                         <div class="review-score-context">
                             <span th:if="${history.previous == null}">First scored review</span>
                             <span th:if="${history.previous != null and history.overallDeltaPoints != null and history.overallDeltaPoints != 0}"
-                                  th:text="${history.overallDeltaPoints + ' points from review ' + history.previous.iterationNumber}">22 points from review 1</span>
+                                  th:text="${history.overallDeltaPoints + ' ' + history.overallDeltaPointUnit + ' from review ' + history.previous.iterationNumber}">22 points from review 1</span>
                             <span th:if="${history.previous != null and history.overallDeltaPoints == 0}">No overall change</span>
                             <span class="review-score-meta"
                                   th:if="${history.selected.score.model != null or history.selected.score.findingCount > 0}"
@@ -193,14 +193,14 @@
                     <p class="review-score-summary" th:if="${history.selected.score.summary != null}"
                        th:text="${history.selected.score.summary}">Review summary</p>
 
-                    <nav th:if="${history.attempts.size() > 1}" class="review-attempt-selector"
+                    <nav th:if="${history.scoredAttemptCount > 2}" class="review-attempt-selector"
                          aria-label="Review attempts">
                         <a th:each="attempt : ${history.attempts}"
                            th:href="${requestedPlanVersion != null
-                               ? '/issues/' + issue.id + '?planVersion=' + requestedPlanVersion + '&amp;reviewAttempt=' + attempt.iterationNumber + '#review-history'
-                               : '/issues/' + issue.id + '?reviewAttempt=' + attempt.iterationNumber + '#review-history'}"
-                           th:attr="aria-current=${attempt.iterationNumber == history.selected.iterationNumber ? 'true' : null}"
-                           th:text="${'Review ' + attempt.iterationNumber}">Review 2</a>
+                               ? '/issues/' + issue.id + '?planVersion=' + requestedPlanVersion + '&amp;reviewAttempt=' + attempt.iterationId + '#review-history'
+                               : '/issues/' + issue.id + '?reviewAttempt=' + attempt.iterationId + '#review-history'}"
+                           th:attr="aria-current=${attempt.iterationId == history.selected.iterationId ? 'true' : null}"
+                           th:text="${attempt.selectorLabel}">Review 2 · Passed · 95%</a>
                     </nav>
 
                     <div class="review-dimension-grid" th:if="${not history.dimensions.isEmpty()}">
@@ -212,12 +212,14 @@
                             <div class="review-score-rail" role="img"
                                  th:attr="aria-label=${dimension.previousPercent == null
                                      ? dimension.label + ': review ' + history.selected.iterationNumber + ' ' + dimension.currentPercent + ' percent; ' + (history.previous == null ? 'first score' : 'first score for this dimension')
-                                     : dimension.label + ': review ' + history.previous.iterationNumber + ' ' + dimension.previousPercent + ' percent; review ' + history.selected.iterationNumber + ' ' + dimension.currentPercent + ' percent; ' + (dimension.deltaPoints == 0 ? 'no change' : (dimension.deltaPoints > 0 ? 'improved ' + dimension.deltaPoints + ' points' : 'declined ' + (0 - dimension.deltaPoints) + ' points'))}">
+                                     : dimension.label + ': review ' + history.previous.iterationNumber + ' ' + dimension.previousPercent + ' percent; review ' + history.selected.iterationNumber + ' ' + dimension.currentPercent + ' percent; ' + (dimension.deltaPoints == 0 ? 'no change' : (dimension.deltaPoints > 0 ? 'improved ' + dimension.deltaPoints + ' ' + dimension.deltaPointUnit : 'declined ' + (0 - dimension.deltaPoints) + ' ' + dimension.deltaPointUnit))}">
                                 <span th:if="${dimension.previousPercent != null}" class="review-score-previous"
                                       th:style="${'width:' + dimension.previousPercent + '%'}"></span>
                                 <span class="review-score-current"
                                       th:style="${'width:' + dimension.currentPercent + '%'}"><i class="review-score-marker"></i></span>
                             </div>
+                            <span class="review-score-delta-icon" aria-hidden="true"
+                                  th:text="${dimension.deltaPoints == null ? '＋' : (dimension.deltaPoints == 0 ? '→' : (dimension.deltaPoints > 0 ? '↑' : '↓'))}">↑</span>
                             <span class="review-score-delta"
                                   th:classappend="${dimension.deltaPoints == null ? 'is-added' : (dimension.deltaPoints == 0 ? 'is-neutral' : (dimension.deltaPoints > 0 ? 'is-positive' : 'is-negative'))}"
                                   th:text="${dimension.deltaPoints == null ? 'New' : (dimension.deltaPoints == 0 ? 'No change' : (dimension.deltaPoints > 0 ? '+' : '') + dimension.deltaPoints)}">+49</span>
@@ -230,6 +232,8 @@
                         <ul class="review-criteria-list">
                             <li th:each="criterion : ${history.criteria}"
                                 th:classappend="${'is-' + criterion.verdict}">
+                                <span class="review-criterion-icon" aria-hidden="true"
+                                      th:text="${criterion.verdict == 'met' ? '✓' : (criterion.verdict == 'unmet' ? '!' : '?')}">✓</span>
                                 <span class="review-criterion-verdict"
                                       th:text="${criterion.verdict == 'met' ? 'Met' : (criterion.verdict == 'unmet' ? 'Unmet' : 'Unclear')}">Met</span>
                                 <div>
@@ -432,7 +436,6 @@
                                 <p th:if="${attempt.ciResult != null}"
                                    th:text="${'CI verification: ' + attempt.ciResult}">CI verification: PASSED</p>
                             </div>
-                            <pre th:if="${attempt.reviewJson != null}" th:text="${attempt.reviewJson}">Findings and test evidence</pre>
                         </li>
                     </ol>
                     <form class="plan-guidance-form" th:action="@{'/issues/' + ${issue.id} + '/plan/retry-implementation'}" method="post">
@@ -804,9 +807,10 @@
                                   th:classappend="${iter.ciResult == 'PASSED' ? 'status-completed' : 'status-failed'}"
                                   th:text="${'CI: ' + iter.ciResult}">CI: PASSED</span>
 
-                            <span class="status" th:if="${iter.reviewPassed != null}"
-                                  th:classappend="${iter.reviewPassed ? 'status-completed' : 'status-failed'}"
-                                  th:text="${'Review: ' + (iter.reviewPassed ? 'PASSED' : 'FAILED')}">Review: PASSED</span>
+                            <span class="status"
+                                  th:if="${iter.reviewPassed != null or (iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson))}"
+                                  th:classappend="${iter.reviewPassed == null ? 'status-pending' : (iter.reviewPassed ? 'status-completed' : 'status-failed')}"
+                                  th:text="${'Review: ' + (iter.reviewPassed == null ? 'UNAVAILABLE' : (iter.reviewPassed ? 'PASSED' : 'FAILED'))}">Review: PASSED</span>
 
                             <span class="text-sm text-muted" th:if="${iter.claudeSessionId != null and not #strings.isEmpty(iter.claudeSessionId)}">
                                 Agent session:
@@ -837,11 +841,13 @@
                             </details>
 
                             <!-- Review Scores -->
-                            <div th:if="${iter.reviewPassed != null}" class="review-scores mt-1">
+                            <div th:if="${iter.reviewPassed != null or (iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson))}"
+                                 class="review-scores mt-1">
                                 <div class="flex-between mb-1">
                                     <span class="text-sm">Independent Review:</span>
-                                    <span class="status" th:classappend="${iter.reviewPassed ? 'status-completed' : 'status-failed'}"
-                                          th:text="${iter.reviewPassed ? 'PASSED' : 'FAILED'}">RESULT</span>
+                                    <span class="status"
+                                          th:classappend="${iter.reviewPassed == null ? 'status-pending' : (iter.reviewPassed ? 'status-completed' : 'status-failed')}"
+                                          th:text="${iter.reviewPassed == null ? 'UNAVAILABLE' : (iter.reviewPassed ? 'PASSED' : 'FAILED')}">RESULT</span>
                                 </div>
                                 <div th:if="${iter.reviewModel != null}" class="text-sm text-muted mb-1"
                                      th:text="'Model: ' + ${iter.reviewModel}">model</div>

@@ -1408,11 +1408,13 @@ select {
 .review-score-meta-only { margin-bottom: 0.75rem; }
 
 .review-score-summary {
+    min-width: 0;
     max-width: 72ch;
     margin: -0.15rem 0 1rem;
     color: var(--text-secondary);
     font-size: 0.82rem;
     line-height: 1.55;
+    overflow-wrap: anywhere;
 }
 
 .review-attempt-selector {
@@ -1532,13 +1534,22 @@ select {
 }
 
 .review-score-delta {
-    display: block;
+    display: inline-block;
     margin-top: 0.48rem;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
     font-size: 0.68rem;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+}
+
+.review-score-delta-icon {
+    display: inline-block;
+    margin-top: 0.48rem;
+    margin-right: 0.2rem;
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    font-weight: 700;
 }
 
 .review-score-delta.is-positive { color: var(--ok); }
@@ -1568,7 +1579,7 @@ select {
 
 .review-criteria-list li {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto auto minmax(0, 1fr);
     gap: 0.65rem;
     min-width: 0;
     padding: 0.62rem 0.7rem;
@@ -1577,6 +1588,15 @@ select {
     border-radius: var(--radius-md);
     background: var(--surface-raised);
 }
+
+.review-criterion-icon {
+    color: var(--text-tertiary);
+    font-size: 0.76rem;
+    font-weight: 800;
+}
+
+.review-criteria-list li.is-met .review-criterion-icon { color: var(--ok); }
+.review-criteria-list li.is-unmet .review-criterion-icon { color: var(--danger); }
 
 .review-criteria-list li.is-met { border-left-color: var(--ok); }
 .review-criteria-list li.is-unmet { border-left-color: var(--danger); }

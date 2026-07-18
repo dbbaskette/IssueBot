@@ -65,19 +65,21 @@
             <div class="flex-between mb-1">
                 <span class="text-sm" style="font-weight:600">Independent Code Review</span>
                 <span class="status"
-                      th:classappend="${rev.passed ? 'status-completed' : 'status-failed'}"
-                      th:text="${rev.passed ? 'PASSED' : 'FAILED'}">RESULT</span>
+                      th:classappend="${rev.passed == null ? 'status-pending' : (rev.passed ? 'status-completed' : 'status-failed')}"
+                      th:text="${rev.passed == null ? 'REVIEW UNAVAILABLE' : (rev.passed ? 'REVIEW PASSED' : 'REVIEW FAILED')}">RESULT</span>
             </div>
-            <div th:if="${rev.overall > 0}" class="mb-1">
-                <span class="badge" th:text="${'Overall ' + #numbers.formatDecimal(rev.overall, 1, 1) + '/10'}">Overall 0/10</span>
+            <p th:if="${rev.failureReason != null}" class="text-sm text-muted mb-1"
+               th:text="${rev.failureReason}">Review unavailable</p>
+            <div th:if="${rev.overall != null}" class="mb-1">
+                <span class="badge" th:text="${'Overall ' + rev.overallPercent + '%'}">Overall 0%</span>
                 <span class="badge" th:if="${rev.findingCount > 0}"
                       th:text="${rev.findingCount + (rev.findingCount == 1 ? ' finding' : ' findings')}">0 findings</span>
             </div>
-            <div th:if="${rev.overall > 0}" class="text-sm text-muted"
+            <div th:if="${rev.overall != null}" class="text-sm text-muted"
                  style="display:flex;flex-wrap:wrap;gap:0.4rem 1rem">
                 <span th:each="dimension : ${rev.dimensions}"
                       th:with="label=${dimension.key == 'specCompliance' ? 'Spec' : (dimension.key == 'codeQuality' ? 'Quality' : (dimension.key == 'testCoverage' ? 'Tests' : (dimension.key == 'architectureFit' ? 'Architecture' : dimension.label)))}"
-                      th:text="${label + ' ' + #numbers.formatDecimal(dimension.value, 1, 1)}">Dimension</span>
+                      th:text="${label + ' ' + dimension.percent + '%'}">Dimension</span>
             </div>
             <div th:if="${not #lists.isEmpty(rev.criteria)}" class="mt-1">
                 <div class="text-sm text-muted" style="font-weight:600;margin-bottom:0.3rem">Acceptance Criteria</div>

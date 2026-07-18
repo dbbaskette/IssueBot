@@ -158,33 +158,38 @@ public class CodeReviewService {
         try {
             String json = extractJson(output);
             JsonNode root = objectMapper.readTree(json);
+            if (!root.isObject()) {
+                throw new IllegalArgumentException("Review response must be a JSON object");
+            }
 
             boolean modelPassed = root.path("passed").asBoolean(false);
             String summary = root.path("summary").asText("No summary");
-            double specCompliance = root.path("specComplianceScore").asDouble(0.0);
-            double correctness = root.path("correctnessScore").asDouble(0.0);
-            double codeQuality = root.path("codeQualityScore").asDouble(0.0);
-            double testCoverage = root.path("testCoverageScore").asDouble(0.0);
-            double architectureFit = root.path("architectureFitScore").asDouble(0.0);
-            double regressions = root.path("regressionsScore").asDouble(0.0);
-            double security = root.path("securityScore").asDouble(1.0);
+            double specCompliance = requiredScore(root, "specComplianceScore");
+            double correctness = requiredScore(root, "correctnessScore");
+            double codeQuality = requiredScore(root, "codeQualityScore");
+            double testCoverage = requiredScore(root, "testCoverageScore");
+            double architectureFit = requiredScore(root, "architectureFitScore");
+            double regressions = requiredScore(root, "regressionsScore");
+            double security = root.has("securityScore") || securityReview
+                    ? requiredScore(root, "securityScore") : 1.0;
             String advice = root.path("advice").asText("");
 
             List<CodeReviewResult.ReviewFinding> findings = new ArrayList<>();
-            JsonNode findingsNode = root.path("findings");
-            if (findingsNode.isArray()) {
-                for (JsonNode f : findingsNode) {
-                    Integer line = f.has("line") && !f.path("line").isNull()
-                            ? f.path("line").asInt() : null;
-                    findings.add(new CodeReviewResult.ReviewFinding(
-                            f.path("severity").asText("medium"),
-                            f.path("category").asText(""),
-                            f.path("file").asText(""),
-                            line,
-                            f.path("finding").asText(""),
-                            f.path("suggestion").asText("")
-                    ));
-                }
+            JsonNode findingsNode = root.get("findings");
+            if (findingsNode == null || !findingsNode.isArray()) {
+                throw new IllegalArgumentException("Review response requires a findings array");
+            }
+            for (JsonNode f : findingsNode) {
+                Integer line = f.has("line") && !f.path("line").isNull()
+                        ? f.path("line").asInt() : null;
+                findings.add(new CodeReviewResult.ReviewFinding(
+                        f.path("severity").asText("medium"),
+                        f.path("category").asText(""),
+                        f.path("file").asText(""),
+                        line,
+                        f.path("finding").asText(""),
+                        f.path("suggestion").asText("")
+                ));
             }
 
             List<CodeReviewResult.CriterionVerdict> criteria = new ArrayList<>();
@@ -239,6 +244,20 @@ public class CodeReviewService {
                     result.getInputTokens(), result.getOutputTokens(), result.getModel()
             );
         }
+    }
+
+    private static double requiredScore(JsonNode root, String field) {
+        JsonNode value = root.get(field);
+        if (value == null || !value.isNumber()) {
+            throw new IllegalArgumentException(
+                    "Review response requires numeric field '" + field + "'");
+        }
+        double score = value.doubleValue();
+        if (!Double.isFinite(score) || score < 0.0 || score > 1.0) {
+            throw new IllegalArgumentException(
+                    "Review score '" + field + "' must be between 0 and 1");
+        }
+        return score;
     }
 
     /**

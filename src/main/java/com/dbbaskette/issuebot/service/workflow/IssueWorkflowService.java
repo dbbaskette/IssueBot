@@ -21,6 +21,8 @@ import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.review.AcceptanceCriteriaParser;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.review.ReviewTestEvidence;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -691,11 +693,13 @@ public class IssueWorkflowService {
             // === Phase 5: Independent Review (Sonnet) ===
             CodeReviewResult reviewResult = null;
             boolean completionResume = resumePhase == RecoveryResumePhase.COMPLETION;
-            boolean persistedReviewVerdict = (resumePhase == RecoveryResumePhase.INDEPENDENT_REVIEW
+            boolean persistedReviewOutcome = (resumePhase == RecoveryResumePhase.INDEPENDENT_REVIEW
                     || completionResume)
-                    && iteration.getReviewPassed() != null;
+                    && (iteration.getReviewPassed() != null
+                    || PersistedReviewOutcome.isPersistedOperationalError(
+                            iteration.getReviewPassed(), iteration.getReviewJson()));
             if (runsPhase(resumePhase, RecoveryResumePhase.INDEPENDENT_REVIEW)
-                    && !persistedReviewVerdict) {
+                    && !persistedReviewOutcome) {
                 trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
                 issueRepository.save(trackedIssue);
 
@@ -705,19 +709,19 @@ public class IssueWorkflowService {
                 if (cancelled(trackedIssue)) return;
             }
 
-            if (persistedReviewVerdict) {
+            if (persistedReviewOutcome) {
                 reviewResult = restorePersistedReview(iteration);
             }
 
-            if (persistedReviewVerdict && reviewResult.invocationFailed()) {
+            if (persistedReviewOutcome && reviewResult.invocationFailed()) {
                 iterationManager.handleMaxReviewIterationsReached(trackedIssue,
-                        "Persisted independent review invocation failed",
+                        "Persisted independent review invocation failed: " + reviewResult.summary(),
                         "The independent review could not run (environment/CLI error), so the "
-                                + "code was not evaluated.", true);
+                                + "code was not evaluated.\n\nDetails: " + reviewResult.summary(), true);
                 return;
             }
 
-            if (persistedReviewVerdict && !reviewResult.passed()) {
+            if (persistedReviewOutcome && !reviewResult.passed()) {
                 iterationManager.handlePlanConformanceFailure(trackedIssue,
                         approvedPlan.versionNumber(), "Persisted second review did not pass",
                         iteration.getReviewJson());
@@ -725,12 +729,12 @@ public class IssueWorkflowService {
             }
 
             // Post review to issue thread (regardless of pass/fail)
-            if (reviewResult != null && !completionResume) {
+            if (reviewResult != null && !reviewResult.invocationFailed() && !completionResume) {
                 if (cancelled(trackedIssue)) return;
                 postReviewToIssue(trackedIssue, reviewResult, iterationNum);
             }
 
-            if (reviewResult == null && !persistedReviewVerdict
+            if (reviewResult == null && !persistedReviewOutcome
                     && resumePhase != RecoveryResumePhase.COMPLETION) {
                 // Review invocation failed — treat as failed review
                 log.warn("Review returned null (invocation error) — skipping to completion");
@@ -1298,7 +1302,7 @@ public class IssueWorkflowService {
 
         // Post review to PR now that it's no longer a draft
         // (submitting reviews on draft PRs can interfere with merge)
-        if (reviewResult != null && prNumber > 0 && !merged) {
+        if (reviewResult != null && !reviewResult.invocationFailed() && prNumber > 0 && !merged) {
             postReviewToGitHub(trackedIssue, prNumber, reviewResult);
         }
 
@@ -1505,10 +1509,15 @@ public class IssueWorkflowService {
         // after the PR is marked as ready (no longer draft), to avoid
         // GitHub 405 errors when merging.
 
-        eventService.log("PHASE_REVIEW_COMPLETE",
-                "Review complete: " + (reviewResult.passed() ? "PASSED" : "FAILED")
-                        + " — " + reviewResult.summary(),
-                repo, trackedIssue);
+        if (reviewResult.outcome() == ReviewOutcome.OPERATIONAL_ERROR) {
+            eventService.log("PHASE_REVIEW_UNAVAILABLE",
+                    "Review unavailable — " + reviewResult.summary(), repo, trackedIssue);
+        } else {
+            eventService.log("PHASE_REVIEW_COMPLETE",
+                    "Review complete: " + (reviewResult.passed() ? "PASSED" : "FAILED")
+                            + " — " + reviewResult.summary(),
+                    repo, trackedIssue);
+        }
 
         return reviewResult;
     }
@@ -2246,6 +2255,13 @@ public class IssueWorkflowService {
     }
 
     private CodeReviewResult restorePersistedReview(Iteration iteration) {
+        if (PersistedReviewOutcome.isPersistedOperationalError(
+                iteration.getReviewPassed(), iteration.getReviewJson())) {
+            String reason = PersistedReviewOutcome.operationalFailureReason(iteration.getReviewJson());
+            return CodeReviewResult.failed(
+                    reason == null ? "Persisted independent review unavailable" : reason,
+                    0, 0, iteration.getReviewModel());
+        }
         try {
             JsonNode root = objectMapper.readTree(iteration.getReviewJson());
             List<CodeReviewResult.ReviewFinding> findings = new ArrayList<>();
@@ -2283,7 +2299,8 @@ public class IssueWorkflowService {
             return new CodeReviewResult(
                     Boolean.TRUE.equals(iteration.getReviewPassed()),
                     "Persisted independent review", 0, 0, 0, 0, 0, 0, 1,
-                    List.of(), "", iteration.getReviewJson(), 0, 0,
+                    List.of(), "",
+                    iteration.getReviewJson() == null ? "{}" : iteration.getReviewJson(), 0, 0,
                     iteration.getReviewModel(), null, List.of());
         }
     }

@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -41,7 +43,7 @@ class ReviewScoreHistoryAssemblerTest {
         History history = ReviewScoreHistoryAssembler.assemble(
                 List.of(scored(1, false, 0.60, 0.50),
                         scored(2, false, 0.75, 0.70),
-                        scored(3, true, 0.95, 0.94)), 2);
+                        scored(3, true, 0.95, 0.94)), 2L);
 
         assertThat(history.selected().iterationNumber()).isEqualTo(2);
         assertThat(history.previous().iterationNumber()).isEqualTo(1);
@@ -50,9 +52,49 @@ class ReviewScoreHistoryAssemblerTest {
     }
 
     @Test
+    void defaultsToLatestStructuredScoreByPersistenceIdDespiteReversedInputAndTrailingError() {
+        Iteration oldest = review(10L, 2, false,
+                "{\"specComplianceScore\":0.40}");
+        Iteration prior = review(20L, 2, false,
+                "{\"specComplianceScore\":0.60}");
+        Iteration latestScored = review(30L, 2, true,
+                "{\"specComplianceScore\":0.90}");
+        Iteration trailingError = review(40L, 2, null,
+                PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+
+        History history = ReviewScoreHistoryAssembler.assemble(
+                List.of(trailingError, oldest, latestScored, prior), null);
+
+        assertThat(history.selected().iterationId()).isEqualTo(30L);
+        assertThat(history.latest().iterationId()).isEqualTo(40L);
+        assertThat(history.latest().score().outcome()).isEqualTo(ReviewOutcome.OPERATIONAL_ERROR);
+        assertThat(history.previous().iterationId()).isEqualTo(20L);
+        assertThat(history.attempts()).extracting(Attempt::iterationId)
+                .containsExactly(40L, 30L, 20L, 10L);
+    }
+
+    @Test
+    void persistenceIdSelectsOneDuplicateNumberAndUsesImmediatelyPriorScoredId() {
+        Iteration first = review(10L, 2, false,
+                "{\"specComplianceScore\":0.40}");
+        Iteration selected = review(20L, 2, false,
+                "{\"specComplianceScore\":0.60}");
+        Iteration later = review(30L, 2, true,
+                "{\"specComplianceScore\":0.90}");
+
+        History history = ReviewScoreHistoryAssembler.assemble(
+                List.of(later, first, selected), 20L);
+
+        assertThat(history.selected().iterationId()).isEqualTo(20L);
+        assertThat(history.selected().iterationNumber()).isEqualTo(2);
+        assertThat(history.previous().iterationId()).isEqualTo(10L);
+        assertThat(history.overallDeltaPoints()).isEqualTo(20);
+    }
+
+    @Test
     void firstScoredReviewHasNoBaselineOrDeltas() {
         History history = ReviewScoreHistoryAssembler.assemble(
-                List.of(scored(1, false, 0.60, 0.50), scored(2, true, 0.95, 0.90)), 1);
+                List.of(scored(1, false, 0.60, 0.50), scored(2, true, 0.95, 0.90)), 1L);
 
         assertThat(history.previous()).isNull();
         assertThat(history.overallDelta()).isNull();
@@ -210,9 +252,13 @@ class ReviewScoreHistoryAssemblerTest {
     }
 
     private Iteration review(int number, Boolean passed, String reviewJson) {
+        return review((long) number, number, passed, reviewJson);
+    }
+
+    private Iteration review(long id, int number, Boolean passed, String reviewJson) {
         TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42, "Test issue");
         Iteration iteration = new Iteration(issue, number);
-        iteration.setId((long) number);
+        iteration.setId(id);
         iteration.setReviewPassed(passed);
         iteration.setReviewJson(reviewJson);
         iteration.setReviewModel("claude-sonnet-4-6");

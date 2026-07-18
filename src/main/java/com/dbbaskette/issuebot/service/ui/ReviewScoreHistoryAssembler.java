@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.ui;
 
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,6 +23,18 @@ public final class ReviewScoreHistoryAssembler {
         public Integer overallPercent() {
             return score.overall() == null ? null : scorePercent(score.overall());
         }
+
+        public String selectorLabel() {
+            String prefix = "Review " + iterationNumber + " · ";
+            if (score.outcome() == ReviewOutcome.UNAVAILABLE
+                    || score.outcome() == ReviewOutcome.OPERATIONAL_ERROR) {
+                return prefix + "Review unavailable";
+            }
+            String verdict = score.outcome() == ReviewOutcome.PASSED
+                    ? "Passed" : "Did not conform";
+            return prefix + verdict + " · "
+                    + (overallPercent() == null ? "Score unavailable" : overallPercent() + "%");
+        }
     }
 
     public record DimensionDelta(
@@ -29,6 +42,9 @@ public final class ReviewScoreHistoryAssembler {
         public int currentPercent() { return scorePercent(current); }
         public Integer previousPercent() { return previous == null ? null : scorePercent(previous); }
         public Integer deltaPoints() { return delta == null ? null : points(delta); }
+        public String deltaPointUnit() {
+            return Math.abs(deltaPoints()) == 1 ? "point" : "points";
+        }
     }
 
     public record History(
@@ -50,11 +66,23 @@ public final class ReviewScoreHistoryAssembler {
         public Integer overallDeltaPoints() {
             return overallDelta == null ? null : points(overallDelta);
         }
+
+        public String overallDeltaPointUnit() {
+            return Math.abs(overallDeltaPoints()) == 1 ? "point" : "points";
+        }
+
+        public long scoredAttemptCount() {
+            return attempts.stream().filter(attempt -> attempt.score().overall() != null).count();
+        }
     }
 
-    public static History assemble(List<Iteration> iterations, Integer requestedIteration) {
+    public static History assemble(List<Iteration> iterations, Long requestedAttemptId) {
+        List<Iteration> orderedIterations = new ArrayList<>(iterations);
+        if (orderedIterations.stream().allMatch(iteration -> iteration.getId() != null)) {
+            orderedIterations.sort(Comparator.comparingLong(Iteration::getId));
+        }
         List<Attempt> chronological = new ArrayList<>();
-        for (Iteration iteration : iterations) {
+        for (Iteration iteration : orderedIterations) {
             if (iteration.getReviewPassed() == null && iteration.getReviewJson() == null) {
                 continue;
             }
@@ -68,14 +96,18 @@ public final class ReviewScoreHistoryAssembler {
         }
 
         Attempt latest = chronological.getLast();
-        Attempt selected = requestedIteration == null ? latest : chronological.stream()
-                .filter(attempt -> attempt.iterationNumber() == requestedIteration)
-                .findFirst()
+        Attempt latestScored = chronological.stream()
+                .filter(attempt -> attempt.score().overall() != null)
+                .reduce((first, second) -> second)
                 .orElse(latest);
+        Attempt selected = requestedAttemptId == null ? latestScored : chronological.stream()
+                .filter(attempt -> requestedAttemptId.equals(attempt.iterationId()))
+                .findFirst()
+                .orElse(latestScored);
 
         Attempt previous = null;
         for (Attempt candidate : chronological) {
-            if (candidate.iterationNumber() >= selected.iterationNumber()) {
+            if (candidate == selected) {
                 break;
             }
             if (candidate.score().overall() != null) {

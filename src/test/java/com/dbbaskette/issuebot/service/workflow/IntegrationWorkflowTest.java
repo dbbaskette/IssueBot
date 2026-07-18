@@ -23,7 +23,9 @@ import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.polling.OrphanedRunRecovery;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1345,6 +1347,23 @@ class IntegrationWorkflowTest {
     }
 
     @Test
+    void persistedFalseVerdictWithoutJsonRestoresAsCompletedFailure() {
+        TrackedIssue issue = createTestIssue();
+        Iteration rejected = new Iteration(issue, 1);
+        rejected.setReviewPassed(false);
+        rejected.setReviewJson(null);
+        rejected.setReviewModel("review-model");
+
+        CodeReviewResult restored = ReflectionTestUtils.invokeMethod(
+                workflowService, "restorePersistedReview", rejected);
+
+        assertNotNull(restored);
+        assertFalse(restored.passed());
+        assertFalse(restored.invocationFailed());
+        assertEquals(ReviewOutcome.FAILED, restored.outcome());
+    }
+
+    @Test
     void persistedReviewInvocationFailureEscalatesWithoutCountingConformanceVerdict()
             throws Exception {
         TrackedIssue issue = createTestIssue();
@@ -1368,8 +1387,9 @@ class IntegrationWorkflowTest {
         Iteration invocationFailure = new Iteration(issue, 1);
         invocationFailure.setId(206L);
         invocationFailure.setCompletedAt(LocalDateTime.now());
-        invocationFailure.setReviewPassed(false);
-        invocationFailure.setReviewJson(null);
+        invocationFailure.setReviewPassed(null);
+        invocationFailure.setReviewJson(PersistedReviewOutcome.operationalErrorJson(
+                "Review invocation failed: review service unavailable"));
         invocationFailure.setReviewModel("claude-sonnet-5");
         when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
                 .thenReturn(Optional.of(invocationFailure));
@@ -1399,6 +1419,7 @@ class IntegrationWorkflowTest {
         assertEquals(0, issue.getPlanConformanceAttempt());
         assertFalse(issue.isPlanCorrectionPending());
         assertTrue(issue.getLastFailureReason().contains("could not run"));
+        assertTrue(issue.getLastFailureReason().contains("review service unavailable"));
         assertFalse(issue.getLastFailureReason().contains("approved Plan v2"));
         verifyNoInteractions(codeReviewService);
         verify(claudeCode, never()).executeImplementation(

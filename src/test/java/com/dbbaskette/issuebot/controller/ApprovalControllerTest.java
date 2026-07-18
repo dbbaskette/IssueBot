@@ -11,6 +11,8 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
@@ -340,6 +342,37 @@ class ApprovalControllerTest {
         Map<Long, ReviewScore> reviewScores =
                 (Map<Long, ReviewScore>) model.getAttribute("reviewScores");
         assertThat(reviewScores.get(1L).criteria()).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void latestReviewCardUsesHighestPersistenceIdRegardlessOfInputOrIterationNumber() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 7, "Fix it");
+        issue.setId(1L);
+        Iteration olderFailure = new Iteration(issue, 2);
+        olderFailure.setId(10L);
+        olderFailure.setReviewPassed(false);
+        olderFailure.setReviewJson("{\"specComplianceScore\":0.50}");
+        Iteration newestUnavailable = new Iteration(issue, 2);
+        newestUnavailable.setId(20L);
+        newestUnavailable.setReviewJson(PersistedReviewOutcome.operationalErrorJson("review timed out"));
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(newestUnavailable, olderFailure));
+
+        ApprovalController controller = controller(issues, iterations,
+                mock(IterationManager.class), mock(GitHubApiClient.class),
+                mock(EventService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class));
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        Map<Long, ReviewScore> reviewScores =
+                (Map<Long, ReviewScore>) model.getAttribute("reviewScores");
+        assertThat(reviewScores.get(1L).outcome()).isEqualTo(ReviewOutcome.OPERATIONAL_ERROR);
+        assertThat(reviewScores.get(1L).failureReason()).isEqualTo("review timed out");
     }
 
     // === returnTo (#91 Needs You inbox) ===

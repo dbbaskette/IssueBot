@@ -50,7 +50,11 @@ public class ApprovalCardAssembler {
         Map<Long, String> ciStatuses = new HashMap<>();
 
         for (TrackedIssue issue : issues) {
-            List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
+            List<Iteration> iterations = new java.util.ArrayList<>(
+                    iterationRepository.findByIssueOrderByIterationNumAsc(issue));
+            if (iterations.stream().allMatch(iteration -> iteration.getId() != null)) {
+                iterations.sort(java.util.Comparator.comparingLong(Iteration::getId));
+            }
             if (!iterations.isEmpty()) {
                 Iteration last = iterations.get(iterations.size() - 1);
                 lastIterations.put(issue.getId(), last);

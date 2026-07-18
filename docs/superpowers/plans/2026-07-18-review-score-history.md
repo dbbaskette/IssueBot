@@ -35,7 +35,7 @@
 - Produces: compatibility accessors `specCompliance()`, `correctness()`, `codeQuality()`, `testCoverage()`, `architectureFit()`, `regressions()`, and `security()` for the approval and inbox templates.
 - Consumes: persisted `Iteration.reviewPassed`, `reviewJson`, and `reviewModel`.
 
-- [ ] **Step 1: Write parser tests for authoritative verdicts and present-only dimensions**
+- [x] **Step 1: Write parser tests for authoritative verdicts and present-only dimensions**
 
 Create `ReviewScoreParserTest` with a failed-first/passed-second fixture and focused malformed/missing-dimension cases:
 
@@ -79,13 +79,13 @@ class ReviewScoreParserTest {
 
 The test helper constructs `TrackedIssue`, `Iteration`, assigns `reviewPassed`, `reviewJson`, and `reviewModel`, and returns the iteration.
 
-- [ ] **Step 2: Run the focused test to verify it fails**
+- [x] **Step 2: Run the focused test to verify it fails**
 
 Run: `./mvnw -q -Dtest=ReviewScoreParserTest test`
 
 Expected: compilation fails because `ReviewScore` and `ReviewScoreParser` do not exist.
 
-- [ ] **Step 3: Add the shared immutable score model**
+- [x] **Step 3: Add the shared immutable score model**
 
 Create `ReviewScore` with the exact public shape below:
 
@@ -118,7 +118,7 @@ public record ReviewScore(
 
 The compact constructor must defensively copy `dimensions` and `criteria` with `List.copyOf`.
 
-- [ ] **Step 4: Implement present-only parsing**
+- [x] **Step 4: Implement present-only parsing**
 
 Create `ReviewScoreParser` as a non-instantiable utility. Define the dimensions in this exact order:
 
@@ -136,7 +136,7 @@ private static final List<DimensionDefinition> DIMENSIONS = List.of(
 
 `parse` must prefer `iteration.getReviewPassed()` over JSON's `passed`, add a dimension only when its JSON field is numeric, average only the added dimensions, parse criteria through `CriterionVerdict.lenient`, and return a verdict-only/neutral score after malformed JSON. Return `null` only when the iteration has neither a persisted verdict nor review JSON.
 
-- [ ] **Step 5: Replace approval-card-local parsing**
+- [x] **Step 5: Replace approval-card-local parsing**
 
 Delete the nested `ApprovalCardAssembler.ReviewScore`, `MAPPER`, `parseReviewScore`, and `parseCriteria`. Import the shared `ReviewScore` and replace the call with:
 
@@ -146,13 +146,13 @@ ReviewScore score = ReviewScoreParser.parse(it);
 
 Update `ApprovalControllerTest` casts/imports from `ApprovalCardAssembler.ReviewScore` to `ReviewScore`; keep its existing criteria assertions unchanged. The existing approvals and inbox templates retain their current accessor names.
 
-- [ ] **Step 6: Run focused parser and approval tests**
+- [x] **Step 6: Run focused parser and approval tests**
 
 Run: `./mvnw -q -Dtest=ReviewScoreParserTest,ApprovalControllerTest,InboxControllerTest,InboxPageRenderTest test`
 
 Expected: all selected tests pass; malformed JSON may emit one expected warning without failing the build.
 
-- [ ] **Step 7: Commit the shared parser**
+- [x] **Step 7: Commit the shared parser**
 
 ```bash
 git add src/main/java/com/dbbaskette/issuebot/service/ui/ReviewScore.java \
@@ -176,7 +176,7 @@ git commit -m "refactor: share structured review score parsing"
 - Produces: `ReviewScoreHistoryAssembler.assemble(List<Iteration>, Integer): History`.
 - Produces records: `Attempt`, `DimensionDelta`, and `History`, including the selected attempt, latest attempt, previous scored attempt, newest-first attempts, deltas, overall delta, and criteria counts.
 
-- [ ] **Step 1: Write comparison and selection tests**
+- [x] **Step 1: Write comparison and selection tests**
 
 Cover the approved review data and all delta modes:
 
@@ -213,13 +213,13 @@ void requestedOlderAttemptUsesNearestEarlierScoredBaseline() {
 
 Also test first scored review (no prior/deltas), unchanged and negative deltas, a current-only dimension labeled `New`, current missing dimensions omitted, failed criteria sorted unmet-first, and passing criteria preserving persisted order.
 
-- [ ] **Step 2: Run the focused test to verify it fails**
+- [x] **Step 2: Run the focused test to verify it fails**
 
 Run: `./mvnw -q -Dtest=ReviewScoreHistoryAssemblerTest test`
 
 Expected: compilation fails because `ReviewScoreHistoryAssembler` does not exist.
 
-- [ ] **Step 3: Implement immutable history records**
+- [x] **Step 3: Implement immutable history records**
 
 Use this public shape:
 
@@ -305,13 +305,13 @@ public static History assemble(List<Iteration> iterations, Integer requestedIter
 }
 ```
 
-- [ ] **Step 4: Run the assembler test**
+- [x] **Step 4: Run the assembler test**
 
 Run: `./mvnw -q -Dtest=ReviewScoreHistoryAssemblerTest test`
 
 Expected: all score selection, delta, criteria-order, and missing-dimension tests pass.
 
-- [ ] **Step 5: Commit the history assembler**
+- [x] **Step 5: Commit the history assembler**
 
 ```bash
 git add src/main/java/com/dbbaskette/issuebot/service/ui/ReviewScoreHistoryAssembler.java \
@@ -333,7 +333,7 @@ git commit -m "feat: assemble review score comparisons"
 - Produces model attributes: `reviewScoreHistory` and boolean `showPlanGuidance`.
 - Accepts optional query parameter `reviewAttempt` as an integer iteration number.
 
-- [ ] **Step 1: Add controller tests for history selection and passing-second-review gating**
+- [x] **Step 1: Add controller tests for history selection and passing-second-review gating**
 
 Update direct `detail` calls to include the new fourth method argument before `hx`, then add:
 
@@ -372,13 +372,13 @@ void requestedReviewAttemptSelectsOlderComparison() {
 
 Retain and strengthen the existing genuine-second-miss controller test to assert `showPlanGuidance == true` only for `FAILED` or `COOLDOWN` plus latest `reviewPassed == false`.
 
-- [ ] **Step 2: Run the controller test to verify failure**
+- [x] **Step 2: Run the controller test to verify failure**
 
 Run: `./mvnw -q -Dtest=IssueControllerTest test`
 
 Expected: compilation/signature failure until the controller accepts `reviewAttempt`; the new model assertions fail until history is assembled.
 
-- [ ] **Step 3: Populate explicit review history and guidance eligibility**
+- [x] **Step 3: Populate explicit review history and guidance eligibility**
 
 Change the endpoint signature to:
 
@@ -414,7 +414,7 @@ return (issue.getStatus() == IssueStatus.FAILED || issue.getStatus() == IssueSta
 
 Populate `planReviewAttempts` from the latest review-bearing attempts whenever history exists, not only when the counter equals two, because badges and diagnostics now reflect real attempts.
 
-- [ ] **Step 4: Render attempt badges from persisted verdicts**
+- [x] **Step 4: Render attempt badges from persisted verdicts**
 
 In `issue-detail.html`, change the guidance panel condition to `th:if="${showPlanGuidance}"`. Replace the hard-coded attempt badge with a three-state expression and accessible copy:
 
@@ -428,7 +428,7 @@ In `issue-detail.html`, change the guidance panel condition to `th:if="${showPla
 
 Use `showPlanGuidance` in the header retry button and generic recovery-panel suppression conditions too, replacing their attempt-counter-only expressions.
 
-- [ ] **Step 5: Add the reported regression render test**
+- [x] **Step 5: Add the reported regression render test**
 
 Extend the render-test context with `reviewScoreHistory` and `showPlanGuidance`. Add a failed review 1 and passed review 2 fixture containing the real score pattern. Assert:
 
@@ -443,13 +443,13 @@ assertThat(html).contains("Conforms to plan")
 
 Update the existing second-miss render test to set `showPlanGuidance=true` and assert both attempt badges say `Did not conform`.
 
-- [ ] **Step 6: Run state and render tests**
+- [x] **Step 6: Run state and render tests**
 
 Run: `./mvnw -q -Dtest=IssueControllerTest,IssueDetailPlanReviewRenderTest test`
 
 Expected: all tests pass, including the failed-first/passed-second regression.
 
-- [ ] **Step 7: Commit accurate issue state**
+- [x] **Step 7: Commit accurate issue state**
 
 ```bash
 git add src/main/java/com/dbbaskette/issuebot/controller/IssueController.java \
@@ -472,7 +472,7 @@ git commit -m "fix: derive conformance guidance from latest verdict"
 - Consumes: `reviewScoreHistory` fields and percentage helpers from Tasks 2 and 3.
 - Produces: server-rendered review-attempt selector URLs using `reviewAttempt`, trajectory rails, textual deltas, and expandable criteria.
 
-- [ ] **Step 1: Add render assertions for the complete card**
+- [x] **Step 1: Add render assertions for the complete card**
 
 Add tests for pass/fail/neutral verdict copy, first scored review, positive/negative/unchanged/new deltas, selector links, criteria counts, unmet-first criteria, and ARIA labels. The main comparison assertion must include:
 
@@ -489,13 +489,13 @@ assertThat(html).contains("Implementation review")
         .contains("reviewAttempt=1");
 ```
 
-- [ ] **Step 2: Run the render test to verify the new assertions fail**
+- [x] **Step 2: Run the render test to verify the new assertions fail**
 
 Run: `./mvnw -q -Dtest=IssueDetailPlanReviewRenderTest test`
 
 Expected: the new score-card content and trajectory classes are absent.
 
-- [ ] **Step 3: Render the expanded trajectory card**
+- [x] **Step 3: Render the expanded trajectory card**
 
 Insert the card after failure/recovery notices and before the plan-review desk. Use semantic elements and these stable classes:
 
@@ -553,19 +553,19 @@ Complete the markup above so that it also:
 - shows model metadata and finding count when available; and
 - renders criteria inside an expanded `<details open>` element with unmet-first order supplied by the assembler.
 
-- [ ] **Step 4: Add responsive trajectory styling**
+- [x] **Step 4: Add responsive trajectory styling**
 
 Extend `style.css` using existing tokens. Define `.review-history-card`, `.review-score-overview`, `.review-attempt-selector`, `.review-dimension-grid`, `.review-dimension`, `.review-score-rail`, `.review-score-previous`, `.review-score-current`, `.review-score-marker`, `.review-score-delta`, and `.review-criteria-summary`.
 
 Use `var(--info)` for the current rail, `var(--text-tertiary)` for the prior rail, `var(--ok)` for positive deltas, and `var(--danger)` for negative deltas. At widths below `700px`, force one dimension per row, make selector controls wrap, and prevent overflow with `min-width:0` and `overflow-wrap:anywhere`. Do not add animation.
 
-- [ ] **Step 5: Run render regression tests**
+- [x] **Step 5: Run render regression tests**
 
 Run: `./mvnw -q -Dtest=IssueDetailPlanReviewRenderTest test`
 
 Expected: all selected tests pass; confirm the stylesheet is served in Task 5's live check.
 
-- [ ] **Step 6: Commit the trajectory UI**
+- [x] **Step 6: Commit the trajectory UI**
 
 ```bash
 git add src/main/resources/templates/issue-detail.html \
@@ -585,19 +585,19 @@ git commit -m "feat: show review score trajectory on issues"
 - Consumes: the completed shared parser, history assembler, controller state, template, and CSS.
 - Produces: verified issue-detail behavior at desktop and mobile widths with no regressions in approval/inbox rendering.
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `./mvnw test`
 
 Expected: `BUILD SUCCESS` with zero failures and zero errors.
 
-- [ ] **Step 2: Build the runnable artifact**
+- [x] **Step 2: Build the runnable artifact**
 
 Run: `./mvnw -q -DskipTests package`
 
 Expected: exit code 0 and `target/issuebot-0.1.0-SNAPSHOT.jar` exists.
 
-- [ ] **Step 3: Start the verified build using the existing local launch procedure**
+- [x] **Step 3: Start the verified build using the existing local launch procedure**
 
 Stop and replace only the existing IssueBot launchd job, preserving `.env` and the Codex CLI path:
 
@@ -609,7 +609,7 @@ curl --fail --silent http://localhost:8090/actuator/health
 
 Expected: `GET http://localhost:8090/actuator/health` returns `{"status":"UP"}`.
 
-- [ ] **Step 4: Verify the reported issue in the browser**
+- [x] **Step 4: Verify the reported issue in the browser**
 
 Open the affected issue page and inspect at a desktop width and approximately 390px mobile width. Confirm:
 
@@ -621,13 +621,13 @@ Open the affected issue page and inspect at a desktop width and approximately 39
 - raw JSON remains available only in iteration history; and
 - approvals/inbox still show the same latest review score and verdict.
 
-- [ ] **Step 5: Inspect the final diff and repository state**
+- [x] **Step 5: Inspect the final diff and repository state**
 
 Run: `git diff --check && git status --short && git log --oneline -6`
 
 Expected: no whitespace errors and a clean worktree unless the browser check found a correction that has not yet been committed.
 
-- [ ] **Step 6: Commit any verification-only fixes**
+- [x] **Step 6: Commit any verification-only fixes**
 
 If Step 4 required a correction, rerun the affected focused test and the full suite, then commit only that correction:
 

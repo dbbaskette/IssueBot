@@ -89,7 +89,8 @@ import java.util.Set;
  *       {@link Iteration#getCiResult()} ({@code PASSED}/{@code FAILED}/{@code ERROR}/
  *       {@code SKIPPED}) over event text.</li>
  *   <li><b>Review</b> — start {@code PHASE_INDEPENDENT_REVIEW}; end is the LATEST of
- *       {@code PHASE_REVIEW_COMPLETE}/{@code PHASE_REVIEW_FAILED}/{@code PHASE_REVIEW_SKIPPED}
+ *       {@code PHASE_REVIEW_COMPLETE}/{@code PHASE_REVIEW_FAILED}/{@code PHASE_REVIEW_SKIPPED}/
+ *       {@code PHASE_REVIEW_UNAVAILABLE}
  *       present (an invocation error logs both {@code _FAILED} and, back in the caller,
  *       {@code _SKIPPED} — both mark the same failure, so the later timestamp is the honest end).
  *       Outcome prefers the structured {@link Iteration#getReviewPassed()} ({@code true}/
@@ -135,6 +136,7 @@ public class TimelineAssembler {
     private static final String PHASE_REVIEW_COMPLETE = "PHASE_REVIEW_COMPLETE";
     private static final String PHASE_REVIEW_FAILED = "PHASE_REVIEW_FAILED";
     private static final String PHASE_REVIEW_SKIPPED = "PHASE_REVIEW_SKIPPED";
+    private static final String PHASE_REVIEW_UNAVAILABLE = "PHASE_REVIEW_UNAVAILABLE";
 
     private static final double MIN_WIDTH_PCT = 6.0;
 
@@ -436,17 +438,17 @@ public class TimelineAssembler {
         if (start.isEmpty()) return;
         LocalDateTime startTs = start.get().getCreatedAt();
 
-        Optional<Event> terminal = latestOf(events, PHASE_REVIEW_COMPLETE, PHASE_REVIEW_FAILED, PHASE_REVIEW_SKIPPED);
+        Optional<Event> terminal = latestOf(events, PHASE_REVIEW_COMPLETE, PHASE_REVIEW_FAILED,
+                PHASE_REVIEW_SKIPPED, PHASE_REVIEW_UNAVAILABLE);
         if (terminal.isPresent()) {
             Boolean reviewPassed = iteration.getReviewPassed();
             String outcome;
             if (reviewPassed != null) {
                 outcome = reviewPassed ? OK : FAIL;
-            } else if (PHASE_REVIEW_SKIPPED.equals(terminal.get().getEventType())
-                    || PHASE_REVIEW_FAILED.equals(terminal.get().getEventType())) {
-                outcome = SKIPPED;
             } else {
-                outcome = FAIL;
+                // Persisted verdict is authoritative. A terminal event without one records
+                // operational progress, not proof that the implementation failed review.
+                outcome = SKIPPED;
             }
             segments.add(new RawSegment("Review", startTs, terminal.get().getCreatedAt(), outcome));
             return;

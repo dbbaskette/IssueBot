@@ -113,6 +113,68 @@ class CodeReviewServiceParseTest {
     }
 
     @Test
+    void malformedResponseIsAnOperationalErrorRatherThanACompletedFailure() {
+        CodeReviewResult result = service.parseReviewResponse(resultWithOutput("not-json"));
+
+        assertThat(result.outcome()).isEqualTo(ReviewOutcome.OPERATIONAL_ERROR);
+        assertThat(result.invocationFailed()).isTrue();
+        assertThat(result.summary()).contains("Failed to parse review");
+    }
+
+    @Test
+    void structurallyIncompleteJsonIsAnOperationalErrorRatherThanACompletedFailure() {
+        for (String json : java.util.List.of(
+                "{}",
+                "[]",
+                """
+                {"specComplianceScore":0.8,"correctnessScore":0.8,
+                 "codeQualityScore":0.8,"testCoverageScore":0.8,
+                 "architectureFitScore":0.8}
+                """,
+                """
+                {"specComplianceScore":"high","correctnessScore":0.8,
+                 "codeQualityScore":0.8,"testCoverageScore":0.8,
+                 "architectureFitScore":0.8,"regressionsScore":0.8}
+                """,
+                """
+                {"specComplianceScore":0.8,"correctnessScore":0.8,
+                 "codeQualityScore":0.8,"testCoverageScore":0.8,
+                 "architectureFitScore":0.8,"regressionsScore":0.8}
+                """)) {
+            CodeReviewResult result = service.parseReviewResponse(resultWithOutput(json));
+
+            assertThat(result.outcome()).as("outcome for %s", json)
+                    .isEqualTo(ReviewOutcome.OPERATIONAL_ERROR);
+            assertThat(result.invocationFailed()).isTrue();
+        }
+    }
+
+    @Test
+    void securityReviewRequiresAValidSecurityScore() {
+        String withoutSecurity = """
+                {"passed":true,"summary":"reviewed",
+                 "specComplianceScore":0.8,"correctnessScore":0.8,"codeQualityScore":0.8,
+                 "testCoverageScore":0.8,"architectureFitScore":0.8,"regressionsScore":0.8,
+                 "findings":[],"criteria":[]}
+                """;
+
+        CodeReviewResult result = service.parseReviewResponse(
+                resultWithOutput(withoutSecurity), 0.70, true);
+
+        assertThat(result.outcome()).isEqualTo(ReviewOutcome.OPERATIONAL_ERROR);
+        assertThat(result.invocationFailed()).isTrue();
+    }
+
+    @Test
+    void completedRejectedResponseHasAnExplicitFailedOutcome() {
+        CodeReviewResult result = service.parseReviewResponse(resultWithOutput(reviewJson(
+                true, 0.60, 0.60, 0.60, 0.60, 0.60, 0.60, 1.0, "[]", "[]")));
+
+        assertThat(result.outcome()).isEqualTo(ReviewOutcome.FAILED);
+        assertThat(result.invocationFailed()).isFalse();
+    }
+
+    @Test
     void highSpecFindingBlocksEvenWhenModelSaysPassed() {
         String json = """
                 {"passed": true, "summary": "ok",
