@@ -52,6 +52,22 @@ class IterationManagerTest {
     }
 
     @Test
+    void maxIterationsRecordsActionableStructuredDiagnostic() {
+        FailureDiagnosticService diagnostics = mock(FailureDiagnosticService.class);
+        iterationManager.setFailureDiagnosticService(diagnostics);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setMaxIterations(2);
+        TrackedIssue issue = new TrackedIssue(repo, 12, "Hard issue");
+
+        iterationManager.handleMaxIterationsReached(issue);
+
+        verify(diagnostics).record(eq(issue), eq(FailureCategory.AGENT_EXIT),
+                contains("Failed after 2 iterations"), isNull(),
+                contains("Failed after 2 iterations"), contains("Break the issue"),
+                eq(FailureRetryability.CONFIGURATION_CHANGE_RECOMMENDED));
+    }
+
+    @Test
     void canIterate_withinLimit() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setMaxIterations(5);
@@ -172,6 +188,20 @@ class IterationManagerTest {
         // Only skips when feedback is a prior impl failure (starts with "Claude Code failed:")
         String reason = iterationManager.shouldSkipRetry(issue, result, null,
                 "Claude Code failed: compilation error");
+        assertNotNull(reason);
+        assertTrue(reason.contains("failed again"));
+    }
+
+    @Test
+    void shouldSkipRetry_repeatedCodexFailure() {
+        TrackedIssue issue = createIssue(2);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(false);
+        result.setOutputTokens(10_000);
+        result.setFilesChanged(java.util.List.of("src/Foo.java"));
+
+        String reason = iterationManager.shouldSkipRetry(issue, result, null,
+                "Codex CLI failed: compilation error");
         assertNotNull(reason);
         assertTrue(reason.contains("failed again"));
     }

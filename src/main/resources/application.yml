@@ -24,6 +24,7 @@ spring:
     locations: classpath:db/migration
 # IssueBot defaults (overridden by ~/.issuebot/config.yml)
 issuebot:
+  agent-provider: claude-code
   poll-interval-seconds: 60
   max-concurrent-issues: 3
   work-directory: ${user.home}/.issuebot/repos
@@ -40,6 +41,12 @@ issuebot:
     review-max-turns: 15
     # Review/utility: smaller than implementation (it only reads a diff and returns a verdict),
     # but 5 minutes was too tight for large diffs — the real cause of "Review Could Not Run".
+    review-timeout-minutes: 20
+  codex-cli:
+    implementation-model: gpt-5.6-sol
+    review-model: gpt-5.6-terra
+    utility-model: gpt-5.6-luna
+    timeout-minutes: 45
     review-timeout-minutes: 20
   auth:
     username: ${ISSUEBOT_USERNAME:}

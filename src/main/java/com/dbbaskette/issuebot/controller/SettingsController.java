@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
+import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,16 +34,19 @@ public class SettingsController {
     private final IssuePollingService pollingService;
     private final TrackedIssueRepository issueRepository;
     private final NotificationRepository notificationRepository;
+    private final CodexModelCatalog codexModelCatalog;
     private Path configPath = Path.of(System.getProperty("user.home"), ".issuebot", "config.yml");
 
     public SettingsController(IssueBotProperties properties,
                                IssuePollingService pollingService,
                                TrackedIssueRepository issueRepository,
-                               NotificationRepository notificationRepository) {
+                               NotificationRepository notificationRepository,
+                               CodexModelCatalog codexModelCatalog) {
         this.properties = properties;
         this.pollingService = pollingService;
         this.issueRepository = issueRepository;
         this.notificationRepository = notificationRepository;
+        this.codexModelCatalog = codexModelCatalog;
     }
 
     @GetMapping
@@ -50,35 +54,6 @@ public class SettingsController {
                            @RequestHeader(value = "HX-Request", required = false) String hx) {
         populateModel(model, null, null);
         return ViewResolver.view("settings", hx != null);
-    }
-
-    @PostMapping("/pause")
-    public String pause(Model model,
-                        @RequestHeader(value = "HX-Request", required = false) String hx) {
-        pollingService.setEnabled(false);
-        populateModel(model, "Agent paused.", null);
-        return ViewResolver.view("settings", hx != null);
-    }
-
-    @PostMapping("/resume")
-    public String resume(Model model,
-                         @RequestHeader(value = "HX-Request", required = false) String hx) {
-        pollingService.setEnabled(true);
-        populateModel(model, "Agent resumed.", null);
-        return ViewResolver.view("settings", hx != null);
-    }
-
-    /**
-     * Fragment endpoint (#83) backing the sidebar "Agent Running/Paused" chip's own
-     * 30s poll (layout.html), so it reflects pause/resume without waiting for a full
-     * page navigation. Returns just the chip markup — "layout :: agent-status" — so
-     * every page (not only Settings) can refresh it independently of that page's own
-     * poll cadence, if any.
-     */
-    @GetMapping("/fragments/agent-status")
-    public String agentStatusFragment(Model model) {
-        model.addAttribute("agentRunning", pollingService.isEnabled());
-        return "layout :: agent-status";
     }
 
     @PostMapping("/quick")
@@ -112,7 +87,8 @@ public class SettingsController {
     static final String CUSTOM_SENTINEL = "__custom__";
 
     @PostMapping("/models")
-    public String saveModels(@RequestParam String implementationModel,
+    public String saveModels(@RequestParam IssueBotProperties.AgentProvider agentProvider,
+                              @RequestParam String implementationModel,
                               @RequestParam String reviewModel,
                               @RequestParam String utilityModel,
                               RedirectAttributes redirectAttributes) {
@@ -126,19 +102,33 @@ public class SettingsController {
             return "redirect:/settings";
         }
 
-        if (!writeModelsToConfig(implementationModel, reviewModel, utilityModel)) {
+        if (!writeModelsToConfig(agentProvider, implementationModel, reviewModel, utilityModel)) {
             redirectAttributes.addFlashAttribute("error",
                     "Could not parse " + configPath + " — fix the YAML in the editor below, then try again.");
             return "redirect:/settings";
         }
 
-        properties.getClaudeCode().setImplementationModel(implementationModel);
-        properties.getClaudeCode().setReviewModel(reviewModel);
-        properties.getClaudeCode().setUtilityModel(utilityModel);
+        properties.setAgentProvider(agentProvider);
+        if (agentProvider == IssueBotProperties.AgentProvider.CODEX) {
+            properties.getCodexCli().setImplementationModel(implementationModel);
+            properties.getCodexCli().setReviewModel(reviewModel);
+            properties.getCodexCli().setUtilityModel(utilityModel);
+        } else {
+            properties.getClaudeCode().setImplementationModel(implementationModel);
+            properties.getClaudeCode().setReviewModel(reviewModel);
+            properties.getClaudeCode().setUtilityModel(utilityModel);
+        }
 
         redirectAttributes.addFlashAttribute("success",
-                "Models updated — applies to the next issue picked up (no restart needed)");
+                agentProvider.getDisplayName() + " selected — applies to the next issue picked up (no restart needed)");
         return "redirect:/settings";
+    }
+
+    /** Backward-compatible direct-call overload retained for controller unit tests and callers. */
+    String saveModels(String implementationModel, String reviewModel, String utilityModel,
+                      RedirectAttributes redirectAttributes) {
+        return saveModels(properties.getAgentProvider(), implementationModel, reviewModel,
+                utilityModel, redirectAttributes);
     }
 
     private static boolean isInvalidModelId(String modelId) {
@@ -150,11 +140,16 @@ public class SettingsController {
      * maps, sets the three model keys, and delegates to
      * {@link #writeConfigValues(Map)} to merge and persist them.
      */
-    private boolean writeModelsToConfig(String implementationModel, String reviewModel, String utilityModel) {
-        return writeConfigValues(Map.of("claude-code", Map.of(
-                "implementation-model", implementationModel,
-                "review-model", reviewModel,
-                "utility-model", utilityModel)));
+    private boolean writeModelsToConfig(IssueBotProperties.AgentProvider provider,
+                                        String implementationModel, String reviewModel,
+                                        String utilityModel) {
+        String section = provider == IssueBotProperties.AgentProvider.CODEX ? "codex-cli" : "claude-code";
+        return writeConfigValues(Map.of(
+                "agent-provider", provider.getConfigValue(),
+                section, Map.of(
+                        "implementation-model", implementationModel,
+                        "review-model", reviewModel,
+                        "utility-model", utilityModel)));
     }
 
     /**
@@ -287,18 +282,37 @@ public class SettingsController {
         model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
-        String implementationModel = properties.getClaudeCode().getImplementationModel();
-        String reviewModel = properties.getClaudeCode().getReviewModel();
-        String utilityModel = properties.getClaudeCode().getUtilityModel();
-        model.addAttribute("modelCatalog", ModelCatalog.MODELS);
+        IssueBotProperties.AgentProvider provider = properties.getAgentProvider();
+        String implementationModel = provider == IssueBotProperties.AgentProvider.CODEX
+                ? properties.getCodexCli().getImplementationModel()
+                : properties.getClaudeCode().getImplementationModel();
+        String reviewModel = provider == IssueBotProperties.AgentProvider.CODEX
+                ? properties.getCodexCli().getReviewModel()
+                : properties.getClaudeCode().getReviewModel();
+        String utilityModel = provider == IssueBotProperties.AgentProvider.CODEX
+                ? properties.getCodexCli().getUtilityModel()
+                : properties.getClaudeCode().getUtilityModel();
+        model.addAttribute("agentProvider", provider);
+        model.addAttribute("claudeModelCatalog", ModelCatalog.MODELS);
+        model.addAttribute("codexModelCatalog", codexModelCatalog.models());
+        model.addAttribute("claudeImplementationModel", properties.getClaudeCode().getImplementationModel());
+        model.addAttribute("claudeReviewModel", properties.getClaudeCode().getReviewModel());
+        model.addAttribute("claudeUtilityModel", properties.getClaudeCode().getUtilityModel());
+        model.addAttribute("codexImplementationModel", properties.getCodexCli().getImplementationModel());
+        model.addAttribute("codexReviewModel", properties.getCodexCli().getReviewModel());
+        model.addAttribute("codexUtilityModel", properties.getCodexCli().getUtilityModel());
         model.addAttribute("implementationModel", implementationModel);
         model.addAttribute("reviewModel", reviewModel);
         model.addAttribute("utilityModel", utilityModel);
         // Whether the current value isn't in the catalog — drives the "Custom…" option/input
         // (implementation/review) and the synthetic preserve-current option (utility).
-        model.addAttribute("implementationModelCustom", ModelCatalog.find(implementationModel).isEmpty());
-        model.addAttribute("reviewModelCustom", ModelCatalog.find(reviewModel).isEmpty());
-        model.addAttribute("utilityModelCustom", ModelCatalog.find(utilityModel).isEmpty());
+        boolean codex = provider == IssueBotProperties.AgentProvider.CODEX;
+        model.addAttribute("implementationModelCustom", codex
+                ? !codexModelCatalog.contains(implementationModel) : ModelCatalog.find(implementationModel).isEmpty());
+        model.addAttribute("reviewModelCustom", codex
+                ? !codexModelCatalog.contains(reviewModel) : ModelCatalog.find(reviewModel).isEmpty());
+        model.addAttribute("utilityModelCustom", codex
+                ? !codexModelCatalog.contains(utilityModel) : ModelCatalog.find(utilityModel).isEmpty());
 
         Path configPath = getConfigPath();
         model.addAttribute("configPath", configPath.toString());

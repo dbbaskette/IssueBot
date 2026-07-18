@@ -111,6 +111,6 @@ class IssueDetailTerminalToolbarRenderTest {
     void terminalPlaceholderLine_carriesDatasetRaw_forDownloadBeforeFirstRealLine() {
         String html = render(issueWithStatus(22L, 22, IssueStatus.IN_PROGRESS));
 
-        assertThat(html).contains("data-raw=\"Waiting for Claude Code output...\"");
+        assertThat(html).contains("data-raw=\"Waiting for agent output...\"");
     }
 }

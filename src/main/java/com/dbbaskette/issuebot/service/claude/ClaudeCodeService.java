@@ -1,10 +1,12 @@
 package com.dbbaskette.issuebot.service.claude;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -24,14 +26,25 @@ public class ClaudeCodeService {
     private final IssueBotProperties properties;
     private final StreamJsonParser parser;
     private final WorkflowCancellationService cancellationService;
+    private final CodexCliService codexCliService;
+    private final ThreadLocal<IssueBotProperties.AgentProvider> pinnedProvider = new ThreadLocal<>();
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
+    @Autowired
     public ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
-                              WorkflowCancellationService cancellationService) {
+                              WorkflowCancellationService cancellationService,
+                              CodexCliService codexCliService) {
         this.properties = properties;
         this.parser = parser;
         this.cancellationService = cancellationService;
+        this.codexCliService = codexCliService;
+    }
+
+    /** Unit-test convenience constructor; production injection always supplies the Codex runner. */
+    ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
+                      WorkflowCancellationService cancellationService) {
+        this(properties, parser, cancellationService, null);
     }
 
     /**
@@ -42,6 +55,10 @@ public class ClaudeCodeService {
     public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
                                                     String model, String resumeSessionId,
                                                     Long issueId, Consumer<String> lineCallback) {
+        if (useCodex()) {
+            return codexCliService.executeImplementation(prompt, workingDirectory, model,
+                    resumeSessionId, issueId, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
@@ -54,6 +71,9 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
                                             String model, Long issueId, Consumer<String> lineCallback) {
+        if (useCodex()) {
+            return codexCliService.executeReview(prompt, workingDirectory, model, issueId, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
@@ -66,6 +86,9 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executeUtility(String prompt, Path workingDirectory,
                                              Consumer<String> lineCallback) {
+        if (useCodex()) {
+            return codexCliService.executeUtility(prompt, workingDirectory, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, config.getUtilityModel(),
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
@@ -80,6 +103,9 @@ public class ClaudeCodeService {
      */
     public ClaudeCodeResult executePlanning(String prompt, Path workingDirectory,
                                              String model, Long issueId, Consumer<String> lineCallback) {
+        if (useCodex()) {
+            return codexCliService.executePlanning(prompt, workingDirectory, model, issueId, lineCallback);
+        }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
         return executeTask(prompt, workingDirectory, model,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
@@ -171,7 +197,7 @@ public class ClaudeCodeService {
                 long duration = System.currentTimeMillis() - startTime;
 
                 if (!finished) {
-                    process.destroyForcibly();
+                    terminateTimedOutProcess(process);
                     stdoutReader.join(3000);
                     stderrReader.join(3000);
                     log.warn("Claude Code timed out after {} minutes. stdout length={}, stderr: {}",
@@ -278,6 +304,10 @@ public class ClaudeCodeService {
         return parsed;
     }
 
+    static void terminateTimedOutProcess(Process process) {
+        WorkflowCancellationService.terminateProcessTree(process);
+    }
+
     /**
      * Build a useful error message for a non-zero CLI exit. Prefers, in order: stderr, then the
      * {@code result} event's text ({@code finalResult} — the CLI's own error summary, e.g.
@@ -322,6 +352,7 @@ public class ClaudeCodeService {
      * Check if the Claude Code CLI is installed and accessible.
      */
     public boolean checkCliAvailable() {
+        if (useCodex()) return codexCliService.checkCliAvailable();
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "--version");
             pb.redirectErrorStream(true);
@@ -349,6 +380,7 @@ public class ClaudeCodeService {
      * Result is cached after first check.
      */
     public boolean checkAuthentication() {
+        if (useCodex()) return codexCliService.checkAuthentication();
         if (cliAuthenticated != null) {
             return cliAuthenticated;
         }
@@ -385,13 +417,45 @@ public class ClaudeCodeService {
     }
 
     public boolean isCliAvailable() {
-        return cliAvailable;
+        return useCodex() ? codexCliService.isCliAvailable() : cliAvailable;
     }
 
     /**
      * Clear the cached auth result so the next checkAuthentication() call re-verifies.
      */
     public void clearAuthCache() {
+        if (useCodex()) {
+            codexCliService.clearAuthCache();
+            return;
+        }
         cliAuthenticated = null;
+    }
+
+    public String providerDisplayName() {
+        return effectiveProvider().getDisplayName();
+    }
+
+    public IssueBotProperties.AgentProvider provider() {
+        return properties.getAgentProvider();
+    }
+
+    /** Pin every invocation on the current workflow thread to one persisted provider. */
+    public void pinProvider(IssueBotProperties.AgentProvider provider) {
+        if (provider == null) pinnedProvider.remove();
+        else pinnedProvider.set(provider);
+    }
+
+    public void clearPinnedProvider() {
+        pinnedProvider.remove();
+    }
+
+    private IssueBotProperties.AgentProvider effectiveProvider() {
+        IssueBotProperties.AgentProvider pinned = pinnedProvider.get();
+        return pinned != null ? pinned : properties.getAgentProvider();
+    }
+
+    private boolean useCodex() {
+        return effectiveProvider() == IssueBotProperties.AgentProvider.CODEX
+                && codexCliService != null;
     }
 }

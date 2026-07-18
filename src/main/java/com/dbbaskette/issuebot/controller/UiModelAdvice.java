@@ -2,6 +2,8 @@ package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
+import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
 
@@ -23,9 +25,11 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 public class UiModelAdvice {
 
     private final IssueBotProperties properties;
+    private final ProcessingControlService processingControl;
 
-    public UiModelAdvice(IssueBotProperties properties) {
+    public UiModelAdvice(IssueBotProperties properties, ProcessingControlService processingControl) {
         this.properties = properties;
+        this.processingControl = processingControl;
     }
 
     @ModelAttribute("humanize")
@@ -43,5 +47,23 @@ public class UiModelAdvice {
     @ModelAttribute("dashboardNotificationsEnabled")
     public boolean dashboardNotificationsEnabled() {
         return properties.getNotifications().isDashboard();
+    }
+
+    @ModelAttribute("processingPaused")
+    public boolean processingPaused() { return processingControl.isPaused(); }
+
+    @ModelAttribute("agentProviderName")
+    public String agentProviderName() { return properties.getAgentProvider().getDisplayName(); }
+
+    @ModelAttribute("codexProvider")
+    public boolean codexProvider() {
+        return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX;
+    }
+
+    /** Current local URL used to return operators to the same view after pause/resume. */
+    @ModelAttribute("currentPath")
+    public String currentPath(HttpServletRequest request) {
+        String query = request.getQueryString();
+        return request.getRequestURI() + (query == null || query.isBlank() ? "" : "?" + query);
     }
 }

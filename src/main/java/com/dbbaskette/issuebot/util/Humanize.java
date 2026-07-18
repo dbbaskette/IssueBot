@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.util;
 
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -20,6 +21,20 @@ public final class Humanize {
     private static final Set<String> UPPER_TOKENS = Set.of("CI", "PR", "API", "ID", "URL");
 
     private static final String PHASE_EVENT_PREFIX = "PHASE_";
+
+    private static final Map<String, String> STATUS_LABELS = Map.ofEntries(
+            Map.entry("PENDING", "Pending"),
+            Map.entry("QUEUED", "Queued"),
+            Map.entry("BLOCKED", "Blocked"),
+            Map.entry("IN_PROGRESS", "In progress"),
+            Map.entry("AWAITING_APPROVAL", "Awaiting approval"),
+            Map.entry("COMPLETED", "Completed"),
+            Map.entry("FAILED", "Failed"),
+            Map.entry("COOLDOWN", "Cooling down"),
+            Map.entry("DECOMPOSED", "Decomposed"),
+            Map.entry("AWAITING_DECOMPOSITION", "Awaiting split approval"),
+            Map.entry("AWAITING_PLAN_APPROVAL", "Awaiting plan approval")
+    );
 
     private Humanize() {
     }
@@ -53,6 +68,20 @@ public final class Humanize {
             }
         }
         return titleCase(candidate);
+    }
+
+    /** Turns internal workflow status names into concise operator-facing labels. */
+    public static String status(String rawStatus) {
+        if (rawStatus == null) {
+            return null;
+        }
+        String known = STATUS_LABELS.get(rawStatus);
+        if (known != null) {
+            return known;
+        }
+        String titled = titleCase(rawStatus);
+        return titled.isEmpty() ? titled
+                : titled.substring(0, 1) + titled.substring(1).toLowerCase(Locale.ROOT);
     }
 
     private static String titleCase(String raw) {

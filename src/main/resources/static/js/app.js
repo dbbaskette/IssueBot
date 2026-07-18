@@ -1385,6 +1385,57 @@
     return group ? group.querySelector('.custom-model-input') : null;
   }
 
+  function syncProviderModelOptions(form, resetSelection) {
+    if (!form) { return; }
+    var providerSelect = form.querySelector('#agent-provider');
+    if (!providerSelect) { return; }
+    var provider = providerSelect.value;
+    var key = provider === 'CODEX' ? 'codexDefault' : 'claudeDefault';
+    var selects = form.querySelectorAll('.provider-model-select');
+    Array.prototype.forEach.call(selects, function (select) {
+      Array.prototype.forEach.call(select.options, function (option) {
+        var owner = option.getAttribute('data-provider');
+        option.disabled = !!owner && owner !== provider;
+      });
+      var selectedOwner = select.selectedOptions.length
+        ? select.selectedOptions[0].getAttribute('data-provider') : null;
+      if (resetSelection || (selectedOwner && selectedOwner !== provider)) {
+        var preferred = select.dataset[key];
+        var match = Array.prototype.find.call(select.options, function (option) {
+          return option.value === preferred && !option.disabled;
+        });
+        if (!match) {
+          match = Array.prototype.find.call(select.options, function (option) {
+            return !option.disabled && option.value !== '__custom__';
+          });
+        }
+        if (match) select.value = match.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+  }
+
+  function initializeProviderModelForms(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    Array.prototype.forEach.call(scope.querySelectorAll('[data-provider-model-form]'), function (form) {
+      syncProviderModelOptions(form, false);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    initializeProviderModelForms(document);
+  });
+
+  document.addEventListener('htmx:afterSwap', function (e) {
+    initializeProviderModelForms(e.target || document);
+  });
+
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'agent-provider') {
+      syncProviderModelOptions(e.target.closest('[data-provider-model-form]'), true);
+    }
+  });
+
   document.addEventListener('change', function (e) {
     var select = e.target;
     if (!select.classList || !select.classList.contains('model-select')) { return; }

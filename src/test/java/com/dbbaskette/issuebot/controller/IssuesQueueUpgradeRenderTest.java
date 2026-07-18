@@ -91,6 +91,10 @@ class IssuesQueueUpgradeRenderTest {
         assertThat(html).contains("name=\"q\"");
         assertThat(html).contains("value=\"login bug\"");
         assertThat(html).contains("Search title or #issue number");
+        assertThat(html).contains("class=\"filter-bar queue-toolbar\"");
+        assertThat(html).contains("class=\"queue-search\"");
+        assertThat(html).contains("class=\"view-chips\"");
+        assertThat(html).contains("Needs attention", "Active", "Waiting");
     }
 
     @Test
@@ -128,6 +132,7 @@ class IssuesQueueUpgradeRenderTest {
         assertThat(html).contains("id=\"select-all-issues\"");
         assertThat(html).contains("class=\"bulk-select\"");
         assertThat(html).contains("name=\"ids\"");
+        assertThat(html).contains("class=\"panel queue-table-panel\"");
     }
 
     @Test
@@ -150,6 +155,19 @@ class IssuesQueueUpgradeRenderTest {
 
         assertThat(html).contains(">Retry<");
         assertThat(html).contains("/issues/1/retry-quick");
+    }
+
+    @Test
+    void statusUsesReadableCopy_andFailureReasonIsVisibleInline() {
+        TrackedIssue cooldown = issue(1, "Cooling down", IssueStatus.COOLDOWN);
+        cooldown.setLastFailureReason("Verification timed out after 10 minutes");
+
+        String html = renderContent(List.of(cooldown), null, 0, 1, false, false);
+
+        assertThat(html).contains(">Cooling down<");
+        assertThat(html).contains("class=\"failure-inline\"");
+        assertThat(html).contains("Verification timed out after 10 minutes");
+        assertThat(html).doesNotContain(">COOLDOWN<");
     }
 
     @Test

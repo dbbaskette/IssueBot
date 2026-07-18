@@ -1,6 +1,8 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.FailureCategory;
+import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -14,6 +16,7 @@ import com.dbbaskette.issuebot.service.notification.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -39,6 +42,12 @@ public class IterationManager {
     private final GitHubApiClient gitHubApi;
     private final EventService eventService;
     private final NotificationService notificationService;
+    private FailureDiagnosticService failureDiagnosticService;
+
+    @Autowired(required = false)
+    void setFailureDiagnosticService(FailureDiagnosticService failureDiagnosticService) {
+        this.failureDiagnosticService = failureDiagnosticService;
+    }
 
     public IterationManager(TrackedIssueRepository issueRepository,
                              WatchedRepoRepository repoRepository,
@@ -111,13 +120,19 @@ public class IterationManager {
         // was itself an implementation failure (not review feedback or human instructions)
         if (implResult != null && !implResult.isSuccess()
                 && failureContext != null
-                && failureContext.startsWith("Claude Code failed:")
+                && isImplementationFailure(failureContext)
                 && currentIter > 1) {
             return "Implementation failed again on iteration " + currentIter
                     + " with same error type — unlikely to succeed on retry";
         }
 
         return null; // OK to retry
+    }
+
+    private static boolean isImplementationFailure(String failureContext) {
+        return failureContext.startsWith("Claude Code failed:")
+                || failureContext.startsWith("Codex CLI failed:")
+                || failureContext.startsWith("Agent failed:");
     }
 
     /**
@@ -290,8 +305,6 @@ public class IterationManager {
     private void escalateFailure(TrackedIssue trackedIssue, String notificationTitle,
                                    String notificationDetail, String eventType,
                                    String eventMessage, String issueComment) {
-        trackedIssue.setLastFailureReason(truncate(notificationDetail, MAX_FAILURE_REASON_CHARS));
-
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 
@@ -299,7 +312,18 @@ public class IterationManager {
 
         trackedIssue.setStatus(IssueStatus.FAILED);
         trackedIssue.setCurrentPhase(null);
-        issueRepository.save(trackedIssue);
+        String summary = truncate(notificationDetail, MAX_FAILURE_REASON_CHARS);
+        if (failureDiagnosticService != null) {
+            FailureCategory category = failureCategory(eventType);
+            failureDiagnosticService.record(trackedIssue, category, summary, null,
+                    notificationDetail, suggestedAction(category),
+                    category == FailureCategory.BUDGET
+                            ? FailureRetryability.OPERATOR_ACTION_REQUIRED
+                            : FailureRetryability.CONFIGURATION_CHANGE_RECOMMENDED);
+        } else {
+            trackedIssue.setLastFailureReason(summary);
+            issueRepository.save(trackedIssue);
+        }
 
         try {
             gitHubApi.addLabels(repo.getOwner(), repo.getName(), issueNumber,
@@ -322,6 +346,20 @@ public class IterationManager {
                 repo.fullName() + " #" + issueNumber + " — " + notificationDetail, trackedIssue);
 
         eventService.log(eventType, eventMessage, repo, trackedIssue);
+    }
+
+    private static FailureCategory failureCategory(String eventType) {
+        if (eventType.contains("BUDGET")) return FailureCategory.BUDGET;
+        if (eventType.contains("REVIEW")) return FailureCategory.REVIEW;
+        return FailureCategory.AGENT_EXIT;
+    }
+
+    private static String suggestedAction(FailureCategory category) {
+        return switch (category) {
+            case BUDGET -> "Raise the issue or repository budget before retrying.";
+            case REVIEW -> "Review the blockers, add specific implementation guidance, then retry.";
+            default -> "Break the issue into smaller changes or add more specific guidance before retrying.";
+        };
     }
 
     /**

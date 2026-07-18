@@ -11,6 +11,7 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
+import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -26,6 +27,7 @@ import org.eclipse.jgit.api.Git;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -78,6 +80,12 @@ public class IssueWorkflowService {
     private final RepoLessonRepository lessonRepository;
     private final LessonsService lessonsService;
     private final ObjectMapper objectMapper;
+    private FailureDiagnosticService failureDiagnosticService;
+
+    @Autowired(required = false)
+    void setFailureDiagnosticService(FailureDiagnosticService failureDiagnosticService) {
+        this.failureDiagnosticService = failureDiagnosticService;
+    }
 
     public IssueWorkflowService(GitOperationsService gitOps,
                                  GitHubApiClient gitHubApi,
@@ -144,8 +152,10 @@ public class IssueWorkflowService {
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
-            trackedIssue.setLastFailureReason("Unhandled error: " + e.getMessage());
-            issueRepository.save(trackedIssue);
+            recordFailure(trackedIssue, FailureCategory.UNEXPECTED,
+                    "Unhandled error: " + e.getMessage(), null, e.toString(),
+                    "Review the technical details and add narrower guidance before retrying.",
+                    FailureRetryability.RETRYABLE);
             eventService.log("WORKFLOW_ERROR", "Unhandled error: " + e.getMessage(),
                     trackedIssue.getRepo(), trackedIssue);
         }
@@ -156,6 +166,9 @@ public class IssueWorkflowService {
     }
 
     public void processIssue(TrackedIssue trackedIssue, String additionalInstructions) {
+        IssueBotProperties.AgentProvider executionProvider = claudeCode.provider();
+        claudeCode.pinProvider(executionProvider);
+        try {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 
@@ -169,6 +182,15 @@ public class IssueWorkflowService {
         // Captured before it is cleared just below: a continue-session retry's first
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
+        IssueBotProperties.AgentProvider previousProvider = trackedIssue.getResolvedAgentProvider();
+        if (trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
+                && previousProvider != executionProvider) {
+            trackedIssue.setClaudeSessionId(null);
+            eventService.log("SESSION_PROVIDER_CHANGED",
+                    "Previous agent session was discarded because the execution provider changed",
+                    repo, trackedIssue);
+        }
+        trackedIssue.setResolvedAgentProvider(executionProvider);
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         // Workflow entry point for both a fresh start and a retry (IssueController.retry sets
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
@@ -176,8 +198,9 @@ public class IssueWorkflowService {
         trackedIssue.setStartedAt(LocalDateTime.now());
         trackedIssue.setCurrentPhase("SETUP");
         trackedIssue.setLastFailureReason(null);
-        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue));
-        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue));
+        trackedIssue.setSuspensionReason(null);
+        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
+        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionProvider));
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
                 + trackedIssue.getResolvedImplModel() + " / "
@@ -200,8 +223,10 @@ public class IssueWorkflowService {
             log.error("Phase 1 (Setup) failed for {} #{}", repo.fullName(), issueNumber, e);
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setCurrentPhase(null);
-            trackedIssue.setLastFailureReason("Setup failed: " + e.getMessage());
-            issueRepository.save(trackedIssue);
+            recordFailure(trackedIssue, FailureCategory.SETUP,
+                    "Setup failed: " + e.getMessage(), "SETUP", e.toString(),
+                    "Check repository access, credentials, and the local checkout before retrying.",
+                    FailureRetryability.OPERATOR_ACTION_REQUIRED);
             eventService.log("PHASE_SETUP_FAILED", "Setup failed: " + e.getMessage(), repo, trackedIssue);
             return;
         }
@@ -336,7 +361,7 @@ public class IssueWorkflowService {
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             if (!implResult.isSuccess()) {
-                log.warn("Claude Code returned failure for iteration {}", iterationNum);
+                log.warn("{} returned failure for iteration {}", claudeCode.providerDisplayName(), iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
 
@@ -357,8 +382,8 @@ public class IssueWorkflowService {
                     return;
                 }
 
-                previousFeedback = "Claude Code failed: " + implResult.getErrorMessage();
-                reviewFeedback = false; // Claude Code failure is not review feedback
+                previousFeedback = claudeCode.providerDisplayName() + " failed: " + implResult.getErrorMessage();
+                reviewFeedback = false; // implementation-provider failure is not review feedback
                 continue;
             }
 
@@ -500,8 +525,10 @@ public class IssueWorkflowService {
                 log.error("Phase 4 (PR Creation) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
-                trackedIssue.setLastFailureReason("PR creation failed: " + e.getMessage());
-                issueRepository.save(trackedIssue);
+                recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
+                        "PR creation failed: " + e.getMessage(), "PR_CREATION", e.toString(),
+                        "Check GitHub permissions and branch state, then retry.",
+                        FailureRetryability.OPERATOR_ACTION_REQUIRED);
                 eventService.log("PHASE_PR_CREATION_FAILED",
                         "PR creation failed: " + e.getMessage(), repo, trackedIssue);
                 return;
@@ -578,8 +605,10 @@ public class IssueWorkflowService {
                 log.error("Phase 6 (Completion) failed", e);
                 trackedIssue.setStatus(IssueStatus.FAILED);
                 trackedIssue.setCurrentPhase(null);
-                trackedIssue.setLastFailureReason("Completion failed: " + e.getMessage());
-                issueRepository.save(trackedIssue);
+                recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
+                        "Completion failed: " + e.getMessage(), "COMPLETION", e.toString(),
+                        "Inspect the pull request and merge checks, then retry completion.",
+                        FailureRetryability.OPERATOR_ACTION_REQUIRED);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);
                 return;
@@ -597,6 +626,9 @@ public class IssueWorkflowService {
         }
         captureLessons(trackedIssue, "failed after max iterations", previousFeedback, previousCiLogs, repoPath);
         iterationManager.handleMaxIterationsReached(trackedIssue);
+        } finally {
+            claudeCode.clearPinnedProvider();
+        }
     }
 
     /**
@@ -642,16 +674,41 @@ public class IssueWorkflowService {
      * Checkpoint: returns true (and finalizes the issue as FAILED) if the operator
      * requested cancellation. Callers must return immediately when this returns true.
      */
-    private boolean cancelled(TrackedIssue trackedIssue) {
-        if (!cancellationService.isCancelled(trackedIssue.getId())) return false;
-        trackedIssue.setStatus(IssueStatus.FAILED);
+    boolean cancelled(TrackedIssue trackedIssue) {
+        CancellationReason reason = cancellationService.reason(trackedIssue.getId()).orElse(null);
+        if (reason == null) return false;
         trackedIssue.setCurrentPhase(null);
-        trackedIssue.setLastFailureReason("Cancelled by operator");
+        if (reason == CancellationReason.GLOBAL_PAUSE) {
+            trackedIssue.setStatus(IssueStatus.PENDING);
+            trackedIssue.setSuspensionReason("Processing paused by operator");
+            trackedIssue.setLastFailureReason(null);
+        } else {
+            trackedIssue.setStatus(IssueStatus.FAILED);
+            trackedIssue.setSuspensionReason(null);
+            trackedIssue.setLastFailureReason("Cancelled by operator");
+        }
         issueRepository.save(trackedIssue);
-        eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
-                trackedIssue.getRepo(), trackedIssue);
+        if (reason == CancellationReason.GLOBAL_PAUSE) {
+            eventService.log("WORKFLOW_SUSPENDED", "Processing paused by operator",
+                    trackedIssue.getRepo(), trackedIssue);
+        } else {
+            eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
+                    trackedIssue.getRepo(), trackedIssue);
+        }
         cancellationService.clear(trackedIssue.getId());
         return true;
+    }
+
+    void recordFailure(TrackedIssue issue, FailureCategory category, String summary, String phase,
+                       String technicalDetails, String suggestedAction,
+                       FailureRetryability retryability) {
+        if (failureDiagnosticService != null) {
+            failureDiagnosticService.record(issue, category, summary, phase, technicalDetails,
+                    suggestedAction, retryability);
+        } else {
+            issue.setLastFailureReason(summary);
+            issueRepository.save(issue);
+        }
     }
 
     /**
@@ -759,7 +816,7 @@ public class IssueWorkflowService {
             prompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + prompt;
         }
 
-        sseService.broadcastClaudeLog(issueId, "[system] Launching Claude Code ("
+        sseService.broadcastClaudeLog(issueId, "[system] Launching " + claudeCode.providerDisplayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
                 + (resumed ? " (resuming session)" : "") + "...");
         ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
@@ -797,7 +854,8 @@ public class IssueWorkflowService {
             if (superpowers) {
                 coldPrompt = SuperpowersMethodologyService.IMPLEMENTATION_METHODOLOGY + "\n\n" + coldPrompt;
             }
-            sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh Claude Code session...");
+            sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
+                    + claudeCode.providerDisplayName() + " session...");
             result = claudeCode.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
         }
@@ -1789,6 +1847,24 @@ public class IssueWorkflowService {
                 }
                 case "stderr" -> {
                     text = "[stderr] " + node.path("text").asText("");
+                }
+                case "thread.started", "turn.started" -> text = null;
+                case "turn.completed" -> text = "[result] Agent turn complete";
+                case "turn.failed", "error" -> {
+                    JsonNode error = node.path("error");
+                    String message = error.isTextual() ? error.asText()
+                            : error.path("message").asText(node.path("message").asText("Agent turn failed"));
+                    text = "[error] " + message;
+                }
+                case "item.completed" -> {
+                    JsonNode item = node.path("item");
+                    String itemType = item.path("type").asText("");
+                    text = switch (itemType) {
+                        case "agent_message" -> item.path("text").asText("");
+                        case "command_execution" -> "[command] " + item.path("command").asText("");
+                        case "file_change" -> "[files] Changes applied";
+                        default -> null;
+                    };
                 }
                 default -> {
                     String raw = node.toString();
