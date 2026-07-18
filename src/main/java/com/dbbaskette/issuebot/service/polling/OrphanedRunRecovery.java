@@ -69,11 +69,14 @@ public class OrphanedRunRecovery {
             log.info("Recovering interrupted issue {} #{} from phase {} to {}",
                     issue.getRepo().fullName(), issue.getIssueNumber(),
                     issue.getCurrentPhase(), recoveredStatus);
-            if (action == RecoveryAction.RESTORE_UNEXECUTED_CORRECTION) {
+            if (action == RecoveryAction.RESTORE_UNEXECUTED_CORRECTION
+                    || action == RecoveryAction.RESTORE_INTERRUPTED_IMPLEMENTATION) {
                 // The second implementation claim consumed the ordinary iteration budget just
-                // before work began. Roll back only that claim so normal dispatch can replay it;
-                // the approved version and completed-verdict count remain immutable.
+                // before work began. Roll back only that claim so normal dispatch can replay the
+                // same durable iteration and exact prepared prompt.
                 issue.setCurrentIteration(issue.getCurrentIteration() - 1);
+            }
+            if (action == RecoveryAction.RESTORE_UNEXECUTED_CORRECTION) {
                 issue.setPlanCorrectionPending(true);
             }
             issue.setStatus(recoveredStatus);
@@ -94,6 +97,23 @@ public class OrphanedRunRecovery {
     }
 
     private RecoveryAction recoveryAction(TrackedIssue issue) {
+        if ("IMPLEMENTATION".equalsIgnoreCase(issue.getCurrentPhase())
+                && issue.getCurrentIteration() > 0
+                && (!issue.effectivePlanFirst() || issue.getApprovedPlanningVersion() != null)) {
+            Iteration current = currentIteration(issue);
+            boolean incomplete = current == null
+                    || (current.getCompletedAt() == null
+                    && current.getImplementationCompletedAt() == null);
+            if (incomplete) {
+                // A claimed Plan First correction must also restore its one-shot eligibility.
+                // Every other implementation simply replays the same iteration number; the
+                // workflow reuses its incomplete row and byte-for-byte prepared context.
+                if (isClaimedCorrection(issue) && current != null) {
+                    return RecoveryAction.RESTORE_UNEXECUTED_CORRECTION;
+                }
+                return RecoveryAction.RESTORE_INTERRUPTED_IMPLEMENTATION;
+            }
+        }
         if (!issue.effectivePlanFirst()) {
             return RecoveryAction.REQUEUE;
         }
@@ -187,6 +207,7 @@ public class OrphanedRunRecovery {
     private enum RecoveryAction {
         NONE,
         REQUEUE,
+        RESTORE_INTERRUPTED_IMPLEMENTATION,
         RESTORE_UNEXECUTED_CORRECTION,
         RESUME_POST_IMPLEMENTATION_CORRECTION,
         AWAITING_PLAN_APPROVAL

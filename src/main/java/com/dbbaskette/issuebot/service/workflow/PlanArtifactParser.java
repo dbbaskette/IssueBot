@@ -31,17 +31,18 @@ public final class PlanArtifactParser {
         if (plan.isBlank()) {
             throw invalid("Implementation Plan is blank");
         }
-        if (spec.contains("\n" + SPEC_HEADING)
-                || spec.contains("\n" + PLAN_HEADING)
-                || plan.contains("\n" + SPEC_HEADING)
-                || plan.contains("\n" + PLAN_HEADING)) {
-            throw invalid("Planner output contains duplicate or reordered top-level sections");
+        if (containsTopLevelHeading(spec) || containsTopLevelHeading(plan)) {
+            throw invalid("Planner output contains an additional or duplicate top-level heading");
         }
         if (spec.length() > MAX_SECTION_CHARS || plan.length() > MAX_SECTION_CHARS) {
             throw invalid("Each planning section must be 20,000 characters or fewer");
         }
 
         return new PlanningArtifact(spec, plan);
+    }
+
+    private boolean containsTopLevelHeading(String section) {
+        return section.lines().anyMatch(line -> line.startsWith("# "));
     }
 
     private InvalidPlanningArtifactException invalid(String message) {

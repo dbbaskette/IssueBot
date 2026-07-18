@@ -98,7 +98,7 @@ public class CodeReviewService {
         }
 
         // 4. Parse JSON response
-        return parseReviewResponse(result);
+        return parseReviewResponse(result, reviewPassThreshold, securityReview);
     }
 
     /**
@@ -138,6 +138,17 @@ public class CodeReviewService {
      * Package-private for direct unit testing of the parsing logic.
      */
     CodeReviewResult parseReviewResponse(ClaudeCodeResult result) {
+        return parseReviewResponse(result, 0.70, false);
+    }
+
+    /**
+     * Parse the model response, then derive the authoritative verdict locally. The model's
+     * {@code passed} field is retained only inside {@code rawJson} for auditability; it is
+     * never trusted as workflow state.
+     */
+    CodeReviewResult parseReviewResponse(ClaudeCodeResult result,
+                                         double reviewPassThreshold,
+                                         boolean securityReview) {
         String output = result.getOutput();
         if (output == null || output.isBlank()) {
             return CodeReviewResult.failed("Empty review output",
@@ -148,7 +159,7 @@ public class CodeReviewService {
             String json = extractJson(output);
             JsonNode root = objectMapper.readTree(json);
 
-            boolean passed = root.path("passed").asBoolean(false);
+            boolean modelPassed = root.path("passed").asBoolean(false);
             String summary = root.path("summary").asText("No summary");
             double specCompliance = root.path("specComplianceScore").asDouble(0.0);
             double correctness = root.path("correctnessScore").asDouble(0.0);
@@ -187,12 +198,8 @@ public class CodeReviewService {
                 }
             }
 
-            log.info("Review parsed: passed={}, scores=[spec={}, correct={}, quality={}, tests={}, arch={}, regress={}, sec={}], findings={}, criteria={}",
-                    passed, specCompliance, correctness, codeQuality, testCoverage,
-                    architectureFit, regressions, security, findings.size(), criteria.size());
-
             CodeReviewResult parsed = new CodeReviewResult(
-                    passed, summary,
+                    false, summary,
                     specCompliance, correctness, codeQuality, testCoverage,
                     architectureFit, regressions, security,
                     findings, advice, json,
@@ -200,17 +207,30 @@ public class CodeReviewService {
                     result.getCostUsd(),
                     criteria
             );
-            if (parsed.passed() && parsed.hasBlockingSpecFinding()) {
-                return new CodeReviewResult(
-                        false, parsed.summary(),
-                        parsed.specComplianceScore(), parsed.correctnessScore(),
-                        parsed.codeQualityScore(), parsed.testCoverageScore(),
-                        parsed.architectureFitScore(), parsed.regressionsScore(), parsed.securityScore(),
-                        parsed.findings(), parsed.advice(), parsed.rawJson(),
-                        parsed.inputTokens(), parsed.outputTokens(), parsed.modelUsed(), parsed.costUsd(),
-                        parsed.criteria());
-            }
-            return parsed;
+            boolean scoresPass = specCompliance >= reviewPassThreshold
+                    && correctness >= reviewPassThreshold
+                    && codeQuality >= reviewPassThreshold
+                    && testCoverage >= reviewPassThreshold
+                    && architectureFit >= reviewPassThreshold
+                    && regressions >= reviewPassThreshold
+                    && (!securityReview || security >= reviewPassThreshold);
+            boolean authoritativePassed = scoresPass && !parsed.hasBlockingSpecFinding();
+
+            log.info("Review parsed: modelPassed={}, authoritativePassed={}, threshold={}, securityReview={}, "
+                            + "scores=[spec={}, correct={}, quality={}, tests={}, arch={}, regress={}, sec={}], "
+                            + "findings={}, criteria={}",
+                    modelPassed, authoritativePassed, reviewPassThreshold, securityReview,
+                    specCompliance, correctness, codeQuality, testCoverage,
+                    architectureFit, regressions, security, findings.size(), criteria.size());
+
+            return new CodeReviewResult(
+                    authoritativePassed, parsed.summary(),
+                    parsed.specComplianceScore(), parsed.correctnessScore(),
+                    parsed.codeQualityScore(), parsed.testCoverageScore(),
+                    parsed.architectureFitScore(), parsed.regressionsScore(), parsed.securityScore(),
+                    parsed.findings(), parsed.advice(), parsed.rawJson(),
+                    parsed.inputTokens(), parsed.outputTokens(), parsed.modelUsed(), parsed.costUsd(),
+                    parsed.criteria());
         } catch (Exception e) {
             log.warn("Failed to parse review JSON: {}", e.getMessage());
             return CodeReviewResult.failed(

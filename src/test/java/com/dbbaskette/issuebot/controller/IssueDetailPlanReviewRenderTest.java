@@ -145,6 +145,29 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void secondMissPanelRendersPersistedLocalAndCiEvidenceOutsideReviewJson() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+        issue.setApprovedPlanningVersion(approved);
+
+        Iteration second = failedReview(issue, 2,
+                "{\"unmetRequirements\":[\"Keep approval immutable\"]}");
+        second.setLocalCheckResult("FAILED");
+        second.setCiResult("PASSED");
+
+        String html = render(issue, List.of(approved), approved, approved, List.of(second));
+
+        assertThat(html).contains("Persisted verification evidence")
+                .contains("Local checks")
+                .contains("CI verification")
+                .contains("Local checks: FAILED")
+                .contains("CI verification: PASSED");
+    }
+
+    @Test
     void designAndImplementationMarkdownAreRenderedSafelyAndIndependently() {
         TrackedIssue issue = issueAwaitingApproval();
         PlanningVersion version = pending(issue, 1, "# Design-only marker", "# Plan-only marker", null);

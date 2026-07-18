@@ -3,7 +3,9 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.function.Function;
@@ -17,10 +19,33 @@ public class IssueDispatchService {
 
     private final TrackedIssueRepository issues;
     private final ProcessingControlService control;
+    private final IssueDispatchTransactionManager transactions;
+    private final IssueGuidanceRepository legacyGuidance;
 
+    /** Legacy constructor retained for isolated unit tests; production uses the proxied manager. */
     public IssueDispatchService(TrackedIssueRepository issues, ProcessingControlService control) {
         this.issues = issues;
         this.control = control;
+        this.transactions = null;
+        this.legacyGuidance = null;
+    }
+
+    /** Test-only compatibility constructor for the pre-proxy in-memory fixture. */
+    public IssueDispatchService(TrackedIssueRepository issues, ProcessingControlService control,
+                                IssueGuidanceRepository guidance) {
+        this.issues = issues;
+        this.control = control;
+        this.transactions = null;
+        this.legacyGuidance = guidance;
+    }
+
+    @Autowired
+    public IssueDispatchService(IssueDispatchTransactionManager transactions,
+                                ProcessingControlService control) {
+        this.issues = null;
+        this.control = control;
+        this.transactions = transactions;
+        this.legacyGuidance = null;
     }
 
     public boolean isPaused() {
@@ -28,6 +53,7 @@ public class IssueDispatchService {
     }
 
     public synchronized ClaimResult claimStart(Long issueId) {
+        if (transactions != null) return transactions.claimStart(issueId);
         if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findById(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
@@ -35,8 +61,18 @@ public class IssueDispatchService {
     }
 
     public synchronized ClaimResult claimStart(TrackedIssue issue) {
+        if (transactions != null) return transactions.claimStart(issue.getId());
         if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
         return claimStartLoaded(issue);
+    }
+
+    /** Applies manual-start options to the fresh locked entity before it becomes runnable. */
+    public ClaimResult claimStart(Long issueId,
+                                  IssueDispatchTransactionManager.StartMutation mutation) {
+        if (transactions != null) return transactions.claimStart(issueId, mutation);
+        TrackedIssue issue = issues.findById(issueId).orElse(null);
+        if (issue != null) mutation.apply(issue);
+        return issue == null ? ClaimResult.rejected("Issue not found") : claimStart(issue);
     }
 
     private ClaimResult claimStartLoaded(TrackedIssue issue) {
@@ -74,11 +110,19 @@ public class IssueDispatchService {
 
     public synchronized ClaimResult claimRetry(Long issueId,
                                                Function<TrackedIssue, String> additionalGate) {
+        if (transactions != null) {
+            return transactions.claimRetry(issueId, additionalGate,
+                    IssueDispatchTransactionManager.RetryMutation.none());
+        }
         if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return ClaimResult.rejected("Cannot retry issue in " + issue.getStatus() + " status");
+        }
+        if (IssueDispatchTransactionManager.isSecondPlanFirstMiss(issue)) {
+            return ClaimResult.rejected(
+                    "The second Plan First conformance miss requires the guided implementation retry");
         }
         String additionalRejection = additionalGate.apply(issue);
         if (additionalRejection != null) {
@@ -93,6 +137,55 @@ public class IssueDispatchService {
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setSuspensionReason(null);
         issues.save(issue);
+        return ClaimResult.claimed(issue);
+    }
+
+    /** Applies caller-supplied retry resets to the authoritative locked entity before commit. */
+    public ClaimResult claimRetry(Long issueId,
+                                  Function<TrackedIssue, String> additionalGate,
+                                  IssueDispatchTransactionManager.RetryMutation mutation) {
+        if (transactions != null) {
+            return transactions.claimRetry(issueId, additionalGate, mutation);
+        }
+        return claimRetry(issueId, candidate -> {
+            String rejection = additionalGate.apply(candidate);
+            if (rejection == null) mutation.apply(candidate);
+            return rejection;
+        });
+    }
+
+    /** Atomically claims the one allowed post-conformance guided retry and stores its guidance. */
+    public ClaimResult claimGuidedRetry(Long issueId, String guidance, int maxConcurrentIssues) {
+        if (transactions != null) {
+            return transactions.claimGuidedRetry(issueId, guidance, maxConcurrentIssues);
+        }
+        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
+        if (issue == null) return ClaimResult.rejected("Issue not found");
+        if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
+            return ClaimResult.rejected("Cannot retry issue in " + issue.getStatus() + " status");
+        }
+        if (!IssueDispatchTransactionManager.requiresGuidedPlanRetry(issue)) {
+            return ClaimResult.rejected("Guided retry is only available after the second Plan First "
+                    + "conformance miss with an approved non-legacy planning version");
+        }
+        if (issues.countByStatus(IssueStatus.IN_PROGRESS) >= maxConcurrentIssues) {
+            return ClaimResult.rejected("Global concurrency limit reached");
+        }
+        List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
+        if (!active.isEmpty()) {
+            return ClaimResult.rejected("Issue #" + active.getFirst().getIssueNumber()
+                    + " is currently running for this repository");
+        }
+        issue.setCurrentIteration(0);
+        issue.setCurrentReviewIteration(0);
+        issue.setPlanConformanceAttempt(0);
+        issue.setCooldownUntil(null);
+        issue.setCurrentPhase(null);
+        issue.setPlanCorrectionPending(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issues.save(issue);
+        if (legacyGuidance != null) legacyGuidance.save(new com.dbbaskette.issuebot.model.IssueGuidance(issueId, guidance));
         return ClaimResult.claimed(issue);
     }
 

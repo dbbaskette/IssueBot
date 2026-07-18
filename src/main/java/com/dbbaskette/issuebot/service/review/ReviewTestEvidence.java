@@ -1,11 +1,23 @@
 package com.dbbaskette.issuebot.service.review;
 
-/** Local and CI verification outcomes supplied to the independent reviewer. */
-public record ReviewTestEvidence(String localVerificationResult, String ciResult) {
+/**
+ * Durable inputs supplied to the independent reviewer. The optional prior context is
+ * carried to a subsequent review so it can verify that earlier findings and operator
+ * guidance were actually addressed.
+ */
+public record ReviewTestEvidence(String localVerificationResult,
+                                 String ciResult,
+                                 String priorReviewContext) {
 
     public ReviewTestEvidence {
         localVerificationResult = normalize(localVerificationResult);
         ciResult = normalize(ciResult);
+        priorReviewContext = priorReviewContext == null || priorReviewContext.isBlank()
+                ? null : priorReviewContext;
+    }
+
+    public ReviewTestEvidence(String localVerificationResult, String ciResult) {
+        this(localVerificationResult, ciResult, null);
     }
 
     public static ReviewTestEvidence notRun() {

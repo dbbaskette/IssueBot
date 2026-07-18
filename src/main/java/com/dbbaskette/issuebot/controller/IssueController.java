@@ -320,6 +320,9 @@ public class IssueController {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return "Cannot retry issue in " + issue.getStatus() + " status";
         }
+        if (issue.effectivePlanFirst() && issue.getPlanConformanceAttempt() == 2) {
+            return "The second Plan First conformance miss requires the guided implementation retry";
+        }
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
                 && issue.getResolvedAgentProvider() != properties.getAgentProvider()) {
             String previousProvider = issue.getResolvedAgentProvider() == null
@@ -344,37 +347,35 @@ public class IssueController {
         List<JsonNode> remainingPRs = closeStaleIssueBotPrs(issue, openPRs);
 
         // Enforce the same gating as the polling service (using filtered list)
-        String gateReason = checkGate(issue, remainingPRs);
-        if (gateReason != null) {
-            return gateReason;
-        }
-
-        issue.setCurrentIteration(0);
-        issue.setCurrentReviewIteration(0);
-        issue.setCurrentPhase(null);
-        issue.setCooldownUntil(null);
-        issue.setImplModelOverride(normalize(implModelOverride));
-        issue.setReviewModelOverride(normalize(reviewModelOverride));
-        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
-        issue.setPlanFirstOverride(planOverride);
-        // Explicitly selecting "Require" on a retry demands a fresh, full plan cycle —
-        // planApproved is never reset elsewhere, so without this a previously approved
-        // plan would silently skip the gate. Inherit/Skip leave the plan state as-is
-        // (a plain retry of an already-approved issue keeps its approved plan).
-        if (Boolean.TRUE.equals(planOverride)) {
-            issue.setPlanApproved(false);
-            issue.setImplementationPlan(null);
-            issue.setPlanFeedback(null);
-            issue.setPlanRejections(0);
-        }
-        // Manual retry defaults to a fresh Claude session; the operator must explicitly
-        // opt in via the "Continue previous session" checkbox to keep it (issue #67).
-        if (!continueSession) {
-            issue.setClaudeSessionId(null);
-        }
-        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(issue.getId());
+        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(
+                issue.getId(), candidate -> checkGate(candidate, remainingPRs), candidate -> {
+                    candidate.setCurrentIteration(0);
+                    candidate.setCurrentReviewIteration(0);
+                    candidate.setCurrentPhase(null);
+                    candidate.setCooldownUntil(null);
+                    candidate.setImplModelOverride(normalize(implModelOverride));
+                    candidate.setReviewModelOverride(normalize(reviewModelOverride));
+                    candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+                    candidate.setPlanFirstOverride(planOverride);
+                    if (Boolean.TRUE.equals(planOverride)) {
+                        PlanningVersion approved = candidate.getApprovedPlanningVersion();
+                        if (approved != null) {
+                            approved.supersedeForFreshCycle();
+                            planningVersionRepository.save(approved);
+                            candidate.setApprovedPlanningVersion(null);
+                        }
+                        candidate.setPlanApproved(false);
+                        candidate.setImplementationPlan(null);
+                        candidate.setPlanFeedback(null);
+                        candidate.setPlanRejections(0);
+                        candidate.setPlanConformanceAttempt(0);
+                        candidate.setPlanCorrectionPending(false);
+                    }
+                    if (!continueSession) candidate.setClaudeSessionId(null);
+                });
         if (!claim.claimed()) return claim.reason();
+        issue = claim.issue();
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
                 ? instructions.trim() : null;
@@ -433,13 +434,16 @@ public class IssueController {
             return gateReason;
         }
 
-        issue.setCurrentPhase(null);
-        issue.setImplModelOverride(normalize(implModelOverride));
-        issue.setReviewModelOverride(normalize(reviewModelOverride));
-        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
-        issue.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
-        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(issue.getId());
+        Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(issue.getId(), candidate -> {
+            candidate.setCurrentPhase(null);
+            candidate.setImplModelOverride(normalize(implModelOverride));
+            candidate.setReviewModelOverride(normalize(reviewModelOverride));
+            candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+            candidate.setPlanFirstOverride(planOverride);
+        });
         if (!claim.claimed()) return claim.reason();
+        issue = claim.issue();
 
         eventService.log("MANUAL_START",
                 "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
@@ -797,23 +801,14 @@ public class IssueController {
             text = text.substring(0, 4000);
         }
 
-        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(
-                id, this::planImplementationRetryRejection);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimGuidedRetry(
+                id, text, properties.getMaxConcurrentIssues());
         if (!claim.claimed()) {
             redirectAttributes.addFlashAttribute("error", claim.reason());
             return planReviewRedirect(id);
         }
 
         TrackedIssue issue = claim.issue();
-        issue.setCurrentIteration(0);
-        issue.setCurrentReviewIteration(0);
-        issue.setPlanConformanceAttempt(0);
-        issue.setCooldownUntil(null);
-        issue.setCurrentPhase(null);
-        issue.setPlanCorrectionPending(false);
-        issueRepository.save(issue);
-
-        guidanceRepository.save(new IssueGuidance(issue.getId(), text));
         int versionNumber = issue.getApprovedPlanningVersion().getVersionNumber();
         eventService.log("PLAN_IMPLEMENTATION_RETRY",
                 "Retrying implementation against unchanged approved Plan v" + versionNumber
@@ -830,7 +825,9 @@ public class IssueController {
                     issue.getIssueNumber(), e.getMessage());
         }
 
-        workflowService.processIssueAsync(issue, text);
+        // The guidance row committed with the claim is the single source of truth. The workflow
+        // consumes it only when the exact implementation context is durably checkpointed.
+        workflowService.processIssueAsync(issue);
         redirectAttributes.addFlashAttribute("success",
                 "Implementation retry started against unchanged approved Plan v" + versionNumber);
         return planReviewRedirect(id);
@@ -923,7 +920,8 @@ public class IssueController {
         // Per-repo gate: no two issues in-flight for the same repo
         WatchedRepo repo = issue.getRepo();
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
         if (repoHasActiveIssue) {
             return repo.fullName() + " already has an active issue. Wait for it to complete.";
         }

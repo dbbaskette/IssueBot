@@ -4,7 +4,9 @@ import com.dbbaskette.issuebot.model.IssueGuidance;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -13,6 +15,11 @@ import java.util.List;
 public interface IssueGuidanceRepository extends JpaRepository<IssueGuidance, Long> {
 
     List<IssueGuidance> findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(Long issueId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT g FROM IssueGuidance g WHERE g.issueId = :issueId "
+            + "AND g.consumedAt IS NULL ORDER BY g.createdAt ASC, g.id ASC")
+    List<IssueGuidance> findUnconsumedForUpdate(@Param("issueId") Long issueId);
 
     /**
      * Retire all unconsumed guidance for an issue with a targeted UPDATE —

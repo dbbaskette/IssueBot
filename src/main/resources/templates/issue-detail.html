@@ -336,6 +336,14 @@
                                 <span class="status status-failed">Did not conform</span>
                             </div>
                             <p th:if="${attempt.reviewModel != null}" th:text="${'Review model: ' + attempt.reviewModel}">Review model</p>
+                            <div class="plan-review-evidence"
+                                 th:if="${attempt.localCheckResult != null or attempt.ciResult != null}">
+                                <strong>Persisted verification evidence</strong>
+                                <p th:if="${attempt.localCheckResult != null}"
+                                   th:text="${'Local checks: ' + attempt.localCheckResult}">Local checks: PASSED</p>
+                                <p th:if="${attempt.ciResult != null}"
+                                   th:text="${'CI verification: ' + attempt.ciResult}">CI verification: PASSED</p>
+                            </div>
                             <pre th:if="${attempt.reviewJson != null}" th:text="${attempt.reviewJson}">Findings and test evidence</pre>
                         </li>
                     </ol>

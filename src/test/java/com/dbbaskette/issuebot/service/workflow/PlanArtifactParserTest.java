@@ -64,4 +64,30 @@ class PlanArtifactParserTest {
                 .isInstanceOf(InvalidPlanningArtifactException.class)
                 .hasMessageContaining("duplicate");
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "# Design Spec\nspec\n# Unexpected Section\nextra\n# Implementation Plan\nplan",
+            "# Design Spec\nspec\n# Implementation Plan\nplan\n# Unexpected Section\nextra"
+    })
+    void rejectsAnyAdditionalTopLevelHeading(String output) {
+        assertThatThrownBy(() -> parser.parse(output))
+                .isInstanceOf(InvalidPlanningArtifactException.class)
+                .hasMessageContaining("top-level");
+    }
+
+    @Test
+    void allowsSecondLevelSubsectionsInsideBothArtifacts() {
+        PlanningArtifact artifact = parser.parse("""
+                # Design Spec
+                ## Architecture
+                A focused design.
+                # Implementation Plan
+                ## Task 1
+                Write the failing test.
+                """);
+
+        assertThat(artifact.designSpec()).contains("## Architecture");
+        assertThat(artifact.implementationPlan()).contains("## Task 1");
+    }
 }

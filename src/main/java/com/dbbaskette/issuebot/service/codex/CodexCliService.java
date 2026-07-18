@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -57,18 +58,27 @@ public class CodexCliService {
     public ClaudeCodeResult executePlanning(String prompt, Path directory, String model,
                                              Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
-                properties.getCodexCli().getTimeoutMinutes(), issueId, callback);
+                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, true);
     }
 
     public ClaudeCodeResult executeTask(String prompt, Path directory, String model,
                                          String sessionId, int timeoutMinutes, Long issueId,
                                          Consumer<String> callback) {
-        List<String> command = buildCommand(model, sessionId);
+        return executeTask(prompt, directory, model, sessionId, timeoutMinutes, issueId, callback, false);
+    }
+
+    private ClaudeCodeResult executeTask(String prompt, Path directory, String model,
+                                          String sessionId, int timeoutMinutes, Long issueId,
+                                          Consumer<String> callback, boolean planningMode) {
+        List<String> command = planningMode ? buildPlanningCommand(model) : buildCommand(model, sessionId);
         long started = System.currentTimeMillis();
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(directory.toFile());
             builder.redirectErrorStream(false);
+            if (planningMode) {
+                sanitizePlanningEnvironment(builder.environment());
+            }
             Process process = builder.start();
             if (issueId != null) cancellationService.registerProcess(issueId, process);
             process.getOutputStream().write(prompt.getBytes(StandardCharsets.UTF_8));
@@ -127,6 +137,32 @@ public class CodexCliService {
         if (sessionId != null && !sessionId.isBlank()) command.add(sessionId);
         command.add("-");
         return command;
+    }
+
+    /** Read-only, non-persistent planning mode; ChatGPT subscription auth still comes from CODEX_HOME. */
+    List<String> buildPlanningCommand(String model) {
+        List<String> command = new ArrayList<>(List.of(
+                "codex", "--ask-for-approval", "never", "--sandbox", "read-only", "exec"));
+        command.add("--skip-git-repo-check");
+        command.add("--ephemeral");
+        command.add("--json");
+        command.add("--ignore-user-config");
+        command.add("--ignore-rules");
+        command.add("--model");
+        command.add(model);
+        command.add("-");
+        return command;
+    }
+
+    static void sanitizePlanningEnvironment(Map<String, String> environment) {
+        for (String name : List.of(
+                "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                "GIT_ASKPASS", "SSH_ASKPASS", "SSH_AUTH_SOCK")) {
+            environment.remove(name);
+        }
+        environment.put("GIT_CONFIG_GLOBAL", "/dev/null");
+        environment.put("GIT_CONFIG_NOSYSTEM", "1");
+        environment.put("GIT_TERMINAL_PROMPT", "0");
     }
 
     static void terminateTimedOutProcess(Process process) {

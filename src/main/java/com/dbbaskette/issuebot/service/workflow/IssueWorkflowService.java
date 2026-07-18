@@ -83,10 +83,16 @@ public class IssueWorkflowService {
     private final LessonsService lessonsService;
     private final ObjectMapper objectMapper;
     private FailureDiagnosticService failureDiagnosticService;
+    private WorkflowCheckpointTransactionManager workflowCheckpoints;
 
     @Autowired(required = false)
     void setFailureDiagnosticService(FailureDiagnosticService failureDiagnosticService) {
         this.failureDiagnosticService = failureDiagnosticService;
+    }
+
+    @Autowired
+    void setWorkflowCheckpoints(WorkflowCheckpointTransactionManager workflowCheckpoints) {
+        this.workflowCheckpoints = workflowCheckpoints;
     }
 
     public IssueWorkflowService(GitOperationsService gitOps,
@@ -180,10 +186,12 @@ public class IssueWorkflowService {
         log.info("Starting workflow for {} #{}: {}", repo.fullName(), issueNumber,
                 trackedIssue.getIssueTitle());
 
-        cancellationService.clear(trackedIssue.getId());
-        // Retire guidance rows left over from a previous run — they were aimed at that
-        // run's context and must not leak into this one's prompts (issue #63).
-        guidanceRepository.markConsumed(trackedIssue.getId(), LocalDateTime.now());
+        // A pause/stop can race with async dispatch. Never erase a request that arrived after
+        // the durable claim but before this worker began.
+        if (cancellationService.isCancelled(trackedIssue.getId())) {
+            cancelled(trackedIssue);
+            return;
+        }
         // Captured before it is cleared just below: a continue-session retry's first
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
@@ -258,6 +266,9 @@ public class IssueWorkflowService {
                 repoPath = gitOps.repoLocalPath(repo.getOwner(), repo.getName());
                 issueDetails = fetchIssueDetails(repo, issueNumber);
                 planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
+                if (cancellationService.isCancelled(trackedIssue.getId())) {
+                    cancelled(trackedIssue);
+                }
             } catch (Exception e) {
                 failSetup(trackedIssue, repo, issueNumber, e);
             }
@@ -361,9 +372,10 @@ public class IssueWorkflowService {
             // by the controller mid-iteration. Note reviewFeedback is deliberately left
             // untouched: guidance augments whatever feedback drives this iteration, it
             // must not reclassify a review-feedback iteration as something else.
-            List<IssueGuidance> pendingGuidance =
-                    guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(trackedIssue.getId());
-            if (!pendingGuidance.isEmpty()) {
+            List<IssueGuidance> pendingGuidance = workflowCheckpoints == null
+                    ? guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(trackedIssue.getId())
+                    : List.of();
+            if (workflowCheckpoints == null && !pendingGuidance.isEmpty()) {
                 StringBuilder gb = new StringBuilder("ADDITIONAL HUMAN GUIDANCE (mid-run):");
                 for (IssueGuidance g : pendingGuidance) {
                     gb.append("\n[").append(g.getCreatedAt().format(GUIDANCE_TIME)).append("] ")
@@ -412,9 +424,23 @@ public class IssueWorkflowService {
                 return;
             }
             if (iteration == null) {
+                iteration = reusableImplementationIteration(trackedIssue.getId(), iterationNum);
+            }
+            if (iteration == null) {
                 iteration = new Iteration(trackedIssue, iterationNum);
                 iteration.setImplModel(trackedIssue.getResolvedImplModel());
                 iterationRepository.save(iteration);
+            }
+
+            if (resumePhase == null && workflowCheckpoints != null) {
+                WorkflowCheckpointTransactionManager.ImplementationContext context =
+                        workflowCheckpoints.prepareImplementationContext(
+                                trackedIssue.getId(), iteration.getId(), previousFeedback);
+                previousFeedback = context.text();
+                if (context.guidanceApplied()) {
+                    eventService.log("GUIDANCE_APPLIED",
+                            "Applying operator guidance to this iteration", repo, trackedIssue);
+                }
             }
 
             log.info("Iteration counter updated: {}/{} for {} #{}",
@@ -433,7 +459,9 @@ public class IssueWorkflowService {
                     if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
                         iteration.setClaudeSessionId(implResult.getSessionId());
                     }
-                    trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
+                    if (workflowCheckpoints == null || !implResult.isSuccess()) {
+                        trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
+                    }
                 } catch (Exception e) {
                     log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
                     iteration.setCompletedAt(LocalDateTime.now());
@@ -444,6 +472,22 @@ public class IssueWorkflowService {
                     reviewFeedback = false; // impl exception is not review feedback
                     continue;
                 }
+            }
+
+            if (resumePhase == null && implResult.isSuccess() && workflowCheckpoints != null) {
+                String checkpointDiff;
+                try (Git git = gitOps.openRepo(repo.getOwner(), repo.getName())) {
+                    checkpointDiff = gitOps.diff(git, repo.getBranch());
+                } catch (Exception e) {
+                    checkpointDiff = "";
+                    log.warn("Failed to get diff for implementation checkpoint", e);
+                }
+                WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpoint =
+                        checkpointSuccessfulImplementation(
+                                trackedIssue, iteration, implResult, checkpointDiff, iterationNum);
+                trackedIssue = checkpoint.issue();
+                iteration = checkpoint.iteration();
+                repo = trackedIssue.getRepo();
             }
 
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
@@ -657,7 +701,8 @@ public class IssueWorkflowService {
 
                 reviewResult = phaseIndependentReview(
                         trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria,
-                        approvedPlan);
+                        approvedPlan, previousFeedback);
+                if (cancelled(trackedIssue)) return;
             }
 
             if (persistedReviewVerdict) {
@@ -681,6 +726,7 @@ public class IssueWorkflowService {
 
             // Post review to issue thread (regardless of pass/fail)
             if (reviewResult != null && !completionResume) {
+                if (cancelled(trackedIssue)) return;
                 postReviewToIssue(trackedIssue, reviewResult, iterationNum);
             }
 
@@ -729,6 +775,7 @@ public class IssueWorkflowService {
 
             // Route non-blocking review findings per the repo's follow-up mode
             if (reviewResult != null && reviewResult.passed() && !completionResume) {
+                if (cancelled(trackedIssue)) return;
                 try {
                     followUpService.handleNonBlockingFindings(trackedIssue, issueDetails, reviewResult, prNumber);
                 } catch (Exception e) {
@@ -738,6 +785,7 @@ public class IssueWorkflowService {
             }
 
             // === Phase 6: Completion ===
+            if (cancelled(trackedIssue)) return;
             try {
                 trackedIssue.setCurrentPhase("COMPLETION");
                 issueRepository.save(trackedIssue);
@@ -819,6 +867,29 @@ public class IssueWorkflowService {
         return truncate(sb.toString(), 3000);
     }
 
+    /** Checkpoint first; accounting and telemetry are deliberately ordered after its commit. */
+    WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpointSuccessfulImplementation(
+            TrackedIssue issue, Iteration iteration, ClaudeCodeResult result,
+            String diff, int iterationNum) {
+        WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpoint =
+                workflowCheckpoints.persistImplementationComplete(
+                        issue.getId(), iteration.getId(), result, diff);
+        trackCost(checkpoint.issue(), iterationNum, result, "IMPLEMENTATION");
+        eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
+                "Implementation complete: " + result,
+                checkpoint.issue().getRepo(), checkpoint.issue());
+        return checkpoint;
+    }
+
+    /** Reuses the row rearmed after a crash so its exact prepared prompt is not lost. */
+    Iteration reusableImplementationIteration(Long issueId, int iterationNum) {
+        return iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                        issueId, iterationNum)
+                .filter(candidate -> candidate.getCompletedAt() == null
+                        && candidate.getImplementationCompletedAt() == null)
+                .orElse(null);
+    }
+
     /**
      * Checkpoint: returns true (and finalizes the issue as FAILED) if the operator
      * requested cancellation. Callers must return immediately when this returns true.
@@ -826,17 +897,23 @@ public class IssueWorkflowService {
     boolean cancelled(TrackedIssue trackedIssue) {
         CancellationReason reason = cancellationService.reason(trackedIssue.getId()).orElse(null);
         if (reason == null) return false;
-        trackedIssue.setCurrentPhase(null);
-        if (reason == CancellationReason.GLOBAL_PAUSE) {
-            trackedIssue.setStatus(IssueStatus.PENDING);
-            trackedIssue.setSuspensionReason("Processing paused by operator");
-            trackedIssue.setLastFailureReason(null);
+        if (workflowCheckpoints != null) {
+            trackedIssue = reason == CancellationReason.GLOBAL_PAUSE
+                    ? workflowCheckpoints.suspendForGlobalPause(trackedIssue.getId())
+                    : workflowCheckpoints.cancelForOperator(trackedIssue.getId());
         } else {
-            trackedIssue.setStatus(IssueStatus.FAILED);
-            trackedIssue.setSuspensionReason(null);
-            trackedIssue.setLastFailureReason("Cancelled by operator");
+            trackedIssue.setCurrentPhase(null);
+            if (reason == CancellationReason.GLOBAL_PAUSE) {
+                trackedIssue.setStatus(IssueStatus.PENDING);
+                trackedIssue.setSuspensionReason("Processing paused by operator");
+                trackedIssue.setLastFailureReason(null);
+            } else {
+                trackedIssue.setStatus(IssueStatus.FAILED);
+                trackedIssue.setSuspensionReason(null);
+                trackedIssue.setLastFailureReason("Cancelled by operator");
+            }
+            issueRepository.save(trackedIssue);
         }
-        issueRepository.save(trackedIssue);
         if (reason == CancellationReason.GLOBAL_PAUSE) {
             eventService.log("WORKFLOW_SUSPENDED", "Processing paused by operator",
                     trackedIssue.getRepo(), trackedIssue);
@@ -1061,13 +1138,16 @@ public class IssueWorkflowService {
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
         }
 
-        if (result.isSuccess() && result.getSessionId() != null && !result.getSessionId().isBlank()) {
+        if (workflowCheckpoints == null && result.isSuccess()
+                && result.getSessionId() != null && !result.getSessionId().isBlank()) {
             trackedIssue.setClaudeSessionId(result.getSessionId());
             issueRepository.save(trackedIssue);
         }
 
-        eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
-                "Implementation complete: " + result, repo, trackedIssue);
+        if (workflowCheckpoints == null) {
+            eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
+                    "Implementation complete: " + result, repo, trackedIssue);
+        }
         return result;
     }
 
@@ -1311,6 +1391,16 @@ public class IssueWorkflowService {
                                              int prNumber, Iteration iteration,
                                              List<String> criteria,
                                              ApprovedPlanContext approvedPlan) {
+        return phaseIndependentReview(trackedIssue, issueDetails, repoPath, branchName,
+                prNumber, iteration, criteria, approvedPlan, null);
+    }
+
+    CodeReviewResult phaseIndependentReview(TrackedIssue trackedIssue, JsonNode issueDetails,
+                                             Path repoPath, String branchName,
+                                             int prNumber, Iteration iteration,
+                                             List<String> criteria,
+                                             ApprovedPlanContext approvedPlan,
+                                             String priorReviewContext) {
         WatchedRepo repo = trackedIssue.getRepo();
         String reviewModelLabel = trackedIssue.getResolvedReviewModel() != null
                 ? trackedIssue.getResolvedReviewModel() : "the review model";
@@ -1338,6 +1428,9 @@ public class IssueWorkflowService {
         CodeReviewResult reviewResult;
         int attempt = 0;
         while (true) {
+            if (cancellationService.isCancelled(issueId)) {
+                return null;
+            }
             attempt++;
             try {
                 reviewResult = codeReviewService.reviewCode(
@@ -1353,7 +1446,8 @@ public class IssueWorkflowService {
                         repo.getCustomInstructions(),
                         approvedPlan,
                         new ReviewTestEvidence(
-                                iteration.getLocalCheckResult(), iteration.getCiResult()),
+                                iteration.getLocalCheckResult(), iteration.getCiResult(),
+                                priorReviewContext),
                         line -> streamClaudeLog(issueId, line));
             } catch (Exception e) {
                 log.error("Independent review failed", e);
@@ -1365,6 +1459,9 @@ public class IssueWorkflowService {
             }
             if (!reviewResult.invocationFailed() || attempt >= maxReviewInvocationAttempts) {
                 break; // a real verdict (pass/fail), or retries exhausted → let the caller escalate
+            }
+            if (cancellationService.isCancelled(issueId)) {
+                return null;
             }
             long backoffMs = attempt * reviewRetryBackoffBaseMs; // linear: 2s, 4s, 6s, 8s
             log.warn("Review invocation failed (attempt {}/{}): {} — retrying in {}ms",
@@ -1383,6 +1480,10 @@ public class IssueWorkflowService {
                     break;
                 }
             }
+        }
+
+        if (cancellationService.isCancelled(issueId)) {
+            return null;
         }
 
         // (Review-iteration slot already claimed at the top of this method — see above.)

@@ -11,6 +11,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -22,9 +23,11 @@ import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 import static com.dbbaskette.issuebot.service.workflow.PlanFirstService.PlanningOutcome.AWAITING_APPROVAL;
+import static com.dbbaskette.issuebot.service.workflow.PlanFirstService.PlanningOutcome.CANCELLED;
 import static com.dbbaskette.issuebot.service.workflow.PlanFirstService.PlanningOutcome.FAILED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,19 +45,28 @@ class PlanFirstServiceTest {
     private PlanningVersionRepository versions;
     private EventService events;
     private NotificationService notifications;
+    private PlanningWorkspaceService planningWorkspaces;
+    private PlanningWorkspaceService.PlanningWorkspace planningWorkspace;
+    private WorkflowCancellationService cancellations;
     private TrackedIssue issue;
     private JsonNode details;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         agent = mock(ClaudeCodeService.class);
         gitHub = mock(GitHubApiClient.class);
         issues = mock(TrackedIssueRepository.class);
         versions = mock(PlanningVersionRepository.class);
         events = mock(EventService.class);
         notifications = mock(NotificationService.class);
-        service = new PlanFirstService(agent, gitHub, issues, versions,
-                new PlanArtifactParser(), events, notifications);
+        planningWorkspaces = mock(PlanningWorkspaceService.class);
+        planningWorkspace = mock(PlanningWorkspaceService.PlanningWorkspace.class);
+        cancellations = mock(WorkflowCancellationService.class);
+        when(planningWorkspaces.open(REPO_PATH)).thenReturn(planningWorkspace);
+        when(planningWorkspace.path()).thenReturn(REPO_PATH);
+        service = new PlanFirstService(agent, gitHub,
+                new PlanFirstTransactionManager(issues, versions), new PlanArtifactParser(),
+                planningWorkspaces, events, notifications, cancellations);
 
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
@@ -64,6 +76,7 @@ class PlanFirstServiceTest {
         issue.setCurrentPhase("planning");
         issue.setResolvedImplModel("gpt-5.6-sol");
         issue.setResolvedAgentProvider(AgentProvider.CODEX);
+        when(issues.findByIdForPlanning(8L)).thenReturn(Optional.of(issue));
 
         details = new ObjectMapper().createObjectNode()
                 .put("title", "Add pagination")
@@ -97,6 +110,35 @@ class PlanFirstServiceTest {
     }
 
     @Test
+    void revisionPlanningPromptIncludesExactPriorArtifactsAndOperatorFeedback() {
+        String priorSpec = "Exact prior design spec\n- preserve this spacing\n- API: `v1/users`";
+        String priorPlan = "Exact prior implementation plan\n1. Keep this entire step\n2. And this one";
+        String feedback = "Add rollback behavior without changing the public API";
+        PlanningVersion prior = PlanningVersion.pending(issue, 4, priorSpec, priorPlan,
+                "CODEX", "gpt-5.6-sol", null);
+        issue.setPlanFeedback(feedback);
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(prior));
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nrevised spec\n# Implementation Plan\nrevised plan"));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(agent).executePlanning(prompt.capture(), eq(REPO_PATH), eq("gpt-5.6-sol"), eq(8L), isNull());
+        assertThat(prompt.getValue())
+                .contains("## Exact prior Design Spec — Version 4\n" + priorSpec)
+                .contains("## Exact prior Implementation Plan — Version 4\n" + priorPlan)
+                .contains("## Operator guidance for the next version\n" + feedback);
+        assertThat(prompt.getValue().indexOf(priorSpec)).isLessThan(prompt.getValue().indexOf(priorPlan));
+        assertThat(prompt.getValue().indexOf(priorPlan)).isLessThan(prompt.getValue().indexOf(feedback));
+
+        ArgumentCaptor<PlanningVersion> saved = ArgumentCaptor.forClass(PlanningVersion.class);
+        verify(versions).save(saved.capture());
+        assertThat(saved.getValue().getVersionNumber()).isEqualTo(5);
+        assertThat(saved.getValue().getRevisionFeedback()).isEqualTo(feedback);
+    }
+
+    @Test
     void generationPinsResolvedProviderAroundPlannerExecution() {
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
                 .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
@@ -108,6 +150,34 @@ class PlanFirstServiceTest {
         routing.verify(agent).executePlanning(anyString(), eq(REPO_PATH),
                 eq("gpt-5.6-sol"), eq(8L), isNull());
         routing.verify(agent).clearPinnedProvider();
+    }
+
+    @Test
+    void generationUsesOnlyIsolatedSnapshotAndVerifiesRealCheckoutAfterProviderReturns() throws Exception {
+        Path isolated = Path.of("/tmp/isolated-planning-snapshot");
+        when(planningWorkspace.path()).thenReturn(isolated);
+        when(agent.executePlanning(anyString(), eq(isolated), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
+
+        verify(agent).executePlanning(anyString(), eq(isolated), eq("gpt-5.6-sol"), eq(8L), isNull());
+        verify(planningWorkspace).verifySourceUnchanged();
+        verify(planningWorkspace).close();
+        verify(agent, never()).executePlanning(anyString(), eq(REPO_PATH), anyString(), anyLong(), any());
+    }
+
+    @Test
+    void checkoutInvariantViolationFailsBeforeAnyPlanningVersionIsPersisted() {
+        when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
+                .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
+        doThrow(new IllegalStateException("Planning changed real checkout invariants: worktree"))
+                .when(planningWorkspace).verifySourceUnchanged();
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(FAILED);
+
+        verify(versions, never()).save(any());
+        assertThat(issue.getLastFailureReason()).contains("checkout invariants");
     }
 
     @Test
@@ -128,7 +198,7 @@ class PlanFirstServiceTest {
     void generationNumbersRevisionAndPreservesItsFeedback() {
         PlanningVersion prior = pendingVersion(issue, 2, 7L);
         issue.setPlanFeedback("  Include rollback behavior  ");
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(prior));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(prior));
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
                 .thenReturn(success("# Design Spec\nrevised spec\n# Implementation Plan\nrevised plan"));
 
@@ -184,6 +254,21 @@ class PlanFirstServiceTest {
 
         assertThat(issue.getLastFailureReason()).contains("Codex exited 17");
         verify(versions, never()).save(any());
+    }
+
+    @Test
+    void globallyPausedPlannerReturnsCancellationWithoutFailureStateOrEffects() {
+        when(cancellations.isCancelled(8L)).thenReturn(true);
+
+        assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(CANCELLED);
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(issue.getCurrentPhase()).isEqualTo("planning");
+        verify(versions, never()).save(any());
+        verify(issues, never()).save(any());
+        verifyNoInteractions(planningWorkspaces);
+        verify(agent, never()).executePlanning(anyString(), any(), anyString(), anyLong(), isNull());
+        verifyNoInteractions(gitHub, events, notifications);
     }
 
     @Test
@@ -274,7 +359,7 @@ class PlanFirstServiceTest {
         issue.setPlanConformanceAttempt(2);
         issue.setPlanCorrectionPending(true);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
 
         service.approvePlan(8L, 9L);
 
@@ -295,7 +380,7 @@ class PlanFirstServiceTest {
         PlanningVersion current = pendingVersion(issue, 3, 9L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
 
         assertThatThrownBy(() -> service.approvePlan(8L, 7L))
                 .isInstanceOf(IllegalStateException.class)
@@ -328,7 +413,7 @@ class PlanFirstServiceTest {
         PlanningVersion current = pendingVersion(issue, 3, 9L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
         doThrow(new RuntimeException("GitHub unavailable"))
                 .when(gitHub).addComment(anyString(), anyString(), anyInt(), anyString());
 
@@ -347,7 +432,7 @@ class PlanFirstServiceTest {
         PlanningVersion current = pendingVersion(issue, 2, 7L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
 
         service.requestRevision(8L, 7L, "  Include rollback behavior  ");
 
@@ -374,7 +459,7 @@ class PlanFirstServiceTest {
         PlanningVersion current = pendingVersion(issue, 2, 7L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
         String feedback = "x".repeat(4000);
 
         service.requestRevision(8L, 7L, feedback);
@@ -397,7 +482,7 @@ class PlanFirstServiceTest {
         PlanningVersion current = pendingVersion(issue, 3, 9L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
 
         assertThatThrownBy(() -> service.requestRevision(8L, 7L, "rollback"))
                 .isInstanceOf(IllegalStateException.class)
@@ -414,7 +499,7 @@ class PlanFirstServiceTest {
         PlanningVersion current = pendingVersion(issue, 2, 7L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
-        when(versions.findFirstByIssueIdOrderByVersionNumberDesc(8L)).thenReturn(Optional.of(current));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
         doThrow(new RuntimeException("GitHub unavailable"))
                 .when(gitHub).addComment(anyString(), anyString(), anyInt(), anyString());
 

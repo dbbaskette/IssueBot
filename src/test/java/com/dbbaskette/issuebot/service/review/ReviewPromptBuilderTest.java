@@ -154,4 +154,47 @@ class ReviewPromptBuilderTest {
         assertThat(prompt.indexOf("## Test Evidence"))
                 .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
     }
+
+    @Test
+    void subsequentReviewIncludesPriorFindingsAndOperatorGuidanceBeforeDiff() {
+        String context = "PRIOR FINDINGS:\n- rollback missing\n\nOPERATOR GUIDANCE:\nKeep the API stable";
+
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, new ReviewTestEvidence("PASSED", "PASSED", context));
+
+        assertThat(prompt).contains("## Prior Review Findings and Operator Guidance")
+                .contains(context)
+                .contains("Explicitly verify that each prior finding and operator instruction was resolved");
+        assertThat(prompt.indexOf("## Prior Review Findings and Operator Guidance"))
+                .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
+    }
+
+    @Test
+    void priorReviewContextUsesDeterministicBoundedPrefix() {
+        String retained = "x".repeat(ReviewPromptBuilder.MAX_PRIOR_REVIEW_CONTEXT_CHARS);
+        String omitted = "THIS_TAIL_MUST_BE_OMITTED";
+        ReviewTestEvidence evidence = new ReviewTestEvidence(
+                "PASSED", "SKIPPED", retained + omitted);
+
+        String first = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, evidence);
+        String second = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, evidence);
+
+        assertThat(first).isEqualTo(second)
+                .contains(retained + "\n... (prior review context truncated)")
+                .doesNotContain(omitted);
+    }
+
+    @Test
+    void absentPriorReviewContextKeepsTheExistingPromptShape() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, new ReviewTestEvidence("PASSED", "SKIPPED"));
+
+        assertThat(prompt).doesNotContain("Prior Review Findings and Operator Guidance");
+    }
 }

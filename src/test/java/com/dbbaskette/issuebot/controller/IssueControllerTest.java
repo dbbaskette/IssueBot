@@ -228,7 +228,7 @@ class IssueControllerTest {
                     cancellationService, guidanceRepository, new ObjectMapper(),
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(),
-                    new IssueDispatchService(issues, control), planningVersions);
+                    new IssueDispatchService(issues, control, guidanceRepository), planningVersions);
         }
     }
 
@@ -619,7 +619,7 @@ class IssueControllerTest {
                 eq(f.issue.getRepo()), same(f.issue));
         verify(f.gitHubApiClient).addComment(eq("acme"), eq("widgets"), eq(42),
                 argThat(comment -> comment.contains("Plan v3") && comment.contains("null branch")));
-        verify(f.workflowService).processIssueAsync(same(f.issue), eq("Handle the null branch"));
+        verify(f.workflowService).processIssueAsync(same(f.issue));
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
@@ -701,8 +701,7 @@ class IssueControllerTest {
         f.controller.retryPlanImplementation(
                 f.issue.getId(), "Address the remaining review finding", f.redirectAttributes);
 
-        verify(f.workflowService).processIssueAsync(
-                same(f.issue), eq("Address the remaining review finding"));
+        verify(f.workflowService).processIssueAsync(same(f.issue));
         verify(f.redirectAttributes, never()).addFlashAttribute(
                 eq("error"), contains("open IssueBot PR"));
     }
@@ -773,6 +772,8 @@ class IssueControllerTest {
         f.issue.setImplementationPlan("old approved plan");
         f.issue.setPlanFeedback("old feedback");
         f.issue.setPlanRejections(2);
+        PlanningVersion approved = approvedVersion(f.issue, 4);
+        f.issue.setApprovedPlanningVersion(approved);
 
         f.controller.retry(1L, null, null, null, null, "require", false, f.redirectAttributes);
 
@@ -784,6 +785,10 @@ class IssueControllerTest {
         org.assertj.core.api.Assertions.assertThat(saved.getImplementationPlan()).isNull();
         org.assertj.core.api.Assertions.assertThat(saved.getPlanFeedback()).isNull();
         org.assertj.core.api.Assertions.assertThat(saved.getPlanRejections()).isZero();
+        org.assertj.core.api.Assertions.assertThat(saved.getApprovedPlanningVersion()).isNull();
+        org.assertj.core.api.Assertions.assertThat(approved.getState())
+                .isEqualTo(PlanningVersionState.SUPERSEDED);
+        verify(f.planningVersions).save(same(approved));
     }
 
     /** Inherit (and Skip) must leave a previously approved plan untouched — no re-gate. */
@@ -1188,6 +1193,21 @@ class IssueControllerTest {
         verify(f.issues, never()).save(any());
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Cannot retry issue in QUEUED"));
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues");
+    }
+
+    @Test
+    void genericAndQuickRetryRejectSecondPlanFirstMissBeforeRepositoryEffects() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.getRepo().setPlanFirst(true);
+        f.issue.setPlanConformanceAttempt(2);
+
+        f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
+
+        verify(f.gitHubApiClient, never()).listOpenPullRequests(anyString(), anyString(), anyString());
+        verify(f.issues, never()).save(any());
+        verify(f.workflowService, never()).processIssueAsync(any());
+        verify(f.redirectAttributes).addFlashAttribute(
+                eq("error"), contains("guided implementation retry"));
     }
 
     /**

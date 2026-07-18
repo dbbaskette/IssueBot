@@ -17,6 +17,7 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
+import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -190,6 +191,8 @@ class IntegrationWorkflowTest {
         when(costRepository.totalCostForIssueByPhase(eq(issue), eq("REVIEW"))).thenReturn(BigDecimal.valueOf(0.01));
         // Iteration loop re-reads entity from DB — return the same in-memory issue
         when(issueRepository.findById(issue.getId())).thenReturn(java.util.Optional.of(issue));
+        when(issueRepository.findByIdForPlanning(issue.getId()))
+                .thenReturn(java.util.Optional.of(issue));
         // Default pre-screen: not too large
         when(decompositionService.preScreen(any(), any()))
                 .thenReturn(new IssueDecompositionService.PreScreenResult(false, null));
@@ -1420,10 +1423,10 @@ class IntegrationWorkflowTest {
         List<PlanningVersion> storedVersions = new ArrayList<>();
         AtomicLong nextVersionId = new AtomicLong(100);
         PlanningVersionRepository lifecycleVersions = mock(PlanningVersionRepository.class);
-        when(lifecycleVersions.findFirstByIssueIdOrderByVersionNumberDesc(issue.getId()))
+        when(lifecycleVersions.findLatestByIssueIdForUpdate(issue.getId()))
                 .thenAnswer(invocation -> storedVersions.isEmpty()
-                        ? Optional.empty()
-                        : Optional.of(storedVersions.getLast()));
+                        ? List.of()
+                        : List.of(storedVersions.getLast()));
         when(lifecycleVersions.save(any(PlanningVersion.class))).thenAnswer(invocation -> {
             PlanningVersion version = invocation.getArgument(0);
             if (version.getId() == null) {
@@ -1433,9 +1436,14 @@ class IntegrationWorkflowTest {
             return version;
         });
 
+        PlanningWorkspaceService planningWorkspaces = mock(PlanningWorkspaceService.class);
+        PlanningWorkspaceService.PlanningWorkspace planningWorkspace =
+                mock(PlanningWorkspaceService.PlanningWorkspace.class);
+        when(planningWorkspaces.open(any(Path.class))).thenReturn(planningWorkspace);
+        when(planningWorkspace.path()).thenReturn(Path.of("/tmp/repo"));
         PlanFirstService authoritativePlanFirst = new PlanFirstService(
                 claudeCode, gitHubApi, issueRepository, lifecycleVersions,
-                new PlanArtifactParser(), eventService, notificationService);
+                new PlanArtifactParser(), planningWorkspaces, eventService, notificationService);
         when(claudeCode.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
                 .thenReturn(planningResult("first spec", "first plan"),
                         planningResult("second spec with rollback", "second plan with rollback test"));
@@ -1521,12 +1529,21 @@ class IntegrationWorkflowTest {
         assertTrue(issue.getLastFailureReason().contains("approved Plan v2"));
         assertTrue(persistedConformanceStates.contains("2|IMPLEMENTATION|false|1"));
 
+        List<IssueGuidance> storedGuidance = new ArrayList<>();
+        when(guidanceRepository.save(any(IssueGuidance.class))).thenAnswer(invocation -> {
+            IssueGuidance saved = invocation.getArgument(0);
+            storedGuidance.add(saved);
+            return saved;
+        });
+        when(guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(issue.getId()))
+                .thenAnswer(invocation -> List.copyOf(storedGuidance));
         ProcessingControlService processingControl = mock(ProcessingControlService.class);
         when(issueRepository.findByIdWithApprovedPlanningVersion(issue.getId()))
                 .thenReturn(Optional.of(issue));
         when(issueRepository.findByRepoAndStatusIn(eq(issue.getRepo()), anyList()))
                 .thenReturn(List.of());
-        IssueDispatchService dispatch = new IssueDispatchService(issueRepository, processingControl);
+        IssueDispatchService dispatch = new IssueDispatchService(
+                issueRepository, processingControl, guidanceRepository);
         IssueBotProperties properties = new IssueBotProperties();
         RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
         IssueController controller = new IssueController(
@@ -1713,9 +1730,8 @@ class IntegrationWorkflowTest {
         assertFalse(secondPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
                 "guidance must not re-appear in iteration 2 — it was consumed and no new guidance was queued");
 
-        // markConsumed fires twice: once at workflow start (retiring stale rows from a
-        // previous run) and once at the checkpoint that consumed this run's guidance.
-        verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
+        // Guidance is consumed only at the checkpoint that incorporates it into the prompt.
+        verify(guidanceRepository).markConsumed(eq(1L), any(LocalDateTime.class));
         verify(eventService).log(eq("GUIDANCE_APPLIED"), anyString(), any(), eq(issue));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
@@ -1765,7 +1781,7 @@ class IntegrationWorkflowTest {
         verify(claudeCode).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(promptCaptor.getValue().contains("Focus on the token refresh path"));
-        verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
+        verify(guidanceRepository).markConsumed(eq(1L), any(LocalDateTime.class));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 

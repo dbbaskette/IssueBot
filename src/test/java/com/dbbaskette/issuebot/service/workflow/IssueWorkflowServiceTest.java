@@ -76,6 +76,55 @@ class IssueWorkflowServiceTest {
                 FailureRetryability.OPERATOR_ACTION_REQUIRED);
     }
 
+    @Test
+    void implementationCheckpointCommitsBeforeCostAndTelemetryEffects() {
+        WorkflowCheckpointTransactionManager checkpoints =
+                mock(WorkflowCheckpointTransactionManager.class);
+        workflowService.setWorkflowCheckpoints(checkpoints);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Durable result");
+        issue.setId(1L);
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setId(2L);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("done");
+        result.setModel("gpt-5.6-sol");
+        TrackedIssue freshIssue = new TrackedIssue(repo, 42, "Durable result");
+        freshIssue.setId(1L);
+        Iteration freshIteration = new Iteration(freshIssue, 1);
+        freshIteration.setId(2L);
+        when(checkpoints.persistImplementationComplete(1L, 2L, result, "+diff"))
+                .thenReturn(new WorkflowCheckpointTransactionManager.ImplementationCheckpoint(
+                        freshIssue, freshIteration));
+
+        workflowService.checkpointSuccessfulImplementation(
+                issue, iteration, result, "+diff", 1);
+
+        var order = inOrder(checkpoints, costRepository, eventService);
+        order.verify(checkpoints).persistImplementationComplete(1L, 2L, result, "+diff");
+        order.verify(costRepository).save(any());
+        order.verify(eventService).log(eq("PHASE_IMPLEMENTATION_COMPLETE"),
+                anyString(), same(repo), same(freshIssue));
+    }
+
+    @Test
+    void rearmedImplementationReusesIncompleteRowWithItsDurablePromptContext() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Resume");
+        issue.setId(1L);
+        Iteration durable = new Iteration(issue, 1);
+        durable.setId(9L);
+        durable.setImplementationContext("exact guidance prepared before the crash");
+        durable.setImplementationContextPrepared(true);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 1))
+                .thenReturn(Optional.of(durable));
+
+        Iteration reused = workflowService.reusableImplementationIteration(1L, 1);
+
+        assertSame(durable, reused);
+        assertEquals("exact guidance prepared before the crash", reused.getImplementationContext());
+    }
+
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();

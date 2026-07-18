@@ -143,6 +143,36 @@ class OrphanedRunRecoveryTest {
     }
 
     @Test
+    void interruptedGuidedImplementationRearmsItsDurablePromptIteration() {
+        TrackedIssue orphan = new TrackedIssue(repo, 103, "Guided implementation");
+        orphan.setId(103L);
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentIteration(1);
+        orphan.setCurrentPhase("IMPLEMENTATION");
+        orphan.setPlanConformanceAttempt(0);
+        PlanningVersion approved = PlanningVersion.pending(
+                orphan, 2, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        orphan.setApprovedPlanningVersion(approved);
+        Iteration interrupted = new Iteration(orphan, 1);
+        interrupted.setImplementationContext(
+                "ADDITIONAL HUMAN GUIDANCE: preserve the rollback contract");
+        interrupted.setImplementationContextPrepared(true);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(103L, 1))
+                .thenReturn(Optional.of(interrupted));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(0, orphan.getCurrentIteration());
+        assertEquals(false, orphan.isPlanCorrectionPending());
+        assertNull(orphan.getCurrentPhase());
+        assertEquals("ADDITIONAL HUMAN GUIDANCE: preserve the rollback contract",
+                interrupted.getImplementationContext());
+    }
+
+    @Test
     void completedCorrectionImplementationIsNotRearmedWhenTerminalHandlingWasInterrupted() {
         TrackedIssue orphan = claimedCorrection(102, "IMPLEMENTATION");
         Iteration completedClaim = new Iteration(orphan, 2);

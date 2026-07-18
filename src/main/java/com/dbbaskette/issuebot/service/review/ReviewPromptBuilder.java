@@ -12,6 +12,8 @@ import java.util.List;
 @Component
 public class ReviewPromptBuilder {
 
+    static final int MAX_PRIOR_REVIEW_CONTEXT_CHARS = 6_000;
+
     /**
      * Build the review prompt for the configured review model.
      *
@@ -121,6 +123,13 @@ public class ReviewPromptBuilder {
                 .append("- Local verification: ")
                 .append(effectiveEvidence.localVerificationResult()).append("\n")
                 .append("- CI: ").append(effectiveEvidence.ciResult()).append("\n");
+
+        if (effectiveEvidence.priorReviewContext() != null) {
+            prompt.append("\n## Prior Review Findings and Operator Guidance\n\n")
+                    .append(truncatePriorReviewContext(effectiveEvidence.priorReviewContext()))
+                    .append("\n\nExplicitly verify that each prior finding and operator instruction was resolved. ")
+                    .append("Report anything still unresolved as a current finding.\n");
+        }
 
         prompt.append("""
 
@@ -234,5 +243,13 @@ public class ReviewPromptBuilder {
     private String truncate(String text, int maxLength) {
         if (text == null) return "";
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "\n... (truncated)";
+    }
+
+    private String truncatePriorReviewContext(String text) {
+        if (text.length() <= MAX_PRIOR_REVIEW_CONTEXT_CHARS) {
+            return text;
+        }
+        return text.substring(0, MAX_PRIOR_REVIEW_CONTEXT_CHARS)
+                + "\n... (prior review context truncated)";
     }
 }

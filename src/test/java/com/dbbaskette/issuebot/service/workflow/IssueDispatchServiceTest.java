@@ -89,7 +89,7 @@ class IssueDispatchServiceTest {
     @Test
     void guardedRetryStillRespectsPauseAndRepositorySerialization() {
         issue.setStatus(IssueStatus.FAILED);
-        issue.setPlanConformanceAttempt(2);
+        issue.setPlanConformanceAttempt(1);
         when(control.isPaused()).thenReturn(true);
 
         IssueDispatchService.ClaimResult paused = service.claimRetry(

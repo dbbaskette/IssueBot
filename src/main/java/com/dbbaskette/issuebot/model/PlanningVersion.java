@@ -88,6 +88,14 @@ public class PlanningVersion {
         }
     }
 
+    /** A deliberate fresh planning cycle retires even an approved contract. */
+    public void supersedeForFreshCycle() {
+        if (state == PlanningVersionState.PENDING || state == PlanningVersionState.APPROVED) {
+            state = PlanningVersionState.SUPERSEDED;
+            approvedAt = null;
+        }
+    }
+
     public Long getId() { return id; }
     public TrackedIssue getIssue() { return issue; }
     public int getVersionNumber() { return versionNumber; }

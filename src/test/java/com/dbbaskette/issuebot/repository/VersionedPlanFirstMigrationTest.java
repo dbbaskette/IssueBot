@@ -91,6 +91,93 @@ class VersionedPlanFirstMigrationTest {
         }
     }
 
+    @Test
+    void migrationRepairsV26PointerlessRunsAndPreservesApprovedLegacyRun() throws Exception {
+        String url = "jdbc:h2:mem:repair_v26_plan_first_" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("26").load().migrate();
+
+        long awaitingId;
+        long activeId;
+        long approvedId;
+        try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
+            long repoId = insertRepo(connection);
+            awaitingId = insertLegacyIssue(connection, repoId, 43,
+                    "AWAITING_PLAN_APPROVAL", false, 0, "PLANNING", null);
+            activeId = insertLegacyIssue(connection, repoId, 44,
+                    "IN_PROGRESS", false, 2, "IMPLEMENTATION", null);
+            approvedId = insertLegacyIssue(connection, repoId, 45,
+                    "IN_PROGRESS", true, 1, "IMPLEMENTATION", null);
+        }
+
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .load().migrate();
+
+        try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
+            assertCleanPlanningCycle(connection, awaitingId);
+            assertCleanPlanningCycle(connection, activeId);
+
+            assertThat(stringColumn(connection,
+                    "SELECT status FROM tracked_issues WHERE id = ?", approvedId))
+                    .isEqualTo("IN_PROGRESS");
+            long approvedVersionId = longColumn(connection,
+                    "SELECT approved_planning_version_id FROM tracked_issues WHERE id = ?", approvedId);
+            assertThat(approvedVersionId).isPositive();
+            assertThat(stringColumn(connection,
+                    "SELECT state FROM planning_versions WHERE id = ?", approvedVersionId))
+                    .isEqualTo("LEGACY");
+            assertThat(stringColumn(connection,
+                    "SELECT implementation_plan FROM planning_versions WHERE id = ?", approvedVersionId))
+                    .isEqualTo("legacy plan 45");
+        }
+    }
+
+    @Test
+    void appendOnlyRepairHandlesLiveDeadStateWithoutDisruptingPendingApprovalOrOptOut() throws Exception {
+        String url = "jdbc:h2:mem:repair_live_plan_first_" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1";
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .target("28").load().migrate();
+
+        long deadAwaitingId;
+        long pendingApprovalId;
+        long optedOutActiveId;
+        try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
+            long repoId = insertRepo(connection);
+            deadAwaitingId = insertVersionedIssue(connection, repoId, 51,
+                    "AWAITING_PLAN_APPROVAL", null, 1, "PLANNING");
+            insertPlanningVersion(connection, deadAwaitingId, "LEGACY", "legacy dead plan");
+
+            pendingApprovalId = insertVersionedIssue(connection, repoId, 52,
+                    "AWAITING_PLAN_APPROVAL", null, 0, null);
+            insertPlanningVersion(connection, pendingApprovalId, "PENDING", "current pending plan");
+
+            optedOutActiveId = insertVersionedIssue(connection, repoId, 53,
+                    "IN_PROGRESS", false, 2, "IMPLEMENTATION");
+        }
+
+        Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration")
+                .load().migrate();
+
+        try (Connection connection = DriverManager.getConnection(url, "sa", "")) {
+            assertCleanPlanningCycle(connection, deadAwaitingId);
+
+            assertThat(stringColumn(connection,
+                    "SELECT status FROM tracked_issues WHERE id = ?", pendingApprovalId))
+                    .isEqualTo("AWAITING_PLAN_APPROVAL");
+            assertThat(longColumn(connection, """
+                    SELECT COUNT(*) FROM planning_versions
+                    WHERE issue_id = ? AND state = 'PENDING'
+                    """, pendingApprovalId)).isEqualTo(1L);
+
+            assertThat(stringColumn(connection,
+                    "SELECT status FROM tracked_issues WHERE id = ?", optedOutActiveId))
+                    .isEqualTo("IN_PROGRESS");
+            assertThat(longColumn(connection,
+                    "SELECT current_iteration FROM tracked_issues WHERE id = ?", optedOutActiveId))
+                    .isEqualTo(2L);
+        }
+    }
+
     private long insertRepo(Connection connection) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO watched_repos (owner, name) VALUES ('acme', 'widgets')")) {
@@ -114,6 +201,91 @@ class VersionedPlanFirstMigrationTest {
         return longColumn(connection, "SELECT id FROM tracked_issues WHERE repo_id = ? AND issue_number = 42", repoId);
     }
 
+    private long insertLegacyIssue(Connection connection, long repoId, int issueNumber,
+                                   String status, boolean planApproved, int currentIteration,
+                                   String currentPhase, Boolean planFirstOverride) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO tracked_issues
+                    (repo_id, issue_number, issue_title, status, current_iteration, current_phase,
+                     branch_name, implementation_plan, plan_approved, plan_first_override,
+                     current_review_iteration, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'issuebot/legacy-run', ?, ?, ?, 1, ?)
+                """)) {
+            statement.setLong(1, repoId);
+            statement.setInt(2, issueNumber);
+            statement.setString(3, "Legacy issue " + issueNumber);
+            statement.setString(4, status);
+            statement.setInt(5, currentIteration);
+            statement.setString(6, currentPhase);
+            statement.setString(7, "legacy plan " + issueNumber);
+            statement.setBoolean(8, planApproved);
+            statement.setObject(9, planFirstOverride);
+            statement.setTimestamp(10, Timestamp.valueOf(LocalDateTime.of(2026, 7, 17, 12, 0)));
+            statement.executeUpdate();
+        }
+        return longColumn(connection,
+                "SELECT id FROM tracked_issues WHERE repo_id = ? AND issue_number = ?", repoId, issueNumber);
+    }
+
+    private long insertVersionedIssue(Connection connection, long repoId, int issueNumber,
+                                      String status, Boolean planFirstOverride, int currentIteration,
+                                      String currentPhase) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO tracked_issues
+                    (repo_id, issue_number, issue_title, status, current_iteration, current_phase,
+                     branch_name, plan_first_override, current_review_iteration, plan_conformance_attempt,
+                     plan_correction_pending, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'issuebot/live-run', ?, 1, 1, TRUE, ?)
+                """)) {
+            statement.setLong(1, repoId);
+            statement.setInt(2, issueNumber);
+            statement.setString(3, "Live issue " + issueNumber);
+            statement.setString(4, status);
+            statement.setInt(5, currentIteration);
+            statement.setString(6, currentPhase);
+            statement.setObject(7, planFirstOverride);
+            statement.setTimestamp(8, Timestamp.valueOf(LocalDateTime.of(2026, 7, 17, 12, 0)));
+            statement.executeUpdate();
+        }
+        return longColumn(connection,
+                "SELECT id FROM tracked_issues WHERE repo_id = ? AND issue_number = ?", repoId, issueNumber);
+    }
+
+    private void insertPlanningVersion(Connection connection, long issueId, String state, String plan)
+            throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO planning_versions
+                    (issue_id, version_number, design_spec, implementation_plan, provider, model, state)
+                VALUES (?, 1, NULL, ?, 'CODEX', 'gpt-5.6-sol', ?)
+                """)) {
+            statement.setLong(1, issueId);
+            statement.setString(2, plan);
+            statement.setString(3, state);
+            statement.executeUpdate();
+        }
+    }
+
+    private void assertCleanPlanningCycle(Connection connection, long issueId) throws Exception {
+        assertThat(stringColumn(connection,
+                "SELECT status FROM tracked_issues WHERE id = ?", issueId)).isEqualTo("PENDING");
+        assertThat(longColumn(connection,
+                "SELECT current_iteration FROM tracked_issues WHERE id = ?", issueId)).isZero();
+        assertThat(longColumn(connection,
+                "SELECT current_review_iteration FROM tracked_issues WHERE id = ?", issueId)).isZero();
+        assertThat(stringColumn(connection,
+                "SELECT current_phase FROM tracked_issues WHERE id = ?", issueId)).isNull();
+        assertThat(stringColumn(connection,
+                "SELECT branch_name FROM tracked_issues WHERE id = ?", issueId)).isNull();
+        assertThat(longColumn(connection,
+                "SELECT plan_conformance_attempt FROM tracked_issues WHERE id = ?", issueId)).isZero();
+        assertThat(booleanColumn(connection,
+                "SELECT plan_correction_pending FROM tracked_issues WHERE id = ?", issueId)).isFalse();
+        assertThat(booleanColumn(connection,
+                "SELECT plan_approved FROM tracked_issues WHERE id = ?", issueId)).isFalse();
+        assertThat(stringColumn(connection,
+                "SELECT implementation_plan FROM tracked_issues WHERE id = ?", issueId)).isNull();
+    }
+
     private boolean booleanColumn(Connection connection, String sql, Object... parameters) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             bind(statement, parameters);
@@ -130,6 +302,16 @@ class VersionedPlanFirstMigrationTest {
             try (ResultSet result = statement.executeQuery()) {
                 assertThat(result.next()).isTrue();
                 return result.getLong(1);
+            }
+        }
+    }
+
+    private String stringColumn(Connection connection, String sql, Object... parameters) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bind(statement, parameters);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                return result.getString(1);
             }
         }
     }

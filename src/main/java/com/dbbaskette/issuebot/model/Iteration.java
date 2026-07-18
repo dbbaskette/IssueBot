@@ -52,6 +52,19 @@ public class Iteration {
     @Column(name = "claude_session_id", length = 64)
     private String claudeSessionId;
 
+    @Lob
+    @Column(name = "implementation_context")
+    private String implementationContext;
+
+    @Column(name = "implementation_context_prepared", nullable = false)
+    private boolean implementationContextPrepared;
+
+    @Column(name = "implementation_completed_at")
+    private LocalDateTime implementationCompletedAt;
+
+    @Column(name = "implementation_succeeded")
+    private Boolean implementationSucceeded;
+
     @Column(name = "started_at", nullable = false, updatable = false)
     private LocalDateTime startedAt = LocalDateTime.now();
 
@@ -109,4 +122,24 @@ public class Iteration {
 
     public String getClaudeSessionId() { return claudeSessionId; }
     public void setClaudeSessionId(String claudeSessionId) { this.claudeSessionId = claudeSessionId; }
+
+    public String getImplementationContext() { return implementationContext; }
+    public void setImplementationContext(String implementationContext) {
+        this.implementationContext = implementationContext;
+    }
+
+    public boolean isImplementationContextPrepared() { return implementationContextPrepared; }
+    public void setImplementationContextPrepared(boolean implementationContextPrepared) {
+        this.implementationContextPrepared = implementationContextPrepared;
+    }
+
+    public LocalDateTime getImplementationCompletedAt() { return implementationCompletedAt; }
+    public void setImplementationCompletedAt(LocalDateTime implementationCompletedAt) {
+        this.implementationCompletedAt = implementationCompletedAt;
+    }
+
+    public Boolean getImplementationSucceeded() { return implementationSucceeded; }
+    public void setImplementationSucceeded(Boolean implementationSucceeded) {
+        this.implementationSucceeded = implementationSucceeded;
+    }
 }

@@ -53,6 +53,7 @@ class PlanConformanceWorkflowTest {
     private PlanFirstService planFirstService;
     private LocalVerificationService localVerificationService;
     private IterationManager iterationManager;
+    private WorkflowCancellationService cancellationService;
     private IssueWorkflowService workflow;
     private ObjectMapper objectMapper;
     private ApprovedPlanContext approvedPlan;
@@ -77,13 +78,14 @@ class PlanConformanceWorkflowTest {
                 issueRepository, repoRepository, iterationRepository, gitHubApi,
                 mock(EventService.class), mock(NotificationService.class));
 
+        cancellationService = new WorkflowCancellationService();
         workflow = new IssueWorkflowService(
                 gitOps, gitHubApi, agent, reviewer, mock(CiTemplateService.class),
                 localVerificationService, issueRepository, iterationRepository,
                 costRepository, mock(EventService.class), mock(SseService.class),
                 mock(NotificationService.class), iterationManager,
                 mock(IssueDecompositionService.class), planFirstService, mock(FollowUpService.class),
-                new ModelResolver(new IssueBotProperties()), new WorkflowCancellationService(),
+                new ModelResolver(new IssueBotProperties()), cancellationService,
                 mock(IssueGuidanceRepository.class), mock(RepoLessonRepository.class),
                 mock(LessonsService.class), objectMapper);
         workflow.reviewRetryBackoffBaseMs = 0;
@@ -116,8 +118,13 @@ class PlanConformanceWorkflowTest {
                 .contains("first miss");
         assertThat(savedClaims).contains("2:false").doesNotContain("2:true");
         assertThat(iterationManager.canIterate(issue)).isFalse();
+        ArgumentCaptor<ReviewTestEvidence> evidence = ArgumentCaptor.forClass(ReviewTestEvidence.class);
         verify(reviewer, times(2)).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
-                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), evidence.capture(), any());
+        assertThat(evidence.getAllValues().get(0).priorReviewContext()).isNull();
+        assertThat(evidence.getAllValues().get(1).priorReviewContext())
+                .contains("first miss")
+                .contains("Approved deliverable missing");
     }
 
     @Test
@@ -188,6 +195,29 @@ class PlanConformanceWorkflowTest {
     }
 
     @Test
+    void globalPauseDuringFailedReviewStopsBeforeRetryBackoffCostOrVerdict() throws Exception {
+        TrackedIssue issue = planFirstIssue();
+        arrangeWorkflow(issue);
+        when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
+                .thenAnswer(invocation -> {
+                    cancellationService.requestCancel(issue.getId(), CancellationReason.GLOBAL_PAUSE);
+                    return CodeReviewResult.failed(
+                            "review process stopped for pause", 13, 5, "review-model");
+                });
+
+        workflow.processIssue(issue);
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.PENDING);
+        assertThat(issue.getSuspensionReason()).isEqualTo("Processing paused by operator");
+        assertThat(issue.getPlanConformanceAttempt()).isZero();
+        verify(reviewer).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());
+        verify(costRepository, never()).save(argThat(cost -> "REVIEW".equals(cost.getPhase())));
+        verify(iterationRepository, never()).save(argThat(iteration -> iteration.getReviewPassed() != null));
+    }
+
+    @Test
     void reviewReceivesCurrentLocalAndCiEvidence() throws Exception {
         TrackedIssue issue = planFirstIssue();
         issue.getRepo().setVerificationCommands("verify");
@@ -198,12 +228,13 @@ class PlanConformanceWorkflowTest {
                 anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(ReviewTestEvidence.class), any()))
                 .thenReturn(passedConformance());
 
-        workflow.processIssue(issue);
+        workflow.processIssue(issue, "Keep the public API stable");
 
         verify(reviewer).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
                 anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan),
                 argThat(evidence -> "PASSED".equals(evidence.localVerificationResult())
-                        && "SKIPPED".equals(evidence.ciResult())), any());
+                        && "SKIPPED".equals(evidence.ciResult())
+                        && evidence.priorReviewContext().contains("Keep the public API stable")), any());
     }
 
     @Test

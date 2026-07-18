@@ -1,6 +1,5 @@
 package com.dbbaskette.issuebot.service.workflow;
 
-import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
@@ -10,16 +9,16 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -46,7 +45,7 @@ public class PlanFirstService {
     private static final Logger log = LoggerFactory.getLogger(PlanFirstService.class);
     private static final int MAX_FAILURE_REASON_CHARS = 2_000;
 
-    public enum PlanningOutcome { AWAITING_APPROVAL, FAILED }
+    public enum PlanningOutcome { AWAITING_APPROVAL, FAILED, CANCELLED, STALE }
 
     /**
      * Temporary source-compatibility result for the controller until its version-bound endpoints
@@ -57,26 +56,43 @@ public class PlanFirstService {
 
     private final ClaudeCodeService agent;
     private final GitHubApiClient gitHub;
-    private final TrackedIssueRepository issues;
-    private final PlanningVersionRepository versions;
+    private final PlanFirstTransactionManager transactions;
     private final PlanArtifactParser parser;
+    private final PlanningWorkspaceService planningWorkspaces;
     private final EventService events;
     private final NotificationService notifications;
+    private final WorkflowCancellationService cancellations;
 
+    @Autowired
     public PlanFirstService(ClaudeCodeService agent,
                             GitHubApiClient gitHub,
-                            TrackedIssueRepository issues,
-                            PlanningVersionRepository versions,
+                            PlanFirstTransactionManager transactions,
                             PlanArtifactParser parser,
+                            PlanningWorkspaceService planningWorkspaces,
                             EventService events,
-                            NotificationService notifications) {
+                            NotificationService notifications,
+                            WorkflowCancellationService cancellations) {
         this.agent = agent;
         this.gitHub = gitHub;
-        this.issues = issues;
-        this.versions = versions;
+        this.transactions = transactions;
         this.parser = parser;
+        this.planningWorkspaces = planningWorkspaces;
         this.events = events;
         this.notifications = notifications;
+        this.cancellations = cancellations;
+    }
+
+    /** Convenience constructor for focused unit/integration fixtures; Spring uses the proxy constructor above. */
+    PlanFirstService(ClaudeCodeService agent,
+                     GitHubApiClient gitHub,
+                     TrackedIssueRepository issues,
+                     PlanningVersionRepository versions,
+                     PlanArtifactParser parser,
+                     PlanningWorkspaceService planningWorkspaces,
+                     EventService events,
+                     NotificationService notifications) {
+        this(agent, gitHub, new PlanFirstTransactionManager(issues, versions), parser,
+                planningWorkspaces, events, notifications, new WorkflowCancellationService());
     }
 
     /**
@@ -85,75 +101,89 @@ public class PlanFirstService {
      * must never continue into implementation after {@link PlanningOutcome#FAILED}.
      */
     public PlanningOutcome generateVersion(TrackedIssue trackedIssue, JsonNode issueDetails, Path repoPath) {
-        PlanningVersion version;
-        String feedback;
+        Long issueId = trackedIssue.getId();
+        PlanFirstTransactionManager.GenerationContext context;
         try {
-            String model = requireResolvedModel(trackedIssue);
-            String provider = requireResolvedProvider(trackedIssue);
-            feedback = normalize(trackedIssue.getPlanFeedback());
-            String prompt = buildPlanningPrompt(issueDetails, feedback);
+            context = transactions.prepareGeneration(issueId);
+        } catch (Exception e) {
+            if (cancellations.isCancelled(issueId)) {
+                return PlanningOutcome.CANCELLED;
+            }
+            return failPlanning(null, issueId, e);
+        }
+        if (cancellations.isCancelled(issueId)) {
+            return PlanningOutcome.CANCELLED;
+        }
+
+        PlanFirstTransactionManager.GenerationCommit commit;
+        try {
+            String prompt = buildPlanningPrompt(issueDetails, context.feedback(), context.previous());
 
             ClaudeCodeResult result;
-            agent.pinProvider(trackedIssue.getResolvedAgentProvider());
-            try {
-                result = agent.executePlanning(
-                        prompt, repoPath, model, trackedIssue.getId(), null);
-            } finally {
-                agent.clearPinnedProvider();
+            try (PlanningWorkspaceService.PlanningWorkspace workspace = planningWorkspaces.open(repoPath)) {
+                agent.pinProvider(context.provider());
+                try {
+                    try {
+                        result = agent.executePlanning(
+                                prompt, workspace.path(), context.model(), issueId, null);
+                    } finally {
+                        workspace.verifySourceUnchanged();
+                    }
+                } finally {
+                    agent.clearPinnedProvider();
+                }
+            }
+            if (cancellations.isCancelled(issueId)) {
+                return PlanningOutcome.CANCELLED;
             }
             requireSuccessfulResult(result);
 
             PlanArtifactParser.PlanningArtifact artifact =
                     parser.parse(result.getFinalResultOrOutput());
-            int nextVersion = versions.findFirstByIssueIdOrderByVersionNumberDesc(trackedIssue.getId())
-                    .map(previous -> previous.getVersionNumber() + 1)
-                    .orElse(1);
-            version = PlanningVersion.pending(trackedIssue, nextVersion,
-                    artifact.designSpec(), artifact.implementationPlan(), provider, model, feedback);
-
-            versions.save(version);
-            trackedIssue.setPlanFeedback(null);
-            trackedIssue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
-            trackedIssue.setCurrentPhase(null);
-            trackedIssue.setLastFailureReason(null);
-            issues.save(trackedIssue);
+            if (cancellations.isCancelled(issueId)) {
+                return PlanningOutcome.CANCELLED;
+            }
+            commit = transactions.persistGeneratedVersion(
+                    context, artifact.designSpec(), artifact.implementationPlan());
+        } catch (PlanFirstTransactionManager.StalePlanningGenerationException e) {
+            log.info("Discarding stale planning generation for issue {}: {}", issueId, e.getMessage());
+            return PlanningOutcome.STALE;
         } catch (Exception e) {
-            failPlanning(trackedIssue, e);
-            return PlanningOutcome.FAILED;
+            if (cancellations.isCancelled(issueId)) {
+                return PlanningOutcome.CANCELLED;
+            }
+            return failPlanning(context, issueId, e);
         }
 
-        boolean revision = feedback != null;
+        // A pause can race with the final database commit. The durable checkpoint owner will
+        // rearm it; do not emit external effects while cancellation is pending.
+        if (cancellations.isCancelled(issueId)) {
+            return PlanningOutcome.CANCELLED;
+        }
+
+        TrackedIssue issue = commit.issue();
+        PlanningVersion version = commit.version();
         runAfterPersistence("publish planning proposal audit",
-                () -> publishProposalAudit(trackedIssue, version));
+                () -> publishProposalAudit(issue, version));
         runAfterPersistence("record planning proposal event",
-                () -> events.log(revision ? "PLAN_REVISION_GENERATED" : "PLAN_PROPOSED",
-                        (revision ? "Generated plan revision version " : "Proposed planning version ")
+                () -> events.log(commit.revision() ? "PLAN_REVISION_GENERATED" : "PLAN_PROPOSED",
+                        (commit.revision() ? "Generated plan revision version " : "Proposed planning version ")
                                 + version.getVersionNumber() + " — awaiting approval",
-                        trackedIssue.getRepo(), trackedIssue));
+                        issue.getRepo(), issue));
         runAfterPersistence("send planning proposal notification",
-                () -> notifications.info(revision ? "Plan Revision Generated" : "Plan Proposed",
-                        trackedIssue.getRepo().fullName() + " #" + trackedIssue.getIssueNumber()
+                () -> notifications.info(commit.revision() ? "Plan Revision Generated" : "Plan Proposed",
+                        issue.getRepo().fullName() + " #" + issue.getIssueNumber()
                                 + " — version " + version.getVersionNumber() + " awaits approval",
-                        trackedIssue));
+                        issue));
         return PlanningOutcome.AWAITING_APPROVAL;
     }
 
     /** Approves both artifacts in exactly the latest pending version. */
-    public synchronized void approvePlan(Long issueId, Long expectedVersionId) {
-        TrackedIssue issue = requireIssue(issueId);
-        PlanningVersion current = requireCurrentPending(issue);
-        if (!Objects.equals(current.getId(), expectedVersionId)) {
-            throw new IllegalStateException(
-                    "Stale approval: current pending version is " + current.getVersionNumber());
-        }
-
-        current.approve(LocalDateTime.now());
-        issue.setApprovedPlanningVersion(current);
-        issue.setPlanConformanceAttempt(0);
-        issue.setPlanCorrectionPending(false);
-        issue.setStatus(IssueStatus.PENDING);
-        versions.save(current);
-        issues.save(issue);
+    public void approvePlan(Long issueId, Long expectedVersionId) {
+        PlanFirstTransactionManager.LifecycleCommit commit =
+                transactions.approvePlan(issueId, expectedVersionId);
+        TrackedIssue issue = commit.issue();
+        PlanningVersion current = commit.version();
 
         runAfterPersistence("publish planning approval audit",
                 () -> publishApprovalAudit(issue, current));
@@ -171,7 +201,7 @@ public class PlanFirstService {
     }
 
     /** Supersedes exactly the latest pending version and queues a guided regeneration. */
-    public synchronized void requestRevision(Long issueId, Long expectedVersionId, String feedback) {
+    public void requestRevision(Long issueId, Long expectedVersionId, String feedback) {
         String guidance = normalize(feedback);
         if (guidance == null) {
             throw new IllegalArgumentException("Revision guidance is required");
@@ -180,18 +210,10 @@ public class PlanFirstService {
             throw new IllegalArgumentException("Revision guidance must be 4,000 characters or fewer");
         }
 
-        TrackedIssue issue = requireIssue(issueId);
-        PlanningVersion current = requireCurrentPending(issue);
-        if (!Objects.equals(current.getId(), expectedVersionId)) {
-            throw new IllegalStateException(
-                    "Stale revision: current pending version is " + current.getVersionNumber());
-        }
-
-        current.supersede();
-        versions.save(current);
-        issue.setPlanFeedback(guidance);
-        issue.setStatus(IssueStatus.PENDING);
-        issues.save(issue);
+        PlanFirstTransactionManager.LifecycleCommit commit =
+                transactions.requestRevision(issueId, expectedVersionId, guidance);
+        TrackedIssue issue = commit.issue();
+        PlanningVersion current = commit.version();
 
         runAfterPersistence("publish planning revision audit",
                 () -> publishRevisionAudit(issue, current, guidance));
@@ -224,32 +246,24 @@ public class PlanFirstService {
                 approved.getDesignSpec(), approved.getImplementationPlan()));
     }
 
-    String buildPlanningPrompt(JsonNode issueDetails, String feedback) {
+    String buildPlanningPrompt(JsonNode issueDetails, String feedback,
+                               PlanFirstTransactionManager.PreviousVersion previousVersion) {
         String title = issueDetails.path("title").asText();
         String body = issueDetails.path("body").asText("No description");
         StringBuilder prompt = new StringBuilder(PLANNING_METHODOLOGY)
                 .append("\n\n## Issue\nTitle: ").append(title)
                 .append("\nBody:\n").append(body).append('\n');
         if (feedback != null) {
+            prompt.append("\n## Exact prior Design Spec — Version ")
+                    .append(previousVersion.versionNumber()).append('\n')
+                    .append(previousVersion.designSpec()).append('\n')
+                    .append("\n## Exact prior Implementation Plan — Version ")
+                    .append(previousVersion.versionNumber()).append('\n')
+                    .append(previousVersion.implementationPlan()).append('\n');
             prompt.append("\n## Operator guidance for the next version\n")
                     .append(feedback).append('\n');
         }
         return prompt.toString();
-    }
-
-    private String requireResolvedModel(TrackedIssue issue) {
-        String model = normalize(issue.getResolvedImplModel());
-        if (model == null) {
-            throw new IllegalStateException("Resolved implementation model is required for planning");
-        }
-        return model;
-    }
-
-    private String requireResolvedProvider(TrackedIssue issue) {
-        if (issue.getResolvedAgentProvider() == null) {
-            throw new IllegalStateException("Resolved implementation provider is required for planning");
-        }
-        return issue.getResolvedAgentProvider().name();
     }
 
     private void requireSuccessfulResult(ClaudeCodeResult result) {
@@ -267,42 +281,31 @@ public class PlanFirstService {
         }
     }
 
-    private TrackedIssue requireIssue(Long issueId) {
-        return issues.findById(issueId)
-                .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
-    }
-
-    private PlanningVersion requireCurrentPending(TrackedIssue issue) {
-        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
-            throw new IllegalStateException(
-                    "Issue is not awaiting plan approval: " + issue.getStatus());
-        }
-        PlanningVersion current = versions.findFirstByIssueIdOrderByVersionNumberDesc(issue.getId())
-                .orElseThrow(() -> new IllegalStateException("Issue has no planning version"));
-        if (current.getState() != PlanningVersionState.PENDING) {
-            throw new IllegalStateException("Issue has no current pending planning version");
-        }
-        return current;
-    }
-
-    private void failPlanning(TrackedIssue issue, Exception failure) {
+    private PlanningOutcome failPlanning(PlanFirstTransactionManager.GenerationContext context,
+                                         Long issueId,
+                                         Exception failure) {
         String detail = normalize(failure.getMessage());
         if (detail == null) {
             detail = failure.getClass().getSimpleName();
         }
         String reason = bound("Planning failed: " + detail, MAX_FAILURE_REASON_CHARS);
+        PlanFirstTransactionManager.FailureCommit failureCommit = context == null
+                ? transactions.failPlanningIfActive(issueId, reason)
+                : transactions.failPlanning(context, reason);
+        if (!failureCommit.committed()) {
+            log.info("Discarding stale planning failure for issue {}: {}", issueId, detail);
+            return PlanningOutcome.STALE;
+        }
+        TrackedIssue failed = failureCommit.issue();
         log.warn("Planning failed for {} #{}: {}",
-                issue.getRepo().fullName(), issue.getIssueNumber(), detail);
-        issue.setStatus(IssueStatus.FAILED);
-        issue.setCurrentPhase(null);
-        issue.setLastFailureReason(reason);
-        issues.save(issue);
+                failed.getRepo().fullName(), failed.getIssueNumber(), detail);
         runAfterPersistence("record planning failure event",
-                () -> events.log("PLAN_FAILED", reason, issue.getRepo(), issue));
+                () -> events.log("PLAN_FAILED", reason, failed.getRepo(), failed));
         runAfterPersistence("send planning failure notification",
                 () -> notifications.warn("Planning Failed",
-                        issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " — " + reason,
-                        issue));
+                        failed.getRepo().fullName() + " #" + failed.getIssueNumber() + " — " + reason,
+                        failed));
+        return PlanningOutcome.FAILED;
     }
 
     private void publishProposalAudit(TrackedIssue issue, PlanningVersion version) {

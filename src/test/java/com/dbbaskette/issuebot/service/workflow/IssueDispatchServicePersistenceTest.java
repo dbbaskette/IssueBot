@@ -3,14 +3,18 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
+import com.dbbaskette.issuebot.model.ProcessingControl;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
+import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -18,16 +22,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-
 /** Real Hibernate exercise of retry claiming with OSIV/test transaction disabled. */
 @DataJpaTest
+@Import(IssueDispatchTransactionManager.class)
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class IssueDispatchServicePersistenceTest {
+
+    @Autowired
+    private IssueDispatchTransactionManager dispatch;
 
     @Autowired
     private TrackedIssueRepository issues;
@@ -39,13 +45,18 @@ class IssueDispatchServicePersistenceTest {
     private WatchedRepoRepository repos;
 
     @Autowired
+    private ProcessingControlRepository controls;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Test
     void guidedRetryLoadsAndPreservesApprovedVersionOutsideRepositoryTransaction() {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         Long[] ids = tx.execute(status -> {
+            controls.save(new ProcessingControl(ProcessingState.RUNNING));
             WatchedRepo repo = repos.save(new WatchedRepo("acme", "widgets"));
+            repo.setPlanFirst(true);
             TrackedIssue issue = new TrackedIssue(repo, 42, "Preserve the approved plan");
             issue.setStatus(IssueStatus.FAILED);
             issue.setPlanConformanceAttempt(2);
@@ -61,14 +72,8 @@ class IssueDispatchServicePersistenceTest {
         });
         assertThat(ids).isNotNull();
 
-        IssueDispatchService service = new IssueDispatchService(
-                issues, mock(ProcessingControlService.class));
-        IssueDispatchService.ClaimResult result = service.claimRetry(ids[0], candidate -> {
-            PlanningVersion approved = candidate.getApprovedPlanningVersion();
-            assertThat(approved.getState()).isEqualTo(PlanningVersionState.APPROVED);
-            assertThat(approved.getVersionNumber()).isEqualTo(3);
-            return null;
-        });
+        IssueDispatchService.ClaimResult result =
+                dispatch.claimGuidedRetry(ids[0], "preserve the approved plan", 10);
 
         assertThat(result.claimed()).isTrue();
         assertThat(result.issue().getApprovedPlanningVersion().getId()).isEqualTo(ids[1]);
