@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.review;
 
+import com.dbbaskette.issuebot.service.workflow.ApprovedPlanContext;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -10,6 +11,8 @@ import java.util.List;
  */
 @Component
 public class ReviewPromptBuilder {
+
+    static final int MAX_PRIOR_REVIEW_CONTEXT_CHARS = 6_000;
 
     /**
      * Build the review prompt for the configured review model.
@@ -29,7 +32,7 @@ public class ReviewPromptBuilder {
                                       List<String> criteria,
                                       boolean securityReview, double threshold) {
         return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
-                securityReview, threshold, null);
+                securityReview, threshold, null, null);
     }
 
     /**
@@ -42,6 +45,31 @@ public class ReviewPromptBuilder {
                                       List<String> criteria,
                                       boolean securityReview, double threshold,
                                       String repoInstructions) {
+        return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
+                securityReview, threshold, repoInstructions, null);
+    }
+
+    /**
+     * @param approvedPlan immutable approved Plan First contract, or null for ordinary reviews
+     */
+    public String buildReviewPrompt(String issueTitle, String issueBody,
+                                      List<String> changedFiles, String diff,
+                                      List<String> criteria,
+                                      boolean securityReview, double threshold,
+                                      String repoInstructions,
+                                      ApprovedPlanContext approvedPlan) {
+        return buildReviewPrompt(issueTitle, issueBody, changedFiles, diff, criteria,
+                securityReview, threshold, repoInstructions, approvedPlan,
+                ReviewTestEvidence.notRun());
+    }
+
+    public String buildReviewPrompt(String issueTitle, String issueBody,
+                                      List<String> changedFiles, String diff,
+                                      List<String> criteria,
+                                      boolean securityReview, double threshold,
+                                      String repoInstructions,
+                                      ApprovedPlanContext approvedPlan,
+                                      ReviewTestEvidence testEvidence) {
         // Locale.ROOT: the prompt must always render "0.70", never "0,70"
         String thresholdText = String.format(java.util.Locale.ROOT, "%.2f", threshold);
         List<String> effectiveCriteria = criteria != null ? criteria : List.of();
@@ -75,6 +103,32 @@ public class ReviewPromptBuilder {
 
         if (repoInstructions != null && !repoInstructions.isBlank()) {
             prompt.append(buildRepoInstructionsSection(repoInstructions));
+        }
+
+        if (approvedPlan != null) {
+            prompt.append("\n## Approved Design Spec — Version ")
+                    .append(approvedPlan.versionNumber()).append("\n\n")
+                    .append(approvedPlan.designSpec()).append("\n\n")
+                    .append("## Approved Implementation Plan\n\n")
+                    .append(approvedPlan.implementationPlan()).append("\n\n")
+                    .append("The approved Design Spec is the binding scope and acceptance contract. ")
+                    .append("Tie each blocking finding to an acceptance criterion or required plan deliverable.\n")
+                    .append("Treat any high-severity unmet acceptance criterion or required plan deliverable as blocking. ")
+                    .append("Set passed to false for every such blocking finding.\n");
+        }
+
+        ReviewTestEvidence effectiveEvidence = testEvidence != null
+                ? testEvidence : ReviewTestEvidence.notRun();
+        prompt.append("\n## Test Evidence\n\n")
+                .append("- Local verification: ")
+                .append(effectiveEvidence.localVerificationResult()).append("\n")
+                .append("- CI: ").append(effectiveEvidence.ciResult()).append("\n");
+
+        if (effectiveEvidence.priorReviewContext() != null) {
+            prompt.append("\n## Prior Review Findings and Operator Guidance\n\n")
+                    .append(truncatePriorReviewContext(effectiveEvidence.priorReviewContext()))
+                    .append("\n\nExplicitly verify that each prior finding and operator instruction was resolved. ")
+                    .append("Report anything still unresolved as a current finding.\n");
         }
 
         prompt.append("""
@@ -189,5 +243,13 @@ public class ReviewPromptBuilder {
     private String truncate(String text, int maxLength) {
         if (text == null) return "";
         return text.length() <= maxLength ? text : text.substring(0, maxLength) + "\n... (truncated)";
+    }
+
+    private String truncatePriorReviewContext(String text) {
+        if (text.length() <= MAX_PRIOR_REVIEW_CONTEXT_CHARS) {
+            return text;
+        }
+        return text.substring(0, MAX_PRIOR_REVIEW_CONTEXT_CHARS)
+                + "\n... (prior review context truncated)";
     }
 }

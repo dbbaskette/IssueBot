@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -96,6 +98,42 @@ class ClaudeCodeServiceTest {
         List<String> utilityCommand = service.buildCommand("utility prompt", "claude-haiku-4-5", 15, null, null);
         assertFalse(reviewCommand.contains("--resume"));
         assertFalse(utilityCommand.contains("--resume"));
+    }
+
+    @Test
+    void planningCommandUsesSubscriptionAuthButExposesOnlyReadTools() {
+        List<String> command = service.buildPlanningCommand(
+                "plan only", "claude-opus-4-8", 30);
+
+        assertTrue(command.contains("--safe-mode"), command.toString());
+        assertTrue(command.contains("--no-session-persistence"), command.toString());
+        assertEquals("plan", command.get(command.indexOf("--permission-mode") + 1));
+        assertEquals("Read,Glob,Grep", command.get(command.indexOf("--tools") + 1));
+        assertFalse(command.contains("--dangerously-skip-permissions"), command.toString());
+        assertFalse(command.contains("Bash"), command.toString());
+        assertFalse(command.contains("Edit"), command.toString());
+        assertFalse(command.contains("Write"), command.toString());
+        // --bare would disable OAuth/keychain auth, so it is deliberately absent.
+        assertFalse(command.contains("--bare"), command.toString());
+    }
+
+    @Test
+    void planningEnvironmentRemovesRepositoryCredentialsWithoutBreakingSubscriptionHome() {
+        Map<String, String> environment = new HashMap<>(Map.of(
+                "HOME", "/operator/home",
+                "GH_TOKEN", "secret",
+                "GITHUB_TOKEN", "secret-two",
+                "SSH_AUTH_SOCK", "/tmp/agent.sock"));
+
+        ClaudeCodeService.sanitizePlanningEnvironment(environment);
+
+        assertEquals("/operator/home", environment.get("HOME"));
+        assertFalse(environment.containsKey("GH_TOKEN"));
+        assertFalse(environment.containsKey("GITHUB_TOKEN"));
+        assertFalse(environment.containsKey("SSH_AUTH_SOCK"));
+        assertEquals("/dev/null", environment.get("GIT_CONFIG_GLOBAL"));
+        assertEquals("1", environment.get("GIT_CONFIG_NOSYSTEM"));
+        assertEquals("0", environment.get("GIT_TERMINAL_PROMPT"));
     }
 
     // === Non-zero-exit error reporting: surface the real cause, not the init event ===

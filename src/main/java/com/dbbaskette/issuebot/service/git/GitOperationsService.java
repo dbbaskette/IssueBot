@@ -48,6 +48,21 @@ public class GitOperationsService {
      * Clone a repository, or pull latest if already cloned.
      */
     public Git cloneOrPull(String owner, String name, String branch) throws GitAPIException, IOException {
+        return cloneOrPull(owner, name, branch, true);
+    }
+
+    /**
+     * Prepare a base-branch checkout for planning without creating commits or pushing.
+     * An empty repository remains empty; implementation setup may initialize it only
+     * after an approved planning contract exists.
+     */
+    public Git prepareForPlanning(String owner, String name, String branch)
+            throws GitAPIException, IOException {
+        return cloneOrPull(owner, name, branch, false);
+    }
+
+    private Git cloneOrPull(String owner, String name, String branch, boolean initializeEmpty)
+            throws GitAPIException, IOException {
         Path localPath = repoLocalPath(owner, name);
         File dir = localPath.toFile();
 
@@ -60,8 +75,12 @@ public class GitOperationsService {
                 git.fetch().setCredentialsProvider(credentials()).call();
 
                 if (isEmptyRepo(git)) {
-                    log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
-                    initializeEmptyRepo(git, dir, branch);
+                    if (initializeEmpty) {
+                        log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
+                        initializeEmptyRepo(git, dir, branch);
+                    } else {
+                        log.info("Repository {}/{} is empty — leaving it unchanged for planning", owner, name);
+                    }
                     return git;
                 }
 
@@ -80,7 +99,7 @@ public class GitOperationsService {
 
         log.info("Cloning {}/{} to {}", owner, name, localPath);
         dir.mkdirs();
-        String url = String.format("https://github.com/%s/%s.git", owner, name);
+        String url = remoteUrl(owner, name);
         Git git = Git.cloneRepository()
                 .setURI(url)
                 .setDirectory(dir)
@@ -90,11 +109,19 @@ public class GitOperationsService {
         ensureClaudeWorktreeExcluded(dir);
 
         if (isEmptyRepo(git)) {
-            log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
-            initializeEmptyRepo(git, dir, branch);
+            if (initializeEmpty) {
+                log.info("Repository {}/{} is empty — creating initial commit on {}", owner, name, branch);
+                initializeEmptyRepo(git, dir, branch);
+            } else {
+                log.info("Repository {}/{} is empty — leaving it unchanged for planning", owner, name);
+            }
         }
 
         return git;
+    }
+
+    String remoteUrl(String owner, String name) {
+        return String.format("https://github.com/%s/%s.git", owner, name);
     }
 
     /** Discard all local modifications and untracked files/dirs so a branch switch can't conflict. */

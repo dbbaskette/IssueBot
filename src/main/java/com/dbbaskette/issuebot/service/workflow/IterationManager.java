@@ -13,10 +13,12 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -72,7 +74,66 @@ public class IterationManager {
         int maxIterations = getMaxIterationsFromDb(trackedIssue);
         int current = trackedIssue.getCurrentIteration();
         log.debug("canIterate check: currentIteration={}, maxIterations={}", current, maxIterations);
-        return current < maxIterations;
+        return trackedIssue.isPlanCorrectionPending() || current < maxIterations;
+    }
+
+    /**
+     * Atomically claims the single Plan First correction and creates its durable iteration row.
+     * The returned row is the authoritative row for this run even when a guided retry previously
+     * used the same iteration number.
+     */
+    @Transactional
+    public Iteration claimPlanCorrectionIteration(TrackedIssue trackedIssue, int iterationNum) {
+        TrackedIssue claimTarget = issueRepository.findById(trackedIssue.getId())
+                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        if (!claimTarget.isPlanCorrectionPending()) {
+            throw new IllegalStateException("Plan correction is not pending");
+        }
+        if (iterationNum != claimTarget.getCurrentIteration() + 1) {
+            throw new IllegalArgumentException("Correction iteration must advance by one");
+        }
+
+        Iteration authoritative = iterationRepository
+                .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                        claimTarget.getId(), iterationNum)
+                .filter(candidate -> candidate.getCompletedAt() == null)
+                .orElse(null);
+
+        claimTarget.setCurrentIteration(iterationNum);
+        claimTarget.setCurrentPhase("IMPLEMENTATION");
+        claimTarget.setPlanCorrectionPending(false);
+        issueRepository.save(claimTarget);
+        issueRepository.flush();
+
+        if (authoritative != null) {
+            return authoritative;
+        }
+        Iteration iteration = new Iteration(claimTarget, iterationNum);
+        iteration.setImplModel(claimTarget.getResolvedImplModel());
+        return iterationRepository.save(iteration);
+    }
+
+    /**
+     * Persist a completed review verdict and its plan-conformance transition atomically.
+     * Keeping these writes in a separate Spring-managed component ensures the transaction
+     * is applied when the workflow calls this method; a crash cannot leave a durable failed
+     * verdict without the pending correction or second-miss state needed for recovery.
+     */
+    @Transactional
+    public void persistCompletedReviewVerdict(TrackedIssue trackedIssue, Iteration iteration,
+                                               CodeReviewResult reviewResult,
+                                               ApprovedPlanContext approvedPlan) {
+        iteration.setReviewPassed(reviewResult.passed());
+        iteration.setReviewJson(reviewResult.rawJson());
+        iteration.setReviewModel(reviewResult.modelUsed());
+        iterationRepository.save(iteration);
+
+        if (approvedPlan != null && !reviewResult.invocationFailed()) {
+            int conformanceAttempt = trackedIssue.getPlanConformanceAttempt() + 1;
+            trackedIssue.setPlanConformanceAttempt(conformanceAttempt);
+            trackedIssue.setPlanCorrectionPending(!reviewResult.passed() && conformanceAttempt == 1);
+            issueRepository.save(trackedIssue);
+        }
     }
 
     /**
@@ -259,6 +320,26 @@ public class IterationManager {
                 detail.toString(),
                 "MAX_REVIEW_ITERATIONS_REACHED",
                 "Review failed after " + maxReviewIterations + " iterations, entering cooldown",
+                comment);
+    }
+
+    /** Escalate after the fixed two-verdict Plan First conformance cycle is exhausted. */
+    public void handlePlanConformanceFailure(TrackedIssue trackedIssue, int approvedPlanVersion,
+                                              String blockerSummary, String richFindings) {
+        String detail = "Implementation did not conform to approved Plan v" + approvedPlanVersion
+                + " after two review attempts, needs human guidance.";
+        if (blockerSummary != null && !blockerSummary.isBlank()) {
+            detail += "\n" + blockerSummary.strip();
+        }
+
+        String comment = buildPlanConformanceFailureComment(
+                trackedIssue, approvedPlanVersion, richFindings);
+        escalateFailure(trackedIssue,
+                "Approved Plan Conformance Failed",
+                detail,
+                "MAX_REVIEW_ITERATIONS_REACHED",
+                "Approved Plan v" + approvedPlanVersion
+                        + " did not conform after two review attempts, entering cooldown",
                 comment);
     }
 
@@ -470,6 +551,39 @@ public class IterationManager {
         sb.append("- Remove the `needs-human` label and add `agent-ready` to retry\n\n");
         sb.append("---\n*Generated by [IssueBot](https://github.com/dbbaskette/IssueBot)*");
 
+        return sb.toString();
+    }
+
+    private String buildPlanConformanceFailureComment(TrackedIssue trackedIssue,
+                                                       int approvedPlanVersion,
+                                                       String richFindings) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## IssueBot: Approved Plan Conformance Failed\n\n")
+                .append("The implementation did not conform to **approved Plan v")
+                .append(approvedPlanVersion)
+                .append("** after **two review attempts**. No third corrective implementation was scheduled.\n\n");
+        if (richFindings != null && !richFindings.isBlank()) {
+            sb.append("### Final Blocking Feedback\n")
+                    .append(truncate(richFindings.strip(), 4000)).append("\n\n");
+        }
+
+        List<Iteration> reviewIterations = iterationRepository
+                .findByIssueOrderByIterationNumAsc(trackedIssue).stream()
+                .filter(iteration -> iteration.getReviewJson() != null)
+                .toList();
+        int first = Math.max(0, reviewIterations.size() - 2);
+        for (int i = first; i < reviewIterations.size(); i++) {
+            Iteration iteration = reviewIterations.get(i);
+            sb.append("### Review Attempt ").append(i - first + 1).append("\n")
+                    .append("```json\n")
+                    .append(truncate(iteration.getReviewJson(), 2500))
+                    .append("\n```\n\n");
+        }
+
+        sb.append("### Next Steps\n")
+                .append("- Review both conformance verdicts and provide targeted implementation guidance\n")
+                .append("- Remove the `needs-human` label and add `agent-ready` when ready to retry\n\n")
+                .append("---\n*Generated by [IssueBot](https://github.com/dbbaskette/IssueBot)*");
         return sb.toString();
     }
 

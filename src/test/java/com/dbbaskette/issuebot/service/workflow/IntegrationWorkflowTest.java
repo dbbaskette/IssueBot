@@ -1,31 +1,47 @@
 package com.dbbaskette.issuebot.service.workflow;
 
+import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.controller.IssueController;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
+import com.dbbaskette.issuebot.repository.EventRepository;
 import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.NotificationRepository;
+import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
+import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.polling.OrphanedRunRecovery;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.CodeReviewService;
+import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -53,7 +69,6 @@ class IntegrationWorkflowTest {
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
     private PlanFirstService planFirstService;
-    private SuperpowersMethodologyService superpowersService;
     private FollowUpService followUpService;
     private IssueGuidanceRepository guidanceRepository;
     private com.dbbaskette.issuebot.repository.RepoLessonRepository lessonRepository;
@@ -77,7 +92,6 @@ class IntegrationWorkflowTest {
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
         planFirstService = mock(PlanFirstService.class);
-        superpowersService = mock(SuperpowersMethodologyService.class);
         followUpService = mock(FollowUpService.class);
         guidanceRepository = mock(IssueGuidanceRepository.class);
         lessonRepository = mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class);
@@ -91,7 +105,6 @@ class IntegrationWorkflowTest {
                 eventService, sseService, notificationService, iterationManager,
                 decompositionService,
                 planFirstService,
-                superpowersService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
@@ -108,6 +121,10 @@ class IntegrationWorkflowTest {
         repo.setId(1L);
         repo.setBranch("main");
         repo.setMode(RepoMode.AUTONOMOUS);
+        // Most integration cases exercise the ordinary implementation pipeline. The production
+        // repository default is Plan First, so this fixture declares its opt-out explicitly;
+        // Plan First cases opt back in within their own setup.
+        repo.setPlanFirst(false);
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the login bug");
         issue.setId(1L);
         return issue;
@@ -141,13 +158,17 @@ class IntegrationWorkflowTest {
     }
 
     private CodeReviewResult failedReview() {
+        return failedReview("Missing test coverage");
+    }
+
+    private CodeReviewResult failedReview(String finding) {
         return new CodeReviewResult(
-                false, "Missing test coverage",
+                false, finding,
                 0.9, 0.8, 0.85, 0.4, 0.9, 0.9, 1.0,
                 List.of(new CodeReviewResult.ReviewFinding(
                         "high", "test_coverage", "src/Service.java", 42,
-                        "No tests for method", "Add unit test")),
-                "Add tests",
+                        finding, "Address the approved-plan requirement")),
+                finding,
                 "{\"passed\":false}", 500, 300, "claude-sonnet-4-6", null, List.of());
     }
 
@@ -170,6 +191,8 @@ class IntegrationWorkflowTest {
         when(costRepository.totalCostForIssueByPhase(eq(issue), eq("REVIEW"))).thenReturn(BigDecimal.valueOf(0.01));
         // Iteration loop re-reads entity from DB — return the same in-memory issue
         when(issueRepository.findById(issue.getId())).thenReturn(java.util.Optional.of(issue));
+        when(issueRepository.findByIdForPlanning(issue.getId()))
+                .thenReturn(java.util.Optional.of(issue));
         // Default pre-screen: not too large
         when(decompositionService.preScreen(any(), any()))
                 .thenReturn(new IssueDecompositionService.PreScreenResult(false, null));
@@ -200,7 +223,7 @@ class IntegrationWorkflowTest {
 
         // Review passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -232,7 +255,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -268,7 +291,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -320,7 +343,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -350,7 +373,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -376,7 +399,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -389,7 +412,7 @@ class IntegrationWorkflowTest {
         ArgumentCaptor<String> reviewInstructionsCaptor = ArgumentCaptor.forClass(String.class);
         verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(),
-                reviewInstructionsCaptor.capture(), any());
+                reviewInstructionsCaptor.capture(), isNull(), any(), any());
         assertEquals("Always use constructor injection", reviewInstructionsCaptor.getValue());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
@@ -423,14 +446,14 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
         var criteriaCaptor = ArgumentCaptor.forClass(List.class);
         verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyString(), any(), (List<String>) criteriaCaptor.capture(),
-                anyBoolean(), anyDouble(), any(), any());
+                anyBoolean(), anyDouble(), any(), any(), any(), any());
         assertEquals(List.of(
                 "Special characters are accepted in passwords",
                 "Login failures are logged"), criteriaCaptor.getValue());
@@ -461,7 +484,7 @@ class IntegrationWorkflowTest {
 
         // First review fails, second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -494,7 +517,7 @@ class IntegrationWorkflowTest {
 
         // Review fails
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(failedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(failedReview());
 
         // No more review iterations
         when(iterationManager.canReviewIterate(issue)).thenReturn(false);
@@ -525,14 +548,14 @@ class IntegrationWorkflowTest {
 
         // Invocation crashes twice, then runs and passes on the 3rd attempt.
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(invocationFailedReview(), invocationFailedReview(), passedReview());
 
         workflowService.processIssue(issue);
 
         // The REVIEW was retried (3 invocations) within ONE implementation attempt — not re-implemented.
         verify(codeReviewService, times(3)).reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
         verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).handleMaxReviewIterationsReached(any(), any(), any(), anyBoolean());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
@@ -556,14 +579,14 @@ class IntegrationWorkflowTest {
 
         // Invocation always crashes.
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(invocationFailedReview());
 
         workflowService.processIssue(issue);
 
         // Retried up to the cap (5), then escalated as "could not run" (invocationFailed=true) — NOT re-implemented.
         verify(codeReviewService, times(5)).reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
         verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));
     }
@@ -587,7 +610,7 @@ class IntegrationWorkflowTest {
         // Invocation crashes twice, then a REAL failing verdict — the retry loop must hand this
         // off to the normal failed-review path, NOT the "could not run" escalation.
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(invocationFailedReview(), invocationFailedReview(), failedReview());
         when(iterationManager.canReviewIterate(issue)).thenReturn(false); // exhaust immediately
 
@@ -608,11 +631,11 @@ class IntegrationWorkflowTest {
         com.dbbaskette.issuebot.model.Iteration iter = new com.dbbaskette.issuebot.model.Iteration(issue, 1);
         java.util.concurrent.atomic.AtomicInteger seenAtCall = new java.util.concurrent.atomic.AtomicInteger(-1);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenAnswer(inv -> { seenAtCall.set(issue.getCurrentReviewIteration()); return passedReview(); });
 
         workflowService.phaseIndependentReview(issue, createIssueDetails(),
-                Path.of("/tmp/repo"), "branch", 99, iter, List.of());
+                Path.of("/tmp/repo"), "branch", 99, iter, List.of(), null);
 
         assertEquals(1, seenAtCall.get(),
                 "review slot claimed before the review runs, so the counter shows the in-flight round");
@@ -696,7 +719,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(true))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -725,7 +748,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -791,7 +814,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -809,49 +832,46 @@ class IntegrationWorkflowTest {
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);
 
-        // Simulate the real service: store the plan, park the issue, report success
-        when(planFirstService.proposePlan(eq(issue), any(), any())).thenAnswer(inv -> {
-            issue.setImplementationPlan("1. Touch FooService\n2. Add tests");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(planFirstService.generateVersion(eq(issue), any(), any())).thenAnswer(inv -> {
+            assertEquals("PLANNING", issue.getCurrentPhase());
             issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
             issue.setCurrentPhase(null);
-            return true;
+            return PlanFirstService.PlanningOutcome.AWAITING_APPROVAL;
         });
 
         workflowService.processIssue(issue);
 
         assertEquals(IssueStatus.AWAITING_PLAN_APPROVAL, issue.getStatus());
-        verify(planFirstService).proposePlan(eq(issue), any(), any());
+        verify(planFirstService).generateVersion(eq(issue), any(), any());
         // No implementation tokens spent before approval
         verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
+        verify(gitOps).prepareForPlanning("owner", "repo", "main");
+        verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
+        verify(ciTemplateService, never()).ensureCiWorkflow(any(), anyString());
     }
 
     @Test
-    void planFirst_plannerFailure_proceedsWithImplementation() throws Exception {
+    void planFirst_plannerFailure_stopsBeforeImplementation() throws Exception {
         TrackedIssue issue = createTestIssue();
         issue.getRepo().setPlanFirst(true);
         issue.getRepo().setCiEnabled(false);
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);
 
-        // Planner failed — proposePlan reports false and the workflow must fall through
-        when(planFirstService.proposePlan(eq(issue), any(), any())).thenReturn(false);
-
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
-                .thenReturn(successResult());
-        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
-        ObjectNode prNode = objectMapper.createObjectNode();
-        prNode.put("number", 400);
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(false))).thenReturn(prNode);
-        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(planFirstService.generateVersion(eq(issue), any(), any()))
+                .thenReturn(PlanFirstService.PlanningOutcome.FAILED);
 
         workflowService.processIssue(issue);
 
-        verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
-        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(iterationManager, never()).canIterate(any());
+        verify(gitOps).prepareForPlanning("owner", "repo", "main");
+        verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
+        verify(ciTemplateService, never()).ensureCiWorkflow(any(), anyString());
     }
 
     @Test
@@ -859,10 +879,11 @@ class IntegrationWorkflowTest {
         TrackedIssue issue = createTestIssue();
         issue.getRepo().setPlanFirst(true);
         issue.getRepo().setCiEnabled(false);
-        issue.setPlanApproved(true);
-        issue.setImplementationPlan("1. Touch FooService\n2. Add FooServiceTest");
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(9L, 4, "Use the existing service boundary",
+                        "1. Touch FooService\n2. Add FooServiceTest")));
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
@@ -873,89 +894,23 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
-        // Approved → the plan gate is skipped entirely and the plan is injected into the prompt
-        verify(planFirstService, never()).proposePlan(any(), any(), any());
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
-        assertTrue(promptCaptor.getValue().contains("## Approved Plan"));
+        assertTrue(promptCaptor.getValue().contains("## Approved Planning Contract — Version 4"));
+        assertTrue(promptCaptor.getValue().contains("### Design Spec\nUse the existing service boundary"));
         assertTrue(promptCaptor.getValue().contains("1. Touch FooService"));
-        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
-    }
-
-    @Test
-    void superpowersMethodology_generatesPlanThenImplementsWithTddPreamble() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setSuperpowersMethodology(true);
-        issue.getRepo().setCiEnabled(false);
-        ObjectNode issueDetails = createIssueDetails();
-        setupCommonMocks(issue, issueDetails);
-
-        // Autonomous pass: store a plan on the issue (no approval gate, unlike plan-first)
-        doAnswer(inv -> {
-            issue.setImplementationPlan("1. Touch FooService\n2. Add FooServiceTest");
-            return null;
-        }).when(superpowersService).generatePlan(eq(issue), any(), any());
-
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
-                .thenReturn(successResult());
-        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
-        ObjectNode prNode = objectMapper.createObjectNode();
-        prNode.put("number", 402);
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(false))).thenReturn(prNode);
-        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
-
-        workflowService.processIssue(issue);
-
-        verify(superpowersService).generatePlan(eq(issue), any(), any());
-        // No plan-first gate — implementation runs in the same pass.
-        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
-        // Generated plan is fed in even without operator approval...
-        assertTrue(promptCaptor.getValue().contains("## Approved Plan"));
-        assertTrue(promptCaptor.getValue().contains("1. Touch FooService"));
-        // ...and the TDD/executing-plans preamble leads the prompt.
-        assertTrue(promptCaptor.getValue().contains("test-driven development"));
-        assertTrue(promptCaptor.getValue().contains("finish with real, committed CODE changes"));
-    }
-
-    @Test
-    void superpowersMethodology_skipsPlanPassWhenAPlanAlreadyExists() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setSuperpowersMethodology(true);
-        issue.getRepo().setCiEnabled(false);
-        issue.setImplementationPlan("existing plan from a prior attempt"); // retry/resume
-        ObjectNode issueDetails = createIssueDetails();
-        setupCommonMocks(issue, issueDetails);
-
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
-                .thenReturn(successResult());
-        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
-        ObjectNode prNode = objectMapper.createObjectNode();
-        prNode.put("number", 403);
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), eq(false))).thenReturn(prNode);
-        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
-
-        workflowService.processIssue(issue);
-
-        // A plan already exists — don't re-plan on every attempt.
-        verify(superpowersService, never()).generatePlan(any(), any(), any());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
     @Test
     void planFirstDisabled_neverInvokesPlanner_andPromptHasNoPlanSection() throws Exception {
         TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(false);
         issue.getRepo().setCiEnabled(false);
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);
@@ -969,15 +924,678 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
         verifyNoInteractions(planFirstService);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
-        assertFalse(promptCaptor.getValue().contains("## Approved Plan"));
+        assertFalse(promptCaptor.getValue().contains("## Approved Planning Contract"));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void legacyApprovedPlanAlreadyInFlightCanFinishWithoutRegeneration() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.setPlanApproved(true);
+        issue.setCurrentIteration(1);
+        PlanningVersion legacy = mock(PlanningVersion.class);
+        when(legacy.getState()).thenReturn(PlanningVersionState.LEGACY);
+        when(legacy.getImplementationPlan()).thenReturn("Keep the migrated transaction boundary");
+        issue.setApprovedPlanningVersion(legacy);
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode().put("number", 403);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
+                .thenReturn(passedReview());
+
+        workflowService.processIssue(issue);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode).executeImplementation(
+                prompt.capture(), any(Path.class), anyString(), any(), any(), any());
+        assertTrue(prompt.getValue().contains("## Legacy approved plan"));
+        assertTrue(prompt.getValue().contains("Keep the migrated transaction boundary"));
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
+        assertSame(legacy, issue.getApprovedPlanningVersion());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+    }
+
+    @Test
+    void restartAfterCorrectionClaimStillExecutesSecondAttemptAgainstApprovedVersion()
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setCurrentPhase("IMPLEMENTATION");
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(false);
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 2, "approved spec", "approved corrective plan",
+                "CODEX", "gpt-5.6-sol", null);
+        ReflectionTestUtils.setField(approved, "id", 202L);
+        approved.approve(LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        ApprovedPlanContext approvedContext = new ApprovedPlanContext(
+                202L, 2, approved.getDesignSpec(), approved.getImplementationPlan());
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        Iteration firstAttempt = new Iteration(issue, 1);
+        firstAttempt.setReviewJson("{\"summary\":\"missing rollback\"}");
+        firstAttempt.setDiff("+ first attempt");
+        Iteration priorGuidedRetry = new Iteration(issue, 2);
+        priorGuidedRetry.setId(190L);
+        priorGuidedRetry.setCompletedAt(LocalDateTime.now());
+        priorGuidedRetry.setDiff("stale guided-retry iteration");
+        Iteration interruptedClaim = new Iteration(issue, 2);
+        interruptedClaim.setId(202L);
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(firstAttempt, priorGuidedRetry, interruptedClaim));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 2))
+                .thenReturn(Optional.of(interruptedClaim));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(firstAttempt));
+
+        PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(issue));
+        new OrphanedRunRecovery(issueRepository, iterationRepository, versions, eventService)
+                .requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, issue.getStatus());
+        assertEquals(1, issue.getCurrentIteration());
+        assertTrue(issue.isPlanCorrectionPending());
+
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(repos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
+        IterationManager authoritativeIterations = new IterationManager(
+                issueRepository, repos, iterationRepository,
+                gitHubApi, eventService, notificationService);
+        IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService, issueRepository, iterationRepository, costRepository,
+                eventService, sseService, notificationService, authoritativeIterations,
+                decompositionService, planFirstService, followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new WorkflowCancellationService(), guidanceRepository, lessonRepository,
+                lessonsService, objectMapper);
+        recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
+
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        ObjectNode prNode = objectMapper.createObjectNode().put("number", 502);
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
+                .thenReturn(passedReview());
+
+        recoveredWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals(2, issue.getCurrentIteration());
+        assertEquals(2, issue.getPlanConformanceAttempt());
+        assertFalse(issue.isPlanCorrectionPending());
+        assertSame(approved, issue.getApprovedPlanningVersion());
+        verify(claudeCode).executeImplementation(
+                argThat(prompt -> prompt.contains("missing rollback")
+                        && prompt.contains("Approved Planning Contract — Version 2")),
+                any(Path.class), anyString(), any(), any(), any());
+        verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(),
+                eq(approvedContext), any(), any());
+        verify(iterationRepository, never()).save(argThat(iteration ->
+                iteration != interruptedClaim && iteration.getIterationNum() == 2));
+    }
+
+    @Test
+    void restartAfterCorrectionImplementationResumesCiPrAndReviewWithoutAnotherImplementation()
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setCurrentPhase("CI_VERIFICATION");
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(false);
+        issue.setPrNumber(503);
+        issue.setBranchName("issuebot/issue-42-fix-login-bug");
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 2, "approved spec", "approved corrective plan",
+                "CODEX", "gpt-5.6-sol", null);
+        ReflectionTestUtils.setField(approved, "id", 203L);
+        approved.approve(LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        ApprovedPlanContext approvedContext = new ApprovedPlanContext(
+                203L, 2, approved.getDesignSpec(), approved.getImplementationPlan());
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        Iteration priorRun = new Iteration(issue, 2);
+        priorRun.setId(190L);
+        priorRun.setDiff("stale prior-run diff");
+        priorRun.setLocalCheckResult("FAILED");
+        priorRun.setCiResult("FAILED");
+        priorRun.setReviewPassed(true);
+        priorRun.setReviewJson("{\"passed\":true,\"summary\":\"stale verdict\"}");
+        Iteration correction = new Iteration(issue, 2);
+        correction.setId(203L);
+        correction.setDiff("+ corrected rollback handling");
+        correction.setLocalCheckResult("PASSED");
+        correction.setCiResult("SKIPPED");
+        correction.setCompletedAt(LocalDateTime.now());
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(priorRun, correction));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 2))
+                .thenReturn(Optional.of(correction));
+        PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(issue));
+
+        new OrphanedRunRecovery(issueRepository, iterationRepository, versions, eventService)
+                .requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, issue.getStatus());
+        assertEquals("CI_VERIFICATION", issue.getCurrentPhase());
+        assertEquals(2, issue.getCurrentIteration());
+        assertFalse(issue.isPlanCorrectionPending());
+
+        List<String> resumedPhases = new ArrayList<>();
+        when(issueRepository.save(any(TrackedIssue.class))).thenAnswer(invocation -> {
+            TrackedIssue saved = invocation.getArgument(0);
+            resumedPhases.add(saved.getCurrentPhase());
+            return saved;
+        });
+
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(repos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
+        IterationManager authoritativeIterations = new IterationManager(
+                issueRepository, repos, iterationRepository,
+                gitHubApi, eventService, notificationService);
+        IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService, issueRepository, iterationRepository, costRepository,
+                eventService, sseService, notificationService, authoritativeIterations,
+                decompositionService, planFirstService, followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new WorkflowCancellationService(), guidanceRepository, lessonRepository,
+                lessonsService, objectMapper);
+        recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
+        ObjectNode existingPr = objectMapper.createObjectNode().put("number", 503);
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenReturn(List.of(existingPr));
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
+                .thenReturn(passedReview());
+
+        recoveredWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals(2, issue.getCurrentIteration());
+        assertEquals(2, issue.getPlanConformanceAttempt());
+        assertSame(approved, issue.getApprovedPlanningVersion());
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(gitOps, never()).cloneOrPull(anyString(), anyString(), anyString());
+        verify(gitOps, never()).createBranch(any(Git.class), anyInt(), anyString());
+        verify(gitOps).checkout(any(Git.class), eq(issue.getBranchName()));
+        verify(gitOps, never()).commit(any(Git.class), anyString());
+        verify(gitOps, never()).push(any(Git.class), anyString());
+        assertFalse(resumedPhases.contains("SETUP"));
+        verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(),
+                eq(approvedContext), argThat(evidence ->
+                        "PASSED".equals(evidence.localVerificationResult())
+                                && "SKIPPED".equals(evidence.ciResult())), any());
+    }
+
+    @Test
+    void restartAfterPersistedCiFailureAtMaxUsesOrdinaryTerminalSemantics()
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setCurrentPhase("CI_VERIFICATION");
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(false);
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 2, "approved spec", "approved corrective plan",
+                "CODEX", "gpt-5.6-sol", null);
+        ReflectionTestUtils.setField(approved, "id", 204L);
+        approved.approve(LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        ApprovedPlanContext approvedContext = new ApprovedPlanContext(
+                204L, 2, approved.getDesignSpec(), approved.getImplementationPlan());
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+
+        Iteration failedCi = new Iteration(issue, 2);
+        failedCi.setId(204L);
+        failedCi.setCiResult("FAILED");
+        failedCi.setCompletedAt(LocalDateTime.now());
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 2))
+                .thenReturn(Optional.of(failedCi));
+        PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(issue));
+        new OrphanedRunRecovery(issueRepository, iterationRepository, versions, eventService)
+                .requeueOrphanedRuns();
+
+        assertEquals(2, issue.getCurrentIteration());
+        assertFalse(issue.isPlanCorrectionPending());
+
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(repos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
+        IterationManager authoritativeIterations = new IterationManager(
+                issueRepository, repos, iterationRepository,
+                gitHubApi, eventService, notificationService);
+        IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService, issueRepository, iterationRepository, costRepository,
+                eventService, sseService, notificationService, authoritativeIterations,
+                decompositionService, planFirstService, followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new WorkflowCancellationService(), guidanceRepository, lessonRepository,
+                lessonsService, objectMapper);
+        recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
+
+        recoveredWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COOLDOWN, issue.getStatus());
+        assertEquals(2, issue.getCurrentIteration());
+        assertEquals(1, issue.getPlanConformanceAttempt());
+        assertSame(approved, issue.getApprovedPlanningVersion());
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+        verifyNoInteractions(codeReviewService);
+    }
+
+    @Test
+    void restartAfterPersistedLocalFailureBelowMaxUsesOrdinaryNextIteration()
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(1);
+        issue.setCurrentPhase("LOCAL_CHECKS");
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(false);
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 2, "approved spec", "approved corrective plan",
+                "CODEX", "gpt-5.6-sol", null);
+        ReflectionTestUtils.setField(approved, "id", 205L);
+        approved.approve(LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        ApprovedPlanContext approvedContext = new ApprovedPlanContext(
+                205L, 2, approved.getDesignSpec(), approved.getImplementationPlan());
+        setupCommonMocks(issue, createIssueDetails());
+
+        Iteration failedLocal = new Iteration(issue, 1);
+        failedLocal.setId(205L);
+        failedLocal.setLocalCheckResult("FAILED");
+        failedLocal.setCompletedAt(LocalDateTime.now());
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(failedLocal));
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(issue));
+        new OrphanedRunRecovery(issueRepository, iterationRepository,
+                mock(PlanningVersionRepository.class), eventService).requeueOrphanedRuns();
+        assertNull(issue.getCurrentPhase());
+
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(repos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
+        IterationManager authoritativeIterations = new IterationManager(
+                issueRepository, repos, iterationRepository,
+                gitHubApi, eventService, notificationService);
+        IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService, issueRepository, iterationRepository, costRepository,
+                eventService, sseService, notificationService, authoritativeIterations,
+                decompositionService, planFirstService, followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new WorkflowCancellationService(), guidanceRepository, lessonRepository,
+                lessonsService, objectMapper);
+        recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        ObjectNode pr = objectMapper.createObjectNode().put("number", 507);
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenReturn(List.of(pr));
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
+                .thenReturn(passedReview());
+
+        recoveredWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals(2, issue.getCurrentIteration());
+        assertEquals(2, issue.getPlanConformanceAttempt());
+        verify(claudeCode).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+    }
+
+    @Test
+    void recoveryCompletionRecognizesAlreadyMergedPrWithoutRepeatingExternalEffects() {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setAutoMerge(true);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setPrNumber(504);
+        ObjectNode issueDetails = createIssueDetails();
+        ObjectNode mergedPr = objectMapper.createObjectNode()
+                .put("number", 504).put("merged", true).put("draft", false);
+        when(gitHubApi.getPullRequest("owner", "repo", 504)).thenReturn(mergedPr);
+
+        workflowService.phaseRecoveryCompletion(
+                issue, issueDetails, "issuebot/issue-42-fix-login-bug",
+                2, "+ corrected rollback handling", 504, passedReview());
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertNull(issue.getCurrentPhase());
+        verify(gitHubApi, never()).mergePullRequest(
+                anyString(), anyString(), anyInt(), anyString(), anyString());
+        verify(gitHubApi, never()).addComment(anyString(), anyString(), anyInt(), anyString());
+        verify(gitHubApi, never()).addLabels(anyString(), anyString(), anyInt(), anyList());
+        verify(gitHubApi, never()).removeLabel(anyString(), anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void recoveryCompletionMarksAlreadyMergedApprovalGatedPrCompleted() {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setMode(RepoMode.APPROVAL_GATED);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setPrNumber(505);
+        ObjectNode mergedPr = objectMapper.createObjectNode()
+                .put("number", 505).put("merged", true).put("draft", false);
+        when(gitHubApi.getPullRequest("owner", "repo", 505)).thenReturn(mergedPr);
+
+        workflowService.phaseRecoveryCompletion(
+                issue, createIssueDetails(), "issuebot/issue-42-fix-login-bug",
+                2, "+ corrected rollback handling", 505, passedReview());
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        verify(gitHubApi, never()).markPrReady(anyString(), anyString(), anyInt());
+        verify(gitHubApi, never()).mergePullRequest(
+                anyString(), anyString(), anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    void persistedReviewInvocationFailureEscalatesWithoutCountingConformanceVerdict()
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(1);
+        issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        issue.setPlanConformanceAttempt(0);
+        issue.setPlanCorrectionPending(false);
+        issue.setPrNumber(506);
+        issue.setBranchName("issuebot/issue-42-fix-login-bug");
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 2, "approved spec", "approved plan", "CODEX", "gpt-5.6-sol", null);
+        ReflectionTestUtils.setField(approved, "id", 206L);
+        approved.approve(LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        setupCommonMocks(issue, createIssueDetails());
+
+        Iteration invocationFailure = new Iteration(issue, 1);
+        invocationFailure.setId(206L);
+        invocationFailure.setCompletedAt(LocalDateTime.now());
+        invocationFailure.setReviewPassed(false);
+        invocationFailure.setReviewJson(null);
+        invocationFailure.setReviewModel("claude-sonnet-5");
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(invocationFailure));
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(issue));
+        new OrphanedRunRecovery(issueRepository, iterationRepository,
+                mock(PlanningVersionRepository.class), eventService).requeueOrphanedRuns();
+
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        when(repos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
+        IterationManager authoritativeIterations = new IterationManager(
+                issueRepository, repos, iterationRepository,
+                gitHubApi, eventService, notificationService);
+        IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService, issueRepository, iterationRepository, costRepository,
+                eventService, sseService, notificationService, authoritativeIterations,
+                decompositionService, planFirstService, followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new WorkflowCancellationService(), guidanceRepository, lessonRepository,
+                lessonsService, objectMapper);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(206L, 2, "approved spec", "approved plan")));
+
+        recoveredWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COOLDOWN, issue.getStatus());
+        assertEquals(0, issue.getPlanConformanceAttempt());
+        assertFalse(issue.isPlanCorrectionPending());
+        assertTrue(issue.getLastFailureReason().contains("could not run"));
+        assertFalse(issue.getLastFailureReason().contains("approved Plan v2"));
+        verifyNoInteractions(codeReviewService);
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+    }
+
+    @Test
+    void fullLifecycleRevisesApprovesCorrectsStopsAndGuidedRetriesAgainstSameVersion()
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.getRepo().setDecompositionMode(DecompositionMode.OFF);
+        issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        ObjectNode issueDetails = createIssueDetails();
+        setupCommonMocks(issue, issueDetails);
+        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        when(claudeCode.providerDisplayName()).thenReturn("Claude Code");
+
+        List<PlanningVersion> storedVersions = new ArrayList<>();
+        AtomicLong nextVersionId = new AtomicLong(100);
+        PlanningVersionRepository lifecycleVersions = mock(PlanningVersionRepository.class);
+        when(lifecycleVersions.findLatestByIssueIdForUpdate(issue.getId()))
+                .thenAnswer(invocation -> storedVersions.isEmpty()
+                        ? List.of()
+                        : List.of(storedVersions.getLast()));
+        when(lifecycleVersions.save(any(PlanningVersion.class))).thenAnswer(invocation -> {
+            PlanningVersion version = invocation.getArgument(0);
+            if (version.getId() == null) {
+                ReflectionTestUtils.setField(version, "id", nextVersionId.getAndIncrement());
+                storedVersions.add(version);
+            }
+            return version;
+        });
+
+        PlanningWorkspaceService planningWorkspaces = mock(PlanningWorkspaceService.class);
+        PlanningWorkspaceService.PlanningWorkspace planningWorkspace =
+                mock(PlanningWorkspaceService.PlanningWorkspace.class);
+        when(planningWorkspaces.open(any(Path.class))).thenReturn(planningWorkspace);
+        when(planningWorkspace.path()).thenReturn(Path.of("/tmp/repo"));
+        PlanFirstService authoritativePlanFirst = new PlanFirstService(
+                claudeCode, gitHubApi, issueRepository, lifecycleVersions,
+                new PlanArtifactParser(), planningWorkspaces, eventService, notificationService);
+        when(claudeCode.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
+                .thenReturn(planningResult("first spec", "first plan"),
+                        planningResult("second spec with rollback", "second plan with rollback test"));
+
+        assertEquals(PlanFirstService.PlanningOutcome.AWAITING_APPROVAL,
+                authoritativePlanFirst.generateVersion(issue, issueDetails, Path.of("/tmp/repo")));
+        PlanningVersion v1 = storedVersions.getFirst();
+        authoritativePlanFirst.requestRevision(issue.getId(), v1.getId(), "include rollback");
+        assertEquals(PlanningVersionState.SUPERSEDED, v1.getState());
+
+        assertEquals(PlanFirstService.PlanningOutcome.AWAITING_APPROVAL,
+                authoritativePlanFirst.generateVersion(issue, issueDetails, Path.of("/tmp/repo")));
+        PlanningVersion v2 = storedVersions.getLast();
+        authoritativePlanFirst.approvePlan(issue.getId(), v2.getId());
+        assertSame(v2, issue.getApprovedPlanningVersion());
+        assertEquals(PlanningVersionState.APPROVED, v2.getState());
+
+        List<String> persistedConformanceStates = new ArrayList<>();
+        when(issueRepository.save(any(TrackedIssue.class))).thenAnswer(invocation -> {
+            TrackedIssue saved = invocation.getArgument(0);
+            persistedConformanceStates.add(saved.getCurrentIteration() + "|"
+                    + saved.getCurrentPhase() + "|" + saved.isPlanCorrectionPending()
+                    + "|" + saved.getPlanConformanceAttempt());
+            return saved;
+        });
+
+        List<Iteration> storedIterations = new ArrayList<>();
+        AtomicLong nextIterationId = new AtomicLong(500);
+        when(iterationRepository.save(any(Iteration.class))).thenAnswer(invocation -> {
+            Iteration iteration = invocation.getArgument(0);
+            if (!storedIterations.contains(iteration)) {
+                iteration.setId(nextIterationId.getAndIncrement());
+                storedIterations.add(iteration);
+            }
+            return iteration;
+        });
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue))
+                .thenAnswer(invocation -> List.copyOf(storedIterations));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                eq(issue.getId()), anyInt())).thenAnswer(invocation -> {
+            int iterationNum = invocation.getArgument(1);
+            for (int i = storedIterations.size() - 1; i >= 0; i--) {
+                if (storedIterations.get(i).getIterationNum() == iterationNum) {
+                    return Optional.of(storedIterations.get(i));
+                }
+            }
+            return Optional.empty();
+        });
+        WatchedRepoRepository lifecycleRepos = mock(WatchedRepoRepository.class);
+        when(lifecycleRepos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
+        IterationManager authoritativeIterations = spy(new IterationManager(
+                issueRepository, lifecycleRepos, iterationRepository,
+                gitHubApi, eventService, notificationService));
+
+        IssueWorkflowService lifecycleWorkflow = new IssueWorkflowService(
+                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                localVerificationService, issueRepository, iterationRepository, costRepository,
+                eventService, sseService, notificationService, authoritativeIterations,
+                decompositionService, authoritativePlanFirst, followUpService,
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new WorkflowCancellationService(), guidanceRepository, lessonRepository,
+                lessonsService, objectMapper);
+        lifecycleWorkflow.reviewRetryBackoffBaseMs = 0;
+
+        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult(), successResult(), successResult());
+        ObjectNode prNode = objectMapper.createObjectNode().put("number", 501);
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> issue.getPrNumber() == null ? List.of() : List.of(prNode));
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(prNode);
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
+                .thenReturn(failedReview("missing rollback"),
+                        failedReview("rollback test missing"), passedReview());
+
+        lifecycleWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COOLDOWN, issue.getStatus());
+        assertEquals(2, issue.getPlanConformanceAttempt());
+        assertFalse(issue.isPlanCorrectionPending());
+        assertSame(v2, issue.getApprovedPlanningVersion());
+        assertTrue(issue.getLastFailureReason().contains("approved Plan v2"));
+        assertTrue(persistedConformanceStates.contains("2|IMPLEMENTATION|false|1"));
+
+        List<IssueGuidance> storedGuidance = new ArrayList<>();
+        when(guidanceRepository.save(any(IssueGuidance.class))).thenAnswer(invocation -> {
+            IssueGuidance saved = invocation.getArgument(0);
+            storedGuidance.add(saved);
+            return saved;
+        });
+        when(guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(issue.getId()))
+                .thenAnswer(invocation -> List.copyOf(storedGuidance));
+        ProcessingControlService processingControl = mock(ProcessingControlService.class);
+        when(issueRepository.findByIdWithApprovedPlanningVersion(issue.getId()))
+                .thenReturn(Optional.of(issue));
+        when(issueRepository.findByRepoAndStatusIn(eq(issue.getRepo()), anyList()))
+                .thenReturn(List.of());
+        IssueDispatchService dispatch = new IssueDispatchService(
+                issueRepository, processingControl, guidanceRepository);
+        IssueBotProperties properties = new IssueBotProperties();
+        RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
+        IssueController controller = new IssueController(
+                issueRepository, lifecycleRepos, iterationRepository, mock(EventRepository.class),
+                costRepository, mock(IssuePollingService.class), lifecycleWorkflow, eventService,
+                gitHubApi, properties, decompositionService, authoritativePlanFirst,
+                new WorkflowCancellationService(), guidanceRepository, objectMapper,
+                new TimelineAssembler(), mock(NotificationRepository.class), new MarkdownRenderer(),
+                dispatch, lifecycleVersions);
+
+        controller.retryPlanImplementation(
+                issue.getId(), "test rollback on network failure", redirectAttributes);
+
+        assertSame(v2, issue.getApprovedPlanningVersion());
+        assertEquals(PlanningVersionState.APPROVED, v2.getState());
+        assertEquals("second spec with rollback", v2.getDesignSpec());
+        assertEquals("second plan with rollback test", v2.getImplementationPlan());
+        assertEquals(2, storedVersions.size());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals(1, issue.getPlanConformanceAttempt());
+        assertFalse(issue.isPlanCorrectionPending());
+
+        ArgumentCaptor<String> implementationPrompts = ArgumentCaptor.forClass(String.class);
+        verify(claudeCode, times(3)).executeImplementation(
+                implementationPrompts.capture(), any(Path.class), anyString(), any(), any(), any());
+        assertTrue(implementationPrompts.getAllValues().get(1).contains("missing rollback"));
+        assertTrue(implementationPrompts.getAllValues().get(2)
+                .contains("test rollback on network failure"));
+        assertTrue(implementationPrompts.getAllValues().get(2)
+                .contains("Approved Planning Contract — Version 2"));
+
+        ArgumentCaptor<ApprovedPlanContext> reviewedPlans =
+                ArgumentCaptor.forClass(ApprovedPlanContext.class);
+        verify(codeReviewService, times(3)).reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(),
+                reviewedPlans.capture(), any(), any());
+        assertTrue(reviewedPlans.getAllValues().stream().allMatch(context ->
+                context.id() == v2.getId() && context.versionNumber() == 2));
+        verify(guidanceRepository).save(argThat(guidance ->
+                guidance.getIssueId().equals(issue.getId())
+                        && guidance.getGuidance().equals("test rollback on network failure")));
+        verify(authoritativeIterations).claimPlanCorrectionIteration(any(TrackedIssue.class), eq(2));
+        assertEquals(1, storedIterations.stream()
+                .filter(iteration -> iteration.getIterationNum() == 2)
+                .count(), "the atomic claim row must be reused by the workflow");
+    }
+
+    private ClaudeCodeResult planningResult(String spec, String plan) {
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("# Design Spec\n" + spec + "\n# Implementation Plan\n" + plan);
+        return result;
     }
 
     // === Test 12: Repo without verification commands never invokes LocalVerificationService ===
@@ -998,7 +1616,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -1038,7 +1656,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean())).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any())).thenReturn(passedReview());
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
@@ -1094,7 +1712,7 @@ class IntegrationWorkflowTest {
 
         // First review fails (forces iteration 2), second passes (completes)
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1112,9 +1730,8 @@ class IntegrationWorkflowTest {
         assertFalse(secondPrompt.contains("ADDITIONAL HUMAN GUIDANCE"),
                 "guidance must not re-appear in iteration 2 — it was consumed and no new guidance was queued");
 
-        // markConsumed fires twice: once at workflow start (retiring stale rows from a
-        // previous run) and once at the checkpoint that consumed this run's guidance.
-        verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
+        // Guidance is consumed only at the checkpoint that incorporates it into the prompt.
+        verify(guidanceRepository).markConsumed(eq(1L), any(LocalDateTime.class));
         verify(eventService).log(eq("GUIDANCE_APPLIED"), anyString(), any(), eq(issue));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
@@ -1152,7 +1769,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue);
@@ -1164,7 +1781,7 @@ class IntegrationWorkflowTest {
         verify(claudeCode).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(promptCaptor.getValue().contains("Focus on the token refresh path"));
-        verify(guidanceRepository, times(2)).markConsumed(eq(1L), any(LocalDateTime.class));
+        verify(guidanceRepository).markConsumed(eq(1L), any(LocalDateTime.class));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
@@ -1201,7 +1818,7 @@ class IntegrationWorkflowTest {
 
         // Iteration 1's review fails → iteration 2 is a review-feedback iteration
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1329,7 +1946,7 @@ class IntegrationWorkflowTest {
 
         // First review fails (forces iteration 2), second passes
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1381,7 +1998,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1433,7 +2050,7 @@ class IntegrationWorkflowTest {
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
 
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(failedReview(), passedReview());
 
         workflowService.processIssue(issue);
@@ -1488,7 +2105,7 @@ class IntegrationWorkflowTest {
         when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), eq(false))).thenReturn(prNode);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenReturn(passedReview());
 
         workflowService.processIssue(issue); // manual retry without instructions

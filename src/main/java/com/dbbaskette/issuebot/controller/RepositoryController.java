@@ -45,6 +45,7 @@ public class RepositoryController {
     private final RepoLessonRepository lessonRepository;
     private final IssuePollingService pollingService;
     private final NotificationRepository notificationRepository;
+    private final PlanningVersionRepository planningVersionRepository;
 
     @Autowired(required = false)
     private IssueBotProperties properties;
@@ -59,7 +60,8 @@ public class RepositoryController {
                                  EventRepository eventRepository,
                                  RepoLessonRepository lessonRepository,
                                  IssuePollingService pollingService,
-                                 NotificationRepository notificationRepository) {
+                                 NotificationRepository notificationRepository,
+                                 PlanningVersionRepository planningVersionRepository) {
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
@@ -68,6 +70,7 @@ public class RepositoryController {
         this.lessonRepository = lessonRepository;
         this.pollingService = pollingService;
         this.notificationRepository = notificationRepository;
+        this.planningVersionRepository = planningVersionRepository;
     }
 
     @GetMapping
@@ -100,8 +103,7 @@ public class RepositoryController {
                                @RequestParam(defaultValue = "ROLLING_BACKLOG") String followUpMode,
                                @RequestParam(defaultValue = "PROPOSE") String decompositionMode,
                                @RequestParam(defaultValue = "false") boolean preScreenEnabled,
-                               @RequestParam(defaultValue = "false") boolean planFirst,
-                               @RequestParam(defaultValue = "false") boolean superpowersMethodology,
+                               @RequestParam(defaultValue = "true") boolean planFirst,
                                @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
                                @RequestParam(required = false) String customInstructions,
                                @RequestParam(required = false, defaultValue = "false") boolean lessonsEnabled,
@@ -155,7 +157,6 @@ public class RepositoryController {
         }
         repo.setPreScreenEnabled(preScreenEnabled);
         repo.setPlanFirst(planFirst);
-        repo.setSuperpowersMethodology(superpowersMethodology);
         repo.setIssueBudgetUsd(normalizeBudget(issueBudgetUsd));
         repo.setCustomInstructions(normalize(customInstructions));
         repo.setLessonsEnabled(lessonsEnabled);
@@ -180,14 +181,23 @@ public class RepositoryController {
     public String delete(Model model, @PathVariable Long id,
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         repoRepository.findById(id).ifPresent(repo -> {
-            // Delete children in FK order: events, cost_tracking, iterations, tracked_issues, repo
+            // planning_versions and tracked_issues form an intentional FK cycle through the
+            // approved-version pointer. Break and flush that pointer before deleting versions.
             eventRepository.deleteByRepo(repo);
             List<TrackedIssue> issues = issueRepository.findByRepo(repo);
+            List<Long> issueIds = issues.stream().map(TrackedIssue::getId).toList();
+            if (!issueIds.isEmpty()) {
+                issues.forEach(issue -> issue.setApprovedPlanningVersion(null));
+                issueRepository.saveAllAndFlush(issues);
+                planningVersionRepository.deleteByIssueIds(issueIds);
+                planningVersionRepository.flush();
+            }
             for (TrackedIssue issue : issues) {
                 costRepository.deleteByIssue(issue);
                 iterationRepository.deleteByIssue(issue);
             }
             issueRepository.deleteAll(issues);
+            issueRepository.flush();
             repoRepository.delete(repo);
         });
         populateModel(model, "Repository removed.", null);

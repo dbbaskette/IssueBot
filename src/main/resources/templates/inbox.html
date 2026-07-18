@@ -107,34 +107,31 @@
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(planApprovals)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${planApprovals}" class="glass-card mb-2" style="padding:1rem">
+                <div th:each="issue : ${planApprovals}" th:with="version=${planVersions.get(issue.id)}"
+                     class="glass-card mb-2" style="padding:1rem">
                     <div class="flex-between mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
                             <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
                         </div>
-                        <span class="status status-awaiting_plan_approval">AWAITING PLAN APPROVAL</span>
+                        <span class="status status-awaiting_plan_approval"
+                              th:text="${version != null ? 'Plan v' + version.versionNumber + ' awaiting approval' : 'Plan awaiting approval'}">Plan v3 awaiting approval</span>
                     </div>
 
-                    <div class="mb-2">
-                        <!--/* Model output is untrusted — rendered as preformatted text via th:text,
-                               never injected as HTML. */-->
-                        <pre class="code-output plan-text" th:text="${planExcerpts.get(issue.id)}">plan excerpt</pre>
-                        <details th:if="${planTruncated.get(issue.id)}">
-                            <summary class="text-sm">Show full plan</summary>
-                            <pre class="code-output plan-text" th:text="${issue.implementationPlan}">full plan</pre>
-                        </details>
+                    <div class="text-sm text-muted mb-2 flex gap-1" style="flex-wrap:wrap"
+                         th:if="${version != null}">
+                        <span><i class="ti ti-clock" aria-hidden="true"></i>
+                            <span th:text="${planAges.get(issue.id) + ' old'}">5m old</span>
+                        </span>
+                        <span><i class="ti ti-robot" aria-hidden="true"></i>
+                            <span th:text="${(version.provider != null ? version.provider : 'Unknown provider') + ' · ' + (version.model != null ? version.model : 'Unknown model')}">CODEX · gpt-5.6</span>
+                        </span>
                     </div>
 
                     <div class="form-actions flex gap-1">
-                        <button type="button" class="btn btn-primary btn-sm"
-                                th:attr="data-modal-open=${'approve-plan-modal-' + issue.id}">
-                            <i class="ti ti-check" aria-hidden="true"></i> Approve plan
-                        </button>
-                        <button type="button" class="btn btn-danger btn-sm"
-                                th:attr="data-modal-open=${'reject-plan-modal-' + issue.id}">
-                            <i class="ti ti-x" aria-hidden="true"></i> Reject
-                        </button>
+                        <a class="btn btn-primary btn-sm" th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">
+                            <i class="ti ti-file-description" aria-hidden="true"></i> Review spec &amp; plan
+                        </a>
                     </div>
                 </div>
             </div>
@@ -215,7 +212,7 @@
     </div>
 
     <!--
-      === Modals (#91) — top-level, one set per issue across the approvals/plan/split groups.
+      === Modals (#91) — top-level, one set per issue across the PR approval and split groups.
       Deliberately NOT inside any polled fragment: this page has no auto-refresh (unlike the
       Approvals/dashboard pages), so there is no morph/swap that could snap an open modal shut —
       see approvals.html and dashboard.html for the precedent this follows.
@@ -256,47 +253,6 @@
             </form>
         </div>
     </div>
-
-    <!-- Approve/Reject plan modals -->
-    <th:block th:each="issue : ${planApprovals}">
-        <div th:id="${'approve-plan-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
-            <div class="modal glass-card" role="dialog" aria-modal="true"
-                 th:attr="aria-labelledby=${'approve-plan-modal-' + issue.id + '-title'}">
-                <h3 th:id="${'approve-plan-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Approve Plan</h3>
-                <p class="text-sm text-muted" style="margin:0 0 1rem">
-                    Starts implementation using this plan for
-                    <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>.
-                    Queued, implementation resumes on the next poll cycle (~60s).
-                </p>
-                <form th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
-                    <input type="hidden" name="returnTo" value="inbox">
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close data-modal-autofocus>Cancel</button>
-                        <button type="submit" class="btn btn-primary btn-sm">Approve plan</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div th:id="${'reject-plan-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
-            <div class="modal glass-card" role="dialog" aria-modal="true"
-                 th:attr="aria-labelledby=${'reject-plan-modal-' + issue.id + '-title'}">
-                <h3 th:id="${'reject-plan-modal-' + issue.id + '-title'}" style="margin:0 0 0.5rem">Reject Plan</h3>
-                <p class="text-sm text-muted" style="margin:0 0 1rem">
-                    Feedback for the next plan (required). After 2 rejections the issue escalates to needs-human.
-                </p>
-                <form th:action="@{'/issues/' + ${issue.id} + '/plan/reject'}" method="post">
-                    <input type="hidden" name="returnTo" value="inbox">
-                    <textarea name="feedback" rows="4" class="modal-textarea" required data-modal-autofocus
-                              placeholder="e.g. The plan misses the caching layer — include how invalidation is handled"></textarea>
-                    <div class="modal-actions">
-                        <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
-                        <button type="submit" class="btn btn-danger btn-sm">Reject plan</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </th:block>
 
     <!-- Approve/Reject split modals -->
     <th:block th:each="issue : ${splitProposals}">

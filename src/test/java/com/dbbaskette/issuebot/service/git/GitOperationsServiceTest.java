@@ -9,7 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.*;
 
 class GitOperationsServiceTest {
 
@@ -48,6 +48,32 @@ class GitOperationsServiceTest {
             assertTrue(content.contains(".claude/worktrees/"), "exclude should list .claude/worktrees/");
             int occurrences = content.split(java.util.regex.Pattern.quote(".claude/worktrees/"), -1).length - 1;
             assertEquals(1, occurrences, "entry should not be duplicated");
+        }
+    }
+
+    @Test
+    void prepareForPlanningLeavesEmptyCheckoutWithoutCommitOrPush(@TempDir Path tmp) throws Exception {
+        Path remotePath = tmp.resolve("remote.git");
+        try (Git remote = Git.init().setBare(true).setDirectory(remotePath.toFile()).call()) {
+            assertNull(remote.getRepository().resolve("HEAD"));
+        }
+        IssueBotProperties properties = new IssueBotProperties();
+        properties.setWorkDirectory(tmp.resolve("checkouts").toString());
+        GitOperationsService service = new GitOperationsService(properties) {
+            @Override
+            String remoteUrl(String owner, String name) {
+                return remotePath.toUri().toString();
+            }
+        };
+
+        try (Git planningCheckout = service.prepareForPlanning("owner", "empty", "main")) {
+            assertNull(planningCheckout.getRepository().resolve("HEAD"));
+            assertFalse(Files.exists(service.repoLocalPath("owner", "empty").resolve("README.md")));
+        }
+
+        try (Git remote = Git.open(remotePath.toFile())) {
+            assertNull(remote.getRepository().resolve("refs/heads/main"));
+            assertNull(remote.getRepository().resolve("HEAD"));
         }
     }
 

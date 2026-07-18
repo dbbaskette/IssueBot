@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -41,18 +42,20 @@ public class ProcessingControlService {
         return state() == ProcessingState.PAUSED;
     }
 
+    @Transactional
     public synchronized void pause() {
         persist(ProcessingState.PAUSED);
         issues.findByStatus(IssueStatus.IN_PROGRESS).forEach(issue ->
                 cancellationService.requestCancel(issue.getId(), CancellationReason.GLOBAL_PAUSE));
     }
 
+    @Transactional
     public synchronized void resume() {
         persist(ProcessingState.RUNNING);
     }
 
     private void persist(ProcessingState next) {
-        ProcessingControl control = repository.findById(ProcessingControl.SINGLETON_ID)
+        ProcessingControl control = repository.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> new ProcessingControl(state.get()));
         control.setState(next);
         repository.save(control);

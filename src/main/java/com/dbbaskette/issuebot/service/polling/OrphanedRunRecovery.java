@@ -1,7 +1,12 @@
 package com.dbbaskette.issuebot.service.polling;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.slf4j.Logger;
@@ -13,18 +18,16 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Recovers issues stranded {@code IN_PROGRESS} by a crash or restart.
+ * Recovers restart-safe Plan First work stranded {@code IN_PROGRESS} by a crash or restart.
+ * An async task disappears when the JVM stops while its persisted row retains the in-flight
+ * status, so an explicitly recoverable planning or correction phase must return through the
+ * normal pending-dispatch path.
  * <p>
- * An {@code IN_PROGRESS} issue's workflow runs on an async task; when the JVM stops, that task
- * dies but the DB row stays {@code IN_PROGRESS}. The poller only starts <em>untracked</em>
- * issues ({@code qualifiesForProcessing}), so nothing would ever pick a stranded run back up —
- * it would sit {@code IN_PROGRESS} forever, and (via the per-repo gate) also block every other
- * issue in that repo.
- * <p>
- * On startup we reset those rows to {@code PENDING}; {@link IssuePollingService#resumePendingIssues}
- * then re-dispatches them on the next poll, respecting the per-repo serialization gate (an issue
- * that died after opening a PR stays gated behind that PR, as it should). Human-wait states
- * ({@code AWAITING_*}) are deliberately left untouched — nothing was running for them.
+ * Recovery reconciles a planning run that already published a pending version back to its human
+ * approval wait, requeues interrupted planning/correction work, and preserves the established
+ * restart behavior for opt-out, legacy, and approved implementation runs. Human-wait/failure
+ * states are not queried. Recovery never creates or changes a planning version;
+ * {@link IssuePollingService#resumePendingIssues} performs any safe dispatch on a later poll.
  */
 @Component
 public class OrphanedRunRecovery {
@@ -32,10 +35,17 @@ public class OrphanedRunRecovery {
     private static final Logger log = LoggerFactory.getLogger(OrphanedRunRecovery.class);
 
     private final TrackedIssueRepository issueRepository;
+    private final IterationRepository iterationRepository;
+    private final PlanningVersionRepository versionRepository;
     private final EventService eventService;
 
-    public OrphanedRunRecovery(TrackedIssueRepository issueRepository, EventService eventService) {
+    public OrphanedRunRecovery(TrackedIssueRepository issueRepository,
+                               IterationRepository iterationRepository,
+                               PlanningVersionRepository versionRepository,
+                               EventService eventService) {
         this.issueRepository = issueRepository;
+        this.iterationRepository = iterationRepository;
+        this.versionRepository = versionRepository;
         this.eventService = eventService;
     }
 
@@ -45,16 +55,161 @@ public class OrphanedRunRecovery {
         if (orphaned.isEmpty()) {
             return;
         }
+        int recovered = 0;
         for (TrackedIssue issue : orphaned) {
-            log.info("Requeueing orphaned in-flight issue {} #{} — left IN_PROGRESS by a restart",
-                    issue.getRepo().fullName(), issue.getIssueNumber());
-            issue.setStatus(IssueStatus.PENDING);
-            issue.setCurrentPhase(null);
+            if (issue.getStatus() != IssueStatus.IN_PROGRESS) {
+                continue;
+            }
+            RecoveryAction action = recoveryAction(issue);
+            if (action == RecoveryAction.NONE) {
+                continue;
+            }
+            IssueStatus recoveredStatus = action == RecoveryAction.AWAITING_PLAN_APPROVAL
+                    ? IssueStatus.AWAITING_PLAN_APPROVAL : IssueStatus.PENDING;
+            log.info("Recovering interrupted issue {} #{} from phase {} to {}",
+                    issue.getRepo().fullName(), issue.getIssueNumber(),
+                    issue.getCurrentPhase(), recoveredStatus);
+            if (action == RecoveryAction.RESTORE_UNEXECUTED_CORRECTION
+                    || action == RecoveryAction.RESTORE_INTERRUPTED_IMPLEMENTATION) {
+                // The second implementation claim consumed the ordinary iteration budget just
+                // before work began. Roll back only that claim so normal dispatch can replay the
+                // same durable iteration and exact prepared prompt.
+                issue.setCurrentIteration(issue.getCurrentIteration() - 1);
+            }
+            if (action == RecoveryAction.RESTORE_UNEXECUTED_CORRECTION) {
+                issue.setPlanCorrectionPending(true);
+            }
+            issue.setStatus(recoveredStatus);
+            if (action != RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION) {
+                issue.setCurrentPhase(null);
+            }
             issueRepository.save(issue);
             eventService.log("ISSUE_RECOVERED",
-                    "Requeued after a restart interrupted the run mid-flight",
+                    action == RecoveryAction.AWAITING_PLAN_APPROVAL
+                            ? "Restored plan approval wait after restart"
+                            : "Requeued after a restart interrupted processing",
                     issue.getRepo(), issue);
+            recovered++;
         }
-        log.info("Requeued {} orphaned in-flight issue(s) after restart", orphaned.size());
+        if (recovered > 0) {
+            log.info("Recovered {} interrupted issue(s) after restart", recovered);
+        }
+    }
+
+    private RecoveryAction recoveryAction(TrackedIssue issue) {
+        if ("IMPLEMENTATION".equalsIgnoreCase(issue.getCurrentPhase())
+                && issue.getCurrentIteration() > 0
+                && (!issue.effectivePlanFirst() || issue.getApprovedPlanningVersion() != null)) {
+            Iteration current = currentIteration(issue);
+            boolean incomplete = current == null
+                    || (current.getCompletedAt() == null
+                    && current.getImplementationCompletedAt() == null);
+            if (incomplete) {
+                // A claimed Plan First correction must also restore its one-shot eligibility.
+                // Every other implementation simply replays the same iteration number; the
+                // workflow reuses its incomplete row and byte-for-byte prepared context.
+                if (isClaimedCorrection(issue) && current != null) {
+                    return RecoveryAction.RESTORE_UNEXECUTED_CORRECTION;
+                }
+                return RecoveryAction.RESTORE_INTERRUPTED_IMPLEMENTATION;
+            }
+        }
+        if (!issue.effectivePlanFirst()) {
+            return RecoveryAction.REQUEUE;
+        }
+        if (isClaimedCorrection(issue)) {
+            Iteration current = currentIteration(issue);
+            if ("IMPLEMENTATION".equalsIgnoreCase(issue.getCurrentPhase())) {
+                // Only an incomplete durable iteration proves the claim had not reached its
+                // terminal implementation handling. Missing/completed state is conservative:
+                // never grant another corrective implementation.
+                return issue.getPlanConformanceAttempt() == 1
+                        && current != null && current.getCompletedAt() == null
+                        ? RecoveryAction.RESTORE_UNEXECUTED_CORRECTION
+                        : RecoveryAction.REQUEUE;
+            }
+        }
+        if (isResumablePostImplementationCheckpoint(issue)) {
+            Iteration current = currentIteration(issue);
+            if (current != null) {
+                if (isPersistedVerificationFailure(issue.getCurrentPhase(), current)) {
+                    // A failed verification already consumed this iteration. Clear the phase and
+                    // let the ordinary iteration budget choose next-iteration versus terminal.
+                    return RecoveryAction.REQUEUE;
+                }
+                // Keep the exact durable phase as the workflow resume checkpoint. This includes
+                // a first-review invocation failure, whose conformance count intentionally stays
+                // zero because the code was never judged.
+                return RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION;
+            }
+        }
+        if (issue.getApprovedPlanningVersion() != null) {
+            return RecoveryAction.REQUEUE;
+        }
+        if (issue.isPlanCorrectionPending()) {
+            return RecoveryAction.REQUEUE;
+        }
+        if (!"PLANNING".equalsIgnoreCase(issue.getCurrentPhase())
+                && !"SETUP".equalsIgnoreCase(issue.getCurrentPhase())) {
+            return RecoveryAction.NONE;
+        }
+
+        PlanningVersion latest = versionRepository
+                .findFirstByIssueIdOrderByVersionNumberDesc(issue.getId())
+                .orElse(null);
+        return latest != null && latest.getState() == PlanningVersionState.PENDING
+                ? RecoveryAction.AWAITING_PLAN_APPROVAL
+                : RecoveryAction.REQUEUE;
+    }
+
+    private boolean isClaimedCorrection(TrackedIssue issue) {
+        return issue.getApprovedPlanningVersion() != null
+                && issue.getPlanConformanceAttempt() >= 1
+                && issue.getPlanConformanceAttempt() <= 2
+                && !issue.isPlanCorrectionPending()
+                && issue.getCurrentIteration() > 0;
+    }
+
+    private boolean isResumablePostImplementationCheckpoint(TrackedIssue issue) {
+        return issue.getApprovedPlanningVersion() != null
+                && issue.getPlanConformanceAttempt() >= 0
+                && issue.getPlanConformanceAttempt() <= 2
+                && !issue.isPlanCorrectionPending()
+                && issue.getCurrentIteration() > 0
+                && isPostImplementationPhase(issue.getCurrentPhase());
+    }
+
+    private Iteration currentIteration(TrackedIssue issue) {
+        return iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                        issue.getId(), issue.getCurrentIteration())
+                .orElse(null);
+    }
+
+    private boolean isPostImplementationPhase(String phase) {
+        return "LOCAL_CHECKS".equalsIgnoreCase(phase)
+                || "CI_VERIFICATION".equalsIgnoreCase(phase)
+                || "PR_CREATION".equalsIgnoreCase(phase)
+                || "INDEPENDENT_REVIEW".equalsIgnoreCase(phase)
+                || "COMPLETION".equalsIgnoreCase(phase);
+    }
+
+    private boolean isPersistedVerificationFailure(String phase, Iteration iteration) {
+        if (iteration.getCompletedAt() == null) {
+            return false;
+        }
+        return ("LOCAL_CHECKS".equalsIgnoreCase(phase)
+                && "FAILED".equalsIgnoreCase(iteration.getLocalCheckResult()))
+                || ("CI_VERIFICATION".equalsIgnoreCase(phase)
+                && ("FAILED".equalsIgnoreCase(iteration.getCiResult())
+                    || "ERROR".equalsIgnoreCase(iteration.getCiResult())));
+    }
+
+    private enum RecoveryAction {
+        NONE,
+        REQUEUE,
+        RESTORE_INTERRUPTED_IMPLEMENTATION,
+        RESTORE_UNEXECUTED_CORRECTION,
+        RESUME_POST_IMPLEMENTATION_CORRECTION,
+        AWAITING_PLAN_APPROVAL
     }
 }

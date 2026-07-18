@@ -68,6 +68,20 @@ public record CodeReviewResult(
     }
 
     /**
+     * Server-side conformance guard: high-severity spec/security findings and explicitly
+     * unmet acceptance criteria are blocking independently of model-supplied pass/fail text.
+     */
+    public boolean hasBlockingSpecFinding() {
+        boolean highSpec = findings != null && findings.stream().anyMatch(finding ->
+                "high".equalsIgnoreCase(finding.severity())
+                        && ("spec_compliance".equalsIgnoreCase(finding.category())
+                        || "security".equalsIgnoreCase(finding.category())));
+        boolean unmetCriterion = criteria != null && criteria.stream().anyMatch(criterion ->
+                "unmet".equalsIgnoreCase(criterion.verdict()));
+        return highSpec || unmetCriterion;
+    }
+
+    /**
      * Create a failed result for error cases (e.g. JSON parse failure).
      */
     public static CodeReviewResult failed(String reason, long inputTokens, long outputTokens, String model) {

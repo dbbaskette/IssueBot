@@ -1155,18 +1155,18 @@
     },
     ASSIST: {
       mode: 'APPROVAL_GATED', autoStart: true, autoMerge: false,
-      decompositionMode: 'PROPOSE', followUpMode: 'ROLLING_BACKLOG', planFirst: false
+      decompositionMode: 'PROPOSE', followUpMode: 'ROLLING_BACKLOG', planFirst: true
     },
     AUTONOMOUS: {
       mode: 'AUTONOMOUS', autoStart: true, autoMerge: true,
-      decompositionMode: 'AUTO', followUpMode: 'ROLLING_BACKLOG', planFirst: false
+      decompositionMode: 'AUTO', followUpMode: 'ROLLING_BACKLOG', planFirst: true
     }
   };
 
   var AUTONOMY_PRESET_DESCRIPTIONS = {
-    OBSERVE: 'Nothing happens without your approval — plans, splits, and merges all wait for you.',
-    ASSIST: 'IssueBot works automatically but PRs wait for your approval.',
-    AUTONOMOUS: 'Full autopilot — auto-start, auto-merge, automatic splitting.',
+    OBSERVE: 'Plans, splits, and merges wait for you.',
+    ASSIST: 'IssueBot plans first and works automatically after approval, but PRs wait for you.',
+    AUTONOMOUS: 'Plans wait for approval; after that, IssueBot auto-starts, splits, and merges.',
     CUSTOM: 'Your own combination of the advanced settings below.'
   };
 
@@ -1231,7 +1231,14 @@
         else { setValue(meta.id, preset[key]); }
       });
     }
+    syncPlanFirstSubmission();
     syncPresetUi(name, true);
+  }
+
+  function syncPlanFirstSubmission() {
+    var checkbox = document.getElementById('plan-first');
+    var optOut = document.getElementById('plan-first-opt-out');
+    if (checkbox && optOut) { optOut.disabled = checkbox.checked; }
   }
 
   // Stored allowedPaths is JSON (e.g. ["src/","test/"]); the form input is a
@@ -1304,7 +1311,7 @@
     setValue('decomposition-mode', ds.decompositionMode);
     setChecked('pre-screen-enabled', ds.preScreenEnabled);
     setChecked('plan-first', ds.planFirst);
-    setChecked('superpowers-methodology', ds.superpowersMethodology);
+    syncPlanFirstSubmission();
     setChecked('auto-merge', ds.autoMerge);
     setChecked('security-review', ds.securityReviewEnabled);
     setValue('allowed-paths', allowedPathsToInput(ds.allowedPaths));
@@ -1368,6 +1375,7 @@
       return;
     }
     if (AUTONOMY_FIELD_IDS.indexOf(e.target.id) !== -1) {
+      if (e.target.id === 'plan-first') { syncPlanFirstSubmission(); }
       syncPresetUi(derivePreset(), false);
     }
   });
@@ -1776,6 +1784,56 @@
     }
   });
 
+  // --- Plan Review desk ---------------------------------------------------
+  // Event delegation keeps tabs working after htmx replaces #content. Each
+  // review card owns its tab/panel state so a future page can safely host more
+  // than one review fragment without id/query leakage between them.
+  function activatePlanTab(tab, focusTab) {
+    var root = tab && tab.closest('[data-plan-review]');
+    if (!root) { return; }
+    var tabs = Array.prototype.slice.call(root.querySelectorAll('[data-plan-tab]'));
+    tabs.forEach(function (item) {
+      var selected = item === tab;
+      item.setAttribute('aria-selected', String(selected));
+      item.setAttribute('tabindex', selected ? '0' : '-1');
+      var panel = root.querySelector('#' + item.getAttribute('aria-controls'));
+      if (panel) { panel.hidden = !selected; }
+    });
+    if (focusTab) { tab.focus(); }
+  }
+
+  document.addEventListener('click', function (event) {
+    var tab = event.target.closest && event.target.closest('[data-plan-tab]');
+    if (tab) { activatePlanTab(tab, false); }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    var tab = event.target.closest && event.target.closest('[data-plan-tab]');
+    if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { return; }
+    var tabs = Array.prototype.slice.call(
+      tab.closest('[data-plan-review]').querySelectorAll('[data-plan-tab]')
+    );
+    var index = tabs.indexOf(tab);
+    if (event.key === 'Home') { index = 0; }
+    else if (event.key === 'End') { index = tabs.length - 1; }
+    else if (event.key === 'ArrowLeft') { index = (index - 1 + tabs.length) % tabs.length; }
+    else { index = (index + 1) % tabs.length; }
+    event.preventDefault();
+    activatePlanTab(tabs[index], true);
+  });
+
+  function syncPlanRevisionButton(textarea) {
+    var form = textarea && textarea.closest('.plan-revision-form');
+    var button = form && form.querySelector('[data-plan-revise]');
+    if (button) { button.disabled = textarea.value.trim().length === 0; }
+  }
+
+  document.addEventListener('input', function (event) {
+    if (event.target.matches && event.target.matches('[data-plan-revision-guidance]')) {
+      syncPlanRevisionButton(event.target);
+    }
+  });
+
   // --- Init ---------------------------------------------------------------
   function init() {
     syncThemeIcon();
@@ -1785,6 +1843,7 @@
     initCostCharts();
     updateBulkActionBar();
     UpdateStamps.markAllVisible();
+    document.querySelectorAll('[data-plan-revision-guidance]').forEach(syncPlanRevisionButton);
   }
 
   if (document.readyState === 'loading') {

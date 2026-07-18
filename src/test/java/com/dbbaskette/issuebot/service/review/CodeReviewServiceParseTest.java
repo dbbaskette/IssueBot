@@ -111,4 +111,117 @@ class CodeReviewServiceParseTest {
 
         assertThat(result.criteria()).isEmpty();
     }
+
+    @Test
+    void highSpecFindingBlocksEvenWhenModelSaysPassed() {
+        String json = """
+                {"passed": true, "summary": "ok",
+                 "specComplianceScore": 0.95, "correctnessScore": 0.95, "codeQualityScore": 0.95,
+                 "testCoverageScore": 0.95, "architectureFitScore": 0.95, "regressionsScore": 0.95,
+                 "securityScore": 1.0,
+                 "findings": [{"severity": "HIGH", "category": "SPEC_COMPLIANCE",
+                   "file": "src/Main.java", "line": 1, "finding": "Required plan step missing",
+                   "suggestion": "Implement it"}], "advice": ""}
+                """;
+
+        CodeReviewResult result = service.parseReviewResponse(resultWithOutput(json));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.hasBlockingSpecFinding()).isTrue();
+    }
+
+    @Test
+    void unmetCriterionBlocksEvenWhenModelSaysPassed() {
+        String json = """
+                {"passed": true, "summary": "ok",
+                 "specComplianceScore": 0.95, "correctnessScore": 0.95, "codeQualityScore": 0.95,
+                 "testCoverageScore": 0.95, "architectureFitScore": 0.95, "regressionsScore": 0.95,
+                 "securityScore": 1.0, "findings": [], "advice": "",
+                 "criteria": [{"text": "Required behavior", "verdict": "UNMET", "note": "Missing"}]}
+                """;
+
+        CodeReviewResult result = service.parseReviewResponse(resultWithOutput(json));
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.hasBlockingSpecFinding()).isTrue();
+    }
+
+    @Test
+    void serverPassesWhenAllSixCoreScoresMeetThresholdEvenWhenModelSaysFailed() {
+        String json = reviewJson(false, 0.80, 0.80, 0.80, 0.80, 0.80, 0.80, 0.10,
+                "[]", "[]");
+
+        CodeReviewResult result = service.parseReviewResponse(
+                resultWithOutput(json), 0.80, false);
+
+        assertThat(result.passed()).isTrue();
+        assertThat(result.rawJson()).contains("\"passed\":false");
+    }
+
+    @Test
+    void everyCoreScoreIsEnforcedServerSideAtConfiguredThreshold() {
+        double threshold = 0.75;
+        assertThat(service.parseReviewResponse(resultWithOutput(reviewJson(true,
+                0.74, 1, 1, 1, 1, 1, 1, "[]", "[]")), threshold, false).passed()).isFalse();
+        assertThat(service.parseReviewResponse(resultWithOutput(reviewJson(true,
+                1, 0.74, 1, 1, 1, 1, 1, "[]", "[]")), threshold, false).passed()).isFalse();
+        assertThat(service.parseReviewResponse(resultWithOutput(reviewJson(true,
+                1, 1, 0.74, 1, 1, 1, 1, "[]", "[]")), threshold, false).passed()).isFalse();
+        assertThat(service.parseReviewResponse(resultWithOutput(reviewJson(true,
+                1, 1, 1, 0.74, 1, 1, 1, "[]", "[]")), threshold, false).passed()).isFalse();
+        assertThat(service.parseReviewResponse(resultWithOutput(reviewJson(true,
+                1, 1, 1, 1, 0.74, 1, 1, "[]", "[]")), threshold, false).passed()).isFalse();
+        assertThat(service.parseReviewResponse(resultWithOutput(reviewJson(true,
+                1, 1, 1, 1, 1, 0.74, 1, "[]", "[]")), threshold, false).passed()).isFalse();
+    }
+
+    @Test
+    void securityScoreIsEnforcedOnlyWhenSecurityReviewIsEnabled() {
+        String json = reviewJson(true, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.2,
+                "[]", "[]");
+
+        assertThat(service.parseReviewResponse(resultWithOutput(json), 0.7, true).passed()).isFalse();
+        assertThat(service.parseReviewResponse(resultWithOutput(json), 0.7, false).passed()).isTrue();
+    }
+
+    @Test
+    void highSecurityFindingBlocksEvenWhenSecurityScoreAndModelSayPassed() {
+        String findings = """
+                [{"severity":"HIGH","category":"SECURITY","file":"src/Main.java",\
+                  "finding":"Credential exposure","suggestion":"Remove it"}]
+                """;
+        String json = reviewJson(true, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9,
+                findings, "[]");
+
+        CodeReviewResult result = service.parseReviewResponse(
+                resultWithOutput(json), 0.7, false);
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.hasBlockingSpecFinding()).isTrue();
+    }
+
+    @Test
+    void unmetCriterionBlocksServerVerdictRegardlessOfModelFlag() {
+        String criteria = """
+                [{"text":"Required behavior","verdict":"unmet","note":"Missing"}]
+                """;
+        String json = reviewJson(true, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 1.0,
+                "[]", criteria);
+
+        assertThat(service.parseReviewResponse(
+                resultWithOutput(json), 0.7, false).passed()).isFalse();
+    }
+
+    private String reviewJson(boolean modelPassed,
+                              double spec, double correctness, double quality,
+                              double tests, double architecture, double regressions,
+                              double security, String findings, String criteria) {
+        return """
+                {"passed":%s,"summary":"reviewed",\
+                 "specComplianceScore":%s,"correctnessScore":%s,"codeQualityScore":%s,\
+                 "testCoverageScore":%s,"architectureFitScore":%s,"regressionsScore":%s,\
+                 "securityScore":%s,"findings":%s,"criteria":%s,"advice":""}
+                """.formatted(modelPassed, spec, correctness, quality, tests, architecture,
+                regressions, security, findings, criteria);
+    }
 }

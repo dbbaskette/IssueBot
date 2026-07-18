@@ -13,6 +13,7 @@ import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -107,9 +108,9 @@ public class ClaudeCodeService {
             return codexCliService.executePlanning(prompt, workingDirectory, model, issueId, lineCallback);
         }
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, model,
-                config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
-                null, null, issueId, lineCallback);
+        return executeCommand(buildPlanningCommand(prompt, model, config.getMaxTurnsPerInvocation()),
+                prompt, workingDirectory, model, config.getMaxTurnsPerInvocation(),
+                config.getTimeoutMinutes(), null, issueId, lineCallback, true);
     }
 
     /**
@@ -120,14 +121,25 @@ public class ClaudeCodeService {
                                          String model, int maxTurns, int timeoutMinutes,
                                          String systemPrompt, String resumeSessionId,
                                          Long issueId, Consumer<String> lineCallback) {
-        List<String> command = buildCommand(prompt, model, maxTurns, systemPrompt, resumeSessionId);
+        return executeCommand(buildCommand(prompt, model, maxTurns, systemPrompt, resumeSessionId),
+                prompt, workingDirectory, model, maxTurns, timeoutMinutes, resumeSessionId,
+                issueId, lineCallback, false);
+    }
+
+    private ClaudeCodeResult executeCommand(List<String> command, String prompt,
+                                             Path workingDirectory, String model,
+                                             int maxTurns, int timeoutMinutes,
+                                             String resumeSessionId, Long issueId,
+                                             Consumer<String> lineCallback,
+                                             boolean planningMode) {
 
         log.info("Executing Claude Code in {}: model={}, maxTurns={}, timeout={}min, resume={}",
                 workingDirectory, model, maxTurns, timeoutMinutes,
                 (resumeSessionId != null && !resumeSessionId.isBlank()) ? resumeSessionId : "(none)");
-        log.info("Command: claude -p <prompt> --output-format stream-json --max-turns {} --model {}{} --verbose --dangerously-skip-permissions",
+        log.info("Command: claude -p <prompt> --output-format stream-json --max-turns {} --model {}{} --verbose ({})",
                 maxTurns, model,
-                (resumeSessionId != null && !resumeSessionId.isBlank()) ? " --resume " + resumeSessionId : "");
+                (resumeSessionId != null && !resumeSessionId.isBlank()) ? " --resume " + resumeSessionId : "",
+                planningMode ? "read-only planning tools" : "implementation permissions");
         log.info("Prompt length: {} chars, first 200: {}", prompt.length(),
                 prompt.substring(0, Math.min(200, prompt.length())));
 
@@ -137,6 +149,9 @@ public class ClaudeCodeService {
             pb.directory(workingDirectory.toFile());
             pb.redirectErrorStream(false);
             stripNestedSessionEnv(pb);
+            if (planningMode) {
+                sanitizePlanningEnvironment(pb.environment());
+            }
 
             Process process = pb.start();
             if (issueId != null) cancellationService.registerProcess(issueId, process);
@@ -243,6 +258,42 @@ public class ClaudeCodeService {
             return failedResult(System.currentTimeMillis() - startTime,
                     "Claude Code execution interrupted");
         }
+    }
+
+    /**
+     * Claude planning keeps subscription/keychain authentication available while disabling every
+     * shell or mutation tool. Safe mode also prevents repository hooks/plugins from running code.
+     */
+    List<String> buildPlanningCommand(String prompt, String model, int maxTurns) {
+        List<String> command = new ArrayList<>();
+        command.add("claude");
+        command.add("-p");
+        command.add(prompt);
+        command.add("--output-format");
+        command.add("stream-json");
+        command.add("--max-turns");
+        command.add(String.valueOf(maxTurns));
+        command.add("--model");
+        command.add(model);
+        command.add("--verbose");
+        command.add("--permission-mode");
+        command.add("plan");
+        command.add("--tools");
+        command.add("Read,Glob,Grep");
+        command.add("--safe-mode");
+        command.add("--no-session-persistence");
+        return command;
+    }
+
+    static void sanitizePlanningEnvironment(Map<String, String> environment) {
+        for (String name : List.of(
+                "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                "GIT_ASKPASS", "SSH_ASKPASS", "SSH_AUTH_SOCK")) {
+            environment.remove(name);
+        }
+        environment.put("GIT_CONFIG_GLOBAL", "/dev/null");
+        environment.put("GIT_CONFIG_NOSYSTEM", "1");
+        environment.put("GIT_TERMINAL_PROMPT", "0");
     }
 
     /**

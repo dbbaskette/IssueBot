@@ -98,6 +98,59 @@ class IssuePollingServiceTest {
     }
 
     @Test
+    void awaitingPlanApprovalBlocksSecondIssueInSameRepository() {
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 43)).thenReturn(Optional.empty());
+        TrackedIssue planning = new TrackedIssue(testRepo, 42, "Awaiting plan");
+        planning.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList()))
+                .thenReturn(List.of(planning));
+        when(dependencyResolver.resolve(any(), anyInt())).thenReturn(
+                new com.dbbaskette.issuebot.service.dependency.DependencyResolverService.DependencyResult(
+                        List.of(), List.of(), "", false));
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("number", 43);
+        node.put("title", "Must wait for planning");
+
+        WebhookOutcome outcome = pollingService.evaluateIssue(testRepo, node);
+
+        assertEquals(WebhookOutcome.QUEUED, outcome);
+        verify(workflowService, never()).processIssueAsync(any());
+        verify(issueRepository).findByRepoAndStatusIn(eq(testRepo), argThat(statuses ->
+                statuses.contains(IssueStatus.AWAITING_PLAN_APPROVAL)));
+    }
+
+    @Test
+    void newDiscoveryDispatchesOnlyTheFreshClaimedEntity() {
+        IssueDispatchService dispatch = mock(IssueDispatchService.class);
+        IssuePollingService service = new IssuePollingService(
+                gitHubApiClient, repoRepository, issueRepository,
+                mock(EventService.class), mock(NotificationService.class), workflowService,
+                properties, dependencyResolver, processingControl, dispatch);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 44)).thenReturn(Optional.empty());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList())).thenReturn(List.of());
+        when(issueRepository.save(any(TrackedIssue.class))).thenAnswer(invocation -> {
+            TrackedIssue value = invocation.getArgument(0);
+            value.setId(44L);
+            return value;
+        });
+        when(dependencyResolver.resolve(any(), anyInt())).thenReturn(
+                new com.dbbaskette.issuebot.service.dependency.DependencyResolverService.DependencyResult(
+                        List.of(), List.of(), "", false));
+        TrackedIssue authoritative = new TrackedIssue(testRepo, 44, "Authoritative");
+        authoritative.setId(44L);
+        authoritative.setStatus(IssueStatus.IN_PROGRESS);
+        when(dispatch.claimStart(any(TrackedIssue.class))).thenReturn(
+                new IssueDispatchService.ClaimResult(true, null, authoritative));
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("number", 44);
+        node.put("title", "Discovered copy");
+
+        assertEquals(WebhookOutcome.STARTED, service.evaluateIssue(testRepo, node));
+
+        verify(workflowService).processIssueAsync(same(authoritative));
+    }
+
+    @Test
     void qualifiesForProcessing_inProgressIssue() {
         TrackedIssue tracked = new TrackedIssue(testRepo, 1, "Test");
         tracked.setStatus(IssueStatus.IN_PROGRESS);
@@ -359,9 +412,10 @@ class IssuePollingServiceTest {
 
         assertEquals(WebhookOutcome.STARTED, outcome);
         ArgumentCaptor<TrackedIssue> captor = ArgumentCaptor.forClass(TrackedIssue.class);
-        verify(issueRepository).save(captor.capture());
-        assertEquals(IssueStatus.IN_PROGRESS, captor.getValue().getStatus());
-        verify(workflowService).processIssueAsync(captor.getValue());
+        verify(issueRepository, times(2)).save(captor.capture());
+        TrackedIssue claimed = captor.getAllValues().getLast();
+        assertEquals(IssueStatus.IN_PROGRESS, claimed.getStatus());
+        verify(workflowService).processIssueAsync(claimed);
     }
 
     @Test

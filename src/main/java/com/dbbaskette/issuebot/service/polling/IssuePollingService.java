@@ -200,7 +200,8 @@ public class IssuePollingService {
         if (pending.isEmpty()) return;
 
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
         if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
             log.debug("{} has active work — {} pending issue(s) will wait", repo.fullName(), pending.size());
             return;
@@ -219,7 +220,7 @@ public class IssuePollingService {
         if (!claim.claimed()) return;
         eventService.log("ISSUE_RESUMED",
                 "Resuming pending issue #" + next.getIssueNumber(), repo, next);
-        workflowService.processIssueAsync(next);
+        workflowService.processIssueAsync(claim.issue());
     }
 
     /**
@@ -238,7 +239,8 @@ public class IssuePollingService {
         }
 
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
         if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
             log.debug("{} has active issue or open IssueBot PR — {} issue(s) remain queued",
                     repo.fullName(), queued.size());
@@ -266,7 +268,7 @@ public class IssuePollingService {
         notificationService.info("Issue Dequeued",
                 repo.fullName() + " #" + next.getIssueNumber() + " — gate cleared, starting work", next);
 
-        workflowService.processIssueAsync(next);
+        workflowService.processIssueAsync(claim.issue());
     }
 
     /**
@@ -354,7 +356,8 @@ public class IssuePollingService {
 
         // Per-repo serialization: queue if another issue is active or an IssueBot PR is open
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
         if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
             tracked.setStatus(IssueStatus.QUEUED);
             issueRepository.save(tracked);
@@ -380,11 +383,17 @@ public class IssuePollingService {
             return WebhookOutcome.QUEUED;
         }
 
-        // Set IN_PROGRESS before saving so the per-repo gate sees it
-        // immediately (prevents race where multiple issues for the same
-        // repo slip through in the same polling cycle).
-        tracked.setStatus(IssueStatus.IN_PROGRESS);
-        issueRepository.save(tracked);
+        // Persist discovery as non-runnable, then use the same authoritative transactional
+        // claim path as manual starts and queue draining.
+        tracked.setStatus(IssueStatus.QUEUED);
+        TrackedIssue persistedDiscovery = issueRepository.save(tracked);
+        if (persistedDiscovery != null) tracked = persistedDiscovery;
+
+        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(tracked);
+        if (!claim.claimed()) {
+            return WebhookOutcome.QUEUED;
+        }
+        tracked = claim.issue();
 
         eventService.log("ISSUE_DETECTED",
                 "Detected agent-ready issue #" + issueNumber + ": " + title,

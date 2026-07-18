@@ -5,13 +5,33 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 
 public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long> {
+
+    /** Fresh dispatch read with successful-path associations initialized for OSIV-off callers. */
+    @EntityGraph(attributePaths = {"approvedPlanningVersion", "repo"})
+    @Query("SELECT t FROM TrackedIssue t WHERE t.id = :id")
+    Optional<TrackedIssue> findByIdWithApprovedPlanningVersion(@Param("id") Long id);
+
+    /** Authoritative dispatch read: locks the row and eagerly initializes OSIV-off context. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"approvedPlanningVersion", "repo"})
+    @Query("SELECT t FROM TrackedIssue t WHERE t.id = :id")
+    Optional<TrackedIssue> findByIdForDispatch(@Param("id") Long id);
+
+    /** Fresh lifecycle row for atomic Plan First generation, approval, and revision writes. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"approvedPlanningVersion", "repo"})
+    @Query("SELECT t FROM TrackedIssue t WHERE t.id = :id")
+    Optional<TrackedIssue> findByIdForPlanning(@Param("id") Long id);
 
     Optional<TrackedIssue> findByRepoAndIssueNumber(WatchedRepo repo, int issueNumber);
 

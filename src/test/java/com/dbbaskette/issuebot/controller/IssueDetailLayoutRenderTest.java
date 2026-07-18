@@ -247,14 +247,15 @@ class IssueDetailLayoutRenderTest {
     }
 
     @Test
-    void approvalCard_rendersMarkdownAndButtons_whenAwaitingPlanApproval() {
+    void legacyCombinedPlanIsReadOnlyEvenWhenAwaitingPlanApproval() {
         WebContext ctx = baseContext(issue(11L, 11, IssueStatus.AWAITING_PLAN_APPROVAL), List.of());
         ctx.setVariable("planHtml", "<p>the plan</p>");
         String html = render(ctx, "content");
 
-        assertThat(html).contains("Proposed Plan");
-        assertThat(html).contains("Approve plan");
+        assertThat(html).contains("Design &amp; Implementation Plan");
         assertThat(html).contains("<p>the plan</p>");
+        assertThat(html).doesNotContain("Approve plan");
+        assertThat(html).doesNotContain("plan-review-actions");
     }
 
     @Test

@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueGuidance;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
@@ -78,6 +80,7 @@ public class IssueController {
     private final NotificationRepository notificationRepository;
     private final MarkdownRenderer markdownRenderer;
     private final IssueDispatchService dispatchService;
+    private final PlanningVersionRepository planningVersionRepository;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -103,7 +106,8 @@ public class IssueController {
                             TimelineAssembler timelineAssembler,
                             NotificationRepository notificationRepository,
                             MarkdownRenderer markdownRenderer,
-                            IssueDispatchService dispatchService) {
+                            IssueDispatchService dispatchService,
+                            PlanningVersionRepository planningVersionRepository) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -123,6 +127,7 @@ public class IssueController {
         this.notificationRepository = notificationRepository;
         this.markdownRenderer = markdownRenderer;
         this.dispatchService = dispatchService;
+        this.planningVersionRepository = planningVersionRepository;
     }
 
     @GetMapping
@@ -201,6 +206,7 @@ public class IssueController {
 
     @GetMapping("/{id}")
     public String detail(Model model, @PathVariable Long id,
+                         @RequestParam(required = false) String planVersion,
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         // URL-reachable (a clicked or bookmarked link) — a missing id is a routine "the repo
         // was removed" occurrence, not a server error, so it gets a friendly 404 (#81) rather
@@ -208,9 +214,20 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow(() -> new NotFoundException(
                 "Issue not found — it may have been removed with its repository.",
                 "/issues", "Back to the queue"));
-        populateDetailModel(model, issue, id);
+        populateDetailModel(model, issue, id, parseRequestedPlanVersion(planVersion));
         model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
+    }
+
+    private static Integer parseRequestedPlanVersion(String planVersion) {
+        if (planVersion == null || planVersion.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(planVersion.strip());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private List<?> selectedModelCatalog() {
@@ -228,7 +245,7 @@ public class IssueController {
     @GetMapping("/{id}/live-status")
     public String liveStatus(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
-        populateDetailModel(model, issue, id);
+        populateDetailModel(model, issue, id, null);
         // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
         // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
         return "issue-detail :: live-status-poll";
@@ -303,6 +320,9 @@ public class IssueController {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return "Cannot retry issue in " + issue.getStatus() + " status";
         }
+        if (issue.effectivePlanFirst() && issue.getPlanConformanceAttempt() == 2) {
+            return "The second Plan First conformance miss requires the guided implementation retry";
+        }
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
                 && issue.getResolvedAgentProvider() != properties.getAgentProvider()) {
             String previousProvider = issue.getResolvedAgentProvider() == null
@@ -327,37 +347,35 @@ public class IssueController {
         List<JsonNode> remainingPRs = closeStaleIssueBotPrs(issue, openPRs);
 
         // Enforce the same gating as the polling service (using filtered list)
-        String gateReason = checkGate(issue, remainingPRs);
-        if (gateReason != null) {
-            return gateReason;
-        }
-
-        issue.setCurrentIteration(0);
-        issue.setCurrentReviewIteration(0);
-        issue.setCurrentPhase(null);
-        issue.setCooldownUntil(null);
-        issue.setImplModelOverride(normalize(implModelOverride));
-        issue.setReviewModelOverride(normalize(reviewModelOverride));
-        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
         Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
-        issue.setPlanFirstOverride(planOverride);
-        // Explicitly selecting "Require" on a retry demands a fresh, full plan cycle —
-        // planApproved is never reset elsewhere, so without this a previously approved
-        // plan would silently skip the gate. Inherit/Skip leave the plan state as-is
-        // (a plain retry of an already-approved issue keeps its approved plan).
-        if (Boolean.TRUE.equals(planOverride)) {
-            issue.setPlanApproved(false);
-            issue.setImplementationPlan(null);
-            issue.setPlanFeedback(null);
-            issue.setPlanRejections(0);
-        }
-        // Manual retry defaults to a fresh Claude session; the operator must explicitly
-        // opt in via the "Continue previous session" checkbox to keep it (issue #67).
-        if (!continueSession) {
-            issue.setClaudeSessionId(null);
-        }
-        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(issue.getId());
+        IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(
+                issue.getId(), candidate -> checkGate(candidate, remainingPRs), candidate -> {
+                    candidate.setCurrentIteration(0);
+                    candidate.setCurrentReviewIteration(0);
+                    candidate.setCurrentPhase(null);
+                    candidate.setCooldownUntil(null);
+                    candidate.setImplModelOverride(normalize(implModelOverride));
+                    candidate.setReviewModelOverride(normalize(reviewModelOverride));
+                    candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+                    candidate.setPlanFirstOverride(planOverride);
+                    if (Boolean.TRUE.equals(planOverride)) {
+                        PlanningVersion approved = candidate.getApprovedPlanningVersion();
+                        if (approved != null) {
+                            approved.supersedeForFreshCycle();
+                            planningVersionRepository.save(approved);
+                            candidate.setApprovedPlanningVersion(null);
+                        }
+                        candidate.setPlanApproved(false);
+                        candidate.setImplementationPlan(null);
+                        candidate.setPlanFeedback(null);
+                        candidate.setPlanRejections(0);
+                        candidate.setPlanConformanceAttempt(0);
+                        candidate.setPlanCorrectionPending(false);
+                    }
+                    if (!continueSession) candidate.setClaudeSessionId(null);
+                });
         if (!claim.claimed()) return claim.reason();
+        issue = claim.issue();
 
         String trimmedInstructions = (instructions != null && !instructions.isBlank())
                 ? instructions.trim() : null;
@@ -416,13 +434,16 @@ public class IssueController {
             return gateReason;
         }
 
-        issue.setCurrentPhase(null);
-        issue.setImplModelOverride(normalize(implModelOverride));
-        issue.setReviewModelOverride(normalize(reviewModelOverride));
-        issue.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
-        issue.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
-        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(issue.getId());
+        Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
+        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(issue.getId(), candidate -> {
+            candidate.setCurrentPhase(null);
+            candidate.setImplModelOverride(normalize(implModelOverride));
+            candidate.setReviewModelOverride(normalize(reviewModelOverride));
+            candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+            candidate.setPlanFirstOverride(planOverride);
+        });
         if (!claim.claimed()) return claim.reason();
+        issue = claim.issue();
 
         eventService.log("MANUAL_START",
                 "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
@@ -721,75 +742,118 @@ public class IssueController {
 
     @PostMapping("/{id}/plan/approve")
     public String approvePlan(@PathVariable Long id,
-                              @RequestParam(required = false) String returnTo,
+                              @RequestParam Long versionId,
                               RedirectAttributes redirectAttributes) {
-        TrackedIssue issue = issueRepository.findById(id).orElse(null);
-        if (issue == null) {
-            redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
-        }
-
-        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot approve plan for issue in " + issue.getStatus() + " status");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
-        }
-
         try {
-            planFirstService.approvePlan(issue);
+            planFirstService.approvePlan(id, versionId);
         } catch (Exception e) {
             log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+            return planReviewRedirect(id);
         }
 
         redirectAttributes.addFlashAttribute("success",
                 "Plan approved — queued, implementation resumes on the next poll cycle (~60s)");
-        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+        return planReviewRedirect(id);
     }
 
-    @PostMapping("/{id}/plan/reject")
-    public String rejectPlan(@PathVariable Long id,
+    @PostMapping("/{id}/plan/revise")
+    public String revisePlan(@PathVariable Long id,
+                             @RequestParam Long versionId,
                              @RequestParam(required = false) String feedback,
-                             @RequestParam(required = false) String returnTo,
                              RedirectAttributes redirectAttributes) {
-        TrackedIssue issue = issueRepository.findById(id).orElse(null);
-        if (issue == null) {
-            redirectAttributes.addFlashAttribute("error", "Issue not found");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues");
-        }
-
-        if (issue.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) {
-            redirectAttributes.addFlashAttribute("error",
-                    "Cannot reject plan for issue in " + issue.getStatus() + " status");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
-        }
-
         if (feedback == null || feedback.isBlank()) {
             redirectAttributes.addFlashAttribute("error",
-                    "Feedback is required when rejecting a plan — it drives the next plan");
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+                    "Revision guidance is required — it drives the next planning version");
+            return planReviewRedirect(id);
+        }
+        String revisionGuidance = feedback.strip();
+        if (revisionGuidance.length() > 4000) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Revision guidance must be 4,000 characters or fewer");
+            return planReviewRedirect(id);
         }
 
-        // Branch on the service's returned outcome — the service mutates a fresh
-        // re-read copy of the issue, so this controller's entity is stale after the call.
-        PlanFirstService.RejectOutcome outcome;
         try {
-            outcome = planFirstService.rejectPlan(issue, feedback.trim());
+            planFirstService.requestRevision(id, versionId, revisionGuidance);
         } catch (Exception e) {
-            log.warn("Failed to reject plan for issue {}: {}", id, e.getMessage());
+            log.warn("Failed to revise plan for issue {}: {}", id, e.getMessage());
             redirectAttributes.addFlashAttribute("error", e.getMessage());
-            return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+            return planReviewRedirect(id);
         }
 
-        if (outcome == PlanFirstService.RejectOutcome.ESCALATED) {
-            redirectAttributes.addFlashAttribute("success",
-                    "Plan rejected twice — issue escalated to needs-human");
-        } else {
-            redirectAttributes.addFlashAttribute("success",
-                    "Plan rejected — a new plan is queued and regenerates on the next poll cycle (~60s)");
+        redirectAttributes.addFlashAttribute("success",
+                "Plan revision requested — a new version regenerates on the next poll cycle (~60s)");
+        return planReviewRedirect(id);
+    }
+
+    @PostMapping("/{id}/plan/retry-implementation")
+    public String retryPlanImplementation(@PathVariable Long id,
+                                          @RequestParam(required = false) String guidance,
+                                          RedirectAttributes redirectAttributes) {
+        if (guidance == null || guidance.isBlank()) {
+            redirectAttributes.addFlashAttribute("error", "Guidance is required to retry implementation");
+            return planReviewRedirect(id);
         }
-        return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
+
+        String text = guidance.trim();
+        if (text.length() > 4000) {
+            text = text.substring(0, 4000);
+        }
+
+        IssueDispatchService.ClaimResult claim = dispatchService.claimGuidedRetry(
+                id, text, properties.getMaxConcurrentIssues());
+        if (!claim.claimed()) {
+            redirectAttributes.addFlashAttribute("error", claim.reason());
+            return planReviewRedirect(id);
+        }
+
+        TrackedIssue issue = claim.issue();
+        int versionNumber = issue.getApprovedPlanningVersion().getVersionNumber();
+        eventService.log("PLAN_IMPLEMENTATION_RETRY",
+                "Retrying implementation against unchanged approved Plan v" + versionNumber
+                        + " with operator guidance",
+                issue.getRepo(), issue);
+
+        try {
+            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
+                    issue.getIssueNumber(),
+                    "**IssueBot guided implementation retry (approved Plan v" + versionNumber
+                            + " unchanged):** " + text);
+        } catch (Exception e) {
+            log.warn("Failed to post guided retry comment on #{}: {}",
+                    issue.getIssueNumber(), e.getMessage());
+        }
+
+        // The guidance row committed with the claim is the single source of truth. The workflow
+        // consumes it only when the exact implementation context is durably checkpointed.
+        workflowService.processIssueAsync(issue);
+        redirectAttributes.addFlashAttribute("success",
+                "Implementation retry started against unchanged approved Plan v" + versionNumber);
+        return planReviewRedirect(id);
+    }
+
+    private static boolean eligibleForPlanImplementationRetry(TrackedIssue issue) {
+        return issue.getPlanConformanceAttempt() == 2
+                && issue.getApprovedPlanningVersion() != null
+                && issue.getApprovedPlanningVersion().getState() == PlanningVersionState.APPROVED;
+    }
+
+    private String planImplementationRetryRejection(TrackedIssue issue) {
+        if (!eligibleForPlanImplementationRetry(issue)) {
+            return "Guided retry is only available after the second Plan First conformance miss "
+                    + "with an approved non-legacy planning version";
+        }
+        long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
+        if (activeCount >= properties.getMaxConcurrentIssues()) {
+            return "Global concurrency limit reached (" + activeCount + "/"
+                    + properties.getMaxConcurrentIssues() + "). Wait for an active issue to finish.";
+        }
+        return null;
+    }
+
+    private static String planReviewRedirect(Long id) {
+        return "redirect:/issues/" + id + "#plan-review";
     }
 
     private static String normalize(String s) {
@@ -856,7 +920,8 @@ public class IssueController {
         // Per-repo gate: no two issues in-flight for the same repo
         WatchedRepo repo = issue.getRepo();
         boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL)).isEmpty();
+                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
         if (repoHasActiveIssue) {
             return repo.fullName() + " already has an active issue. Wait for it to complete.";
         }
@@ -905,7 +970,7 @@ public class IssueController {
         return remaining;
     }
 
-    private void populateDetailModel(Model model, TrackedIssue issue, Long id) {
+    private void populateDetailModel(Model model, TrackedIssue issue, Long id, Integer requestedPlanVersion) {
         List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
@@ -927,6 +992,7 @@ public class IssueController {
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
         // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
         model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));
+        populatePlanReviewModel(model, issue, iterations, requestedPlanVersion);
         model.addAttribute("iterations", iterations);
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         // Iteration History (#90) reads newest-first; "iterations" above stays ascending
@@ -953,6 +1019,41 @@ public class IssueController {
                 model.addAttribute("decompositionProposal", proposal);
             }
         }
+    }
+
+    private void populatePlanReviewModel(Model model, TrackedIssue issue,
+                                         List<Iteration> iterations,
+                                         Integer requestedPlanVersion) {
+        List<PlanningVersion> versions = planningVersionRepository
+                .findByIssueIdOrderByVersionNumberDesc(issue.getId());
+        PlanningVersion current = versions.isEmpty() ? null : versions.getFirst();
+        PlanningVersion selected = current;
+        if (requestedPlanVersion != null) {
+            selected = versions.stream()
+                    .filter(version -> version.getVersionNumber() == requestedPlanVersion)
+                    .findFirst()
+                    .orElse(current);
+        }
+
+        boolean historical = selected != null && current != null
+                && selected.getVersionNumber() != current.getVersionNumber();
+        List<Iteration> reviewAttempts = issue.getPlanConformanceAttempt() == 2
+                ? iterations.reversed().stream()
+                    .filter(iteration -> iteration.getReviewPassed() != null
+                            || iteration.getReviewJson() != null)
+                    .limit(2)
+                    .toList()
+                : List.of();
+
+        model.addAttribute("planningVersions", versions);
+        model.addAttribute("selectedPlanningVersion", selected);
+        model.addAttribute("currentPlanningVersion", current);
+        model.addAttribute("selectedPlanIsHistorical", historical);
+        model.addAttribute("selectedDesignSpecHtml", selected == null
+                ? null : markdownRenderer.toHtml(selected.getDesignSpec()));
+        model.addAttribute("selectedImplementationPlanHtml", selected == null
+                ? null : markdownRenderer.toHtml(selected.getImplementationPlan()));
+        model.addAttribute("planReviewAttempts", reviewAttempts);
     }
 
     /**

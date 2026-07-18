@@ -1,10 +1,13 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
+import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -20,6 +23,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -31,7 +35,13 @@ import static org.mockito.Mockito.when;
 class InboxControllerTest {
 
     private static InboxController controller(TrackedIssueRepository issues, NotificationRepository notifications) {
-        return new InboxController(issues, mock(IssuePollingService.class), notifications,
+        return controller(issues, notifications, mock(PlanningVersionRepository.class));
+    }
+
+    private static InboxController controller(TrackedIssueRepository issues,
+                                              NotificationRepository notifications,
+                                              PlanningVersionRepository planningVersions) {
+        return new InboxController(issues, planningVersions, mock(IssuePollingService.class), notifications,
                 new ApprovalCardAssembler(mock(IterationRepository.class), mock(GitHubApiClient.class)),
                 new ObjectMapper());
     }
@@ -138,49 +148,39 @@ class InboxControllerTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    void planExcerptAndTruncationFlagAreComputedPerIssue() {
+    void pendingPlanVersionsAreLoadedOnceAndKeyedByIssueId() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
 
-        TrackedIssue shortPlan = new TrackedIssue(repo(), 1, "Short plan");
-        shortPlan.setId(1L);
-        shortPlan.setImplementationPlan("Step 1\nStep 2");
+        TrackedIssue first = new TrackedIssue(repo(), 1, "First plan");
+        first.setId(1L);
 
-        TrackedIssue longPlan = new TrackedIssue(repo(), 2, "Long plan");
-        longPlan.setId(2L);
-        String elevenLines = "line\n".repeat(11);
-        longPlan.setImplementationPlan(elevenLines);
+        TrackedIssue second = new TrackedIssue(repo(), 2, "Second plan");
+        second.setId(2L);
+
+        PlanningVersion firstVersion = PlanningVersion.pending(
+                first, 2, "spec 2", "plan 2", "CODEX", "gpt-5.6-sol", null);
+        PlanningVersion secondVersion = PlanningVersion.pending(
+                second, 3, "spec 3", "plan 3", "CLAUDE", "claude-sonnet-5", null);
 
         when(issues.findByStatusOrderByIdDesc(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL))
-                .thenReturn(List.of(shortPlan, longPlan));
+                .thenReturn(List.of(first, second));
         when(issues.findByStatusInOrderByIdDesc(org.mockito.ArgumentMatchers.any())).thenReturn(List.of());
+        when(versions.findByIssueIdInAndState(List.of(1L, 2L), PlanningVersionState.PENDING))
+                .thenReturn(List.of(firstVersion, secondVersion));
 
         Model model = new ExtendedModelMap();
-        controller(issues, mock(NotificationRepository.class)).inbox(model, null);
+        controller(issues, mock(NotificationRepository.class), versions).inbox(model, null);
 
-        Map<Long, String> excerpts = (Map<Long, String>) model.getAttribute("planExcerpts");
-        Map<Long, Boolean> truncated = (Map<Long, Boolean>) model.getAttribute("planTruncated");
+        Map<Long, PlanningVersion> pending =
+                (Map<Long, PlanningVersion>) model.getAttribute("planVersions");
+        Map<Long, String> ages = (Map<Long, String>) model.getAttribute("planAges");
 
-        assertThat(excerpts.get(1L)).isEqualTo("Step 1\nStep 2");
-        assertThat(truncated.get(1L)).isFalse();
-
-        // 11 "line" entries (plus the trailing empty split segment) clipped to the first 10.
-        assertThat(excerpts.get(2L)).isEqualTo(String.join("\n", java.util.Collections.nCopies(10, "line")));
-        assertThat(truncated.get(2L)).isTrue();
-    }
-
-    @Test
-    void planExcerpt_capsAtTenLinesOrEightHundredChars() {
-        String elevenLines = String.join("\n", java.util.Collections.nCopies(11, "x"));
-        String excerpt = InboxController.planExcerpt(elevenLines);
-        assertThat(excerpt.split("\n", -1)).hasSize(10);
-
-        String oneLongLine = "y".repeat(1000);
-        String charExcerpt = InboxController.planExcerpt(oneLongLine);
-        assertThat(charExcerpt).hasSize(800);
-
-        assertThat(InboxController.planExcerpt(null)).isEmpty();
-        assertThat(InboxController.planExcerpt("short")).isEqualTo("short");
+        assertThat(pending).containsExactlyInAnyOrderEntriesOf(
+                Map.of(1L, firstVersion, 2L, secondVersion));
+        assertThat(ages).containsKeys(1L, 2L);
+        verify(versions).findByIssueIdInAndState(List.of(1L, 2L), PlanningVersionState.PENDING);
     }
 
     @SuppressWarnings("unchecked")

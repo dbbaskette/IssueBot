@@ -35,7 +35,7 @@
                             <option value="AUTONOMOUS">Autonomous</option>
                             <option value="CUSTOM">Custom</option>
                         </select>
-                        <p class="text-muted" id="preset-description">IssueBot works automatically but PRs wait for your approval.</p>
+                        <p class="text-muted" id="preset-description">IssueBot plans first and works automatically after approval, but PRs wait for you.</p>
                     </div>
                 </div>
 
@@ -126,13 +126,13 @@
                             <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
                             <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
                         </div>
-                        <div class="checkbox-field">
-                            <input type="checkbox" id="plan-first" name="planFirst" value="true">
-                            <label for="plan-first">Plan first — approve a plan before implementation</label>
-                        </div>
-                        <div class="checkbox-field">
-                            <input type="checkbox" id="superpowers-methodology" name="superpowersMethodology" value="true">
-                            <label for="superpowers-methodology">Superpowers methodology — auto design + plan, then implement test-first (no approval gate)</label>
+                        <div class="field-group full-width">
+                            <div class="checkbox-field" style="padding-bottom:0">
+                                <input type="checkbox" id="plan-first" name="planFirst" value="true" checked>
+                                <label for="plan-first">Plan First (recommended)</label>
+                            </div>
+                            <input type="hidden" id="plan-first-opt-out" name="planFirst" value="false" disabled>
+                            <p class="text-sm text-muted">Creates a design spec and implementation plan for approval before code changes. Turn this off to skip that approval contract.</p>
                         </div>
                     </div>
 
@@ -268,7 +268,6 @@
                                              data-decomposition-mode=${repo.decompositionMode.name()},
                                              data-pre-screen-enabled=${repo.preScreenEnabled},
                                              data-plan-first=${repo.planFirst},
-                                             data-superpowers-methodology=${repo.superpowersMethodology},
                                              data-allowed-paths=${repo.allowedPaths},
                                              data-verification-commands=${repo.verificationCommands},
                                              data-implementation-model=${repo.implementationModel},

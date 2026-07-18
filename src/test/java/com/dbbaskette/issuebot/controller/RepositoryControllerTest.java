@@ -33,7 +33,8 @@ class RepositoryControllerTest {
                     issues, mock(IterationRepository.class),
                     mock(CostTrackingRepository.class), mock(EventRepository.class),
                     lessons,
-                    mock(IssuePollingService.class), mock(NotificationRepository.class));
+                    mock(IssuePollingService.class), mock(NotificationRepository.class),
+                    mock(PlanningVersionRepository.class));
         }
 
         WatchedRepo addOrUpdate(String implementationModel, String reviewModel) {
@@ -87,7 +88,7 @@ class RepositoryControllerTest {
                     5, false, 15, false, false, 2, reviewPassThreshold, true, true, null,
                     verificationCommands,
                     implementationModel, reviewModel,
-                    followUpMode, decompositionMode, preScreenEnabled, planFirst, false, issueBudgetUsd,
+                    followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd,
                     customInstructions, lessonsEnabled, null);
             ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
             verify(repos).save(captor.capture());
@@ -184,9 +185,7 @@ class RepositoryControllerTest {
     }
 
     @Test
-    void addOrUpdateDefaultsPlanFirstToFalse() {
-        // Unchecked checkbox posts nothing; @RequestParam(defaultValue = "false") applies —
-        // same binding pattern as preScreenEnabled/autoMerge.
+    void addOrUpdateStoresExplicitPlanFirstOptOut() {
         WatchedRepo saved = new Fixture().addOrUpdate(null, null, "ROLLING_BACKLOG", "PROPOSE",
                 false, new BigDecimal("0.70"), null, null, false);
 
@@ -347,5 +346,27 @@ class RepositoryControllerTest {
         ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
         verify(fixture.repos).save(captor.capture());
         assertThat(captor.getValue().isAutoStart()).isFalse();
+    }
+
+    @Test
+    void newRepositoryDefaultsToPlanFirstWhenParameterIsOmitted() throws Exception {
+        Fixture fixture = new Fixture();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(fixture.controller).build();
+
+        mockMvc.perform(post("/repositories")
+                        .param("owner", "acme")
+                        .param("name", "widgets")
+                        .param("branch", "main")
+                        .param("mode", "AUTONOMOUS")
+                        .param("maxIterations", "5")
+                        .param("ciTimeoutMinutes", "15")
+                        .param("maxReviewIterations", "2")
+                        .param("followUpMode", "ROLLING_BACKLOG")
+                        .param("decompositionMode", "PROPOSE"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
+        verify(fixture.repos).save(captor.capture());
+        assertThat(captor.getValue().isPlanFirst()).isTrue();
     }
 }

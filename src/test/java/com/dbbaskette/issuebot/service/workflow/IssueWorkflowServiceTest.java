@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.FailureCategory;
 import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
@@ -24,6 +26,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,6 +45,7 @@ class IssueWorkflowServiceTest {
     private ObjectMapper objectMapper;
 
     // Named mocks needed by tests that introspect interactions
+    private GitOperationsService gitOps;
     private GitHubApiClient gitHubApi;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
@@ -55,6 +59,7 @@ class IssueWorkflowServiceTest {
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
+    private CiTemplateService ciTemplateService;
 
     @Test
     void recordsStructuredFailureForRecoveryUi() {
@@ -71,9 +76,59 @@ class IssueWorkflowServiceTest {
                 FailureRetryability.OPERATOR_ACTION_REQUIRED);
     }
 
+    @Test
+    void implementationCheckpointCommitsBeforeCostAndTelemetryEffects() {
+        WorkflowCheckpointTransactionManager checkpoints =
+                mock(WorkflowCheckpointTransactionManager.class);
+        workflowService.setWorkflowCheckpoints(checkpoints);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Durable result");
+        issue.setId(1L);
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setId(2L);
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("done");
+        result.setModel("gpt-5.6-sol");
+        TrackedIssue freshIssue = new TrackedIssue(repo, 42, "Durable result");
+        freshIssue.setId(1L);
+        Iteration freshIteration = new Iteration(freshIssue, 1);
+        freshIteration.setId(2L);
+        when(checkpoints.persistImplementationComplete(1L, 2L, result, "+diff"))
+                .thenReturn(new WorkflowCheckpointTransactionManager.ImplementationCheckpoint(
+                        freshIssue, freshIteration));
+
+        workflowService.checkpointSuccessfulImplementation(
+                issue, iteration, result, "+diff", 1);
+
+        var order = inOrder(checkpoints, costRepository, eventService);
+        order.verify(checkpoints).persistImplementationComplete(1L, 2L, result, "+diff");
+        order.verify(costRepository).save(any());
+        order.verify(eventService).log(eq("PHASE_IMPLEMENTATION_COMPLETE"),
+                anyString(), same(repo), same(freshIssue));
+    }
+
+    @Test
+    void rearmedImplementationReusesIncompleteRowWithItsDurablePromptContext() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Resume");
+        issue.setId(1L);
+        Iteration durable = new Iteration(issue, 1);
+        durable.setId(9L);
+        durable.setImplementationContext("exact guidance prepared before the crash");
+        durable.setImplementationContextPrepared(true);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 1))
+                .thenReturn(Optional.of(durable));
+
+        Iteration reused = workflowService.reusableImplementationIteration(1L, 1);
+
+        assertSame(durable, reused);
+        assertEquals("exact guidance prepared before the crash", reused.getImplementationContext());
+    }
+
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
+        gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
@@ -87,12 +142,13 @@ class IssueWorkflowServiceTest {
         eventService = mock(EventService.class);
         cancellationService = new WorkflowCancellationService();
         sseService = mock(SseService.class);
+        ciTemplateService = mock(CiTemplateService.class);
         workflowService = new IssueWorkflowService(
-                mock(GitOperationsService.class),
+                gitOps,
                 gitHubApi,
                 claudeCode,
                 codeReviewService,
-                mock(CiTemplateService.class),
+                ciTemplateService,
                 mock(LocalVerificationService.class),
                 issueRepository,
                 iterationRepository,
@@ -103,7 +159,6 @@ class IssueWorkflowServiceTest {
                 iterationManager,
                 decompositionService,
                 planFirstService,
-                mock(SuperpowersMethodologyService.class),
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
                         new com.dbbaskette.issuebot.config.IssueBotProperties()),
@@ -243,6 +298,183 @@ class IssueWorkflowServiceTest {
     // === Plan-first mode (#64) ===
 
     @Test
+    void planFirstGenerationFailureStopsBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(gitOps.prepareForPlanning("owner", "repo", "main")).thenReturn(mock(Git.class));
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(planFirstService.generateVersion(eq(issue), any(JsonNode.class), any()))
+                .thenReturn(PlanFirstService.PlanningOutcome.FAILED);
+
+        spy.processIssue(issue, null);
+
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(gitOps).prepareForPlanning("owner", "repo", "main");
+        verify(spy, never()).phaseSetup(any());
+        verify(gitOps, never()).cloneOrPull(anyString(), anyString(), anyString());
+        verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
+        verify(ciTemplateService, never()).ensureCiWorkflow(any(), anyString());
+    }
+
+    @Test
+    void approvedContextIsIncludedInImplementationPrompt() {
+        ObjectNode issue = objectMapper.createObjectNode();
+        issue.put("title", "Add pagination");
+        issue.put("body", "Add pagination to the /users endpoint");
+        issue.putArray("labels");
+        ApprovedPlanContext context = new ApprovedPlanContext(
+                14L, 3, "approved spec", "approved plan");
+
+        String prompt = workflowService.buildImplementationPrompt(
+                issue, null, null, null, false, null, context);
+
+        assertTrue(prompt.contains("## Approved Planning Contract — Version 3"));
+        assertTrue(prompt.contains("### Design Spec\napproved spec\n\n"
+                + "### Implementation Plan\napproved plan\n\n"));
+        assertTrue(prompt.contains("Mechanical implementation plan steps may adapt"));
+        assertTrue(prompt.contains("scope and acceptance criteria may not change"));
+    }
+
+    @Test
+    void planFirstWithoutApprovedContextFailsInvariantBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setPlanApproved(true);
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+
+        spy.processIssue(issue, null);
+
+        assertEquals(IssueStatus.FAILED, issue.getStatus());
+        assertTrue(issue.getLastFailureReason().contains("approved planning version"));
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
+    }
+
+    @Test
+    void alreadyStartedLegacyApprovedIssueMayFinishWithoutPretendingItHasANewSpec() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setCurrentIteration(1);
+        issue.setPlanApproved(true);
+        issue.setImplementationPlan("mutable plan that must be ignored");
+        PlanningVersion legacyVersion = mock(PlanningVersion.class);
+        when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        when(legacyVersion.getImplementationPlan()).thenReturn("immutable legacy implementation plan");
+        issue.setApprovedPlanningVersion(legacyVersion);
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(issueRepository.findById(issue.getId())).thenReturn(Optional.empty());
+        ClaudeCodeResult success = new ClaudeCodeResult();
+        success.setSuccess(true);
+        success.setOutput("implemented");
+        when(claudeCode.executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any())).thenReturn(success);
+
+        spy.processIssue(issue, null);
+
+        verify(claudeCode).executeImplementation(
+                argThat(prompt -> prompt.contains("Legacy approved plan")
+                        && prompt.contains("immutable legacy implementation plan")
+                        && !prompt.contains("mutable plan that must be ignored")
+                        && prompt.contains("## Issue")
+                        && !prompt.contains("## Approved Planning Contract")
+                        && !prompt.contains("### Design Spec")),
+                any(), anyString(), any(), anyLong(), any());
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
+    }
+
+    @Test
+    void notYetStartedLegacyApprovedIssueRegeneratesBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setPlanApproved(true);
+        issue.setImplementationPlan("legacy implementation plan");
+        PlanningVersion legacyVersion = mock(PlanningVersion.class);
+        when(legacyVersion.getState()).thenReturn(PlanningVersionState.LEGACY);
+        when(legacyVersion.getImplementationPlan()).thenReturn("legacy implementation plan");
+        issue.setApprovedPlanningVersion(legacyVersion);
+        IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
+        when(planFirstService.generateVersion(eq(issue), any(), any()))
+                .thenReturn(PlanFirstService.PlanningOutcome.AWAITING_APPROVAL);
+
+        spy.processIssue(issue, null);
+
+        verify(planFirstService).generateVersion(eq(issue), any(), any());
+        verify(claudeCode, never()).executeImplementation(
+                anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
+    void approvedPlanFirstIssueRunsFullSetupBeforeImplementation() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.getRepo().setCiEnabled(true);
+        Git git = mock(Git.class);
+        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(git);
+        when(gitOps.createBranch(git, 42, "Fix the bug")).thenReturn("issuebot/issue-42-fix-the-bug");
+        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
+        when(ciTemplateService.detectBuildTool(Path.of("/tmp/repo"))).thenReturn("maven");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(14L, 3, "approved spec", "approved plan")));
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the bug");
+        details.put("body", "Details");
+        details.putArray("labels");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(details);
+
+        workflowService.processIssue(issue, null);
+
+        verify(gitOps).cloneOrPull("owner", "repo", "main");
+        verify(gitOps).createBranch(git, 42, "Fix the bug");
+        verify(ciTemplateService).ensureCiWorkflow(Path.of("/tmp/repo"), "maven");
+        verify(gitOps, never()).prepareForPlanning(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void explicitPlanFirstOptOutRunsFullSetup() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setPlanFirstOverride(false);
+        Git git = mock(Git.class);
+        when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(git);
+        when(gitOps.createBranch(git, 42, "Fix the bug")).thenReturn("issuebot/issue-42-fix-the-bug");
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the bug");
+        details.put("body", "Details");
+        details.putArray("labels");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(details);
+
+        workflowService.processIssue(issue, null);
+
+        verify(gitOps).cloneOrPull("owner", "repo", "main");
+        verify(gitOps).createBranch(git, 42, "Fix the bug");
+        verify(gitOps, never()).prepareForPlanning(anyString(), anyString(), anyString());
+        verifyNoInteractions(planFirstService);
+    }
+
+    private TrackedIssue planFirstWorkflowIssue() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setId(1L);
+        repo.setPlanFirst(true);
+        repo.setPreScreenEnabled(false);
+        repo.setCiEnabled(false);
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
+        issue.setId(1L);
+        return issue;
+    }
+
+    private IssueWorkflowService workflowSpyWithIssueDetails(TrackedIssue issue) throws Exception {
+        IssueWorkflowService spy = spy(workflowService);
+        doNothing().when(spy).phaseSetup(issue);
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "Fix the bug");
+        details.put("body", "Details");
+        details.putArray("labels");
+        when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(details);
+        return spy;
+    }
+
+    @Test
     void buildImplementationPrompt_withApprovedPlan_includesPlanSection() {
         ObjectNode issue = objectMapper.createObjectNode();
         issue.put("title", "Add pagination");
@@ -250,12 +482,13 @@ class IssueWorkflowServiceTest {
         issue.putArray("labels");
 
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
-                false, null, "1. Add a Pageable param\n2. Update the repository query");
+                false, null, new ApprovedPlanContext(11L, 2, "Use Spring Data paging",
+                        "1. Add a Pageable param\n2. Update the repository query"));
 
-        assertTrue(prompt.contains("## Approved Plan"));
+        assertTrue(prompt.contains("## Approved Planning Contract — Version 2"));
         assertTrue(prompt.contains("Pageable param"));
         // Issue section still present and precedes the plan
-        assertTrue(prompt.indexOf("## Issue") < prompt.indexOf("## Approved Plan"));
+        assertTrue(prompt.indexOf("## Issue") < prompt.indexOf("## Approved Planning Contract"));
     }
 
     @Test
@@ -266,9 +499,11 @@ class IssueWorkflowServiceTest {
         issue.putArray("labels");
 
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null,
-                true, null, "1. Add a Pageable param");
+                true, null, new ApprovedPlanContext(11L, 2, "Use Spring Data paging",
+                        "1. Add a Pageable param"));
 
-        assertTrue(prompt.contains("## Approved Plan"));
+        assertTrue(prompt.contains("## Approved Planning Contract — Version 2"));
+        assertTrue(prompt.contains("### Design Spec\nUse Spring Data paging"));
         assertTrue(prompt.contains("Pageable param"));
     }
 
@@ -281,7 +516,7 @@ class IssueWorkflowServiceTest {
 
         String prompt = workflowService.buildImplementationPrompt(issue, null, null, null);
 
-        assertFalse(prompt.contains("## Approved Plan"));
+        assertFalse(prompt.contains("## Approved Planning Contract"));
     }
 
     // === Repository custom instructions + cross-issue lessons (#69) ===
@@ -384,18 +619,19 @@ class IssueWorkflowServiceTest {
 
         String prompt = workflowService.buildImplementationPrompt(issue,
                 "diff content", "Tests failed", "CI broke",
-                false, null, "1. Do the thing",
+                false, null, new ApprovedPlanContext(11L, 2, "Do the approved thing",
+                        "1. Do the thing"),
                 "Always use constructor injection",
                 List.of("Run tests with ./mvnw not mvn"));
 
         int issueIdx = prompt.indexOf("## Issue");
-        int planIdx = prompt.indexOf("## Approved Plan");
+        int planIdx = prompt.indexOf("## Approved Planning Contract");
         int instructionsIdx = prompt.indexOf("## Repository Instructions");
         int lessonsIdx = prompt.indexOf("## Lessons from previous issues in this repo");
         int retryIdx = prompt.indexOf("## Previous Iteration Context");
 
-        assertTrue(issueIdx >= 0 && planIdx > issueIdx, "Issue must precede Approved Plan");
-        assertTrue(instructionsIdx > planIdx, "Approved Plan must precede Repository Instructions");
+        assertTrue(issueIdx >= 0 && planIdx > issueIdx, "Issue must precede Approved Contract");
+        assertTrue(instructionsIdx > planIdx, "Approved Contract must precede Repository Instructions");
         assertTrue(lessonsIdx > instructionsIdx, "Repository Instructions must precede Lessons");
         assertTrue(retryIdx > lessonsIdx, "Lessons must precede Previous Iteration Context");
     }
@@ -895,7 +1131,8 @@ class IssueWorkflowServiceTest {
         successResult.setSuccess(true);
         successResult.setOutput("Implementation complete");
         doReturn(successResult).when(spy).phaseImplementation(
-                any(TrackedIssue.class), any(JsonNode.class), any(), any(), any(), any(), any());
+                any(TrackedIssue.class), any(JsonNode.class), any(), any(), any(), any(), any(),
+                nullable(ApprovedPlanContext.class), nullable(String.class));
 
         // Stub phaseCommitAndPush to throw so the CI-exception path fires (continue → loop ends)
         doThrow(new RuntimeException("simulated push failure"))
@@ -948,19 +1185,14 @@ class IssueWorkflowServiceTest {
                 new java.math.BigDecimal("0.50"), new java.math.BigDecimal("0.01"));
     }
 
-    /**
-     * When reviewCode() throws, currentReviewIteration must remain unchanged
-     * and the issue must NOT be saved with an incremented review iteration.
-     */
     @Test
-    void phaseIndependentReview_reviewCodeThrows_doesNotIncrementReviewIteration() throws Exception {
+    void phaseIndependentReview_reviewCodeThrows_retriesAndReturnsInvocationFailure() throws Exception {
         // --- Arrange ---
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
 
         TrackedIssue issue = new TrackedIssue(repo, 7, "Add caching");
         issue.setId(10L);
-        // baseline: 0 review iterations consumed
         issue.setCurrentReviewIteration(0);
 
         ObjectNode issueDetails = objectMapper.createObjectNode();
@@ -970,20 +1202,20 @@ class IssueWorkflowServiceTest {
         Iteration iteration = new Iteration(issue, 1);
 
         // Make reviewCode blow up
-        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any()))
+        when(codeReviewService.reviewCode(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("review service unavailable"));
+        workflowService.reviewRetryBackoffBaseMs = 0;
 
         // --- Act ---
         CodeReviewResult result = workflowService.phaseIndependentReview(
-                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration, List.of());
+                issue, issueDetails, Path.of("/tmp/repo"), "feature-branch", 99, iteration, List.of(), null);
 
         // --- Assert ---
-        assertNull(result, "Should return null on review invocation error");
-        assertEquals(0, issue.getCurrentReviewIteration(),
-                "currentReviewIteration must not be incremented when reviewCode throws");
-        // The issue must NOT have been saved with an incremented counter
-        verify(issueRepository, never()).save(argThat(
-                i -> i instanceof TrackedIssue ti && ti.getCurrentReviewIteration() > 0));
+        assertNotNull(result);
+        assertTrue(result.invocationFailed());
+        assertEquals(1, issue.getCurrentReviewIteration());
+        verify(codeReviewService, times(5)).reviewCode(
+                any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
     }
 
     // === Terminal QoL (#84) — per-line SSE cap lifted from 500 to 10,000 chars ===

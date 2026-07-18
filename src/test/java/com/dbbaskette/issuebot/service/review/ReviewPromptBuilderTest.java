@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.service.review;
 
+import com.dbbaskette.issuebot.service.workflow.ApprovedPlanContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -121,5 +122,79 @@ class ReviewPromptBuilderTest {
         assertThat(prompt).contains("## Repository Owner Requirements");
         assertThat(prompt).contains("Never modify files under /legacy");
         assertThat(prompt).contains("Treat violations of these requirements as findings.");
+    }
+
+    @Test
+    void reviewPromptIncludesApprovedVersionAndBlockingRules() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of("criterion"), false, 0.70,
+                null, new ApprovedPlanContext(4L, 2, "spec contract", "plan contract"));
+
+        assertThat(prompt).contains("## Approved Design Spec — Version 2")
+                .contains("spec contract")
+                .contains("## Approved Implementation Plan")
+                .contains("plan contract")
+                .contains("high-severity unmet acceptance criterion")
+                .contains("Set passed to false")
+                .contains("required plan deliverable");
+        assertThat(prompt.indexOf("## Approved Design Spec — Version 2"))
+                .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
+    }
+
+    @Test
+    void reviewPromptIncludesExplicitTestEvidenceBeforeDiff() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, new ApprovedPlanContext(4L, 2, "spec contract", "plan contract"),
+                new ReviewTestEvidence(null, "SKIPPED"));
+
+        assertThat(prompt).contains("## Test Evidence")
+                .contains("Local verification: NOT_RUN")
+                .contains("CI: SKIPPED");
+        assertThat(prompt.indexOf("## Test Evidence"))
+                .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
+    }
+
+    @Test
+    void subsequentReviewIncludesPriorFindingsAndOperatorGuidanceBeforeDiff() {
+        String context = "PRIOR FINDINGS:\n- rollback missing\n\nOPERATOR GUIDANCE:\nKeep the API stable";
+
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, new ReviewTestEvidence("PASSED", "PASSED", context));
+
+        assertThat(prompt).contains("## Prior Review Findings and Operator Guidance")
+                .contains(context)
+                .contains("Explicitly verify that each prior finding and operator instruction was resolved");
+        assertThat(prompt.indexOf("## Prior Review Findings and Operator Guidance"))
+                .isLessThan(prompt.indexOf("## Diff (changes vs. base branch)"));
+    }
+
+    @Test
+    void priorReviewContextUsesDeterministicBoundedPrefix() {
+        String retained = "x".repeat(ReviewPromptBuilder.MAX_PRIOR_REVIEW_CONTEXT_CHARS);
+        String omitted = "THIS_TAIL_MUST_BE_OMITTED";
+        ReviewTestEvidence evidence = new ReviewTestEvidence(
+                "PASSED", "SKIPPED", retained + omitted);
+
+        String first = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, evidence);
+        String second = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, evidence);
+
+        assertThat(first).isEqualTo(second)
+                .contains(retained + "\n... (prior review context truncated)")
+                .doesNotContain(omitted);
+    }
+
+    @Test
+    void absentPriorReviewContextKeepsTheExistingPromptShape() {
+        String prompt = builder.buildReviewPrompt("Title", "Body",
+                List.of("src/Main.java"), "diff content", List.of(), false, 0.70,
+                null, null, new ReviewTestEvidence("PASSED", "SKIPPED"));
+
+        assertThat(prompt).doesNotContain("Prior Review Findings and Operator Guidance");
     }
 }
