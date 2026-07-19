@@ -50,7 +50,7 @@ void approvalRedirectReturnsToCurrentIssueOnlyForLiteralIssue() {
 }
 ```
 
-Run: `./mvnw -Dtest=ViewResolverTest test`  
+Run: `./mvnw -Dtest=ViewResolverTest test`
 Expected: FAIL because `approvalRedirect` does not exist.
 
 - [ ] **Step 2: Implement bounded routing**
@@ -67,7 +67,7 @@ public static String approvalRedirect(String returnTo, Long issueId, String fall
 
 Retain `redirectTarget` for unrelated decomposition/plan callers, or delegate it without changing its existing contract.
 
-Run: `./mvnw -Dtest=ViewResolverTest test`  
+Run: `./mvnw -Dtest=ViewResolverTest test`
 Expected: PASS.
 
 - [ ] **Step 3: Write failing controller tests for issue returns and stale submissions**
@@ -92,7 +92,7 @@ verify(redirects).addFlashAttribute(eq("error"), contains("no longer awaiting ap
 
 Also assert merge failure with `returnTo=issue` redirects back to the issue and preserves `AWAITING_APPROVAL`; arbitrary `returnTo` still falls back to `/approvals`.
 
-Run: `./mvnw -Dtest=ApprovalControllerTest test`  
+Run: `./mvnw -Dtest=ApprovalControllerTest test`
 Expected: FAIL because issue routing and stale-state guards are absent.
 
 - [ ] **Step 4: Implement status guards and shared redirect use**
@@ -109,7 +109,7 @@ if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL) {
 
 Use `approvalRedirect(returnTo, id, "redirect:/approvals")` for every approve/reject success and error exit. Preserve the existing merge checkbox semantics, mutation order, event logging, and Inbox behavior. Add a nonblank feedback guard before `handleHumanRejection`; return an actionable error without changing state when blank.
 
-Run: `./mvnw -Dtest=ApprovalControllerTest,ViewResolverTest test`  
+Run: `./mvnw -Dtest=ApprovalControllerTest,ViewResolverTest test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit Task 1**
@@ -153,7 +153,7 @@ assertThat(model.getAttribute("approvalPrUrl")).isEqualTo("https://github.com/ac
 
 For a non-awaiting issue, verify the assembler is not called and the three attributes are absent.
 
-Run: `./mvnw -Dtest=IssueControllerTest test`  
+Run: `./mvnw -Dtest=IssueControllerTest test`
 Expected: FAIL because the controller has no approval-card dependency or attributes.
 
 - [ ] **Step 2: Populate one shared approval card**
@@ -169,7 +169,7 @@ model.addAttribute("approvalPrUrl", cards.prUrls().get(issue.getId()));
 
 Update all direct `IssueController` construction in tests with the new dependency.
 
-Run: `./mvnw -Dtest=IssueControllerTest test`  
+Run: `./mvnw -Dtest=IssueControllerTest test`
 Expected: PASS.
 
 - [ ] **Step 3: Write failing issue-detail render tests**
@@ -186,7 +186,7 @@ Extend the render helper to supply approval attributes. Add tests that assert:
 - no-PR rendering omits the merge checkbox and says approval will complete IssueBot without merging;
 - modal IDs are outside `#live-status` so polling cannot replace them.
 
-Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`  
+Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`
 Expected: FAIL because the decision card is absent.
 
 - [ ] **Step 4: Render the compact decision card and forms**
@@ -211,7 +211,7 @@ Use the existing Tabler icon vocabulary and explicit text for all states. `Appro
 
 The merge checkbox renders only for a positive PR number and is `checked`. The View PR link uses `approvalPrUrl`, `target="_blank"`, and `rel="noopener"`.
 
-Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`  
+Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`
 Expected: PASS.
 
 - [ ] **Step 5: Write and satisfy a focused responsive-style regression**
@@ -233,7 +233,7 @@ Add a static CSS assertion to the render test (or a focused stylesheet test if o
 
 Keep the card consistent with the existing restrained IssueBot panel system; the signature element is the compact evidence-to-decision flow, not new decoration or motion.
 
-Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`  
+Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`
 Expected: PASS.
 
 - [ ] **Step 6: Run affected regression suites**
@@ -271,7 +271,7 @@ git commit -m "feat: approve work from issue detail"
 
 - [ ] **Step 1: Run the full suite from a clean final HEAD**
 
-Run: `./mvnw test`  
+Run: `./mvnw test`
 Expected: `BUILD SUCCESS`, zero failures/errors/skips, and at least the 1,011 tests present before this feature.
 
 - [ ] **Step 2: Build the deployable artifact and inspect the diff**
