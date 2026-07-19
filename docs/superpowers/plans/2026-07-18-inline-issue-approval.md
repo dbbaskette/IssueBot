@@ -269,12 +269,12 @@ git commit -m "feat: approve work from issue detail"
 - Consumes: completed Tasks 1–2.
 - Produces: merge-ready build and recorded automated/live evidence.
 
-- [ ] **Step 1: Run the full suite from a clean final HEAD**
+- [x] **Step 1: Run the full suite from a clean final HEAD**
 
 Run: `./mvnw test`
 Expected: `BUILD SUCCESS`, zero failures/errors/skips, and at least the 1,011 tests present before this feature.
 
-- [ ] **Step 2: Build the deployable artifact and inspect the diff**
+- [x] **Step 2: Build the deployable artifact and inspect the diff**
 
 Run:
 
@@ -299,7 +299,7 @@ Deploy the branch artifact temporarily with the existing local launch configurat
 
 Record URL, viewport, rendered states, health response, artifact SHA-256, and any test issue used in `.superpowers/sdd/inline-approval-verification.md`.
 
-- [ ] **Step 4: Mark plan traceability and commit**
+- [x] **Step 4: Mark plan traceability and commit**
 
 Mark completed steps only after their evidence exists, then commit the plan update:
 
