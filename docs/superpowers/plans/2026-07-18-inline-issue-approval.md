@@ -286,7 +286,7 @@ git status --short
 
 Expected: package exit 0, diff check exit 0, clean worktree.
 
-- [ ] **Step 3: Verify the phone layout and actions against a real awaiting issue**
+- [x] **Step 3: Verify the phone layout and actions against a real awaiting issue**
 
 Deploy the branch artifact temporarily with the existing local launch configuration on port 8090. On a real `AWAITING_APPROVAL` issue, verify at a 390-by-844 viewport:
 
