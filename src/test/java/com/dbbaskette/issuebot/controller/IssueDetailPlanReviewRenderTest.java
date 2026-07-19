@@ -124,6 +124,27 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void approvalRejectDisclosureTracksStateAndRestoresCancelFocus() throws Exception {
+        String html = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+        String javascript;
+        try (var input = getClass().getClassLoader().getResourceAsStream("static/js/app.js")) {
+            assertThat(input).isNotNull();
+            javascript = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        assertThat(html).contains("data-reject-toggle=\"42\"")
+                .contains("aria-expanded=\"false\"")
+                .contains("aria-controls=\"reject-form-42\"");
+        assertThat(javascript)
+                .contains("rejectToggle.setAttribute('aria-controls', panel.id)")
+                .contains("rejectToggle.setAttribute('aria-expanded', String(!panel.hidden))")
+                .contains("cancelToggle.setAttribute('aria-expanded', 'false')")
+                .contains("cancelToggle.focus()");
+    }
+
+    @Test
     void approvalDecisionWithoutPositivePrOmitsMergeAndExplainsCompletionOnly() {
         TrackedIssue issue = issueReadyForApproval();
         issue.setPrNumber(null);

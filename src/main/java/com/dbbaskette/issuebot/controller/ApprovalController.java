@@ -53,10 +53,9 @@ public class ApprovalController {
     }
 
     @PostMapping("/{id}/approve")
-    public String approve(Model model, @PathVariable Long id,
+    public String approve(@PathVariable Long id,
                           @RequestParam(defaultValue = "false") boolean merge,
                           @RequestParam(required = false) String returnTo,
-                          @RequestHeader(value = "HX-Request", required = false) String hx,
                           RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
@@ -108,10 +107,9 @@ public class ApprovalController {
     }
 
     @PostMapping("/{id}/reject")
-    public String reject(Model model, @PathVariable Long id,
+    public String reject(@PathVariable Long id,
                           @RequestParam String feedback,
                           @RequestParam(required = false) String returnTo,
-                          @RequestHeader(value = "HX-Request", required = false) String hx,
                           RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 

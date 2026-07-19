@@ -1046,7 +1046,9 @@
     if (rejectToggle) {
       var panel = document.getElementById('reject-form-' + rejectToggle.getAttribute('data-reject-toggle'));
       if (panel) {
+        rejectToggle.setAttribute('aria-controls', panel.id);
         panel.hidden = !panel.hidden;
+        rejectToggle.setAttribute('aria-expanded', String(!panel.hidden));
         if (!panel.hidden) {
           var ta = panel.querySelector('[data-reject-textarea]');
           if (ta) { ta.focus(); }
@@ -1056,8 +1058,14 @@
     }
     var rejectCancel = e.target.closest('[data-reject-cancel]');
     if (rejectCancel) {
-      var cancelPanel = document.getElementById('reject-form-' + rejectCancel.getAttribute('data-reject-cancel'));
+      var rejectId = rejectCancel.getAttribute('data-reject-cancel');
+      var cancelPanel = document.getElementById('reject-form-' + rejectId);
+      var cancelToggle = document.querySelector('[data-reject-toggle="' + rejectId + '"]');
       if (cancelPanel) { cancelPanel.hidden = true; }
+      if (cancelToggle) {
+        cancelToggle.setAttribute('aria-expanded', 'false');
+        cancelToggle.focus();
+      }
       return;
     }
     // Generic copy-to-clipboard: copies the textContent of the element

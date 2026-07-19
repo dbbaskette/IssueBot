@@ -282,7 +282,8 @@
                             <i class="ti ti-check" aria-hidden="true"></i> Approve
                         </button>
                         <button type="button" class="btn btn-danger"
-                                th:attr="data-reject-toggle=${issue.id}">
+                                aria-expanded="false"
+                                th:attr="data-reject-toggle=${issue.id},aria-controls=${'reject-form-' + issue.id}">
                             <i class="ti ti-x" aria-hidden="true"></i> Reject
                         </button>
                         <a th:if="${approvalPrUrl != null and issue.prNumber != null and issue.prNumber > 0}"
