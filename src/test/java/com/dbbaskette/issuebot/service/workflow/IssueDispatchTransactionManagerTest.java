@@ -41,6 +41,7 @@ class IssueDispatchTransactionManagerTest {
     @Autowired private TrackedIssueRepository issues;
     @Autowired private WatchedRepoRepository repos;
     @Autowired private PlanningVersionRepository versions;
+    @Autowired private IterationRepository iterations;
     @Autowired private ProcessingControlRepository controls;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
     @Autowired private PlatformTransactionManager transactionManager;
@@ -110,6 +111,7 @@ class IssueDispatchTransactionManagerTest {
     @Test
     void genericRetryRejectsSecondPlanFirstMiss() {
         Long issueId = seedApprovedIssue(IssueStatus.FAILED, 2);
+        seedReview(issueId, 2, false, "{}");
 
         IssueDispatchService.ClaimResult result = dispatch.claimRetry(issueId, issue -> null,
                 IssueDispatchTransactionManager.RetryMutation.none());
@@ -120,8 +122,36 @@ class IssueDispatchTransactionManagerTest {
     }
 
     @Test
+    void genericRetryAllowsLatestPersistedPassAfterEarlierMiss() {
+        Long issueId = seedApprovedIssue(IssueStatus.FAILED, 2);
+        seedReview(issueId, 2, false, "{}");
+        seedReview(issueId, 2, true, "{}");
+
+        IssueDispatchService.ClaimResult result = dispatch.claimRetry(issueId, issue -> null,
+                IssueDispatchTransactionManager.RetryMutation.none());
+
+        assertThat(result.claimed()).isTrue();
+        assertThat(issues.findById(issueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void genericRetryTreatsNullPersistedVerdictAsNeutralEvenWhenJsonFails() {
+        Long issueId = seedApprovedIssue(IssueStatus.FAILED, 2);
+        seedReview(issueId, 2, null, "{\"passed\":false}");
+
+        IssueDispatchService.ClaimResult result = dispatch.claimRetry(issueId, issue -> null,
+                IssueDispatchTransactionManager.RetryMutation.none());
+
+        assertThat(result.claimed()).isTrue();
+        assertThat(issues.findById(issueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.IN_PROGRESS);
+    }
+
+    @Test
     void guidedRetryResetAndGuidanceInsertRollbackTogether() {
         Long issueId = seedApprovedIssue(IssueStatus.FAILED, 2);
+        seedReview(issueId, 2, false, "{}");
         doThrow(new IllegalStateException("guidance insert fault"))
                 .when(guidance).saveAndFlush(any(IssueGuidance.class));
 
@@ -139,6 +169,7 @@ class IssueDispatchTransactionManagerTest {
     @Test
     void guidedRetryCommitsResetAndGuidanceAsOneClaim() {
         Long issueId = seedApprovedIssue(IssueStatus.FAILED, 2);
+        seedReview(issueId, 2, false, "{}");
 
         IssueDispatchService.ClaimResult result =
                 dispatch.claimGuidedRetry(issueId, "keep the public API", 10);
@@ -192,6 +223,17 @@ class IssueDispatchTransactionManagerTest {
                     issue, 1, "transactional design", "transactional implementation",
                     "CODEX", "gpt-5.6-sol", null));
             return new PendingVersion(issue.getId(), version.getId());
+        });
+    }
+
+    private void seedReview(Long issueId, int iterationNumber, Boolean passed, String reviewJson) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(ignored -> {
+            TrackedIssue issue = issues.findById(issueId).orElseThrow();
+            Iteration iteration = new Iteration(issue, iterationNumber);
+            iteration.setReviewPassed(passed);
+            iteration.setReviewJson(reviewJson);
+            iterations.saveAndFlush(iteration);
         });
     }
 

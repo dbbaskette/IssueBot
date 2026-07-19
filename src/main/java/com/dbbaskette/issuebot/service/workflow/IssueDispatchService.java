@@ -1,7 +1,9 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import org.springframework.stereotype.Service;
@@ -21,22 +23,22 @@ public class IssueDispatchService {
     private final ProcessingControlService control;
     private final IssueDispatchTransactionManager transactions;
     private final IssueGuidanceRepository legacyGuidance;
+    private final IterationRepository legacyIterations;
 
     /** Legacy constructor retained for isolated unit tests; production uses the proxied manager. */
-    public IssueDispatchService(TrackedIssueRepository issues, ProcessingControlService control) {
-        this.issues = issues;
-        this.control = control;
-        this.transactions = null;
-        this.legacyGuidance = null;
+    public IssueDispatchService(TrackedIssueRepository issues, ProcessingControlService control,
+                                IterationRepository iterations) {
+        this(issues, control, null, iterations);
     }
 
     /** Test-only compatibility constructor for the pre-proxy in-memory fixture. */
     public IssueDispatchService(TrackedIssueRepository issues, ProcessingControlService control,
-                                IssueGuidanceRepository guidance) {
+                                IssueGuidanceRepository guidance, IterationRepository iterations) {
         this.issues = issues;
         this.control = control;
         this.transactions = null;
         this.legacyGuidance = guidance;
+        this.legacyIterations = iterations;
     }
 
     @Autowired
@@ -46,6 +48,7 @@ public class IssueDispatchService {
         this.control = control;
         this.transactions = transactions;
         this.legacyGuidance = null;
+        this.legacyIterations = null;
     }
 
     public boolean isPaused() {
@@ -120,7 +123,7 @@ public class IssueDispatchService {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return ClaimResult.rejected("Cannot retry issue in " + issue.getStatus() + " status");
         }
-        if (IssueDispatchTransactionManager.isSecondPlanFirstMiss(issue)) {
+        if (PlanRetryClassification.isSecondPlanFirstMiss(issue, reviewIterations(issue))) {
             return ClaimResult.rejected(
                     "The second Plan First conformance miss requires the guided implementation retry");
         }
@@ -165,7 +168,7 @@ public class IssueDispatchService {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return ClaimResult.rejected("Cannot retry issue in " + issue.getStatus() + " status");
         }
-        if (!IssueDispatchTransactionManager.requiresGuidedPlanRetry(issue)) {
+        if (!PlanRetryClassification.requiresGuidedPlanRetry(issue, reviewIterations(issue))) {
             return ClaimResult.rejected("Guided retry is only available after the second Plan First "
                     + "conformance miss with an approved non-legacy planning version");
         }
@@ -187,6 +190,10 @@ public class IssueDispatchService {
         issues.save(issue);
         if (legacyGuidance != null) legacyGuidance.save(new com.dbbaskette.issuebot.model.IssueGuidance(issueId, guidance));
         return ClaimResult.claimed(issue);
+    }
+
+    private List<Iteration> reviewIterations(TrackedIssue issue) {
+        return legacyIterations.findByIssueOrderByIterationNumAsc(issue);
     }
 
     public record ClaimResult(boolean claimed, String reason, TrackedIssue issue) {

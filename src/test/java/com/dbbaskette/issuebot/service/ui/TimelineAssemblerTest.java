@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler.Segment;
@@ -739,5 +740,46 @@ class TimelineAssemblerTest {
         Segment review = timeline.get(0).segments().get(0);
         assertThat(review.outcome()).isEqualTo("skipped");
         assertThat(review.durationSecs()).isEqualTo(6L); // anchored to the LATEST terminal event
+    }
+
+    @Test
+    void persistedOperationalReviewOutcome_mapsUnavailableTerminalEventToSkipped() {
+        WatchedRepo repo = repo();
+        TrackedIssue issue = issue(repo, IssueStatus.FAILED);
+        Iteration iter = iteration(issue, 1, T0);
+        iter.setReviewJson(PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+
+        List<Event> events = List.of(
+                ev("PHASE_INDEPENDENT_REVIEW", T0),
+                ev("PHASE_REVIEW_UNAVAILABLE", T0.plusSeconds(7))
+        );
+
+        List<IterationTimeline> timeline = singleRun(
+                assembler.assemble(issue, events, List.of(iter), List.of(), NOW));
+
+        Segment review = timeline.get(0).segments().get(0);
+        assertThat(review.outcome()).isEqualTo("skipped");
+        assertThat(review.durationSecs()).isEqualTo(7L);
+    }
+
+    @Test
+    void completedEventWithoutPersistedVerdictRemainsNeutral() {
+        WatchedRepo repo = repo();
+        TrackedIssue issue = issue(repo, IssueStatus.FAILED);
+        Iteration iter = iteration(issue, 1, T0);
+        iter.setReviewPassed(null);
+        iter.setReviewJson("{\"passed\":false,\"specComplianceScore\":0.4}");
+
+        List<Event> events = List.of(
+                ev("PHASE_INDEPENDENT_REVIEW", T0),
+                ev("PHASE_REVIEW_COMPLETE", T0.plusSeconds(8))
+        );
+
+        List<IterationTimeline> timeline = singleRun(
+                assembler.assemble(issue, events, List.of(iter), List.of(), NOW));
+
+        Segment review = timeline.get(0).segments().get(0);
+        assertThat(review.outcome()).isEqualTo("skipped");
+        assertThat(review.durationSecs()).isEqualTo(8L);
     }
 }

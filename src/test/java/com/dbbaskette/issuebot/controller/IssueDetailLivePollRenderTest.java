@@ -3,6 +3,8 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
+import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -76,6 +78,12 @@ class IssueDetailLivePollRenderTest {
         context.setVariable("phaseCompleted", phaseCompleted);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("approvalReviewScore", new ReviewScore(
+                ReviewOutcome.PASSED, null, "Ready", 0.90, List.of(), 0,
+                "review-model", List.of()));
+        context.setVariable("approvalCiStatus", "passed");
+        context.setVariable("approvalPrUrl",
+                "https://github.com/acme/widgets/pull/" + issue.getPrNumber());
 
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -154,6 +162,45 @@ class IssueDetailLivePollRenderTest {
     }
 
     @Test
+    void runningToAwaitingApprovalPollHydratesUsableDecisionRegionsOnceAndStopsPolling() {
+        TrackedIssue issue = inProgressIssue(35L, 35, "INDEPENDENT_REVIEW");
+        issue.setPrNumber(77);
+
+        String initiallyRunning = render(issue, "content", 5, false);
+
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setCurrentPhase(null);
+        String terminalPoll = render(issue, "live-status-poll", -1, false);
+
+        assertThat(initiallyRunning)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .doesNotContain("id=\"approval-decision\"")
+                .doesNotContain("id=\"issue-approve-modal\"");
+        assertThat(terminalPoll)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .contains("id=\"approval-decision\"")
+                .contains("id=\"issue-approve-modal\"")
+                .contains("data-modal-open=\"issue-approve-modal\"")
+                .contains("action=\"/approvals/35/approve\" method=\"post\"")
+                .contains("action=\"/approvals/35/reject\" method=\"post\"")
+                .contains("name=\"returnTo\" value=\"issue\"")
+                .contains("hx-preserve")
+                .contains("hx-swap-oob=\"true\"")
+                .contains("hx-trigger=\"none\"")
+                .doesNotContain("hx-get=", "every 5s");
+        assertThat(occurrences(terminalPoll, "id=\"approval-decision\""))
+                .isEqualTo(1);
+        assertThat(occurrences(terminalPoll, "id=\"issue-approve-modal\""))
+                .isEqualTo(1);
+        assertThat(occurrences(terminalPoll, "id=\"approval-decision-region\""))
+                .isEqualTo(1);
+        assertThat(occurrences(terminalPoll, "id=\"issue-approval-modal-region\""))
+                .isEqualTo(1);
+    }
+
+    @Test
     void content_offFragmentRegionsRenderInPlaceWithoutOob() {
         // On the initial page (content fragment) the same regions render normally, WITHOUT the
         // OOB attribute — otherwise HTMX would try to relocate/duplicate them on load.
@@ -205,5 +252,9 @@ class IssueDetailLivePollRenderTest {
         // The OOB attr sits on the #timeline-panel element, and it carries the rendered timeline.
         assertThat(html.substring(idx, Math.min(idx + 120, html.length()))).contains("hx-swap-oob=\"true\"");
         assertThat(html).contains(">Timeline<");
+    }
+
+    private static int occurrences(String value, String needle) {
+        return (value.length() - value.replace(needle, "").length()) / needle.length();
     }
 }

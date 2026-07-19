@@ -7,11 +7,13 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.service.approval.ApprovalDecisionService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -96,8 +98,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iter));
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
@@ -124,8 +125,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
@@ -135,5 +135,100 @@ class ApprovalsDiffViewerRenderTest {
         String html = render(model);
 
         assertThat(html).doesNotContain("data-diff-viewer");
+    }
+
+    @Test
+    void partialReviewRendersOnlyPresentDimensions() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 11, "Partial review");
+        issue.setId(4L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setReviewPassed(true);
+        iteration.setReviewJson("""
+                {"passed": true, "specComplianceScore": 0.8}
+                """);
+
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
+
+        ApprovalController controller = new ApprovalController(issues,
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
+
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("Overall 80%")
+                .contains("Spec 80%")
+                .doesNotContain("/10");
+        assertThat(html).doesNotContain("Correctness 0.0", "Quality 0.0", "Tests 0.0",
+                "Architecture 0.0", "Regressions 0.0", "Security 0.0");
+    }
+
+    @Test
+    void validZeroScoreRendersAsZeroPercent() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 12, "Zero score review");
+        issue.setId(5L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        Iteration iteration = new Iteration(issue, 1);
+        iteration.setId(10L);
+        iteration.setReviewPassed(false);
+        iteration.setReviewJson("{\"specComplianceScore\":0.0}");
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
+
+        ApprovalController controller = new ApprovalController(issues,
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("Overall 0%")
+                .contains("Spec 0%")
+                .contains("FAILED")
+                .doesNotContain("/10");
+    }
+
+    @Test
+    void operationalFailureRendersNeutralReasonInsteadOfFailedVerdict() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        IterationRepository iterations = mock(IterationRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 13, "Unavailable review");
+        issue.setId(6L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        Iteration iteration = new Iteration(issue, 2);
+        iteration.setId(20L);
+        iteration.setReviewPassed(null);
+        iteration.setReviewJson(PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+        when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
+
+        ApprovalController controller = new ApprovalController(issues,
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
+                mock(NotificationRepository.class),
+                new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
+        Model model = new ExtendedModelMap();
+        controller.list(model, null);
+
+        String html = render(model);
+
+        assertThat(html).contains("REVIEW UNAVAILABLE")
+                .contains("review CLI timed out")
+                .doesNotContain("REVIEW FAILED");
     }
 }

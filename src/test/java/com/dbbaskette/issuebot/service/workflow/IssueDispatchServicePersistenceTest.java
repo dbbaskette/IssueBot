@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.ProcessingControl;
@@ -8,6 +9,7 @@ import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
@@ -42,6 +44,9 @@ class IssueDispatchServicePersistenceTest {
     private PlanningVersionRepository versions;
 
     @Autowired
+    private IterationRepository iterations;
+
+    @Autowired
     private WatchedRepoRepository repos;
 
     @Autowired
@@ -68,6 +73,10 @@ class IssueDispatchServicePersistenceTest {
             approved = versions.save(approved);
             issue.setApprovedPlanningVersion(approved);
             issues.saveAndFlush(issue);
+            Iteration review = new Iteration(issue, 2);
+            review.setReviewPassed(false);
+            review.setReviewJson("{}");
+            iterations.saveAndFlush(review);
             return new Long[]{issue.getId(), approved.getId()};
         });
         assertThat(ids).isNotNull();

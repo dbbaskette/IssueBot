@@ -67,6 +67,14 @@ public record CodeReviewResult(
         return rawJson == null;
     }
 
+    /** Explicitly separates completed conformance verdicts from operational failures. */
+    public ReviewOutcome outcome() {
+        if (invocationFailed()) {
+            return ReviewOutcome.OPERATIONAL_ERROR;
+        }
+        return passed ? ReviewOutcome.PASSED : ReviewOutcome.FAILED;
+    }
+
     /**
      * Server-side conformance guard: high-severity spec/security findings and explicitly
      * unmet acceptance criteria are blocking independently of model-supplied pass/fail text.

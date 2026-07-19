@@ -1,8 +1,12 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
+import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +27,7 @@ class IssueDispatchServiceTest {
 
     private final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     private final ProcessingControlService control = mock(ProcessingControlService.class);
+    private final IterationRepository iterations = mock(IterationRepository.class);
     private IssueDispatchService service;
     private TrackedIssue issue;
 
@@ -35,7 +40,8 @@ class IssueDispatchServiceTest {
         when(issues.findByIdWithApprovedPlanningVersion(1L))
                 .thenAnswer(invocation -> Optional.of(issue));
         when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of());
-        service = new IssueDispatchService(issues, control);
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
+        service = new IssueDispatchService(issues, control, iterations);
     }
 
     @Test
@@ -113,6 +119,72 @@ class IssueDispatchServiceTest {
     }
 
     @Test
+    void legacyRetryRejectsLatestPersistedSecondMiss() {
+        issue.getRepo().setPlanFirst(true);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        when(iterations.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(review(issue, 2, false, "{}")));
+
+        IssueDispatchService.ClaimResult result = service.claimRetry(1L);
+
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason()).contains("guided implementation retry");
+        verify(issues, never()).save(any());
+    }
+
+    @Test
+    void legacyGuidedRetryAcceptsLatestPersistedSecondMiss() {
+        issue.getRepo().setPlanFirst(true);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 1, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        when(iterations.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(review(issue, 2, false, "{}")));
+        IssueGuidanceRepository guidance = mock(IssueGuidanceRepository.class);
+        IssueDispatchService guidedService = new IssueDispatchService(
+                issues, control, guidance, iterations);
+
+        IssueDispatchService.ClaimResult result =
+                guidedService.claimGuidedRetry(1L, "narrow fix", 5);
+
+        assertThat(result.claimed()).isTrue();
+        verify(guidance).save(argThat(row -> row.getIssueId().equals(1L)
+                && row.getGuidance().equals("narrow fix")));
+    }
+
+    @Test
+    void legacyRetryAllowsLatestPersistedPassAfterEarlierMiss() {
+        issue.getRepo().setPlanFirst(true);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(
+                review(issue, 1, false, "{}"), review(issue, 2, true, "{}")));
+
+        IssueDispatchService.ClaimResult result = service.claimRetry(1L);
+
+        assertThat(result.claimed()).isTrue();
+        verify(issues).save(issue);
+    }
+
+    @Test
+    void legacyRetryTreatsNullPersistedVerdictAsNeutral() {
+        issue.getRepo().setPlanFirst(true);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        when(iterations.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(review(issue, 2, null, "{\"passed\":false}")));
+
+        IssueDispatchService.ClaimResult result = service.claimRetry(1L);
+
+        assertThat(result.claimed()).isTrue();
+        verify(issues).save(issue);
+    }
+
+    @Test
     void concurrentGuardedRetriesCannotBothPassSharedCapacityGate() throws Exception {
         TrackedIssue firstIssue = new TrackedIssue(new WatchedRepo("acme", "one"), 41, "First");
         firstIssue.setId(1L);
@@ -176,5 +248,12 @@ class IssueDispatchServiceTest {
             assertThat(List.of(first.get(), second.get()).stream()
                     .filter(IssueDispatchService.ClaimResult::claimed)).hasSize(1);
         }
+    }
+
+    private static Iteration review(TrackedIssue issue, int number, Boolean passed, String json) {
+        Iteration iteration = new Iteration(issue, number);
+        iteration.setReviewPassed(passed);
+        iteration.setReviewJson(json);
+        return iteration;
     }
 }

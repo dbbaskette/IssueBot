@@ -29,4 +29,15 @@ public final class ViewResolver {
     public static String redirectTarget(String returnTo, String fallback) {
         return "inbox".equals(returnTo) ? "redirect:/inbox" : fallback;
     }
+
+    /**
+     * Resolves approval action redirects to known, server-owned destinations. A request may only
+     * return to the Inbox or the issue on which the action was taken; every other value uses the
+     * caller's fixed fallback.
+     */
+    public static String approvalRedirect(String returnTo, Long issueId, String fallback) {
+        if ("inbox".equals(returnTo)) return "redirect:/inbox";
+        if ("issue".equals(returnTo) && issueId != null) return "redirect:/issues/" + issueId;
+        return fallback;
+    }
 }

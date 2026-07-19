@@ -1216,6 +1216,12 @@ class IssueWorkflowServiceTest {
         assertEquals(1, issue.getCurrentReviewIteration());
         verify(codeReviewService, times(5)).reviewCode(
                 any(), any(), any(), any(), any(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
+        verify(eventService, times(5)).log(eq("PHASE_REVIEW_INVOCATION_ERROR"),
+                contains("no code verdict was produced"), eq(repo), eq(issue));
+        verify(eventService).log("PHASE_REVIEW_UNAVAILABLE",
+                "Independent review unavailable after provider/CLI invocation errors; "
+                        + "the code was not evaluated.", repo, issue);
+        verify(eventService, never()).log(eq("PHASE_REVIEW_FAILED"), anyString(), any(), any());
     }
 
     // === Terminal QoL (#84) — per-line SSE cap lifted from 500 to 10,000 chars ===

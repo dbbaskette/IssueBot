@@ -5,7 +5,11 @@ import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.ReviewScore;
+import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +27,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 
 import java.io.StringWriter;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +58,154 @@ class IssueDetailPlanReviewRenderTest {
         webExchange = webApplication.buildExchange(
                 new MockHttpServletRequest(servletContext),
                 new MockHttpServletResponse());
+    }
+
+    @Test
+    void approvalDecisionRendersOnlyForAwaitingApproval() {
+        TrackedIssue awaiting = issueReadyForApproval();
+
+        String awaitingHtml = renderApproval(awaiting, reviewScore(ReviewOutcome.PASSED, 0.90),
+                "passed", "https://github.com/acme/widgets/pull/55");
+        awaiting.setStatus(IssueStatus.IN_PROGRESS);
+        String inProgressHtml = renderApproval(awaiting, reviewScore(ReviewOutcome.PASSED, 0.90),
+                "passed", "https://github.com/acme/widgets/pull/55");
+
+        assertThat(awaitingHtml)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .contains("id=\"approval-decision\"");
+        assertThat(inProgressHtml)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .doesNotContain("id=\"approval-decision\"");
+    }
+
+    @Test
+    void approvalDecisionUsesExplicitCiReviewAndPercentageSemanticsIncludingZero() {
+        String passedHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+        String zeroHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.0), "passed",
+                "https://github.com/acme/widgets/pull/55");
+        String failedHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.FAILED, 0.55), "failed",
+                "https://github.com/acme/widgets/pull/55");
+        String pendingHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "pending",
+                "https://github.com/acme/widgets/pull/55");
+        String unavailableHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.OPERATIONAL_ERROR, null), "unknown",
+                "https://github.com/acme/widgets/pull/55");
+
+        assertThat(passedHtml).contains("CI passed", "Review passed", "90%");
+        assertThat(zeroHtml).contains("0%");
+        assertThat(failedHtml).contains("CI failed", "Review failed", "ci-failed", "status-failed");
+        assertThat(pendingHtml).contains("CI pending", "ci-pending");
+        assertThat(unavailableHtml).contains("Review unavailable")
+                .doesNotContain("Review failed");
+    }
+
+    @Test
+    void approvalDecisionOrdersActionsAndPostsBackToIssueDetail() {
+        TrackedIssue issue = issueReadyForApproval();
+        issue.setPrNumber(55);
+        String html = renderApproval(issue, reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+
+        assertThat(html).contains("href=\"https://github.com/acme/widgets/pull/55\"")
+                .contains("target=\"_blank\"")
+                .contains("rel=\"noopener\"")
+                .contains("View PR #55")
+                .contains("action=\"/approvals/42/approve\" method=\"post\"")
+                .contains("action=\"/approvals/42/reject\" method=\"post\"")
+                .contains("name=\"returnTo\" value=\"issue\"")
+                .containsPattern("name=\"merge\"[^>]*checked")
+                .containsPattern("name=\"feedback\"[^>]*required");
+        assertThat(occurrences(html, "name=\"returnTo\" value=\"issue\"")).isEqualTo(2);
+        assertThat(html.indexOf("data-modal-open=\"issue-approve-modal\""))
+                .isLessThan(html.indexOf("data-reject-toggle=\"42\""));
+        assertThat(html.indexOf("data-reject-toggle=\"42\""))
+                .isLessThan(html.indexOf("View PR #55"));
+    }
+
+    @Test
+    void approvalRejectDisclosureTracksStateAndRestoresCancelFocus() throws Exception {
+        String html = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+        String javascript;
+        try (var input = getClass().getClassLoader().getResourceAsStream("static/js/app.js")) {
+            assertThat(input).isNotNull();
+            javascript = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        assertThat(html).contains("data-reject-toggle=\"42\"")
+                .contains("aria-expanded=\"false\"")
+                .contains("aria-controls=\"reject-form-42\"");
+        assertThat(javascript)
+                .contains("rejectToggle.setAttribute('aria-controls', panel.id)")
+                .contains("rejectToggle.setAttribute('aria-expanded', String(!panel.hidden))")
+                .contains("cancelToggle.setAttribute('aria-expanded', 'false')")
+                .contains("cancelToggle.focus()");
+    }
+
+    @Test
+    void approvalDecisionWithoutPositivePrOmitsMergeAndExplainsCompletionOnly() {
+        TrackedIssue issue = issueReadyForApproval();
+        issue.setPrNumber(null);
+
+        String html = renderApproval(issue, reviewScore(ReviewOutcome.PASSED, 0.90),
+                "passed", null);
+
+        assertThat(html).contains("Approval will complete IssueBot without merging a pull request.")
+                .doesNotContain("name=\"merge\"")
+                .doesNotContain("View PR");
+    }
+
+    @Test
+    void approvalDecisionModalAndRejectFormStayOutsideLiveStatusPollingFragment() {
+        WebContext context = approvalContext(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+
+        String content = render(context);
+        String liveStatus = render(context, "live-status");
+        String livePoll = render(context, "live-status-poll");
+
+        assertThat(content).contains("id=\"issue-approve-modal\"", "id=\"issue-reject-form\"");
+        assertThat(liveStatus).doesNotContain("issue-approve-modal", "issue-reject-form");
+        assertThat(livePoll)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .contains("id=\"issue-approve-modal\"")
+                .contains("hx-swap-oob=\"true\"");
+        assertThat(occurrences(livePoll, "id=\"approval-decision\""))
+                .isEqualTo(1);
+        assertThat(occurrences(livePoll, "id=\"issue-approve-modal\""))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void approvalDecisionStylesProtectCompactMobileActionFlow() throws Exception {
+        String css;
+        try (var input = getClass().getClassLoader()
+                .getResourceAsStream("static/css/style.css")) {
+            assertThat(input).isNotNull();
+            css = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        assertThat(css).contains(".approval-decision-card")
+                .contains("overflow-wrap: anywhere")
+                .contains(".approval-decision-evidence")
+                .contains(".approval-decision-actions")
+                .contains(".issue-approval-modal")
+                .contains("max-height: calc(100dvh - 2rem)")
+                .contains("overflow-y: auto")
+                .containsPattern("(?s)\\.issue-approval-modal \\.modal-actions\\s*\\{[^}]*position:\\s*sticky[^}]*bottom:\\s*0")
+                .contains("@media (max-width: 600px)")
+                .containsPattern("(?s)@media \\(max-width: 600px\\).*?\\.approval-decision-actions\\s*\\{[^}]*flex-direction:\\s*column")
+                .containsPattern("(?s)\\.approval-decision-actions > \\.btn,.*?\\.approval-decision-actions > form,.*?\\.approval-decision-actions > a\\s*\\{[^}]*width:\\s*100%");
     }
 
     @Test
@@ -130,11 +283,13 @@ class IssueDetailPlanReviewRenderTest {
         Iteration second = failedReview(issue, 2,
                 "{\"unmetRequirements\":[\"Keep approval immutable\"],\"testEvidence\":\"Render test failed\"}");
 
-        String html = render(issue, List.of(approved), approved, approved, List.of(second, first));
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(second, first), true);
 
         assertThat(html).contains("Needs guidance after review 2")
                 .contains("Review attempt 2")
                 .contains("Review attempt 1")
+                .contains("Did not conform")
                 .contains("Keep approval immutable")
                 .contains("Retry Implementation")
                 .contains("The approved Design Spec and Implementation Plan will not change")
@@ -142,6 +297,11 @@ class IssueDetailPlanReviewRenderTest {
                 .doesNotContain("name=\"versionId\"")
                 .doesNotContain("action=\"/issues/42/retry\"")
                 .doesNotContain("name=\"planFirstOverride\"");
+        assertThat(occurrences(html, "class=\"status status-failed\">Did not conform</span>"))
+                .isEqualTo(2);
+        assertThat(occurrences(html, "Keep approval immutable")).isEqualTo(1);
+        assertThat(html.indexOf("Keep approval immutable"))
+                .isGreaterThan(html.indexOf("Iteration History"));
     }
 
     @Test
@@ -158,13 +318,279 @@ class IssueDetailPlanReviewRenderTest {
         second.setLocalCheckResult("FAILED");
         second.setCiResult("PASSED");
 
-        String html = render(issue, List.of(approved), approved, approved, List.of(second));
+        String html = render(issue, List.of(approved), approved, approved, List.of(second), true);
 
         assertThat(html).contains("Persisted verification evidence")
                 .contains("Local checks")
                 .contains("CI verification")
                 .contains("Local checks: FAILED")
                 .contains("CI verification: PASSED");
+    }
+
+    @Test
+    void passingSecondReviewShowsPassedStateAndNormalRecoveryWithoutGuidance() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+        issue.setApprovedPlanningVersion(approved);
+
+        Iteration first = scoredReview(issue, 1, false, 0.62, 0.45);
+        Iteration second = scoredReview(issue, 2, true, 0.96, 0.94);
+
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(second, first), false);
+
+        assertThat(html).containsPattern(
+                        "(?s)Independent review passes.*?class=\"status status-completed\"[^>]*>PASSED</span>")
+                .contains("Recovery")
+                .contains("action=\"/issues/42/retry\"")
+                .doesNotContain("Needs guidance after review 2")
+                .doesNotContain("Action required");
+    }
+
+    @Test
+    void scoreTrajectoryComparesSelectedAttemptAndPreservesPlanVersion() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        PlanningVersion historical = pending(issue, 2, "# Historical design", "# Historical plan", null);
+        historical.supersede();
+
+        Iteration first = review(issue, 1, false, """
+                {
+                  "summary":"Several requirements remain",
+                  "specComplianceScore":0.77,
+                  "correctnessScore":0.78,
+                  "codeQualityScore":0.77,
+                  "testCoverageScore":0.45,
+                  "architectureFitScore":0.78,
+                  "regressionsScore":0.78,
+                  "securityScore":0.78
+                }
+                """);
+        Iteration second = review(issue, 2, true, """
+                {
+                  "summary":"The implementation matches the approved plan",
+                  "specComplianceScore":0.96,
+                  "correctnessScore":0.95,
+                  "codeQualityScore":0.95,
+                  "testCoverageScore":0.94,
+                  "architectureFitScore":0.96,
+                  "regressionsScore":0.95,
+                  "securityScore":0.94,
+                  "findings":[
+                    {"severity":"low","finding":"Minor cleanup"},
+                    {"severity":"info","finding":"Documentation note"}
+                  ],
+                  "criteria":[
+                    {"text":"Contract remains immutable","verdict":"met","note":"Covered by tests"},
+                    {"text":"Retries preserve guidance","verdict":"met","note":"Verified"},
+                    {"text":"Test coverage","verdict":"met","note":"Expanded"},
+                    {"text":"No regressions","verdict":"met","note":"Suite passes"}
+                  ]
+                }
+                """);
+
+        String html = render(issue, List.of(current, historical), historical, current,
+                List.of(second, first));
+
+        assertThat(html).contains("id=\"review-history\"")
+                .contains("Implementation review")
+                .contains("Conforms to plan")
+                .contains("95%")
+                .contains("22 points from review 1")
+                .contains("Test coverage")
+                .contains("94%")
+                .contains("+49")
+                .contains("4 of 4 met")
+                .contains("aria-label=\"Test coverage: review 1 45 percent; review 2 94 percent; improved 49 points\"")
+                .contains("review-model")
+                .contains("2 findings")
+                .contains("open=\"open\"")
+                .doesNotContain("review-attempt-selector");
+    }
+
+    @Test
+    void firstScoredReviewUsesUnavailableVerdictAndNewScoreLanguage() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, null, """
+                {
+                  "summary":"The reviewer returned scores without a verdict",
+                  "specComplianceScore":0.81,
+                  "testCoverageScore":0.68
+                }
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(first));
+
+        assertThat(html).contains("Review unavailable")
+                .contains(">Unavailable</span>")
+                .contains("81%")
+                .contains("First scored review")
+                .contains(">New</span>")
+                .contains("aria-label=\"Spec compliance: review 1 81 percent; first score\"")
+                .contains("aria-label=\"Test coverage: review 1 68 percent; first score\"")
+                .doesNotContain("review-attempt-selector");
+    }
+
+    @Test
+    void operationalReviewFailureIsNeutralAndRetainsDiagnosticReason() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+        issue.setApprovedPlanningVersion(approved);
+        Iteration unavailable = review(issue, 2, null,
+                PersistedReviewOutcome.operationalErrorJson("review CLI timed out"));
+
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(unavailable), false);
+
+        assertThat(html).contains("Review unavailable")
+                .contains("review CLI timed out")
+                .contains("Review: UNAVAILABLE")
+                .contains("Raw JSON")
+                .doesNotContain("Did not conform")
+                .doesNotContain("Changes requested")
+                .doesNotContain("Action required")
+                .doesNotContain("Needs guidance after review 2");
+    }
+
+    @Test
+    void failedTrajectoryShowsNegativeAndUnchangedDeltasWithUnmetCriteriaFirst() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, true, """
+                {
+                  "specComplianceScore":0.90,
+                  "correctnessScore":0.80
+                }
+                """);
+        Iteration second = review(issue, 2, false, """
+                {
+                  "specComplianceScore":0.70,
+                  "correctnessScore":0.80,
+                  "securityScore":0.75,
+                  "criteria":[
+                    {"text":"Passing criterion","verdict":"met","note":"Still covered"},
+                    {"text":"Blocking criterion","verdict":"unmet","note":"Missing guard"}
+                  ]
+                }
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("Did not conform")
+                .contains(">Changes requested</span>")
+                .contains("-10 points from review 1")
+                .contains(">-20</span>")
+                .contains(">No change</span>")
+                .contains("1 of 2 met")
+                .contains("aria-label=\"Spec compliance: review 1 90 percent; review 2 70 percent; declined 20 points\"")
+                .contains("aria-label=\"Correctness: review 1 80 percent; review 2 80 percent; no change\"")
+                .contains("aria-label=\"Security: review 2 75 percent; first score for this dimension\"")
+                .contains("review-score-delta-icon")
+                .contains(">↓</span>")
+                .contains("review-criterion-icon")
+                .contains(">!</span>")
+                .containsSubsequence("Blocking criterion", "Missing guard", "Passing criterion", "Still covered");
+    }
+
+    @Test
+    void outOfRangeScoresRenderBoundedRailWidthsAndUnboundedRawDelta() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":-0.25}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"specComplianceScore":1.40}
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("aria-label=\"Spec compliance: review 1 0 percent; review 2 100 percent; improved 165 points\"")
+                .containsPattern("class=\"review-score-previous\"\\s+style=\"width:0%\"")
+                .containsPattern("class=\"review-score-current\"\\s+style=\"width:100%\"")
+                .contains(">+165</span>")
+                .doesNotContain("width:-25%")
+                .doesNotContain("width:140%");
+    }
+
+    @Test
+    void fractionalTrajectoryUsesRawDeltaAndPreservesExplicitCurrentPlanVersion() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":0.014}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"specComplianceScore":0.025}
+                """);
+        WebContext context = context(issue, List.of(current), current, current, List.of(second, first));
+        context.setVariable("requestedPlanVersion", 3);
+
+        String html = render(context);
+
+        assertThat(html).contains("aria-label=\"Spec compliance: review 1 1 percent; review 2 3 percent; improved 1 point\"")
+                .containsPattern("class=\"review-score-previous\"\\s+style=\"width:1%\"")
+                .containsPattern("class=\"review-score-current\"\\s+style=\"width:3%\"")
+                .contains(">+1</span>")
+                .contains("1 point from review 1")
+                .doesNotContain("review-attempt-selector");
+        assertThat(html.indexOf("id=\"review-history\""))
+                .isLessThan(html.indexOf("id=\"plan-review\""));
+    }
+
+    @Test
+    void selectorUsesUniquePersistenceIdsAndAuditRichLabelsAfterThreeScoredAttempts() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        Iteration first = review(issue, 2, false, "{\"specComplianceScore\":0.50}");
+        first.setId(101L);
+        Iteration second = review(issue, 2, true, "{\"specComplianceScore\":0.75}");
+        second.setId(202L);
+        Iteration third = review(issue, 2, true, "{\"specComplianceScore\":0.90}");
+        third.setId(303L);
+        WebContext context = context(issue, List.of(current), current, current,
+                List.of(third, first, second));
+        context.setVariable("requestedPlanVersion", 3);
+
+        String html = render(context);
+
+        assertThat(html).contains("review-attempt-selector")
+                .contains("Review 2 · Passed · 90%")
+                .contains("Review 2 · Passed · 75%")
+                .contains("Review 2 · Did not conform · 50%")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=303#review-history\"")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=202#review-history\"")
+                .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=101#review-history\"")
+                .containsPattern("href=\"[^\"]*reviewAttempt=303[^\"]*\"\\s+aria-current=\"true\"");
+    }
+
+    @Test
+    void guidanceAttemptBadgesReflectEachPersistedVerdict() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+
+        Iteration unavailable = failedReview(issue, 1, "{}");
+        unavailable.setReviewPassed(null);
+        Iteration passed = scoredReview(issue, 2, true, 0.95, 0.90);
+        Iteration failed = scoredReview(issue, 3, false, 0.70, 0.65);
+
+        String html = render(issue, List.of(approved), approved, approved,
+                List.of(failed, passed, unavailable), true);
+
+        assertThat(html).contains("class=\"status status-failed\">Did not conform</span>")
+                .contains("class=\"status status-completed\">Conformed</span>")
+                .contains("class=\"status status-pending\">Review unavailable</span>");
     }
 
     @Test
@@ -192,7 +618,18 @@ class IssueDetailPlanReviewRenderTest {
                           PlanningVersion selected,
                           PlanningVersion current,
                           List<Iteration> reviewAttempts) {
-        return render(context(issue, versions, selected, current, reviewAttempts));
+        return render(issue, versions, selected, current, reviewAttempts, false);
+    }
+
+    private String render(TrackedIssue issue,
+                          List<PlanningVersion> versions,
+                          PlanningVersion selected,
+                          PlanningVersion current,
+                          List<Iteration> reviewAttempts,
+                          boolean showPlanGuidance) {
+        WebContext context = context(issue, versions, selected, current, reviewAttempts);
+        context.setVariable("showPlanGuidance", showPlanGuidance);
+        return render(context);
     }
 
     private WebContext context(TrackedIssue issue,
@@ -217,18 +654,57 @@ class IssueDetailPlanReviewRenderTest {
         context.setVariable("selectedPlanningVersion", selected);
         context.setVariable("currentPlanningVersion", current);
         context.setVariable("selectedPlanIsHistorical", selected != current);
+        context.setVariable("requestedPlanVersion",
+                selected != current ? selected.getVersionNumber() : null);
         context.setVariable("selectedDesignSpecHtml", markdownRenderer.toHtml(selected.getDesignSpec()));
         context.setVariable("selectedImplementationPlanHtml", markdownRenderer.toHtml(selected.getImplementationPlan()));
         context.setVariable("planReviewAttempts", reviewAttempts);
+        context.setVariable("reviewScoreHistory", ReviewScoreHistoryAssembler.assemble(
+                reviewAttempts.reversed(), null));
+        context.setVariable("showPlanGuidance", false);
         return context;
     }
 
     private String render(WebContext context) {
-        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("content"),
+        return render(context, "content");
+    }
+
+    private String render(WebContext context, String fragment) {
+        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (TemplateMode) null, null);
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    private String renderApproval(TrackedIssue issue, ReviewScore score, String ciStatus,
+                                  String prUrl) {
+        return render(approvalContext(issue, score, ciStatus, prUrl));
+    }
+
+    private WebContext approvalContext(TrackedIssue issue, ReviewScore score, String ciStatus,
+                                       String prUrl) {
+        PlanningVersion plan = pending(issue, 1, "# Approved design", "# Approved plan", null);
+        plan.approve(LocalDateTime.of(2026, 7, 18, 12, 0));
+        WebContext context = context(issue, List.of(plan), plan, plan, List.of());
+        context.setVariable("approvalReviewScore", score);
+        context.setVariable("approvalCiStatus", ciStatus);
+        context.setVariable("approvalPrUrl", prUrl);
+        return context;
+    }
+
+    private static ReviewScore reviewScore(ReviewOutcome outcome, Double overall) {
+        return new ReviewScore(outcome, null, "Review summary", overall, List.of(), 0,
+                "review-model", List.of());
+    }
+
+    private static TrackedIssue issueReadyForApproval() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42,
+                "Review the contract");
+        issue.setId(42L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setPrNumber(55);
+        return issue;
     }
 
     private static TrackedIssue issueAwaitingApproval() {
@@ -244,10 +720,35 @@ class IssueDetailPlanReviewRenderTest {
 
     private static Iteration failedReview(TrackedIssue issue, int number, String reviewJson) {
         Iteration iteration = new Iteration(issue, number);
+        iteration.setId((long) number);
         iteration.setReviewPassed(false);
         iteration.setReviewModel("review-model");
         iteration.setReviewJson(reviewJson);
         iteration.setLocalCheckResult("PASSED");
+        return iteration;
+    }
+
+    private static Iteration scoredReview(TrackedIssue issue, int number, boolean passed,
+                                          double specCompliance, double testCoverage) {
+        return failedReview(issue, number, """
+                {"specComplianceScore":%s,"testCoverageScore":%s}
+                """.formatted(specCompliance, testCoverage), passed);
+    }
+
+    private static Iteration review(TrackedIssue issue, int number, Boolean passed, String reviewJson) {
+        Iteration iteration = new Iteration(issue, number);
+        iteration.setId((long) number);
+        iteration.setReviewPassed(passed);
+        iteration.setReviewModel("review-model");
+        iteration.setReviewJson(reviewJson);
+        iteration.setLocalCheckResult("PASSED");
+        return iteration;
+    }
+
+    private static Iteration failedReview(TrackedIssue issue, int number, String reviewJson,
+                                          boolean passed) {
+        Iteration iteration = failedReview(issue, number, reviewJson);
+        iteration.setReviewPassed(passed);
         return iteration;
     }
 

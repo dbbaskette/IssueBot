@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.dependency.DependencyResolverService;
@@ -59,7 +60,8 @@ class IssuePollingServiceTest {
                 properties,
                 dependencyResolver,
                 processingControl,
-                new IssueDispatchService(issueRepository, processingControl)
+                new IssueDispatchService(
+                        issueRepository, processingControl, mock(IterationRepository.class))
         );
         testRepo = new WatchedRepo("owner", "repo");
     }

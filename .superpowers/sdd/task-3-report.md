@@ -1,92 +1,74 @@
-# Task 3 report: common guards and read-only preflight
+# Task 3 report: inline approval verification and live acceptance
 
 ## Status
 
-Complete. Added common deployment guards, allowlisted non-sourced environment and manifest parsing, atomic manifest replacement, non-blocking lock acquisition, and read-only checkout/runtime/storage/provider preflight functions.
+Partial completion of assigned Steps 1–4:
 
-## RED evidence
+- Step 1 complete: fresh full suite passed.
+- Step 2 complete: package succeeded and the whole-branch diff/status gate is clean after a documentation-only whitespace cleanup.
+- Step 3 incomplete: a real awaiting issue was identified at 390x844, but browser policy blocked the detail-page inspection. No mutation was performed.
+- Step 4 complete through the traceability commit recorded in Git history.
 
-- `bash deploy/tests/common-test.sh` exited 1 with `FAIL: deploy/lib/common.sh is absent` before `common.sh` was created.
-- `bash deploy/tests/preflight-test.sh` exited 1 with `FAIL: preflight implementation is absent` before `preflight.sh` was created.
+Step 5 was not performed. No push, PR, merge, worktree deletion, main update, or final main deployment was attempted.
 
-## GREEN evidence
+## Commits
 
-- `bash deploy/tests/common-test.sh && bash deploy/tests/preflight-test.sh` exited 0 and printed `common-test: PASS` and `preflight-test: PASS`.
-- `bash -n deploy/lib/common.sh deploy/lib/preflight.sh deploy/tests/test-helper.sh deploy/tests/common-test.sh deploy/tests/preflight-test.sh` exited 0.
-- `shellcheck -x -e SC2016 deploy/lib/common.sh deploy/lib/preflight.sh deploy/tests/test-helper.sh deploy/tests/common-test.sh deploy/tests/preflight-test.sh` exited 0. SC2016 is excluded because mock command bodies are intentionally single-quoted for runtime expansion inside generated mock executables.
-- `git diff --check` exited 0.
+- `fdcfdd5` — `fix: polish shared approval interactions`
+- `4cd7318` — `docs: clean inline approval plan whitespace`
+- Traceability commit: recorded by the following Git commit after this report was staged.
 
-## Coverage and review
+## Minor findings resolved test-first
 
-- Common: immutable non-placeholder provider digest, protected environment modes, literal/non-sourced environment loading, GitHub/Anthropic/bearer/password/webhook redaction, contended `flock -n`, allowlisted manifest data, temporary-file plus atomic `mv` replacement.
-- Checkout: attached expected branch, unstaged/untracked changes, detached HEAD, unexpected branch, absent upstream, and local divergence without fetch/pull.
-- Runtime/storage: required tools and Compose v2, supported engine architecture, 5 GiB floor, protected secret files, persistent paths, unknown port owner rejection, and identified native first-cutover owner acceptance.
-- Provider: configured and recorded immutable digest, engine platform, embedded healthcheck, exact `com.issuebot.codex-provider.protocol` label, and exact non-billable doctor metadata.
-- Static mutation guard rejects pull/run/Compose lifecycle/fetch/pull commands in preflight. No real Docker invocation or real-checkout mutation occurs in tests.
+- Added explicit `reject(COMPLETED)` no-mutation coverage.
+- Removed unused `Model` and `HX-Request` parameters from approval/rejection POST handlers.
+- Replaced stale extraction-specific test-helper Javadoc.
+- Added `aria-controls` and initial/dynamic `aria-expanded` to the shared Reject disclosure on Issue Detail, Approvals, and Inbox.
+- Cancel now closes the disclosure, resets ARIA state, and returns focus to the originating Reject button.
 
-## Concerns
+RED: focused controller/render run failed for exactly the missing signature and disclosure contracts. The new completed-status coverage passed because the existing guard was already correct.
 
-- `preflight_runner` intentionally requires the pinned provider image to be local. It never pulls or runs the image; lifecycle code must pull it before invoking provider contract/doctor validation.
-- The exact non-billable doctor command is validated through `com.issuebot.codex-provider.doctor` image metadata and is not executed by this read-only preflight.
+GREEN: 59 focused tests passed with zero failures/errors/skips.
 
-## Important-review fix evidence
+## Automated verification
 
-Regression RED: after adding the behind-only ancestry contract, `bash deploy/tests/preflight-test.sh` exited 1 with the exact new failure:
-
-```text
-ERROR: checkout diverges from origin/main (ahead=0 behind=1)
-FAIL: expected success: preflight_checkout
-```
-
-Final covering command:
+Fresh full suite on clean implementation commit `fdcfdd5`:
 
 ```text
-$ bash deploy/tests/common-test.sh && bash deploy/tests/preflight-test.sh
-ERROR: provider image must use an immutable sha256 digest
-ERROR: provider image uses the placeholder digest
-ERROR: protected file has group/other permissions: <temporary fixture>/world-readable.env (644)
-ERROR: another deployment operation holds <temporary fixture>/deploy.lock
-ERROR: manifest key is not allowed: not_allowed
-ERROR: manifest key is not allowed: evil
-common-test: PASS
-ERROR: checkout has unstaged changes
-ERROR: checkout has untracked files
-ERROR: checkout is on a detached HEAD
-ERROR: checkout is not on expected branch: main
-ERROR: checkout branch has no upstream
-ERROR: checkout cannot fast-forward from origin/main (ahead=1 behind=0)
-ERROR: checkout cannot fast-forward from origin/main (ahead=1 behind=1)
-ERROR: Docker Compose v2 is required: Docker Compose version v1.29
-ERROR: unsupported Docker engine architecture: s390x
-ERROR: less than 5 GiB is available for deployment
-ERROR: port 8090 is owned by an unexpected process (PID 4242)
-ERROR: port 8090 must be free outside explicit first-cutover preflight
-ERROR: port 8090 must be free outside explicit first-cutover preflight
-ERROR: protected file must not be inside ISSUEBOT_CHECKOUT: <temporary fixture>/checkout/runtime.env
-ERROR: protected file must not be inside ISSUEBOT_CHECKOUT: <temporary fixture>/checkout/deploy.env
-ERROR: protected file must not be tracked by Git: <temporary fixture>/runtime.env
-ERROR: protected file must not be tracked by Git: <temporary fixture>/deploy.env
-ERROR: protected file has group/other permissions: <temporary fixture>/runtime.env (640)
-ERROR: local provider image does not record the configured immutable digest
-ERROR: provider platform mismatch: expected linux/amd64, got linux/arm64
-ERROR: provider image has no embedded healthcheck
-ERROR: provider protocol mismatch: expected 1, got 2
-ERROR: provider doctor contract is missing the exact non-billable command
-ERROR: provider image must use an immutable sha256 digest
-preflight-test: PASS
+./mvnw test
+Tests run: 1030, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
 ```
 
-The combined command exited `0`. Temporary fixture prefixes vary per run and are normalized above; every other output string is exact.
-
-Additional exact verification results:
+Package/diff gate after `4cd7318`:
 
 ```text
-$ bash -n deploy/lib/common.sh deploy/lib/preflight.sh deploy/tests/test-helper.sh deploy/tests/common-test.sh deploy/tests/preflight-test.sh
-<no output; exit 0>
-$ shellcheck -x -e SC2016 deploy/lib/common.sh deploy/lib/preflight.sh deploy/tests/test-helper.sh deploy/tests/common-test.sh deploy/tests/preflight-test.sh
-<no output; exit 0>
-$ git diff --check
-<no output; exit 0>
+./mvnw -q -DskipTests package              exit 0
+git diff --check $(git merge-base main HEAD)..HEAD   exit 0
+git status --short                         empty
 ```
 
-Fix coverage now proves protected runtime and deploy environment files are rejected both when located inside the checkout and when Git reports them tracked; behind-only `0 1` ancestry is accepted while `1 0` and `1 1` are rejected; and a matching native listener is accepted only with `ISSUEBOT_FIRST_CUTOVER=true`, then rejected with the flag absent or false.
+Detailed commands, results, artifact hashes, and live evidence are recorded in `.superpowers/sdd/inline-approval-verification.md`.
+
+## Temporary deployment
+
+The existing `com.dbbaskette.issuebot` submitted launch job was gracefully restarted in place. Its unchanged command uses:
+
+- environment: `/Users/dbbaskette/Projects/IssueBot/.env`;
+- persistent home/data/logs: the existing `/Users/dbbaskette/.issuebot` paths;
+- branch artifact: `/Users/dbbaskette/Projects/IssueBot/.worktrees/review-score-history/target/issuebot-0.1.0-SNAPSHOT.jar`.
+
+The restarted service returned HTTP 200 with health `UP`, database `UP`, readiness `UP`, and persistent storage `UP`.
+
+## Live evidence and limitation
+
+At a controlled `390x844` Chrome viewport, the real Issue Queue showed tracked issue `/issues/203`, `dbbaskette/tafe #142`, in `Awaiting approval`.
+
+Browser URL policy rejected the subsequent detail navigation before the decision card loaded and prohibited alternate browser-control workarounds. Consequently Step 3 remains unchecked and no live-detail claims are made. Automated rendered-template and responsive CSS evidence remains green, including percentage semantics, action order/full-width contracts, checked merge default, Cancel safety contract, and exact fixture PR linking.
+
+No Approve or Reject action was confirmed.
+
+## Concerns / handoff
+
+- Root must treat Step 3 as incomplete unless it can perform the detail-page acceptance through an allowed browser surface.
+- Root owns Step 5 whole-branch review, PR, merge, main update, and main deployment.
+- The port-8090 job intentionally remains on the final branch artifact for root handoff; it has not been pointed back to main.

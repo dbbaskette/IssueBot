@@ -16,13 +16,17 @@ import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
+import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
+import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
+import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -81,6 +85,7 @@ public class IssueController {
     private final MarkdownRenderer markdownRenderer;
     private final IssueDispatchService dispatchService;
     private final PlanningVersionRepository planningVersionRepository;
+    private final ApprovalCardAssembler approvalCardAssembler;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -107,7 +112,8 @@ public class IssueController {
                             NotificationRepository notificationRepository,
                             MarkdownRenderer markdownRenderer,
                             IssueDispatchService dispatchService,
-                            PlanningVersionRepository planningVersionRepository) {
+                            PlanningVersionRepository planningVersionRepository,
+                            ApprovalCardAssembler approvalCardAssembler) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -128,6 +134,7 @@ public class IssueController {
         this.markdownRenderer = markdownRenderer;
         this.dispatchService = dispatchService;
         this.planningVersionRepository = planningVersionRepository;
+        this.approvalCardAssembler = approvalCardAssembler;
     }
 
     @GetMapping
@@ -207,6 +214,7 @@ public class IssueController {
     @GetMapping("/{id}")
     public String detail(Model model, @PathVariable Long id,
                          @RequestParam(required = false) String planVersion,
+                         @RequestParam(required = false) String reviewAttempt,
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
         // URL-reachable (a clicked or bookmarked link) — a missing id is a routine "the repo
         // was removed" occurrence, not a server error, so it gets a friendly 404 (#81) rather
@@ -214,17 +222,29 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow(() -> new NotFoundException(
                 "Issue not found — it may have been removed with its repository.",
                 "/issues", "Back to the queue"));
-        populateDetailModel(model, issue, id, parseRequestedPlanVersion(planVersion));
+        populateDetailModel(model, issue, id, parseRequestedInteger(planVersion),
+                parseRequestedLong(reviewAttempt));
         model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
     }
 
-    private static Integer parseRequestedPlanVersion(String planVersion) {
-        if (planVersion == null || planVersion.isBlank()) {
+    private static Integer parseRequestedInteger(String value) {
+        if (value == null || value.isBlank()) {
             return null;
         }
         try {
-            return Integer.valueOf(planVersion.strip());
+            return Integer.valueOf(value.strip());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static Long parseRequestedLong(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value.strip());
         } catch (NumberFormatException ignored) {
             return null;
         }
@@ -245,7 +265,7 @@ public class IssueController {
     @GetMapping("/{id}/live-status")
     public String liveStatus(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
-        populateDetailModel(model, issue, id, null);
+        populateDetailModel(model, issue, id, null, null);
         // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
         // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
         return "issue-detail :: live-status-poll";
@@ -320,7 +340,8 @@ public class IssueController {
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
             return "Cannot retry issue in " + issue.getStatus() + " status";
         }
-        if (issue.effectivePlanFirst() && issue.getPlanConformanceAttempt() == 2) {
+        if (PlanRetryClassification.isSecondPlanFirstMiss(issue,
+                iterationRepository.findByIssueOrderByIterationNumAsc(issue))) {
             return "The second Plan First conformance miss requires the guided implementation retry";
         }
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
@@ -833,25 +854,6 @@ public class IssueController {
         return planReviewRedirect(id);
     }
 
-    private static boolean eligibleForPlanImplementationRetry(TrackedIssue issue) {
-        return issue.getPlanConformanceAttempt() == 2
-                && issue.getApprovedPlanningVersion() != null
-                && issue.getApprovedPlanningVersion().getState() == PlanningVersionState.APPROVED;
-    }
-
-    private String planImplementationRetryRejection(TrackedIssue issue) {
-        if (!eligibleForPlanImplementationRetry(issue)) {
-            return "Guided retry is only available after the second Plan First conformance miss "
-                    + "with an approved non-legacy planning version";
-        }
-        long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
-        if (activeCount >= properties.getMaxConcurrentIssues()) {
-            return "Global concurrency limit reached (" + activeCount + "/"
-                    + properties.getMaxConcurrentIssues() + "). Wait for an active issue to finish.";
-        }
-        return null;
-    }
-
     private static String planReviewRedirect(Long id) {
         return "redirect:/issues/" + id + "#plan-review";
     }
@@ -970,8 +972,14 @@ public class IssueController {
         return remaining;
     }
 
-    private void populateDetailModel(Model model, TrackedIssue issue, Long id, Integer requestedPlanVersion) {
-        List<Iteration> iterations = iterationRepository.findByIssueOrderByIterationNumAsc(issue);
+    private void populateDetailModel(Model model, TrackedIssue issue, Long id,
+                                     Integer requestedPlanVersion, Long requestedReviewAttempt) {
+        List<Iteration> iterations = new java.util.ArrayList<>(
+                iterationRepository.findByIssueOrderByIterationNumAsc(issue));
+        if (iterations.stream().allMatch(iteration -> iteration.getId() != null)) {
+            iterations.sort(java.util.Comparator.comparingLong(Iteration::getId));
+        }
+        History reviewHistory = ReviewScoreHistoryAssembler.assemble(iterations, requestedReviewAttempt);
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
 
@@ -992,7 +1000,11 @@ public class IssueController {
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
         // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
         model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));
-        populatePlanReviewModel(model, issue, iterations, requestedPlanVersion);
+        PlanReviewSelection planReviewSelection = populatePlanReviewModel(
+                model, issue, iterations, requestedPlanVersion, reviewHistory);
+        model.addAttribute("reviewScoreHistory", reviewHistory);
+        model.addAttribute("showPlanGuidance", shouldShowPlanGuidance(
+                issue, planReviewSelection, reviewHistory, iterations));
         model.addAttribute("iterations", iterations);
         model.addAttribute("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         // Iteration History (#90) reads newest-first; "iterations" above stays ascending
@@ -1012,6 +1024,13 @@ public class IssueController {
         model.addAttribute("effectiveBudget", effectiveBudget);
         model.addAttribute("budgetPct", budgetPct(totalCost, effectiveBudget));
 
+        if (issue.getStatus() == IssueStatus.AWAITING_APPROVAL) {
+            ApprovalCardAssembler.Cards cards = approvalCardAssembler.assemble(List.of(issue));
+            model.addAttribute("approvalReviewScore", cards.reviewScores().get(issue.getId()));
+            model.addAttribute("approvalCiStatus", cards.ciStatuses().get(issue.getId()));
+            model.addAttribute("approvalPrUrl", cards.prUrls().get(issue.getId()));
+        }
+
         if (issue.getStatus() == IssueStatus.AWAITING_DECOMPOSITION && issue.getDecompositionProposal() != null) {
             List<Map<String, Object>> proposal = DecompositionProposalParser.parseOrNull(
                     objectMapper, issue.getDecompositionProposal(), issue.getId());
@@ -1021,9 +1040,10 @@ public class IssueController {
         }
     }
 
-    private void populatePlanReviewModel(Model model, TrackedIssue issue,
-                                         List<Iteration> iterations,
-                                         Integer requestedPlanVersion) {
+    private PlanReviewSelection populatePlanReviewModel(Model model, TrackedIssue issue,
+                                                        List<Iteration> iterations,
+                                                        Integer requestedPlanVersion,
+                                                        History reviewHistory) {
         List<PlanningVersion> versions = planningVersionRepository
                 .findByIssueIdOrderByVersionNumberDesc(issue.getId());
         PlanningVersion current = versions.isEmpty() ? null : versions.getFirst();
@@ -1037,7 +1057,7 @@ public class IssueController {
 
         boolean historical = selected != null && current != null
                 && selected.getVersionNumber() != current.getVersionNumber();
-        List<Iteration> reviewAttempts = issue.getPlanConformanceAttempt() == 2
+        List<Iteration> reviewAttempts = reviewHistory != null
                 ? iterations.reversed().stream()
                     .filter(iteration -> iteration.getReviewPassed() != null
                             || iteration.getReviewJson() != null)
@@ -1049,12 +1069,30 @@ public class IssueController {
         model.addAttribute("selectedPlanningVersion", selected);
         model.addAttribute("currentPlanningVersion", current);
         model.addAttribute("selectedPlanIsHistorical", historical);
+        model.addAttribute("requestedPlanVersion", requestedPlanVersion);
         model.addAttribute("selectedDesignSpecHtml", selected == null
                 ? null : markdownRenderer.toHtml(selected.getDesignSpec()));
         model.addAttribute("selectedImplementationPlanHtml", selected == null
                 ? null : markdownRenderer.toHtml(selected.getImplementationPlan()));
         model.addAttribute("planReviewAttempts", reviewAttempts);
+        return new PlanReviewSelection(current, selected, historical);
     }
+
+    private boolean shouldShowPlanGuidance(TrackedIssue issue,
+                                           PlanReviewSelection selection,
+                                           History history,
+                                           List<Iteration> iterations) {
+        return (issue.getStatus() == IssueStatus.FAILED || issue.getStatus() == IssueStatus.COOLDOWN)
+                && issue.getPlanConformanceAttempt() == 2
+                && selection.current() != null
+                && selection.current().getState() == PlanningVersionState.APPROVED
+                && !selection.historical()
+                && history != null
+                && PlanRetryClassification.isSecondPlanFirstMiss(issue, iterations);
+    }
+
+    private record PlanReviewSelection(
+            PlanningVersion current, PlanningVersion selected, boolean historical) {}
 
     /**
      * Maps the workflow's {@code currentPhase} to a 0..6 pipeline index used by the
