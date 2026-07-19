@@ -6,7 +6,9 @@ import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
+import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +27,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 
 import java.io.StringWriter;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -55,6 +58,117 @@ class IssueDetailPlanReviewRenderTest {
         webExchange = webApplication.buildExchange(
                 new MockHttpServletRequest(servletContext),
                 new MockHttpServletResponse());
+    }
+
+    @Test
+    void approvalDecisionRendersOnlyForAwaitingApproval() {
+        TrackedIssue awaiting = issueReadyForApproval();
+
+        String awaitingHtml = renderApproval(awaiting, reviewScore(ReviewOutcome.PASSED, 0.90),
+                "passed", "https://github.com/acme/widgets/pull/55");
+        awaiting.setStatus(IssueStatus.IN_PROGRESS);
+        String inProgressHtml = renderApproval(awaiting, reviewScore(ReviewOutcome.PASSED, 0.90),
+                "passed", "https://github.com/acme/widgets/pull/55");
+
+        assertThat(awaitingHtml).contains("id=\"approval-decision\"");
+        assertThat(inProgressHtml).doesNotContain("id=\"approval-decision\"");
+    }
+
+    @Test
+    void approvalDecisionUsesExplicitCiReviewAndPercentageSemanticsIncludingZero() {
+        String passedHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+        String zeroHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.0), "passed",
+                "https://github.com/acme/widgets/pull/55");
+        String failedHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.FAILED, 0.55), "failed",
+                "https://github.com/acme/widgets/pull/55");
+        String pendingHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "pending",
+                "https://github.com/acme/widgets/pull/55");
+        String unavailableHtml = renderApproval(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.OPERATIONAL_ERROR, null), "unknown",
+                "https://github.com/acme/widgets/pull/55");
+
+        assertThat(passedHtml).contains("CI passed", "Review passed", "90%");
+        assertThat(zeroHtml).contains("0%");
+        assertThat(failedHtml).contains("CI failed", "Review failed", "ci-failed", "status-failed");
+        assertThat(pendingHtml).contains("CI pending", "ci-pending");
+        assertThat(unavailableHtml).contains("Review unavailable")
+                .doesNotContain("Review failed");
+    }
+
+    @Test
+    void approvalDecisionOrdersActionsAndPostsBackToIssueDetail() {
+        TrackedIssue issue = issueReadyForApproval();
+        issue.setPrNumber(55);
+        String html = renderApproval(issue, reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+
+        assertThat(html).contains("href=\"https://github.com/acme/widgets/pull/55\"")
+                .contains("target=\"_blank\"")
+                .contains("rel=\"noopener\"")
+                .contains("View PR #55")
+                .contains("action=\"/approvals/42/approve\" method=\"post\"")
+                .contains("action=\"/approvals/42/reject\" method=\"post\"")
+                .contains("name=\"returnTo\" value=\"issue\"")
+                .containsPattern("name=\"merge\"[^>]*checked")
+                .containsPattern("name=\"feedback\"[^>]*required");
+        assertThat(occurrences(html, "name=\"returnTo\" value=\"issue\"")).isEqualTo(2);
+        assertThat(html.indexOf("data-modal-open=\"issue-approve-modal\""))
+                .isLessThan(html.indexOf("data-reject-toggle=\"42\""));
+        assertThat(html.indexOf("data-reject-toggle=\"42\""))
+                .isLessThan(html.indexOf("View PR #55"));
+    }
+
+    @Test
+    void approvalDecisionWithoutPositivePrOmitsMergeAndExplainsCompletionOnly() {
+        TrackedIssue issue = issueReadyForApproval();
+        issue.setPrNumber(null);
+
+        String html = renderApproval(issue, reviewScore(ReviewOutcome.PASSED, 0.90),
+                "passed", null);
+
+        assertThat(html).contains("Approval will complete IssueBot without merging a pull request.")
+                .doesNotContain("name=\"merge\"")
+                .doesNotContain("View PR");
+    }
+
+    @Test
+    void approvalDecisionModalAndRejectFormStayOutsideLiveStatusPollingFragment() {
+        WebContext context = approvalContext(issueReadyForApproval(),
+                reviewScore(ReviewOutcome.PASSED, 0.90), "passed",
+                "https://github.com/acme/widgets/pull/55");
+
+        String content = render(context);
+        String liveStatus = render(context, "live-status");
+
+        assertThat(content).contains("id=\"issue-approve-modal\"", "id=\"issue-reject-form\"");
+        assertThat(liveStatus).doesNotContain("issue-approve-modal", "issue-reject-form");
+    }
+
+    @Test
+    void approvalDecisionStylesProtectCompactMobileActionFlow() throws Exception {
+        String css;
+        try (var input = getClass().getClassLoader()
+                .getResourceAsStream("static/css/style.css")) {
+            assertThat(input).isNotNull();
+            css = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+
+        assertThat(css).contains(".approval-decision-card")
+                .contains("overflow-wrap: anywhere")
+                .contains(".approval-decision-evidence")
+                .contains(".approval-decision-actions")
+                .contains(".issue-approval-modal")
+                .contains("max-height: calc(100dvh - 2rem)")
+                .contains("overflow-y: auto")
+                .containsPattern("(?s)\\.issue-approval-modal \\.modal-actions\\s*\\{[^}]*position:\\s*sticky[^}]*bottom:\\s*0")
+                .contains("@media (max-width: 600px)")
+                .containsPattern("(?s)@media \\(max-width: 600px\\).*?\\.approval-decision-actions\\s*\\{[^}]*flex-direction:\\s*column")
+                .containsPattern("(?s)\\.approval-decision-actions > \\.btn,.*?\\.approval-decision-actions > form,.*?\\.approval-decision-actions > a\\s*\\{[^}]*width:\\s*100%");
     }
 
     @Test
@@ -515,11 +629,45 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     private String render(WebContext context) {
-        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("content"),
+        return render(context, "content");
+    }
+
+    private String render(WebContext context, String fragment) {
+        TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (TemplateMode) null, null);
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    private String renderApproval(TrackedIssue issue, ReviewScore score, String ciStatus,
+                                  String prUrl) {
+        return render(approvalContext(issue, score, ciStatus, prUrl));
+    }
+
+    private WebContext approvalContext(TrackedIssue issue, ReviewScore score, String ciStatus,
+                                       String prUrl) {
+        PlanningVersion plan = pending(issue, 1, "# Approved design", "# Approved plan", null);
+        plan.approve(LocalDateTime.of(2026, 7, 18, 12, 0));
+        WebContext context = context(issue, List.of(plan), plan, plan, List.of());
+        context.setVariable("approvalReviewScore", score);
+        context.setVariable("approvalCiStatus", ciStatus);
+        context.setVariable("approvalPrUrl", prUrl);
+        return context;
+    }
+
+    private static ReviewScore reviewScore(ReviewOutcome outcome, Double overall) {
+        return new ReviewScore(outcome, null, "Review summary", overall, List.of(), 0,
+                "review-model", List.of());
+    }
+
+    private static TrackedIssue issueReadyForApproval() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42,
+                "Review the contract");
+        issue.setId(42L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setPrNumber(55);
+        return issue;
     }
 
     private static TrackedIssue issueAwaitingApproval() {

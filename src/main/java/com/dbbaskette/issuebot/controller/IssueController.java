@@ -16,6 +16,7 @@ import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
+import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
@@ -84,6 +85,7 @@ public class IssueController {
     private final MarkdownRenderer markdownRenderer;
     private final IssueDispatchService dispatchService;
     private final PlanningVersionRepository planningVersionRepository;
+    private final ApprovalCardAssembler approvalCardAssembler;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -110,7 +112,8 @@ public class IssueController {
                             NotificationRepository notificationRepository,
                             MarkdownRenderer markdownRenderer,
                             IssueDispatchService dispatchService,
-                            PlanningVersionRepository planningVersionRepository) {
+                            PlanningVersionRepository planningVersionRepository,
+                            ApprovalCardAssembler approvalCardAssembler) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -131,6 +134,7 @@ public class IssueController {
         this.markdownRenderer = markdownRenderer;
         this.dispatchService = dispatchService;
         this.planningVersionRepository = planningVersionRepository;
+        this.approvalCardAssembler = approvalCardAssembler;
     }
 
     @GetMapping
@@ -1019,6 +1023,13 @@ public class IssueController {
         model.addAttribute("issueSpent", totalCost);
         model.addAttribute("effectiveBudget", effectiveBudget);
         model.addAttribute("budgetPct", budgetPct(totalCost, effectiveBudget));
+
+        if (issue.getStatus() == IssueStatus.AWAITING_APPROVAL) {
+            ApprovalCardAssembler.Cards cards = approvalCardAssembler.assemble(List.of(issue));
+            model.addAttribute("approvalReviewScore", cards.reviewScores().get(issue.getId()));
+            model.addAttribute("approvalCiStatus", cards.ciStatuses().get(issue.getId()));
+            model.addAttribute("approvalPrUrl", cards.prUrls().get(issue.getId()));
+        }
 
         if (issue.getStatus() == IssueStatus.AWAITING_DECOMPOSITION && issue.getDecompositionProposal() != null) {
             List<Map<String, Object>> proposal = DecompositionProposalParser.parseOrNull(

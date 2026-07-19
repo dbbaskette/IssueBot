@@ -1368,6 +1368,67 @@ select {
 
 .review-history-header h3 { margin-top: 0.15rem; }
 
+/* Compact evidence-to-decision flow for an implementation ready for approval. */
+.approval-decision-card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    border-color: color-mix(in srgb, var(--ok) 32%, var(--hairline));
+}
+
+.approval-decision-card .panel-header {
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.approval-decision-card .panel-header h3 { margin-top: 0.15rem; }
+
+.approval-decision-evidence {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    margin-bottom: 1rem;
+}
+
+.approval-decision-score {
+    border: 1px solid color-mix(in srgb, var(--info) 38%, var(--hairline));
+    background: var(--info-soft);
+    color: var(--info);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.approval-decision-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.issue-approval-modal {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+}
+
+.issue-approval-modal .modal-actions {
+    position: sticky;
+    bottom: 0;
+    padding-top: 0.75rem;
+    background: var(--glass-bg-strong);
+}
+
+@media (max-width: 600px) {
+    .approval-decision-card .panel-header { align-items: stretch; }
+    .approval-decision-actions { flex-direction: column; }
+    .approval-decision-actions > .btn,
+    .approval-decision-actions > form,
+    .approval-decision-actions > a {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
 .review-score-overview {
     display: flex;
     align-items: center;

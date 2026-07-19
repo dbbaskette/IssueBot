@@ -247,6 +247,74 @@
                 </div>
             </section>
 
+            <!-- === INLINE APPROVAL DECISION: evidence first, then explicit operator actions === -->
+            <section th:if="${issue.status.name() == 'AWAITING_APPROVAL'}"
+                     id="approval-decision" class="panel mb-3 approval-decision-card"
+                     aria-labelledby="approval-decision-title">
+                <header class="panel-header">
+                    <div>
+                        <span class="eyebrow">Ready for your decision</span>
+                        <h3 id="approval-decision-title">Approval decision</h3>
+                    </div>
+                    <span class="status status-awaiting_approval">Awaiting approval</span>
+                </header>
+                <div class="panel-body">
+                    <div class="approval-decision-evidence" aria-label="Approval evidence">
+                        <span class="status" th:classappend="${'ci-' + (approvalCiStatus != null ? approvalCiStatus : 'unknown')}">
+                            <i class="ti" aria-hidden="true"
+                               th:classappend="${approvalCiStatus == 'passed' ? 'ti-circle-check' : (approvalCiStatus == 'failed' ? 'ti-circle-x' : (approvalCiStatus == 'pending' ? 'ti-clock' : 'ti-help-circle'))}"></i>
+                            <span th:text="${approvalCiStatus == 'passed' ? 'CI passed' : (approvalCiStatus == 'failed' ? 'CI failed' : (approvalCiStatus == 'pending' ? 'CI pending' : 'CI unknown'))}">CI unknown</span>
+                        </span>
+                        <span class="status"
+                              th:classappend="${approvalReviewScore == null or approvalReviewScore.passed == null ? 'status-pending' : (approvalReviewScore.passed ? 'status-completed' : 'status-failed')}">
+                            <i class="ti" aria-hidden="true"
+                               th:classappend="${approvalReviewScore != null and approvalReviewScore.passed == true ? 'ti-circle-check' : (approvalReviewScore != null and approvalReviewScore.passed == false ? 'ti-circle-x' : 'ti-help-circle')}"></i>
+                            <span th:text="${approvalReviewScore == null or approvalReviewScore.passed == null ? 'Review unavailable' : (approvalReviewScore.passed ? 'Review passed' : 'Review failed')}">Review unavailable</span>
+                        </span>
+                        <span class="badge approval-decision-score"
+                              th:if="${approvalReviewScore != null and approvalReviewScore.overall != null}"
+                              th:text="${approvalReviewScore.overallPercent + '%'}">90%</span>
+                    </div>
+
+                    <div class="approval-decision-actions">
+                        <button type="button" class="btn btn-primary"
+                                data-modal-open="issue-approve-modal">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve
+                        </button>
+                        <button type="button" class="btn btn-danger"
+                                th:attr="data-reject-toggle=${issue.id}">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject
+                        </button>
+                        <a th:if="${approvalPrUrl != null and issue.prNumber != null and issue.prNumber > 0}"
+                           th:href="${approvalPrUrl}" target="_blank" rel="noopener"
+                           class="btn btn-ghost">
+                            <i class="ti ti-external-link" aria-hidden="true"></i>
+                            <span th:text="${'View PR #' + issue.prNumber}">View PR</span>
+                        </a>
+                    </div>
+
+                    <div id="issue-reject-form" class="approval-reject-region">
+                        <div th:id="${'reject-form-' + issue.id}" hidden class="mt-2 glass-card"
+                             style="padding:1rem">
+                            <form th:action="@{'/approvals/' + ${issue.id} + '/reject'}" method="post">
+                                <input type="hidden" name="returnTo" value="issue">
+                                <label class="text-sm" style="font-weight:600;display:block;margin-bottom:0.4rem"
+                                       th:for="${'issue-rejection-feedback-' + issue.id}">Rejection feedback</label>
+                                <textarea th:id="${'issue-rejection-feedback-' + issue.id}" name="feedback" rows="3"
+                                          th:attr="data-reject-textarea=${issue.id}"
+                                          class="modal-textarea"
+                                          placeholder="Describe what needs to change…" required></textarea>
+                                <div class="modal-actions">
+                                    <button type="button" class="btn btn-ghost btn-sm"
+                                            th:attr="data-reject-cancel=${issue.id}">Cancel</button>
+                                    <button type="submit" class="btn btn-danger btn-sm">Submit rejection</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
                 <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
@@ -661,6 +729,48 @@
                 }
             })();
             </script>
+        </div>
+    </div>
+
+    <!-- === Issue approval confirmation modal === -->
+    <div th:if="${issue.status.name() == 'AWAITING_APPROVAL'}"
+         id="issue-approve-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card issue-approval-modal" role="dialog" aria-modal="true"
+             aria-labelledby="issue-approve-modal-title">
+            <h3 id="issue-approve-modal-title" style="margin:0 0 0.5rem">Approve</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">
+                Approval marks
+                <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                complete in IssueBot.
+            </p>
+            <form th:action="@{'/approvals/' + ${issue.id} + '/approve'}" method="post">
+                <input type="hidden" name="returnTo" value="issue">
+                <div class="checkbox-field"
+                     th:if="${issue.prNumber != null and issue.prNumber > 0}">
+                    <input type="checkbox" th:id="${'issue-merge-checkbox-' + issue.id}"
+                           name="merge" value="true" checked>
+                    <label th:for="${'issue-merge-checkbox-' + issue.id}">
+                        Squash-merge PR <span th:text="${'#' + issue.prNumber}">#55</span> on GitHub
+                    </label>
+                </div>
+                <p class="text-sm text-muted"
+                   th:if="${issue.prNumber != null and issue.prNumber > 0}"
+                   style="margin:0.5rem 0 1rem">
+                    Checked merges the pull request; unchecked completes IssueBot and leaves it open.
+                </p>
+                <p class="text-sm text-muted"
+                   th:unless="${issue.prNumber != null and issue.prNumber > 0}"
+                   style="margin:0.5rem 0 1rem">
+                    Approval will complete IssueBot without merging a pull request.
+                </p>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm"
+                            data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="ti ti-check" aria-hidden="true"></i> Confirm approve
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 

@@ -17,6 +17,8 @@ import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
+import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
+import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
@@ -61,7 +63,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -89,7 +91,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -117,7 +119,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -139,7 +141,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -168,7 +170,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -202,6 +204,7 @@ class IssueControllerTest {
         final IssueWorkflowService workflowService = mock(IssueWorkflowService.class);
         final ProcessingControlService control = mock(ProcessingControlService.class);
         final PlanningVersionRepository planningVersions = mock(PlanningVersionRepository.class);
+        final ApprovalCardAssembler approvalCardAssembler = mock(ApprovalCardAssembler.class);
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -217,6 +220,9 @@ class IssueControllerTest {
             when(issues.findByIdWithApprovedPlanningVersion(1L)).thenReturn(Optional.of(issue));
             when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
             when(planningVersions.findByIssueIdOrderByVersionNumberDesc(1L)).thenReturn(List.of());
+            when(approvalCardAssembler.assemble(anyList())).thenReturn(new ApprovalCardAssembler.Cards(
+                    java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
+                    java.util.Map.of(), java.util.Map.of()));
             try {
                 when(gitHubApiClient.listOpenPullRequests("acme", "widgets", GitOperationsService.BRANCH_PREFIX))
                         .thenReturn(List.of());
@@ -233,7 +239,7 @@ class IssueControllerTest {
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(),
                     new IssueDispatchService(issues, control, guidanceRepository, iterationRepository),
-                    planningVersions);
+                    planningVersions, approvalCardAssembler);
         }
     }
 
@@ -913,6 +919,41 @@ class IssueControllerTest {
     }
 
     @Test
+    void detailAssemblesOneSharedApprovalCardForAwaitingIssue() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_APPROVAL);
+        ReviewScore score = new ReviewScore(true, "Ready", 0.90, List.of(), 0,
+                "review-model", List.of());
+        ApprovalCardAssembler.Cards cards = new ApprovalCardAssembler.Cards(
+                java.util.Map.of(), java.util.Map.of(f.issue.getId(), score), java.util.Map.of(),
+                java.util.Map.of(f.issue.getId(), "https://github.com/acme/widgets/pull/55"),
+                java.util.Map.of(f.issue.getId(), "passed"));
+        when(f.approvalCardAssembler.assemble(List.of(f.issue))).thenReturn(cards);
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null, null, null);
+
+        verify(f.approvalCardAssembler).assemble(List.of(f.issue));
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("approvalReviewScore"))
+                .isSameAs(score);
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("approvalCiStatus"))
+                .isEqualTo("passed");
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("approvalPrUrl"))
+                .isEqualTo("https://github.com/acme/widgets/pull/55");
+    }
+
+    @Test
+    void detailDoesNotAssembleApprovalCardOutsideAwaitingApproval() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(model, 1L, null, null, null);
+
+        verifyNoInteractions(f.approvalCardAssembler);
+        org.assertj.core.api.Assertions.assertThat(model.asMap())
+                .doesNotContainKeys("approvalReviewScore", "approvalCiStatus", "approvalPrUrl");
+    }
+
+    @Test
     void detailHttpFallsBackToLatestVersionForMalformedAndOverflowSelections() throws Exception {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
         PlanningVersion current = PlanningVersion.pending(f.issue, 3,
@@ -1495,7 +1536,7 @@ class IssueControllerTest {
                 gitHubApiClient, properties, mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
     }
 
     @Test
