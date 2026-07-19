@@ -60,11 +60,17 @@ public class ApprovalController {
                           RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
+        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL) {
+            redirectAttributes.addFlashAttribute("error",
+                    "This issue is no longer awaiting approval. Refresh to see its current state.");
+            return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
+        }
+
         if (merge) {
             if (issue.getPrNumber() == null || issue.getPrNumber() <= 0) {
                 redirectAttributes.addFlashAttribute("error",
                         "No PR recorded for this issue — merge manually on GitHub");
-                return ViewResolver.redirectTarget(returnTo, "redirect:/approvals");
+                return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
             }
             WatchedRepo repo = issue.getRepo();
             try {
@@ -84,7 +90,7 @@ public class ApprovalController {
             } catch (Exception e) {
                 redirectAttributes.addFlashAttribute("error",
                         "Merge failed: " + e.getMessage() + " — PR is still open on GitHub; issue NOT completed");
-                return ViewResolver.redirectTarget(returnTo, "redirect:/approvals");
+                return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
             }
         }
 
@@ -97,12 +103,8 @@ public class ApprovalController {
                 issue.getRepo(), issue);
 
         String message = "Approved: " + issue.getRepo().fullName() + " #" + issue.getIssueNumber();
-        if ("inbox".equals(returnTo)) {
-            redirectAttributes.addFlashAttribute("message", message);
-            return "redirect:/inbox";
-        }
-        populateModel(model, message);
-        return ViewResolver.view("approvals", hx != null);
+        redirectAttributes.addFlashAttribute("message", message);
+        return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
     }
 
     @PostMapping("/{id}/reject")
@@ -113,6 +115,17 @@ public class ApprovalController {
                           RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
 
+        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL) {
+            redirectAttributes.addFlashAttribute("error",
+                    "This issue is no longer awaiting approval. Refresh to see its current state.");
+            return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
+        }
+
+        if (feedback == null || feedback.isBlank()) {
+            redirectAttributes.addFlashAttribute("error", "Rejection feedback is required.");
+            return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
+        }
+
         iterationManager.handleHumanRejection(issue, feedback);
 
         eventService.log("APPROVAL_REJECTED",
@@ -120,12 +133,8 @@ public class ApprovalController {
                 issue.getRepo(), issue);
 
         String message = "Rejected with feedback: " + issue.getRepo().fullName() + " #" + issue.getIssueNumber();
-        if ("inbox".equals(returnTo)) {
-            redirectAttributes.addFlashAttribute("message", message);
-            return "redirect:/inbox";
-        }
-        populateModel(model, message);
-        return ViewResolver.view("approvals", hx != null);
+        redirectAttributes.addFlashAttribute("message", message);
+        return ViewResolver.approvalRedirect(returnTo, id, "redirect:/approvals");
     }
 
     private void populateModel(Model model, String message) {
