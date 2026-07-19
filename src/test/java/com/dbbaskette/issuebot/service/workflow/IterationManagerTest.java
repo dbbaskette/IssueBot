@@ -403,6 +403,8 @@ class IterationManagerTest {
 
     @Test
     void handleMaxReviewIterationsReached_invocationFailure_framedAsCouldNotRun() {
+        FailureDiagnosticService diagnostics = mock(FailureDiagnosticService.class);
+        iterationManager.setFailureDiagnosticService(diagnostics);
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setMaxReviewIterations(2);
         TrackedIssue issue = new TrackedIssue(repo, 98, "Thread-safety");
@@ -412,17 +414,48 @@ class IterationManagerTest {
                 "Error: Review invocation failed: exit 1",
                 "The independent review could not run (environment/CLI error)…", true);
 
-        // "could not run", not "could not be satisfied" (the code was never judged).
-        assertTrue(issue.getLastFailureReason().startsWith("The independent review could not run"),
-                issue.getLastFailureReason());
-        assertFalse(issue.getLastFailureReason().contains("could not be satisfied"));
+        String action = "Check the reviewer provider, CLI, authentication, and configuration "
+                + "before retrying the review.";
+        verify(diagnostics).record(eq(issue), eq(FailureCategory.REVIEW_INFRASTRUCTURE),
+                startsWith("The independent review could not run"), isNull(),
+                contains("Review invocation failed: exit 1"), eq(action),
+                eq(FailureRetryability.CONFIGURATION_CHANGE_RECOMMENDED));
+        verify(eventService).log(eq("REVIEW_UNAVAILABLE"),
+                eq("Independent review was unavailable after 2 attempts; check the reviewer "
+                        + "provider, CLI, authentication, and configuration before retrying."),
+                eq(repo), eq(issue));
 
-        // The posted GitHub comment must be consistent (header AND body say "could not run").
+        // The posted GitHub comment must direct infrastructure recovery, never code changes.
         ArgumentCaptor<String> comment = ArgumentCaptor.forClass(String.class);
         verify(gitHubApi).addComment(eq("owner"), eq("repo"), eq(98), comment.capture());
         assertTrue(comment.getValue().contains("Review Could Not Run"), comment.getValue());
+        assertTrue(comment.getValue().contains("reviewer provider, CLI, authentication, and configuration"),
+                comment.getValue());
         assertFalse(comment.getValue().contains("Budget Exhausted"), comment.getValue());
         assertFalse(comment.getValue().contains("could not be satisfied"), comment.getValue());
+        assertFalse(comment.getValue().contains("implementation guidance"), comment.getValue());
+        assertFalse(comment.getValue().contains("making changes"), comment.getValue());
+    }
+
+    @Test
+    void completedFailedReviewRetainsImplementationFocusedRecoveryGuidance() {
+        FailureDiagnosticService diagnostics = mock(FailureDiagnosticService.class);
+        iterationManager.setFailureDiagnosticService(diagnostics);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setMaxReviewIterations(2);
+        TrackedIssue issue = new TrackedIssue(repo, 99, "Correctness defect");
+        when(iterationRepository.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
+
+        iterationManager.handleMaxReviewIterationsReached(issue,
+                "Why: response races with cancellation", "[IMPORTANT] Fix the race", false);
+
+        verify(diagnostics).record(eq(issue), eq(FailureCategory.REVIEW),
+                startsWith("Independent review could not be satisfied"), isNull(),
+                contains("response races with cancellation"),
+                eq("Review the blockers, add specific implementation guidance, then retry."),
+                eq(FailureRetryability.CONFIGURATION_CHANGE_RECOMMENDED));
+        verify(eventService).log(eq("MAX_REVIEW_ITERATIONS_REACHED"),
+                contains("Review failed after 2 iterations"), eq(repo), eq(issue));
     }
 
     private CodeReviewResult completedVerdict(boolean passed, String summary) {

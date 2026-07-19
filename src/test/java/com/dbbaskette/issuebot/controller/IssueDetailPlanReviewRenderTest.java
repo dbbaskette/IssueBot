@@ -70,8 +70,14 @@ class IssueDetailPlanReviewRenderTest {
         String inProgressHtml = renderApproval(awaiting, reviewScore(ReviewOutcome.PASSED, 0.90),
                 "passed", "https://github.com/acme/widgets/pull/55");
 
-        assertThat(awaitingHtml).contains("id=\"approval-decision\"");
-        assertThat(inProgressHtml).doesNotContain("id=\"approval-decision\"");
+        assertThat(awaitingHtml)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .contains("id=\"approval-decision\"");
+        assertThat(inProgressHtml)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .doesNotContain("id=\"approval-decision\"");
     }
 
     @Test
@@ -165,9 +171,19 @@ class IssueDetailPlanReviewRenderTest {
 
         String content = render(context);
         String liveStatus = render(context, "live-status");
+        String livePoll = render(context, "live-status-poll");
 
         assertThat(content).contains("id=\"issue-approve-modal\"", "id=\"issue-reject-form\"");
         assertThat(liveStatus).doesNotContain("issue-approve-modal", "issue-reject-form");
+        assertThat(livePoll)
+                .contains("id=\"approval-decision-region\"")
+                .contains("id=\"issue-approval-modal-region\"")
+                .contains("id=\"issue-approve-modal\"")
+                .contains("hx-swap-oob=\"true\"");
+        assertThat(occurrences(livePoll, "id=\"approval-decision\""))
+                .isEqualTo(1);
+        assertThat(occurrences(livePoll, "id=\"issue-approve-modal\""))
+                .isEqualTo(1);
     }
 
     @Test

@@ -296,6 +296,32 @@ class IssueDetailLayoutRenderTest {
     }
 
     @Test
+    void reviewerInfrastructureFailureShowsOperationalRecoveryNotImplementationGuidance() {
+        TrackedIssue failed = issue(140L, 140, IssueStatus.FAILED);
+        WebContext context = baseContext(failed, List.of());
+        context.setVariable("latestFailureDiagnostic", new FailureDiagnostic(failed,
+                FailureCategory.REVIEW_INFRASTRUCTURE,
+                "The independent review could not run after 2 attempts.",
+                "INDEPENDENT_REVIEW", "review provider timed out",
+                "Check the reviewer provider, CLI, authentication, and configuration before retrying the review.",
+                FailureRetryability.CONFIGURATION_CHANGE_RECOMMENDED));
+
+        String html = render(context, "content");
+
+        assertThat(html).contains("The independent review could not run after 2 attempts")
+                .contains("Check the reviewer provider, CLI, authentication, and configuration")
+                .contains("review provider timed out")
+                .contains("Reviewer recovery note (optional)")
+                .contains("Optional note after restoring the reviewer provider or CLI")
+                .contains("Retry after recovery", "Retry workflow after reviewer recovery")
+                .doesNotContain("Guidance for the next attempt")
+                .doesNotContain("What should the agent do differently this time?")
+                .doesNotContain("Retry with guidance")
+                .doesNotContain("add specific implementation guidance")
+                .doesNotContain("Fix the implementation");
+    }
+
+    @Test
     void failedIssueMakesRecoveryCanonical_andOmitsDuplicateRetryModal() {
         TrackedIssue failed = issue(15L, 15, IssueStatus.FAILED);
         failed.setLastFailureReason("Tests failed");

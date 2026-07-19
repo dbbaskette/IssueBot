@@ -172,8 +172,8 @@ git commit -m "refactor: share structured review score parsing"
 - Create: `src/test/java/com/dbbaskette/issuebot/service/ui/ReviewScoreHistoryAssemblerTest.java`
 
 **Interfaces:**
-- Consumes: `ReviewScoreParser.parse(Iteration)` from Task 1 and ascending `List<Iteration>`.
-- Produces: `ReviewScoreHistoryAssembler.assemble(List<Iteration>, Integer): History`.
+- Consumes: `ReviewScoreParser.parse(Iteration)` from Task 1 and a `List<Iteration>`; when every persistence ID is non-null, those IDs define attempt chronology.
+- Produces: `ReviewScoreHistoryAssembler.assemble(List<Iteration>, Long): History`, where the optional `Long` is an `Iteration.id`, not the reusable iteration number.
 - Produces records: `Attempt`, `DimensionDelta`, and `History`, including the selected attempt, latest attempt, previous scored attempt, newest-first attempts, deltas, overall delta, and criteria counts.
 
 - [x] **Step 1: Write comparison and selection tests**
@@ -199,11 +199,17 @@ void latestScoredAttemptComparesWithPreviousScoredAttempt() {
 
 @Test
 void requestedOlderAttemptUsesNearestEarlierScoredBaseline() {
-    History history = ReviewScoreHistoryAssembler.assemble(
-            List.of(scored(1, false, 0.60, 0.50),
-                    scored(2, false, 0.75, 0.70),
-                    scored(3, true, 0.95, 0.94)), 2);
+    Iteration first = scored(1, false, 0.60, 0.50);
+    first.setId(101L);
+    Iteration selected = scored(2, false, 0.75, 0.70);
+    selected.setId(202L);
+    Iteration latest = scored(3, true, 0.95, 0.94);
+    latest.setId(303L);
 
+    History history = ReviewScoreHistoryAssembler.assemble(
+            List.of(first, selected, latest), 202L);
+
+    assertThat(history.selected().iterationId()).isEqualTo(202L);
     assertThat(history.selected().iterationNumber()).isEqualTo(2);
     assertThat(history.previous().iterationNumber()).isEqualTo(1);
     assertThat(history.attempts()).extracting(Attempt::iterationNumber)
@@ -255,12 +261,16 @@ public final class ReviewScoreHistoryAssembler {
 }
 ```
 
-Add `assemble(List<Iteration>, Integer)` with this algorithm:
+Add `assemble(List<Iteration>, Long)` with this algorithm. Persistence IDs select attempts and, when every attempt has one, establish chronology even when retry attempts reuse the same iteration number:
 
 ```java
-public static History assemble(List<Iteration> iterations, Integer requestedIteration) {
+public static History assemble(List<Iteration> iterations, Long requestedAttemptId) {
+    List<Iteration> orderedIterations = new ArrayList<>(iterations);
+    if (orderedIterations.stream().allMatch(iteration -> iteration.getId() != null)) {
+        orderedIterations.sort(Comparator.comparingLong(Iteration::getId));
+    }
     List<Attempt> chronological = new ArrayList<>();
-    for (Iteration iteration : iterations) {
+    for (Iteration iteration : orderedIterations) {
         if (iteration.getReviewPassed() == null && iteration.getReviewJson() == null) continue;
         ReviewScore score = ReviewScoreParser.parse(iteration);
         if (score != null) {
@@ -270,13 +280,17 @@ public static History assemble(List<Iteration> iterations, Integer requestedIter
     if (chronological.isEmpty()) return null;
 
     Attempt latest = chronological.getLast();
-    Attempt selected = requestedIteration == null ? latest : chronological.stream()
-            .filter(a -> a.iterationNumber() == requestedIteration)
-            .findFirst().orElse(latest);
+    Attempt latestScored = chronological.stream()
+            .filter(attempt -> attempt.score().overall() != null)
+            .reduce((first, second) -> second)
+            .orElse(latest);
+    Attempt selected = requestedAttemptId == null ? latestScored : chronological.stream()
+            .filter(attempt -> requestedAttemptId.equals(attempt.iterationId()))
+            .findFirst().orElse(latestScored);
 
     Attempt previous = null;
     for (Attempt candidate : chronological) {
-        if (candidate.iterationNumber() >= selected.iterationNumber()) break;
+        if (candidate == selected) break;
         if (candidate.score().overall() != null) previous = candidate;
     }
 
@@ -331,7 +345,7 @@ git commit -m "feat: assemble review score comparisons"
 **Interfaces:**
 - Consumes: `ReviewScoreHistoryAssembler.History` from Task 2.
 - Produces model attributes: `reviewScoreHistory` and boolean `showPlanGuidance`.
-- Accepts optional query parameter `reviewAttempt` as an integer iteration number.
+- Accepts optional query parameter `reviewAttempt` as a persistence `Iteration.id`, parsed as `Long`; iteration numbers remain display labels only.
 
 - [x] **Step 1: Add controller tests for history selection and passing-second-review gating**
 
@@ -357,16 +371,21 @@ void passingSecondReviewBuildsHistoryWithoutGuidance() {
 @Test
 void requestedReviewAttemptSelectsOlderComparison() {
     Fixture f = approvedPlanFixture(IssueStatus.AWAITING_APPROVAL, 3);
-    when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue)).thenReturn(List.of(
-            review(f.issue, 1, false, 0.60, 0.50),
-            review(f.issue, 2, false, 0.75, 0.70),
-            review(f.issue, 3, true, 0.95, 0.94)));
+    Iteration first = review(f.issue, 1, false, 0.60, 0.50);
+    first.setId(101L);
+    Iteration selected = review(f.issue, 2, false, 0.75, 0.70);
+    selected.setId(202L);
+    Iteration latest = review(f.issue, 3, true, 0.95, 0.94);
+    latest.setId(303L);
+    when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
+            .thenReturn(List.of(first, selected, latest));
     Model model = new ExtendedModelMap();
 
-    f.controller.detail(model, 1L, null, "2", null);
+    f.controller.detail(model, 1L, null, "202", null);
 
-    assertThat(((History) model.getAttribute("reviewScoreHistory"))
-            .selected().iterationNumber()).isEqualTo(2);
+    History history = (History) model.getAttribute("reviewScoreHistory");
+    assertThat(history.selected().iterationId()).isEqualTo(202L);
+    assertThat(history.selected().iterationNumber()).isEqualTo(2);
 }
 ```
 
@@ -389,7 +408,7 @@ public String detail(Model model, @PathVariable Long id,
                      @RequestHeader(value = "HX-Request", required = false) String hx)
 ```
 
-Parse `reviewAttempt` with the same invalid-input-to-null behavior used for `planVersion`. Pass it into `populateDetailModel`. After loading iterations:
+Parse `reviewAttempt` as a `Long` with invalid-input-to-null behavior, distinct from the `Integer` plan-version parser. Pass the resulting persistence ID into `populateDetailModel`. After loading iterations:
 
 ```java
 History reviewHistory = ReviewScoreHistoryAssembler.assemble(iterations, requestedReviewAttempt);
@@ -470,7 +489,7 @@ git commit -m "fix: derive conformance guidance from latest verdict"
 
 **Interfaces:**
 - Consumes: `reviewScoreHistory` fields and percentage helpers from Tasks 2 and 3.
-- Produces: server-rendered review-attempt selector URLs using `reviewAttempt`, trajectory rails, textual deltas, and expandable criteria.
+- Produces: server-rendered review-attempt selector URLs whose `reviewAttempt` value is `Attempt.iterationId`, plus trajectory rails, textual deltas, and expandable criteria.
 
 - [x] **Step 1: Add render assertions for the complete card**
 
@@ -486,7 +505,7 @@ assertThat(html).contains("Implementation review")
         .contains("+49")
         .contains("4 of 4 met")
         .contains("aria-label=\"Test coverage: review 1 45 percent; review 2 94 percent; improved 49 points\"")
-        .contains("reviewAttempt=1");
+        .contains("reviewAttempt=101");
 ```
 
 - [x] **Step 2: Run the render test to verify the new assertions fail**
@@ -520,8 +539,8 @@ Insert the card after failure/recovery notices and before the plan-review desk. 
     </div>
     <nav th:if="${history.attempts.size() > 1}" class="review-attempt-selector" aria-label="Review attempts">
       <a th:each="attempt : ${history.attempts}"
-         th:href="@{'/issues/' + ${issue.id} + '?reviewAttempt=' + ${attempt.iterationNumber} + '#review-history'}"
-         th:attr="aria-current=${attempt.iterationNumber == history.selected.iterationNumber ? 'true' : null}"
+         th:href="@{'/issues/' + ${issue.id} + '?reviewAttempt=' + ${attempt.iterationId} + '#review-history'}"
+         th:attr="aria-current=${attempt.iterationId == history.selected.iterationId ? 'true' : null}"
          th:text="${'Review ' + attempt.iterationNumber}">Review 2</a>
     </nav>
     <div class="review-dimension-grid">

@@ -954,6 +954,36 @@ class IssueControllerTest {
     }
 
     @Test
+    void livePollTransitionToAwaitingApprovalSuppliesDecisionCardData() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        org.springframework.ui.Model runningModel = new org.springframework.ui.ExtendedModelMap();
+        f.controller.liveStatus(runningModel, 1L);
+        verifyNoInteractions(f.approvalCardAssembler);
+
+        f.issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        ReviewScore score = new ReviewScore(true, "Ready", 0.90, List.of(), 0,
+                "review-model", List.of());
+        ApprovalCardAssembler.Cards cards = new ApprovalCardAssembler.Cards(
+                java.util.Map.of(), java.util.Map.of(f.issue.getId(), score), java.util.Map.of(),
+                java.util.Map.of(f.issue.getId(), "https://github.com/acme/widgets/pull/55"),
+                java.util.Map.of(f.issue.getId(), "passed"));
+        when(f.approvalCardAssembler.assemble(List.of(f.issue))).thenReturn(cards);
+
+        org.springframework.ui.Model awaitingModel = new org.springframework.ui.ExtendedModelMap();
+        String view = f.controller.liveStatus(awaitingModel, 1L);
+
+        org.assertj.core.api.Assertions.assertThat(view)
+                .isEqualTo("issue-detail :: live-status-poll");
+        org.assertj.core.api.Assertions.assertThat(awaitingModel.getAttribute("approvalReviewScore"))
+                .isSameAs(score);
+        org.assertj.core.api.Assertions.assertThat(awaitingModel.getAttribute("approvalCiStatus"))
+                .isEqualTo("passed");
+        org.assertj.core.api.Assertions.assertThat(awaitingModel.getAttribute("approvalPrUrl"))
+                .isEqualTo("https://github.com/acme/widgets/pull/55");
+        verify(f.approvalCardAssembler).assemble(List.of(f.issue));
+    }
+
+    @Test
     void detailHttpFallsBackToLatestVersionForMalformedAndOverflowSelections() throws Exception {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
         PlanningVersion current = PlanningVersion.pending(f.issue, 3,

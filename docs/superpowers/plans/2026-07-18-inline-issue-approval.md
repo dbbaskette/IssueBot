@@ -36,7 +36,7 @@
 - Produces: `ViewResolver.approvalRedirect(String returnTo, Long issueId, String fallback)` returning only `/inbox`, `/issues/{id}`, or the supplied server-owned fallback.
 - Produces: status-guarded approve/reject behavior used unchanged by Approvals, Inbox, and issue detail.
 
-- [ ] **Step 1: Write failing safe-routing tests**
+- [x] **Step 1: Write failing safe-routing tests**
 
 Add focused tests equivalent to:
 
@@ -53,7 +53,7 @@ void approvalRedirectReturnsToCurrentIssueOnlyForLiteralIssue() {
 Run: `./mvnw -Dtest=ViewResolverTest test`
 Expected: FAIL because `approvalRedirect` does not exist.
 
-- [ ] **Step 2: Implement bounded routing**
+- [x] **Step 2: Implement bounded routing**
 
 Add this server-owned resolver shape without accepting a path or URL from the request:
 
@@ -70,7 +70,7 @@ Retain `redirectTarget` for unrelated decomposition/plan callers, or delegate it
 Run: `./mvnw -Dtest=ViewResolverTest test`
 Expected: PASS.
 
-- [ ] **Step 3: Write failing controller tests for issue returns and stale submissions**
+- [x] **Step 3: Write failing controller tests for issue returns and stale submissions**
 
 Add tests covering all of these exact outcomes:
 
@@ -95,7 +95,7 @@ Also assert merge failure with `returnTo=issue` redirects back to the issue and 
 Run: `./mvnw -Dtest=ApprovalControllerTest test`
 Expected: FAIL because issue routing and stale-state guards are absent.
 
-- [ ] **Step 4: Implement status guards and shared redirect use**
+- [x] **Step 4: Implement status guards and shared redirect use**
 
 Immediately after loading the issue in both actions, require:
 
@@ -112,7 +112,7 @@ Use `approvalRedirect(returnTo, id, "redirect:/approvals")` for every approve/re
 Run: `./mvnw -Dtest=ApprovalControllerTest,ViewResolverTest test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add src/main/java/com/dbbaskette/issuebot/controller/ApprovalController.java \
@@ -139,7 +139,7 @@ git commit -m "fix: guard shared approval actions"
 - Produces: issue-detail model attributes `approvalReviewScore`, `approvalCiStatus`, and `approvalPrUrl`, present only for `AWAITING_APPROVAL`.
 - Produces: `#approval-decision` card plus `#issue-approve-modal` and `#issue-reject-form`.
 
-- [ ] **Step 1: Write failing controller model tests**
+- [x] **Step 1: Write failing controller model tests**
 
 Inject `ApprovalCardAssembler` into `IssueController`. In the fixture, mock it and assert an awaiting issue calls:
 
@@ -156,7 +156,7 @@ For a non-awaiting issue, verify the assembler is not called and the three attri
 Run: `./mvnw -Dtest=IssueControllerTest test`
 Expected: FAIL because the controller has no approval-card dependency or attributes.
 
-- [ ] **Step 2: Populate one shared approval card**
+- [x] **Step 2: Populate one shared approval card**
 
 Add a constructor-injected `ApprovalCardAssembler`. In `populateDetailModel`, only for `AWAITING_APPROVAL`, assemble `List.of(issue)` once and extract nullable values:
 
@@ -172,7 +172,7 @@ Update all direct `IssueController` construction in tests with the new dependenc
 Run: `./mvnw -Dtest=IssueControllerTest test`
 Expected: PASS.
 
-- [ ] **Step 3: Write failing issue-detail render tests**
+- [x] **Step 3: Write failing issue-detail render tests**
 
 Extend the render helper to supply approval attributes. Add tests that assert:
 
@@ -189,7 +189,7 @@ Extend the render helper to supply approval attributes. Add tests that assert:
 Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`
 Expected: FAIL because the decision card is absent.
 
-- [ ] **Step 4: Render the compact decision card and forms**
+- [x] **Step 4: Render the compact decision card and forms**
 
 Place this semantic structure immediately after the review-history section and before plan/recovery decision content:
 
@@ -214,7 +214,7 @@ The merge checkbox renders only for a positive PR number and is `checked`. The V
 Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`
 Expected: PASS.
 
-- [ ] **Step 5: Write and satisfy a focused responsive-style regression**
+- [x] **Step 5: Write and satisfy a focused responsive-style regression**
 
 Add a static CSS assertion to the render test (or a focused stylesheet test if one exists) that checks the mobile rule includes the approval action container and full-width direct children. Implement scoped styles:
 
@@ -236,7 +236,7 @@ Keep the card consistent with the existing restrained IssueBot panel system; the
 Run: `./mvnw -Dtest=IssueDetailPlanReviewRenderTest test`
 Expected: PASS.
 
-- [ ] **Step 6: Run affected regression suites**
+- [x] **Step 6: Run affected regression suites**
 
 Run:
 
@@ -246,7 +246,7 @@ Run:
 
 Expected: all selected tests pass with zero failures and existing Approvals/Inbox output preserved.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```bash
 git add src/main/java/com/dbbaskette/issuebot/controller/IssueController.java \

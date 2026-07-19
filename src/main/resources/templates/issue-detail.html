@@ -102,10 +102,13 @@
                     </details>
                     <p th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}" class="text-sm text-muted"
                        th:text="'Cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></p>
-                    <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post">
-                        <label for="recoveryInstructions">Guidance for the next attempt</label>
+                    <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post"
+                          th:with="reviewerInfrastructure=${latestFailureDiagnostic != null
+                                and latestFailureDiagnostic.category.name() == 'REVIEW_INFRASTRUCTURE'}">
+                        <label for="recoveryInstructions"
+                               th:text="${reviewerInfrastructure ? 'Reviewer recovery note (optional)' : 'Guidance for the next attempt'}">Guidance for the next attempt</label>
                         <textarea id="recoveryInstructions" name="instructions" rows="4" class="modal-textarea"
-                                  placeholder="What should the agent do differently this time?"></textarea>
+                                  th:placeholder="${reviewerInfrastructure ? 'Optional note after restoring the reviewer provider or CLI' : 'What should the agent do differently this time?'}"></textarea>
                         <details class="mt-1">
                             <summary>Advanced retry options</summary>
                             <div class="field-group">
@@ -146,7 +149,8 @@
                         </details>
                         <div class="modal-actions">
                             <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingPaused == true}"
-                                    th:title="${processingPaused == true ? 'Processing is paused' : 'Retry with this guidance'}">Retry with guidance</button>
+                                    th:title="${processingPaused == true ? 'Processing is paused' : (reviewerInfrastructure ? 'Retry workflow after reviewer recovery' : 'Retry with this guidance')}"
+                                    th:text="${reviewerInfrastructure ? 'Retry after recovery' : 'Retry with guidance'}">Retry with guidance</button>
                         </div>
                     </form>
                 </div>
@@ -247,7 +251,12 @@
                 </div>
             </section>
 
-            <!-- === INLINE APPROVAL DECISION: evidence first, then explicit operator actions === -->
+            <!-- === INLINE APPROVAL DECISION: the wrapper is always present so the live poll can
+                   hydrate this previously-empty region out of band when a running issue reaches
+                   AWAITING_APPROVAL. It remains outside #live-status, so ordinary morph polling
+                   never replaces an already-rendered decision card. === -->
+            <div th:fragment="approval-decision-region(oob)" id="approval-decision-region"
+                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
             <section th:if="${issue.status.name() == 'AWAITING_APPROVAL'}"
                      id="approval-decision" class="panel mb-3 approval-decision-card"
                      aria-labelledby="approval-decision-title">
@@ -315,6 +324,7 @@
                     </div>
                 </div>
             </section>
+            </div>
 
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
@@ -733,9 +743,13 @@
         </div>
     </div>
 
-    <!-- === Issue approval confirmation modal === -->
+    <!-- === Issue approval confirmation modal. The always-present outer region is the OOB target
+           paired with #approval-decision-region. hx-preserve keeps an opened dialog intact if a
+           duplicate terminal poll response was already in flight when polling shut itself off. === -->
+    <div th:fragment="issue-approval-modal-region(oob)" id="issue-approval-modal-region"
+         th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
     <div th:if="${issue.status.name() == 'AWAITING_APPROVAL'}"
-         id="issue-approve-modal" class="modal-backdrop" data-modal hidden>
+         id="issue-approve-modal" class="modal-backdrop" data-modal hidden hx-preserve>
         <div class="modal glass-card issue-approval-modal" role="dialog" aria-modal="true"
              aria-labelledby="issue-approve-modal-title">
             <h3 id="issue-approve-modal-title" style="margin:0 0 0.5rem">Approve</h3>
@@ -773,6 +787,7 @@
                 </div>
             </form>
         </div>
+    </div>
     </div>
 
     <!-- === MODALS (accessible dialogs) — deliberately kept outside .detail-grid and
@@ -1147,6 +1162,8 @@
     <div th:replace="~{issue-detail :: status-actions(true)}"></div>
     <div th:replace="~{issue-detail :: goal-budget(true)}"></div>
     <div th:replace="~{issue-detail :: timeline-panel(true)}"></div>
+    <div th:replace="~{issue-detail :: approval-decision-region(true)}"></div>
+    <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
 </th:block>
 </body>
 </html>

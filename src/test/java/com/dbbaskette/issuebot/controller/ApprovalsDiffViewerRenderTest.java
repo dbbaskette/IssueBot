@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.service.approval.ApprovalDecisionService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -97,8 +98,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iter));
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
@@ -125,8 +125,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
@@ -158,8 +157,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
 
@@ -191,8 +189,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
         Model model = new ExtendedModelMap();
@@ -222,8 +219,7 @@ class ApprovalsDiffViewerRenderTest {
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of(iteration));
 
         ApprovalController controller = new ApprovalController(issues,
-                mock(IterationManager.class), mock(GitHubApiClient.class),
-                mock(EventService.class), mock(IssuePollingService.class),
+                mock(ApprovalDecisionService.class), mock(IssuePollingService.class),
                 mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)));
         Model model = new ExtendedModelMap();

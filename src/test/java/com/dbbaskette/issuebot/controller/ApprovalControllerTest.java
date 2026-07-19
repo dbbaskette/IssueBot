@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.service.approval.ApprovalDecisionService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -36,8 +37,18 @@ class ApprovalControllerTest {
                                                   IterationManager iterationManager, GitHubApiClient gitHubApi,
                                                   EventService eventService, IssuePollingService pollingService,
                                                   NotificationRepository notifications) {
-        return new ApprovalController(issues, iterationManager, gitHubApi, eventService, pollingService,
+        ApprovalDecisionService decisions =
+                new ApprovalDecisionService(issues, iterationManager, gitHubApi, eventService);
+        return new ApprovalController(issues, decisions, pollingService,
                 notifications, new ApprovalCardAssembler(iterations, gitHubApi));
+    }
+
+    private static ApprovalController controller(TrackedIssueRepository issues,
+                                                 ApprovalDecisionService decisions,
+                                                 IssuePollingService pollingService,
+                                                 NotificationRepository notifications) {
+        return new ApprovalController(issues, decisions, pollingService, notifications,
+                mock(ApprovalCardAssembler.class));
     }
 
     @Test
@@ -129,9 +140,11 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         issue.setPrNumber(55);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
         when(iterations.findByIssueOrderByIterationNumAsc(any())).thenReturn(List.of());
+        when(gitHubApi.mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash")))
+                .thenReturn(mergedResponse());
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class),
@@ -143,7 +156,7 @@ class ApprovalControllerTest {
 
         verify(gitHubApi).mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash"));
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
-        verify(issues).save(issue);
+        verify(issues).saveAndFlush(issue);
     }
 
     @Test
@@ -160,10 +173,12 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         issue.setPrNumber(55);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(gitHubApi.getPullRequest("acme", "widgets", 55))
                 .thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode()
                         .put("draft", true));
+        when(gitHubApi.mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash")))
+                .thenReturn(mergedResponse());
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class),
@@ -192,7 +207,7 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         issue.setPrNumber(55);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
         when(iterations.findByIssueOrderByIterationNumAsc(any())).thenReturn(List.of());
 
@@ -206,7 +221,7 @@ class ApprovalControllerTest {
 
         verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
-        verify(issues).save(issue);
+        verify(issues).saveAndFlush(issue);
     }
 
     @Test
@@ -223,7 +238,7 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         issue.setPrNumber(55);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(gitHubApi.mergePullRequest(anyString(), anyString(), anyInt(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("merge conflict"));
 
@@ -236,7 +251,7 @@ class ApprovalControllerTest {
         String outcome = controller.approve(1L, true, null, redirectAttributes);
 
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
         verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
         assertThat(outcome).isEqualTo("redirect:/approvals");
     }
@@ -255,7 +270,7 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         // no PR number recorded
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), gitHubApi, eventService, mock(IssuePollingService.class),
@@ -267,7 +282,7 @@ class ApprovalControllerTest {
 
         verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
         verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
         assertThat(outcome).isEqualTo("redirect:/approvals");
     }
@@ -402,7 +417,7 @@ class ApprovalControllerTest {
         issue.setId(1L);
         issue.setStatus(IssueStatus.AWAITING_APPROVAL);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), mock(GitHubApiClient.class), eventService,
@@ -428,7 +443,7 @@ class ApprovalControllerTest {
         issue.setId(1L);
         issue.setStatus(IssueStatus.AWAITING_APPROVAL);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
 
         ApprovalController controller = controller(issues, iterations,
@@ -454,7 +469,7 @@ class ApprovalControllerTest {
         issue.setId(1L);
         issue.setStatus(IssueStatus.AWAITING_APPROVAL);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
 
         ApprovalController controller = controller(issues, iterations,
@@ -487,7 +502,9 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         issue.setPrNumber(55);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
+        when(gitHubApi.mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash")))
+                .thenReturn(mergedResponse());
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), gitHubApi, eventService,
@@ -499,7 +516,7 @@ class ApprovalControllerTest {
 
         verify(gitHubApi).mergePullRequest(eq("acme"), eq("widgets"), eq(55), anyString(), eq("squash"));
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.COMPLETED);
-        verify(issues).save(issue);
+        verify(issues).saveAndFlush(issue);
         assertThat(outcome).isEqualTo("redirect:/inbox");
         verify(redirectAttributes).addFlashAttribute(eq("message"), contains("Approved"));
     }
@@ -522,7 +539,7 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         issue.setPrNumber(55);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(gitHubApi.mergePullRequest(anyString(), anyString(), anyInt(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("merge conflict"));
 
@@ -537,7 +554,7 @@ class ApprovalControllerTest {
         assertThat(outcome).isEqualTo("redirect:/inbox");
         verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL); // NOT completed
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
     }
 
     /** The no-PR-recorded guard's early return must honor returnTo as well. */
@@ -555,7 +572,7 @@ class ApprovalControllerTest {
         issue.setBranchName("issuebot/7");
         // no PR number recorded
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), gitHubApi, eventService,
@@ -569,7 +586,7 @@ class ApprovalControllerTest {
         verify(redirectAttributes).addFlashAttribute(eq("error"), anyString());
         verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
     }
 
     @Test
@@ -584,7 +601,7 @@ class ApprovalControllerTest {
         issue.setId(1L);
         issue.setStatus(IssueStatus.AWAITING_APPROVAL);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 iterationManager, mock(GitHubApiClient.class), eventService,
@@ -611,7 +628,7 @@ class ApprovalControllerTest {
         issue.setId(1L);
         issue.setStatus(IssueStatus.AWAITING_APPROVAL);
 
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of());
 
         ApprovalController controller = controller(issues, iterations,
@@ -631,7 +648,7 @@ class ApprovalControllerTest {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         IterationRepository iterations = mock(IterationRepository.class);
         TrackedIssue issue = awaitingApprovalIssue();
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), mock(GitHubApiClient.class), mock(EventService.class),
@@ -647,7 +664,7 @@ class ApprovalControllerTest {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         IterationRepository iterations = mock(IterationRepository.class);
         TrackedIssue issue = awaitingApprovalIssue();
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 mock(IterationManager.class), mock(GitHubApiClient.class), mock(EventService.class),
@@ -666,7 +683,7 @@ class ApprovalControllerTest {
         IterationManager iterationManager = mock(IterationManager.class);
         TrackedIssue issue = awaitingApprovalIssue();
         issue.setStatus(IssueStatus.COMPLETED);
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations, iterationManager, gitHubApi,
                 mock(EventService.class), mock(IssuePollingService.class), mock(NotificationRepository.class));
@@ -676,7 +693,7 @@ class ApprovalControllerTest {
                 .isEqualTo("redirect:/issues/1");
 
         verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
         verify(iterationManager, never()).handleHumanRejection(any(), anyString());
         verify(redirects).addFlashAttribute(eq("error"), contains("no longer awaiting approval"));
     }
@@ -689,7 +706,7 @@ class ApprovalControllerTest {
         IterationManager iterationManager = mock(IterationManager.class);
         TrackedIssue issue = awaitingApprovalIssue();
         issue.setStatus(IssueStatus.IN_PROGRESS);
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations, iterationManager, gitHubApi,
                 mock(EventService.class), mock(IssuePollingService.class), mock(NotificationRepository.class));
@@ -699,7 +716,7 @@ class ApprovalControllerTest {
                 .isEqualTo("redirect:/issues/1");
 
         verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
         verify(iterationManager, never()).handleHumanRejection(any(), anyString());
         verify(redirects).addFlashAttribute(eq("error"), contains("no longer awaiting approval"));
     }
@@ -712,7 +729,7 @@ class ApprovalControllerTest {
         IterationManager iterationManager = mock(IterationManager.class);
         TrackedIssue issue = awaitingApprovalIssue();
         issue.setStatus(IssueStatus.COMPLETED);
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations, iterationManager, gitHubApi,
                 mock(EventService.class), mock(IssuePollingService.class), mock(NotificationRepository.class));
@@ -722,7 +739,7 @@ class ApprovalControllerTest {
                 .isEqualTo("redirect:/issues/1");
 
         verify(gitHubApi, never()).mergePullRequest(any(), any(), anyInt(), any(), any());
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
         verify(iterationManager, never()).handleHumanRejection(any(), anyString());
         verify(redirects).addFlashAttribute(eq("error"), contains("no longer awaiting approval"));
     }
@@ -734,7 +751,7 @@ class ApprovalControllerTest {
         GitHubApiClient gitHubApi = mock(GitHubApiClient.class);
         TrackedIssue issue = awaitingApprovalIssue();
         issue.setPrNumber(55);
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
         when(gitHubApi.mergePullRequest(anyString(), anyString(), anyInt(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("merge conflict"));
 
@@ -746,7 +763,7 @@ class ApprovalControllerTest {
 
         assertThat(outcome).isEqualTo("redirect:/issues/1");
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
     }
 
     @Test
@@ -755,7 +772,7 @@ class ApprovalControllerTest {
         IterationRepository iterations = mock(IterationRepository.class);
         IterationManager iterationManager = mock(IterationManager.class);
         TrackedIssue issue = awaitingApprovalIssue();
-        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        when(issues.findByIdForDispatch(1L)).thenReturn(java.util.Optional.of(issue));
 
         ApprovalController controller = controller(issues, iterations,
                 iterationManager, mock(GitHubApiClient.class), mock(EventService.class),
@@ -766,9 +783,87 @@ class ApprovalControllerTest {
                 .isEqualTo("redirect:/issues/1");
 
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
-        verify(issues, never()).save(any());
+        verify(issues, never()).saveAndFlush(any());
         verify(iterationManager, never()).handleHumanRejection(any(), anyString());
         verify(redirects).addFlashAttribute(eq("error"), contains("feedback"));
+    }
+
+    @Test
+    void confirmedOpenMergeOutcomeIsShownExactly() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        ApprovalDecisionService decisions = mock(ApprovalDecisionService.class);
+        TrackedIssue issue = awaitingApprovalIssue();
+        String message = "GitHub did not merge PR #55: merge conflict. GitHub confirms the pull "
+                + "request is still open; the IssueBot issue was not completed.";
+        when(decisions.approve(1L, true)).thenReturn(new ApprovalDecisionService.Decision(
+                ApprovalDecisionService.Outcome.MERGE_CONFIRMED_OPEN, issue, message));
+        ApprovalController controller = controller(issues, decisions,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+        RedirectAttributes redirects = mock(RedirectAttributes.class);
+
+        assertThat(controller.approve(1L, true, "issue", redirects))
+                .isEqualTo("redirect:/issues/1");
+
+        verify(redirects).addFlashAttribute("error", message);
+        verify(redirects, never()).addFlashAttribute(eq("message"), any());
+    }
+
+    @Test
+    void unknownMergeOutcomeTellsOperatorToVerifyExactly() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        ApprovalDecisionService decisions = mock(ApprovalDecisionService.class);
+        TrackedIssue issue = awaitingApprovalIssue();
+        String message = "GitHub merge outcome for PR #55 is unknown after: merge timed out. "
+                + "Verify the pull request on GitHub before retrying; the IssueBot issue was not completed.";
+        when(decisions.approve(1L, true)).thenReturn(new ApprovalDecisionService.Decision(
+                ApprovalDecisionService.Outcome.MERGE_OUTCOME_UNKNOWN, issue, message));
+        ApprovalController controller = controller(issues, decisions,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+        RedirectAttributes redirects = mock(RedirectAttributes.class);
+
+        assertThat(controller.approve(1L, true, "issue", redirects))
+                .isEqualTo("redirect:/issues/1");
+
+        verify(redirects).addFlashAttribute("error", message);
+        verify(redirects, never()).addFlashAttribute(eq("message"), any());
+    }
+
+    @Test
+    void reconciledAmbiguousMergeUsesNormalExactSuccessFlash() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        ApprovalDecisionService decisions = mock(ApprovalDecisionService.class);
+        TrackedIssue issue = awaitingApprovalIssue();
+        issue.setStatus(IssueStatus.COMPLETED);
+        when(decisions.approve(1L, true)).thenReturn(new ApprovalDecisionService.Decision(
+                ApprovalDecisionService.Outcome.APPROVED, issue, null));
+        ApprovalController controller = controller(issues, decisions,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+        RedirectAttributes redirects = mock(RedirectAttributes.class);
+
+        assertThat(controller.approve(1L, true, "issue", redirects))
+                .isEqualTo("redirect:/issues/1");
+
+        verify(redirects).addFlashAttribute("message", "Approved: acme/widgets #7");
+        verify(redirects, never()).addFlashAttribute(eq("error"), any());
+    }
+
+    @Test
+    void rejectionProcessingFailureRedirectsWithBoundedActionableError() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        ApprovalDecisionService decisions = mock(ApprovalDecisionService.class);
+        when(decisions.reject(1L, "needs work"))
+                .thenThrow(new IllegalStateException("review backend unavailable\ntrace"));
+        ApprovalController controller = controller(issues, decisions,
+                mock(IssuePollingService.class), mock(NotificationRepository.class));
+        RedirectAttributes redirects = mock(RedirectAttributes.class);
+
+        assertThat(controller.reject(1L, "needs work", "issue", redirects))
+                .isEqualTo("redirect:/issues/1");
+
+        verify(redirects).addFlashAttribute("error",
+                "Rejection could not be processed: review backend unavailable trace. "
+                        + "No rejection decision was recorded; refresh before retrying.");
+        verify(redirects, never()).addFlashAttribute(eq("message"), any());
     }
 
     private static TrackedIssue awaitingApprovalIssue() {
@@ -776,5 +871,9 @@ class ApprovalControllerTest {
         issue.setId(1L);
         issue.setStatus(IssueStatus.AWAITING_APPROVAL);
         return issue;
+    }
+
+    private static com.fasterxml.jackson.databind.JsonNode mergedResponse() {
+        return new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode().put("merged", true);
     }
 }

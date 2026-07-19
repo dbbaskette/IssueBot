@@ -1455,8 +1455,10 @@ public class IssueWorkflowService {
                         line -> streamClaudeLog(issueId, line));
             } catch (Exception e) {
                 log.error("Independent review failed", e);
-                eventService.log("PHASE_REVIEW_FAILED",
-                        "Review invocation error: " + e.getMessage(), repo, trackedIssue);
+                eventService.log("PHASE_REVIEW_INVOCATION_ERROR",
+                        "Reviewer provider/CLI invocation error: " + e.getMessage()
+                                + "; no code verdict was produced",
+                        repo, trackedIssue);
                 reviewResult = CodeReviewResult.failed(
                         "Review invocation failed: " + e.getMessage(), 0, 0,
                         trackedIssue.getResolvedReviewModel());
@@ -1511,7 +1513,9 @@ public class IssueWorkflowService {
 
         if (reviewResult.outcome() == ReviewOutcome.OPERATIONAL_ERROR) {
             eventService.log("PHASE_REVIEW_UNAVAILABLE",
-                    "Review unavailable — " + reviewResult.summary(), repo, trackedIssue);
+                    "Independent review unavailable after provider/CLI invocation errors; "
+                            + "the code was not evaluated.",
+                    repo, trackedIssue);
         } else {
             eventService.log("PHASE_REVIEW_COMPLETE",
                     "Review complete: " + (reviewResult.passed() ? "PASSED" : "FAILED")
