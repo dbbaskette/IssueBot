@@ -110,6 +110,9 @@
                     <p>Implementation is waiting for you. This issue is holding the repository's next-work slot.</p>
                     <div class="ready-start-actions">
                         <button type="button" class="btn btn-primary"
+                                th:disabled="${processingPaused == true}"
+                                th:title="${processingPaused == true ? 'Processing is paused' : 'Start implementation'}"
+                                th:aria-label="${processingPaused == true ? 'Start implementation — Processing is paused' : null}"
                                 data-modal-open="start-modal">Start implementation</button>
                         <button type="button" class="btn btn-ghost"
                                 data-modal-open="release-ready-modal">Return to queue</button>
@@ -880,6 +883,9 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm"
+                            th:disabled="${processingPaused == true}"
+                            th:title="${processingPaused == true ? 'Processing is paused' : 'Start implementation'}"
+                            th:aria-label="${processingPaused == true ? 'Start implementation — Processing is paused' : null}"
                             th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue'}">Start Issue</button>
                 </div>
             </form>

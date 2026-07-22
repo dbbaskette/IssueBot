@@ -98,6 +98,31 @@ class IssueDetailReadyToStartRenderTest {
     }
 
     @Test
+    void pausedProcessingDisablesReadyStartTriggerAndSubmitButNotRelease() {
+        String html = renderReadyIssue(true);
+        String card = slice(html, "id=\"ready-to-start\"", "id=\"recovery\"");
+        String startTrigger = slice(card,
+                "<button type=\"button\" class=\"btn btn-primary\"", "</button>");
+        String releaseTrigger = slice(card,
+                "<button type=\"button\" class=\"btn btn-ghost\"", "</button>");
+        String startModal = slice(html, "id=\"start-modal\"", "id=\"release-ready-modal\"");
+        String startSubmit = slice(startModal,
+                "<button type=\"submit\" class=\"btn btn-primary btn-sm\"", "</button>");
+
+        assertThat(startTrigger)
+                .contains("disabled=\"disabled\"")
+                .contains("title=\"Processing is paused\"")
+                .contains("aria-label=\"Start implementation — Processing is paused\"");
+        assertThat(startSubmit)
+                .contains("disabled=\"disabled\"")
+                .contains("title=\"Processing is paused\"")
+                .contains("aria-label=\"Start implementation — Processing is paused\"");
+        assertThat(releaseTrigger)
+                .doesNotContain("disabled=\"disabled\"")
+                .doesNotContain("Processing is paused");
+    }
+
+    @Test
     void readyCommandsPostThroughThymeleafActionExpressions() throws Exception {
         String html = renderReadyIssue();
         String template;
@@ -133,6 +158,10 @@ class IssueDetailReadyToStartRenderTest {
     }
 
     private String renderReadyIssue() {
+        return renderReadyIssue(false);
+    }
+
+    private String renderReadyIssue(boolean processingPaused) {
         TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42,
                 "Ship the approved contract");
         issue.setId(42L);
@@ -154,7 +183,7 @@ class IssueDetailReadyToStartRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
-        context.setVariable("processingPaused", false);
+        context.setVariable("processingPaused", processingPaused);
         context.setVariable("planningVersions", List.of(approved));
         context.setVariable("selectedPlanningVersion", approved);
         context.setVariable("currentPlanningVersion", approved);
