@@ -21,6 +21,8 @@ public class IssueNextActionResolver {
                     "Review approval", anchored(issue, "approval-decision"), IssueNextAction.Tone.ACTION, true);
             case AWAITING_PLAN_APPROVAL -> action("Review and approve the current plan.",
                     "Review plan", anchored(issue, "plan-review"), IssueNextAction.Tone.ACTION, true);
+            case READY_TO_START -> action("Plan approved. Start implementation when ready or return it to the queue.",
+                    "Open start controls", anchored(issue, "ready-to-start"), IssueNextAction.Tone.ACTION, true);
             case AWAITING_DECOMPOSITION -> action("Review the proposed issue split.",
                     "Review split", anchored(issue, "status-actions"), IssueNextAction.Tone.ACTION, true);
             case FAILED -> action("Review the failure, add guidance, or retry.",

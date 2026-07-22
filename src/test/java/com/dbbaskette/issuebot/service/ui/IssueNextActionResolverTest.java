@@ -19,6 +19,7 @@ class IssueNextActionResolverTest {
         return Stream.of(
                 Arguments.of(IssueStatus.AWAITING_APPROVAL, "Review and decide the pull request.", "Review approval", "/issues/7#approval-decision", IssueNextAction.Tone.ACTION, true),
                 Arguments.of(IssueStatus.AWAITING_PLAN_APPROVAL, "Review and approve the current plan.", "Review plan", "/issues/7#plan-review", IssueNextAction.Tone.ACTION, true),
+                Arguments.of(IssueStatus.READY_TO_START, "Plan approved. Start implementation when ready or return it to the queue.", "Open start controls", "/issues/7#ready-to-start", IssueNextAction.Tone.ACTION, true),
                 Arguments.of(IssueStatus.AWAITING_DECOMPOSITION, "Review the proposed issue split.", "Review split", "/issues/7#status-actions", IssueNextAction.Tone.ACTION, true),
                 Arguments.of(IssueStatus.FAILED, "Review the failure, add guidance, or retry.", "Resolve failure", "/issues/7#recovery", IssueNextAction.Tone.ACTION, true),
                 Arguments.of(IssueStatus.COOLDOWN, "Review the failed attempt before retrying.", "Review recovery", "/issues/7#recovery", IssueNextAction.Tone.ACTION, true),

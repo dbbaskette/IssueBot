@@ -1,5 +1,7 @@
 package com.dbbaskette.issuebot.util;
 
+import com.dbbaskette.issuebot.model.IssueStatus;
+
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -33,7 +35,8 @@ public final class Humanize {
             Map.entry("COOLDOWN", "Cooling down"),
             Map.entry("DECOMPOSED", "Decomposed"),
             Map.entry("AWAITING_DECOMPOSITION", "Awaiting split approval"),
-            Map.entry("AWAITING_PLAN_APPROVAL", "Awaiting plan approval")
+            Map.entry("AWAITING_PLAN_APPROVAL", "Awaiting plan approval"),
+            Map.entry("READY_TO_START", "Ready to start")
     );
 
     private Humanize() {
@@ -68,6 +71,11 @@ public final class Humanize {
             }
         }
         return titleCase(candidate);
+    }
+
+    /** Turns internal workflow status names into concise operator-facing labels. */
+    public static String status(IssueStatus status) {
+        return status == null ? null : status(status.name());
     }
 
     /** Turns internal workflow status names into concise operator-facing labels. */

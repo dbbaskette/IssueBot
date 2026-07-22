@@ -1,5 +1,6 @@
 package com.dbbaskette.issuebot.util;
 
+import com.dbbaskette.issuebot.model.IssueStatus;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,13 +18,14 @@ class HumanizeTest {
         assertThat(Humanize.status("AWAITING_APPROVAL")).isEqualTo("Awaiting approval");
         assertThat(Humanize.status("AWAITING_DECOMPOSITION")).isEqualTo("Awaiting split approval");
         assertThat(Humanize.status("AWAITING_PLAN_APPROVAL")).isEqualTo("Awaiting plan approval");
+        assertThat(Humanize.status(IssueStatus.READY_TO_START)).isEqualTo("Ready to start");
         assertThat(Humanize.status("COOLDOWN")).isEqualTo("Cooling down");
     }
 
     @Test
     void status_unknownValueFallsBackToSentenceCase() {
         assertThat(Humanize.status("SOME_FUTURE_STATUS")).isEqualTo("Some future status");
-        assertThat(Humanize.status(null)).isNull();
+        assertThat(Humanize.status((String) null)).isNull();
     }
 
     // === phase() ===
