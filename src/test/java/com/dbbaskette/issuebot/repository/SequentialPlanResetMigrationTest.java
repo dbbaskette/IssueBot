@@ -4,11 +4,14 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
+import java.sql.Clob;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,9 +23,10 @@ class SequentialPlanResetMigrationTest {
     void keepsLowestReadyAndDeletesPlansForTwoLaterDuplicates() throws Exception {
         Fixture f = Fixture.atVersion31();
         long repo = f.repo("acme", "widgets");
+        f.readyWithPlan(repo, 143);
         f.readyWithPlan(repo, 141);
         f.readyWithPlan(repo, 142);
-        f.readyWithPlan(repo, 143);
+        assertThat(f.issueId(repo, 143)).isLessThan(f.issueId(repo, 141));
 
         f.migrateToLatest();
 
@@ -35,6 +39,17 @@ class SequentialPlanResetMigrationTest {
         assertThat(f.planCount(repo, 141)).isEqualTo(1);
         assertThat(f.planCount(repo, 142)).isZero();
         assertThat(f.planCount(repo, 143)).isZero();
+    }
+
+    @Test
+    void migrationUsesOnlyDmlToKeepTheRepairAtomic() throws Exception {
+        try (var stream = SequentialPlanResetMigrationTest.class.getResourceAsStream(
+                "/db/migration/V32__enforce_single_ready_reservation.sql")) {
+            assertThat(stream).isNotNull();
+            String migration = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+
+            assertThat(migration).doesNotContainIgnoringCase("CREATE", "DROP", "TEMPORARY");
+        }
     }
 
     @Test
@@ -102,6 +117,8 @@ class SequentialPlanResetMigrationTest {
         f.readyWithPlan(repo, 141);
         f.readyWithPlan(repo, 142);
         f.setMutableWorkflowState(repo, 142);
+        long issueId = f.issueId(repo, 142);
+        f.setPreservedIssueState(repo, 142);
 
         f.migrateToLatest();
 
@@ -127,6 +144,17 @@ class SequentialPlanResetMigrationTest {
         assertThat(f.bool(repo, 142, "plan_approved")).isFalse();
         assertThat(f.approvedPointer(repo, 142)).isNull();
         assertThat(f.planCount(repo, 142)).isZero();
+        assertThat(f.issueId(repo, 142)).isEqualTo(issueId);
+        assertThat(f.repoId(repo, 142)).isEqualTo(repo);
+        assertThat(f.number(repo, 142, "issue_number")).isEqualTo(142);
+        assertThat(f.column(repo, 142, "blocked_by_issues")).isEqualTo("17,18");
+        assertThat(f.column(repo, 142, "impl_model_override")).isEqualTo("gpt-5.6-sol");
+        assertThat(f.column(repo, 142, "review_model_override")).isEqualTo("gpt-5.6-terra");
+        assertThat((BigDecimal) f.column(repo, 142, "budget_override_usd"))
+                .isEqualByComparingTo("12.34");
+        assertThat(f.column(repo, 142, "created_at"))
+                .isEqualTo(Timestamp.valueOf(LocalDateTime.of(2026, 7, 21, 12, 0)));
+        assertThat(f.column(repo, 142, "decomposition_proposal")).isEqualTo("Split this issue");
     }
 
     @Test
@@ -245,6 +273,26 @@ class SequentialPlanResetMigrationTest {
             }
         }
 
+        void setPreservedIssueState(long repoId, int issueNumber) throws Exception {
+            try (Connection connection = connection();
+                 PreparedStatement statement = connection.prepareStatement("""
+                         UPDATE tracked_issues
+                         SET blocked_by_issues = ?, impl_model_override = ?, review_model_override = ?,
+                             budget_override_usd = ?, created_at = ?, decomposition_proposal = ?
+                         WHERE repo_id = ? AND issue_number = ?
+                         """)) {
+                statement.setString(1, "17,18");
+                statement.setString(2, "gpt-5.6-sol");
+                statement.setString(3, "gpt-5.6-terra");
+                statement.setBigDecimal(4, new BigDecimal("12.34"));
+                statement.setTimestamp(5, Timestamp.valueOf(LocalDateTime.of(2026, 7, 21, 12, 0)));
+                statement.setString(6, "Split this issue");
+                statement.setLong(7, repoId);
+                statement.setInt(8, issueNumber);
+                statement.executeUpdate();
+            }
+        }
+
         void migrateToLatest() {
             Flyway.configure().dataSource(url, "sa", "").locations("classpath:db/migration").load().migrate();
         }
@@ -256,6 +304,14 @@ class SequentialPlanResetMigrationTest {
         Long approvedPointer(long repoId, int issueNumber) throws Exception {
             Object value = value("approved_planning_version_id", repoId, issueNumber);
             return value == null ? null : ((Number) value).longValue();
+        }
+
+        long issueId(long repoId, int issueNumber) throws Exception {
+            return number("SELECT id FROM tracked_issues WHERE repo_id = ? AND issue_number = ?", repoId, issueNumber);
+        }
+
+        long repoId(long repoId, int issueNumber) throws Exception {
+            return number("SELECT repo_id FROM tracked_issues WHERE repo_id = ? AND issue_number = ?", repoId, issueNumber);
         }
 
         long planCount(long repoId, int issueNumber) throws Exception {
@@ -291,7 +347,10 @@ class SequentialPlanResetMigrationTest {
                 statement.setInt(2, issueNumber);
                 try (ResultSet result = statement.executeQuery()) {
                     assertThat(result.next()).isTrue();
-                    return result.getObject(1);
+                    Object value = result.getObject(1);
+                    return value instanceof Clob clob
+                            ? clob.getSubString(1, (int) clob.length())
+                            : value;
                 }
             }
         }
