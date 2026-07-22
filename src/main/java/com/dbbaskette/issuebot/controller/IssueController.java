@@ -30,6 +30,7 @@ import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
+import com.dbbaskette.issuebot.util.BudgetProgress;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -907,12 +908,7 @@ public class IssueController {
      * 100 so the bar never overflows. Package-private for the template render test.
      */
     static int budgetPct(BigDecimal spent, BigDecimal budget) {
-        if (budget == null) return 0;
-        if (spent == null || spent.signum() <= 0) return 0;
-        if (budget.signum() <= 0) return 100;
-        BigDecimal pct = spent.multiply(BigDecimal.valueOf(100))
-                .divide(budget, 0, java.math.RoundingMode.DOWN);
-        return pct.compareTo(BigDecimal.valueOf(100)) >= 0 ? 100 : pct.intValue();
+        return BudgetProgress.percent(spent, budget);
     }
 
     /**
