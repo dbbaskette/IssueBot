@@ -10,6 +10,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -18,6 +19,8 @@ import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
+import com.dbbaskette.issuebot.service.ui.IssueNextAction;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
@@ -63,7 +66,8 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
+                    new IssueNextActionResolver());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -91,7 +95,8 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
+                    new IssueNextActionResolver());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -119,7 +124,8 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
+                    new IssueNextActionResolver());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -141,7 +147,8 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
+                    new IssueNextActionResolver());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -156,6 +163,8 @@ class IssueControllerTest {
         WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 1, "Something");
+        issue.setId(41L);
+        issue.setStatus(IssueStatus.PENDING);
         org.springframework.data.domain.Page<TrackedIssue> page = new org.springframework.data.domain.PageImpl<>(
                 List.of(issue), org.springframework.data.domain.PageRequest.of(1, IssueController.PAGE_SIZE), 60);
         when(issues.search(any(), any(), any(), any())).thenReturn(page);
@@ -170,7 +179,8 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class),
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
+                    new IssueNextActionResolver());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -182,6 +192,60 @@ class IssueControllerTest {
         @SuppressWarnings("unchecked")
         List<TrackedIssue> resultIssues = (List<TrackedIssue>) model.getAttribute("issues");
         org.assertj.core.api.Assertions.assertThat(resultIssues).containsExactly(issue);
+        @SuppressWarnings("unchecked")
+        java.util.Map<Long, IssueNextAction> nextActions =
+                (java.util.Map<Long, IssueNextAction>) model.getAttribute("nextActions");
+        org.assertj.core.api.Assertions.assertThat(nextActions)
+                .containsEntry(41L, new IssueNextActionResolver().resolve(issue));
+    }
+
+    @Test
+    void tableExposesNextActionsForVisibleIssues() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Needs review");
+        issue.setId(42L);
+        issue.setStatus(IssueStatus.FAILED);
+        when(issues.search(any(), any(), any(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(issue)));
+
+        IssueController c = newBulkController(issues, repos, mock(GitHubApiClient.class),
+                mock(IssueBotProperties.class), mock(EventService.class), mock(IssueWorkflowService.class));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        c.table(model, null, null, null, 0);
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<Long, IssueNextAction> nextActions =
+                (java.util.Map<Long, IssueNextAction>) model.getAttribute("nextActions");
+        org.assertj.core.api.Assertions.assertThat(nextActions)
+                .containsEntry(42L, new IssueNextActionResolver().resolve(issue));
+    }
+
+    @Test
+    void detailAndLiveStatusExposeNextAction() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        org.springframework.ui.Model detailModel = new org.springframework.ui.ExtendedModelMap();
+        org.springframework.ui.Model liveModel = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.detail(detailModel, 1L, null, null, null);
+        f.controller.liveStatus(liveModel, 1L);
+
+        IssueNextAction expected = new IssueNextActionResolver().resolve(f.issue);
+        org.assertj.core.api.Assertions.assertThat(detailModel.getAttribute("nextAction")).isEqualTo(expected);
+        org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("nextAction")).isEqualTo(expected);
+    }
+
+    @Test
+    void liveStatusExposesModelCatalogForRecoveryOobControls() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        org.springframework.ui.Model liveModel = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.liveStatus(liveModel, 1L);
+
+        org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("modelCatalog"))
+                .isSameAs(ModelCatalog.MODELS);
     }
 
     /**
@@ -239,7 +303,7 @@ class IssueControllerTest {
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(),
                     new IssueDispatchService(issues, control, guidanceRepository, iterationRepository),
-                    planningVersions, approvalCardAssembler);
+                    planningVersions, approvalCardAssembler, new IssueNextActionResolver());
         }
     }
 
@@ -1566,7 +1630,8 @@ class IssueControllerTest {
                 gitHubApiClient, properties, mock(IssueDecompositionService.class), mock(PlanFirstService.class),
                 mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
-                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class));
+                    mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
+                    new IssueNextActionResolver());
     }
 
     @Test

@@ -300,8 +300,34 @@ class IssueDetailPlanReviewRenderTest {
         assertThat(occurrences(html, "class=\"status status-failed\">Did not conform</span>"))
                 .isEqualTo(2);
         assertThat(occurrences(html, "Keep approval immutable")).isEqualTo(1);
+        assertThat(occurrences(html, "id=\"recovery\""))
+                .isEqualTo(1);
         assertThat(html.indexOf("Keep approval immutable"))
                 .isGreaterThan(html.indexOf("Iteration History"));
+    }
+
+    @Test
+    void planFirstGuidanceReplacesNormalRecoveryForFailedAndCooldown() {
+        for (IssueStatus status : List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)) {
+            TrackedIssue issue = issueAwaitingApproval();
+            issue.setStatus(status);
+            issue.setPlanConformanceAttempt(2);
+            PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+            approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+            issue.setApprovedPlanningVersion(approved);
+
+            String html = render(issue, List.of(approved), approved, approved,
+                    List.of(failedReview(issue, 2, "{}")), true);
+
+            assertThat(html)
+                    .contains("id=\"recovery\"")
+                    .contains("Needs guidance after review 2")
+                    .contains("action=\"/issues/42/plan/retry-implementation\" method=\"post\"")
+                    .doesNotContain("action=\"/issues/42/retry\"");
+            assertThat(occurrences(html, "id=\"recovery\""))
+                    .as(status + " recovery target count")
+                    .isEqualTo(1);
+        }
     }
 
     @Test

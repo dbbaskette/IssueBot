@@ -29,6 +29,7 @@ import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
@@ -1574,7 +1575,7 @@ class IntegrationWorkflowTest {
                 gitHubApi, properties, decompositionService, authoritativePlanFirst,
                 new WorkflowCancellationService(), guidanceRepository, objectMapper,
                 new TimelineAssembler(), mock(NotificationRepository.class), new MarkdownRenderer(),
-                dispatch, lifecycleVersions, mock(ApprovalCardAssembler.class));
+                dispatch, lifecycleVersions, mock(ApprovalCardAssembler.class), new IssueNextActionResolver());
 
         controller.retryPlanImplementation(
                 issue.getId(), "test rollback on network failure", redirectAttributes);

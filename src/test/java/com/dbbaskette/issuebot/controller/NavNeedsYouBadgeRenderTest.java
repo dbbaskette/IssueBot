@@ -17,6 +17,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 import java.io.StringWriter;
 import java.util.Locale;
 
+import static com.dbbaskette.issuebot.controller.DashboardRenderFixtures.emptyControlRoom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -64,6 +65,7 @@ class NavNeedsYouBadgeRenderTest {
         }
         context.setVariable("totalCost", java.math.BigDecimal.ZERO);
         context.setVariable("events", java.util.List.of());
+        context.setVariable("controlRoom", emptyControlRoom());
 
         TemplateSpec spec = new TemplateSpec("layout", null,
                 (org.thymeleaf.templatemode.TemplateMode) null, null);

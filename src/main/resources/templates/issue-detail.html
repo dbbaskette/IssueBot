@@ -77,15 +77,33 @@
                 </div>
             </div>
 
+            <section th:fragment="next-action-callout(oob)" id="next-action-callout"
+                     th:if="${nextAction != null}"
+                     class="next-action-callout mb-3"
+                     th:classappend="${' next-action--' + nextAction.tone().name().toLowerCase()}"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}"
+                     aria-labelledby="next-action-heading">
+                <div>
+                    <span class="eyebrow">Next action</span>
+                    <p id="next-action-heading" th:text="${nextAction.summary()}">Review the current issue state.</p>
+                </div>
+                <a th:if="${nextAction.hasAction()}" class="btn btn-outline btn-sm next-action-cta"
+                   th:href="${nextAction.href()}" th:text="${nextAction.ctaLabel()}">View issue</a>
+            </section>
+
             <div th:if="${issue.status.name() == 'PENDING' and issue.suspensionReason != null}"
                  class="alert alert-info" role="status">
                 <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
             </div>
 
-            <!-- === FAILURE RECOVERY PANEL === -->
-            <div id="recovery" class="panel mb-3 failure-recovery recovery-card"
-                 th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
-                              and showPlanGuidance != true}">
+            <!-- === FAILURE RECOVERY REGION: always present so the live poll can hydrate the
+                   CTA destination when a running issue fails. Plan-first guidance and ordinary
+                   recovery are mutually exclusive contents of this one stable target. === -->
+            <div th:fragment="recovery-region(oob)" id="recovery"
+                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+            <section class="panel mb-3 failure-recovery recovery-card"
+                     th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
+                                  and showPlanGuidance != true}">
                 <div class="panel-header">
                     <h3>Recovery</h3>
                     <span class="status status-failed">Needs attention</span>
@@ -154,6 +172,49 @@
                         </div>
                     </form>
                 </div>
+            </section>
+
+            <!-- === NEEDS GUIDANCE: implementation-only retry against approved contract === -->
+            <section th:if="${showPlanGuidance == true}"
+                     class="panel mb-3 plan-guidance-panel" aria-labelledby="plan-guidance-title">
+                <div class="panel-header">
+                    <div>
+                        <span class="eyebrow">Implementation conformance</span>
+                        <h3 id="plan-guidance-title">Needs guidance after review 2</h3>
+                    </div>
+                    <span class="status status-failed">Action required</span>
+                </div>
+                <div class="panel-body">
+                    <p>The approved Design Spec and Implementation Plan will not change. Your guidance applies only to the next implementation attempt.</p>
+                    <ol class="plan-review-attempts">
+                        <li th:each="attempt, stats : ${planReviewAttempts}">
+                            <div class="plan-review-attempt-heading">
+                                <strong th:text="${'Review attempt ' + (2 - stats.index)}">Review attempt 2</strong>
+                                <span class="status"
+                                      th:classappend="${attempt.reviewPassed == null ? 'status-pending' : (attempt.reviewPassed ? 'status-completed' : 'status-failed')}"
+                                      th:text="${attempt.reviewPassed == null ? 'Review unavailable' : (attempt.reviewPassed ? 'Conformed' : 'Did not conform')}">
+                                    Review unavailable
+                                </span>
+                            </div>
+                            <p th:if="${attempt.reviewModel != null}" th:text="${'Review model: ' + attempt.reviewModel}">Review model</p>
+                            <div class="plan-review-evidence"
+                                 th:if="${attempt.localCheckResult != null or attempt.ciResult != null}">
+                                <strong>Persisted verification evidence</strong>
+                                <p th:if="${attempt.localCheckResult != null}"
+                                   th:text="${'Local checks: ' + attempt.localCheckResult}">Local checks: PASSED</p>
+                                <p th:if="${attempt.ciResult != null}"
+                                   th:text="${'CI verification: ' + attempt.ciResult}">CI verification: PASSED</p>
+                            </div>
+                        </li>
+                    </ol>
+                    <form class="plan-guidance-form" th:action="@{'/issues/' + ${issue.id} + '/plan/retry-implementation'}" method="post">
+                        <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
+                        <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
+                                  placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
+                        <button type="submit" class="btn btn-primary">Retry Implementation</button>
+                    </form>
+                </div>
+            </section>
             </div>
 
             <!-- === REVIEW SCORE TRAJECTORY: selected attempt against its nearest scored baseline === -->
@@ -367,9 +428,12 @@
                 </div>
             </div>
 
-            <!-- === PLAN REVIEW DESK: one selected immutable version, focused documents === -->
+            <!-- === PLAN REVIEW REGION: always present so a running-to-plan-approval poll can
+                   hydrate the CTA destination and controls out of band. === -->
+            <div th:fragment="plan-review-region(oob)" id="plan-review"
+                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
             <section th:if="${selectedPlanningVersion != null}"
-                     id="plan-review" class="panel mb-3 plan-review" data-plan-review>
+                     class="panel mb-3 plan-review" data-plan-review>
                 <header class="panel-header plan-review-header">
                     <div>
                         <span class="eyebrow">Planning contract</span>
@@ -483,48 +547,7 @@
                     </form>
                 </div>
             </section>
-
-            <!-- === NEEDS GUIDANCE: implementation-only retry against approved contract === -->
-            <section th:if="${showPlanGuidance == true}"
-                     class="panel mb-3 plan-guidance-panel" aria-labelledby="plan-guidance-title">
-                <div class="panel-header">
-                    <div>
-                        <span class="eyebrow">Implementation conformance</span>
-                        <h3 id="plan-guidance-title">Needs guidance after review 2</h3>
-                    </div>
-                    <span class="status status-failed">Action required</span>
-                </div>
-                <div class="panel-body">
-                    <p>The approved Design Spec and Implementation Plan will not change. Your guidance applies only to the next implementation attempt.</p>
-                    <ol class="plan-review-attempts">
-                        <li th:each="attempt, stats : ${planReviewAttempts}">
-                            <div class="plan-review-attempt-heading">
-                                <strong th:text="${'Review attempt ' + (2 - stats.index)}">Review attempt 2</strong>
-                                <span class="status"
-                                      th:classappend="${attempt.reviewPassed == null ? 'status-pending' : (attempt.reviewPassed ? 'status-completed' : 'status-failed')}"
-                                      th:text="${attempt.reviewPassed == null ? 'Review unavailable' : (attempt.reviewPassed ? 'Conformed' : 'Did not conform')}">
-                                    Review unavailable
-                                </span>
-                            </div>
-                            <p th:if="${attempt.reviewModel != null}" th:text="${'Review model: ' + attempt.reviewModel}">Review model</p>
-                            <div class="plan-review-evidence"
-                                 th:if="${attempt.localCheckResult != null or attempt.ciResult != null}">
-                                <strong>Persisted verification evidence</strong>
-                                <p th:if="${attempt.localCheckResult != null}"
-                                   th:text="${'Local checks: ' + attempt.localCheckResult}">Local checks: PASSED</p>
-                                <p th:if="${attempt.ciResult != null}"
-                                   th:text="${'CI verification: ' + attempt.ciResult}">CI verification: PASSED</p>
-                            </div>
-                        </li>
-                    </ol>
-                    <form class="plan-guidance-form" th:action="@{'/issues/' + ${issue.id} + '/plan/retry-implementation'}" method="post">
-                        <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
-                        <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
-                                  placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
-                        <button type="submit" class="btn btn-primary">Retry Implementation</button>
-                    </form>
-                </div>
-            </section>
+            </div>
 
             <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
             <details th:if="${selectedPlanningVersion == null and planHtml != null}"
@@ -1164,6 +1187,11 @@
     <div th:replace="~{issue-detail :: timeline-panel(true)}"></div>
     <div th:replace="~{issue-detail :: approval-decision-region(true)}"></div>
     <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
+    <div th:replace="~{issue-detail :: next-action-callout(true)}"></div>
+    <div th:replace="~{issue-detail :: recovery-region(true)}"></div>
+    <th:block th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
+        <div th:replace="~{issue-detail :: plan-review-region(true)}"></div>
+    </th:block>
 </th:block>
 </body>
 </html>

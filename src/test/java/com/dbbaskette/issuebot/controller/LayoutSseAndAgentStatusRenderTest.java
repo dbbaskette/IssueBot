@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import static com.dbbaskette.issuebot.controller.DashboardRenderFixtures.emptyControlRoom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -79,6 +80,7 @@ class LayoutSseAndAgentStatusRenderTest {
         context.setVariable("repoCount", 10L);
         context.setVariable("totalCost", new BigDecimal("12.34"));
         context.setVariable("events", List.of());
+        context.setVariable("controlRoom", emptyControlRoom());
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("processingPaused", false);
         context.setVariable("currentPath", "/issues?status=FAILED");
@@ -116,6 +118,7 @@ class LayoutSseAndAgentStatusRenderTest {
         context.setVariable("repoCount", 0L);
         context.setVariable("totalCost", BigDecimal.ZERO);
         context.setVariable("events", List.of());
+        context.setVariable("controlRoom", emptyControlRoom());
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("currentPath", "/issues/14");
         StringWriter writer = new StringWriter();
