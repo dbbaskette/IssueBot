@@ -15,6 +15,7 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
@@ -26,6 +27,7 @@ import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
+import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
@@ -90,6 +92,7 @@ public class IssueController {
     private final PlanningVersionRepository planningVersionRepository;
     private final ApprovalCardAssembler approvalCardAssembler;
     private final IssueNextActionResolver nextActionResolver;
+    private final NotificationService notificationService;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -118,7 +121,8 @@ public class IssueController {
                             IssueDispatchService dispatchService,
                             PlanningVersionRepository planningVersionRepository,
                             ApprovalCardAssembler approvalCardAssembler,
-                            IssueNextActionResolver nextActionResolver) {
+                            IssueNextActionResolver nextActionResolver,
+                            NotificationService notificationService) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -141,6 +145,7 @@ public class IssueController {
         this.planningVersionRepository = planningVersionRepository;
         this.approvalCardAssembler = approvalCardAssembler;
         this.nextActionResolver = nextActionResolver;
+        this.notificationService = notificationService;
     }
 
     @GetMapping
@@ -440,24 +445,29 @@ public class IssueController {
                         @RequestParam(required = false) String planFirstOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
         String error = performStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride);
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
         } else {
-            redirectAttributes.addFlashAttribute("success", "Issue started");
+            redirectAttributes.addFlashAttribute("success",
+                    readyStart ? "Implementation started." : "Issue started");
         }
         return "redirect:/issues/" + id;
     }
 
     /**
-     * Core start logic shared by {@link #start} and bulk start (#87) — same QUEUED-only
-     * gate and same concurrency/repo/PR gate for every call site. Returns an error message
-     * if the issue could not be started, or {@code null} on success.
+     * Core start logic shared by {@link #start} and bulk start (#87). Ordinary queue starts and
+     * approved-contract starts use their distinct atomic claims while sharing the same
+     * concurrency/repo/PR gate. Returns an error message if the issue could not be started,
+     * or {@code null} on success.
      */
     private String performStart(TrackedIssue issue, String implModelOverride, String reviewModelOverride,
                                 BigDecimal budgetOverrideUsd, String planFirstOverride) {
-        if (issue.getStatus() != IssueStatus.QUEUED && issue.getStatus() != IssueStatus.PENDING) {
-            return "Cannot start issue in " + issue.getStatus() + " status (must be QUEUED or PENDING)";
+        boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
+        if (!readyStart && issue.getStatus() != IssueStatus.QUEUED && issue.getStatus() != IssueStatus.PENDING) {
+            return "Cannot start issue in " + issue.getStatus()
+                    + " status (must be QUEUED, PENDING, or READY_TO_START)";
         }
 
         // Enforce the same gating as the polling service
@@ -466,23 +476,55 @@ public class IssueController {
             return gateReason;
         }
 
-        Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
-        IssueDispatchService.ClaimResult claim = dispatchService.claimStart(issue.getId(), candidate -> {
+        IssueDispatchTransactionManager.StartMutation mutation = candidate -> {
             candidate.setCurrentPhase(null);
             candidate.setImplModelOverride(normalize(implModelOverride));
             candidate.setReviewModelOverride(normalize(reviewModelOverride));
             candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
-            candidate.setPlanFirstOverride(planOverride);
-        });
+            if (candidate.getStatus() != IssueStatus.READY_TO_START) {
+                candidate.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
+            }
+        };
+        IssueDispatchService.ClaimResult claim = readyStart
+                ? dispatchService.claimReadyStart(issue.getId(), mutation)
+                : dispatchService.claimStart(issue.getId(), mutation);
         if (!claim.claimed()) return claim.reason();
         issue = claim.issue();
 
-        eventService.log("MANUAL_START",
-                "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
-                issue.getRepo(), issue);
+        if (readyStart) {
+            int version = issue.getApprovedPlanningVersion().getVersionNumber();
+            String message = "Started implementation for " + issue.getRepo().fullName()
+                    + " #" + issue.getIssueNumber() + " from approved Plan v" + version;
+            eventService.log("IMPLEMENTATION_STARTED", message, issue.getRepo(), issue);
+            notificationService.info("Implementation Started", message, issue);
+        } else {
+            eventService.log("MANUAL_START",
+                    "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
+                    issue.getRepo(), issue);
+        }
 
         workflowService.processIssueAsync(issue);
         return null;
+    }
+
+    @PostMapping("/{id}/ready/release")
+    public String releaseReadyToQueue(@PathVariable Long id,
+                                      RedirectAttributes redirectAttributes) {
+        IssueDispatchService.TransitionResult result = dispatchService.releaseReadyToQueue(id);
+        if (!result.transitioned()) {
+            redirectAttributes.addFlashAttribute("error", result.reason());
+            return "redirect:/issues/" + id + "#ready-to-start";
+        }
+
+        TrackedIssue issue = result.issue();
+        int version = issue.getApprovedPlanningVersion().getVersionNumber();
+        String message = "Released the repository slot for " + issue.getRepo().fullName()
+                + " #" + issue.getIssueNumber() + "; approved Plan v" + version + " was preserved";
+        eventService.log("READY_SLOT_RELEASED", message, issue.getRepo(), issue);
+        notificationService.info("Repository Slot Released", message, issue);
+        redirectAttributes.addFlashAttribute("success",
+                "Returned to queue. The approved plan was preserved; normal automatic processing may start this issue later.");
+        return "redirect:/issues/" + id + "#ready-to-start";
     }
 
     @PostMapping("/{id}/complete")
@@ -785,8 +827,8 @@ public class IssueController {
         }
 
         redirectAttributes.addFlashAttribute("success",
-                "Plan approved — queued, implementation resumes on the next poll cycle (~60s)");
-        return planReviewRedirect(id);
+                "Plan approved. Implementation is waiting for you.");
+        return "redirect:/issues/" + id + "#ready-to-start";
     }
 
     @PostMapping("/{id}/plan/revise")

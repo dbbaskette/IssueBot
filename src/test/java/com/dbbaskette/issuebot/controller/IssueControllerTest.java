@@ -13,6 +13,7 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
+import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
@@ -67,7 +68,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver());
+                    new IssueNextActionResolver(), mock(NotificationService.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -96,7 +97,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver());
+                    new IssueNextActionResolver(), mock(NotificationService.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -125,7 +126,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver());
+                    new IssueNextActionResolver(), mock(NotificationService.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -148,7 +149,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver());
+                    new IssueNextActionResolver(), mock(NotificationService.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -180,7 +181,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver());
+                    new IssueNextActionResolver(), mock(NotificationService.class));
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -269,6 +270,8 @@ class IssueControllerTest {
         final ProcessingControlService control = mock(ProcessingControlService.class);
         final PlanningVersionRepository planningVersions = mock(PlanningVersionRepository.class);
         final ApprovalCardAssembler approvalCardAssembler = mock(ApprovalCardAssembler.class);
+        final NotificationService notificationService = mock(NotificationService.class);
+        final IssueDispatchService dispatchService;
         final IssueController controller;
         final TrackedIssue issue;
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
@@ -294,6 +297,8 @@ class IssueControllerTest {
                 throw new RuntimeException(e);
             }
 
+            dispatchService = spy(new IssueDispatchService(
+                    issues, control, guidanceRepository, iterationRepository));
             controller = new IssueController(issues, repos,
                     iterationRepository, eventRepository,
                     costRepository, mock(IssuePollingService.class),
@@ -301,9 +306,9 @@ class IssueControllerTest {
                     gitHubApiClient, properties, decompositionService, planFirstService,
                     cancellationService, guidanceRepository, new ObjectMapper(),
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
-                    mock(NotificationRepository.class), new MarkdownRenderer(),
-                    new IssueDispatchService(issues, control, guidanceRepository, iterationRepository),
-                    planningVersions, approvalCardAssembler, new IssueNextActionResolver());
+                    mock(NotificationRepository.class), new MarkdownRenderer(), dispatchService,
+                    planningVersions, approvalCardAssembler, new IssueNextActionResolver(),
+                    notificationService);
         }
     }
 
@@ -453,6 +458,98 @@ class IssueControllerTest {
 
         org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
         verify(f.redirectAttributes).addFlashAttribute("success", "Issue started");
+        verify(f.eventService).log(eq("MANUAL_START"), anyString(),
+                eq(f.issue.getRepo()), same(f.issue));
+        verifyNoInteractions(f.notificationService);
+    }
+
+    @Test
+    void readyStartPreservesPlanSelectionAndEmitsReadyStartSignals() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        PlanningVersion approved = approvedVersion(f.issue, 3);
+        f.issue.setApprovedPlanningVersion(approved);
+        f.issue.setPlanFirstOverride(true);
+
+        String view = f.controller.start(1L, "claude-opus-4-8", "claude-sonnet-5",
+                new java.math.BigDecimal("4.50"), "skip", f.redirectAttributes);
+
+        verify(f.dispatchService).claimReadyStart(eq(1L), any());
+        verify(f.dispatchService, never()).claimStart(eq(1L), any());
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPlanFirstOverride()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(f.issue.getImplModelOverride()).isEqualTo("claude-opus-4-8");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getReviewModelOverride()).isEqualTo("claude-sonnet-5");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getBudgetOverrideUsd())
+                .isEqualByComparingTo("4.50");
+        verify(f.eventService).log(eq("IMPLEMENTATION_STARTED"),
+                argThat(message -> message.contains("acme/widgets")
+                        && message.contains("#42") && message.contains("Plan v3")),
+                eq(f.issue.getRepo()), same(f.issue));
+        verify(f.notificationService).info(eq("Implementation Started"),
+                argThat(message -> message.contains("acme/widgets")
+                        && message.contains("#42") && message.contains("Plan v3")),
+                same(f.issue));
+        verify(f.workflowService, times(1)).processIssueAsync(same(f.issue));
+        verify(f.redirectAttributes).addFlashAttribute("success", "Implementation started.");
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void rejectedReadyStartLeavesReservationAloneAndDisplaysClaimReason() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 2));
+        f.issue.setPlanFirstOverride(true);
+        when(f.control.isPaused()).thenReturn(true);
+
+        String view = f.controller.start(1L, null, null, null, "skip", f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPlanFirstOverride()).isTrue();
+        verify(f.redirectAttributes).addFlashAttribute("error", "Processing is paused");
+        verifyNoInteractions(f.notificationService);
+        verify(f.eventService, never()).log(eq("IMPLEMENTATION_STARTED"), anyString(), any(), any());
+        verifyNoInteractions(f.workflowService);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test
+    void releaseReadyIssuePreservesPlanAndEmitsReleaseSignals() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        PlanningVersion approved = approvedVersion(f.issue, 4);
+        f.issue.setApprovedPlanningVersion(approved);
+
+        String view = f.controller.releaseReadyToQueue(1L, f.redirectAttributes);
+
+        verify(f.dispatchService).releaseReadyToQueue(1L);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getApprovedPlanningVersion()).isSameAs(approved);
+        verify(f.eventService).log(eq("READY_SLOT_RELEASED"),
+                argThat(message -> message.contains("acme/widgets")
+                        && message.contains("#42") && message.contains("Plan v4")),
+                eq(f.issue.getRepo()), same(f.issue));
+        verify(f.notificationService).info(eq("Repository Slot Released"),
+                argThat(message -> message.contains("acme/widgets")
+                        && message.contains("#42") && message.contains("Plan v4")),
+                same(f.issue));
+        verifyNoInteractions(f.workflowService);
+        verify(f.redirectAttributes).addFlashAttribute("success",
+                "Returned to queue. The approved plan was preserved; normal automatic processing may start this issue later.");
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#ready-to-start");
+    }
+
+    @Test
+    void staleReadyReleaseDisplaysCurrentStateAndEmitsNoReleaseSignals() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 4));
+
+        String view = f.controller.releaseReadyToQueue(1L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute("error",
+                "Issue is now IN_PROGRESS; the repository slot was not changed");
+        verify(f.eventService, never()).log(eq("READY_SLOT_RELEASED"), anyString(), any(), any());
+        verifyNoInteractions(f.notificationService);
+        verifyNoInteractions(f.workflowService);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#ready-to-start");
     }
 
     @Test
@@ -589,8 +686,9 @@ class IssueControllerTest {
         String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
 
         verify(f.planFirstService).approvePlan(1L, 13L);
-        verify(f.redirectAttributes).addFlashAttribute(eq("success"), contains("next poll cycle"));
-        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
+        verify(f.redirectAttributes).addFlashAttribute("success",
+                "Plan approved. Implementation is waiting for you.");
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#ready-to-start");
     }
 
     @Test
@@ -1631,7 +1729,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver());
+                    new IssueNextActionResolver(), mock(NotificationService.class));
     }
 
     @Test
