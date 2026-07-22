@@ -97,7 +97,7 @@ public class PlanFirstTransactionManager {
         issue.setApprovedPlanningVersion(current);
         issue.setPlanConformanceAttempt(0);
         issue.setPlanCorrectionPending(false);
-        issue.setStatus(IssueStatus.PENDING);
+        issue.setStatus(IssueStatus.READY_TO_START);
         issues.save(issue);
         issues.flush();
         return new LifecycleCommit(issue, current);

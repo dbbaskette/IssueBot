@@ -190,13 +190,13 @@ public class PlanFirstService {
         runAfterPersistence("record planning approval event",
                 () -> events.log("PLAN_APPROVED",
                         "Approved planning version " + current.getVersionNumber()
-                                + " — queued for implementation",
+                                + " — waiting for manual implementation start",
                         issue.getRepo(), issue));
         runAfterPersistence("send planning approval notification",
                 () -> notifications.info("Plan Approved",
                         issue.getRepo().fullName() + " #" + issue.getIssueNumber()
                                 + " — version " + current.getVersionNumber()
-                                + " queued for implementation",
+                                + " approved; waiting for you to start implementation",
                         issue));
     }
 
@@ -318,8 +318,8 @@ public class PlanFirstService {
 
     private void publishApprovalAudit(TrackedIssue issue, PlanningVersion version) {
         publishGitHubAudit(issue,
-                "Planning version " + version.getVersionNumber()
-                        + " approved — implementation will start shortly.");
+                "Design Spec and Implementation Plan version " + version.getVersionNumber()
+                        + " approved. Implementation is waiting for a manual start in IssueBot.");
     }
 
     private void publishRevisionAudit(TrackedIssue issue, PlanningVersion version, String feedback) {

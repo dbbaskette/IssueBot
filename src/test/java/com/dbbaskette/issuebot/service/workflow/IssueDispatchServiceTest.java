@@ -77,6 +77,119 @@ class IssueDispatchServiceTest {
     }
 
     @Test
+    void readyReservationOwnerIgnoresItselfAndCanStart() {
+        PlanningVersion approved = approvedVersion(issue);
+        issue.setApprovedPlanningVersion(approved);
+        issue.setStatus(IssueStatus.READY_TO_START);
+        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(issue));
+
+        IssueDispatchService.ClaimResult result = service.claimReadyStart(1L);
+
+        assertThat(result.claimed()).isTrue();
+        assertThat(result.issue().getApprovedPlanningVersion()).isSameAs(approved);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void genericClaimStartRejectsReadyReservation() {
+        issue.setApprovedPlanningVersion(approvedVersion(issue));
+        issue.setStatus(IssueStatus.READY_TO_START);
+        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(issue));
+
+        IssueDispatchService.ClaimResult result = service.claimStart(1L);
+
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Cannot start issue in READY_TO_START status");
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        verify(issues, never()).save(any());
+    }
+
+    @Test
+    void readyReservationUsesExactWordingForOtherStartAndRetry() {
+        TrackedIssue reservation = new TrackedIssue(issue.getRepo(), 41, "Reserved");
+        reservation.setId(41L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
+        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(reservation));
+
+        issue.setStatus(IssueStatus.QUEUED);
+        IssueDispatchService.ClaimResult start = service.claimStart(1L);
+        issue.setStatus(IssueStatus.FAILED);
+        IssueDispatchService.ClaimResult retry = service.claimRetry(1L);
+
+        assertThat(start.claimed()).isFalse();
+        assertThat(start.reason())
+                .isEqualTo("Issue #41 has an approved plan and is waiting to start.");
+        assertThat(retry.claimed()).isFalse();
+        assertThat(retry.reason())
+                .isEqualTo("Issue #41 has an approved plan and is waiting to start.");
+        verify(issues, never()).save(any());
+    }
+
+    @Test
+    void readyReservationUsesExactWordingForGuidedRetry() {
+        issue.getRepo().setPlanFirst(true);
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        issue.setApprovedPlanningVersion(approvedVersion(issue));
+        when(iterations.findByIssueOrderByIterationNumAsc(issue))
+                .thenReturn(List.of(review(issue, 2, false, "{}")));
+        TrackedIssue reservation = new TrackedIssue(issue.getRepo(), 41, "Reserved");
+        reservation.setId(41L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
+        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(reservation));
+        IssueGuidanceRepository guidance = mock(IssueGuidanceRepository.class);
+        IssueDispatchService guidedService = new IssueDispatchService(
+                issues, control, guidance, iterations);
+
+        IssueDispatchService.ClaimResult result =
+                guidedService.claimGuidedRetry(1L, "narrow fix", 5);
+
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Issue #41 has an approved plan and is waiting to start.");
+        verify(issues, never()).save(any());
+        verifyNoInteractions(guidance);
+    }
+
+    @Test
+    void legacyReleaseQueuesReadyReservationWhilePausedAndPreservesApprovedVersion() {
+        PlanningVersion approved = approvedVersion(issue);
+        issue.setApprovedPlanningVersion(approved);
+        issue.setStatus(IssueStatus.READY_TO_START);
+        issue.setPlanConformanceAttempt(2);
+        issue.setCurrentPhase("WAITING");
+        issue.setSuspensionReason("operator hold");
+        when(control.isPaused()).thenReturn(true);
+
+        IssueDispatchService.TransitionResult result = service.releaseReadyToQueue(1L);
+
+        assertThat(result.transitioned()).isTrue();
+        assertThat(result.issue()).isSameAs(issue);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(issue.getApprovedPlanningVersion()).isSameAs(approved);
+        assertThat(issue.getPlanConformanceAttempt()).isEqualTo(2);
+        assertThat(issue.getCurrentPhase()).isNull();
+        assertThat(issue.getSuspensionReason()).isNull();
+        verify(issues).save(issue);
+        verify(control, never()).isPaused();
+    }
+
+    @Test
+    void legacyReleaseRejectsStaleStateWithoutMutation() {
+        issue.setStatus(IssueStatus.PENDING);
+
+        IssueDispatchService.TransitionResult result = service.releaseReadyToQueue(1L);
+
+        assertThat(result.transitioned()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Issue is now PENDING; the repository slot was not changed");
+        assertThat(result.issue()).isSameAs(issue);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.PENDING);
+        verify(issues, never()).save(any());
+    }
+
+    @Test
     void guardedRetryChecksEligibilityOnFreshIssueBeforeSaving() {
         issue.setStatus(IssueStatus.FAILED);
         issue.setPlanConformanceAttempt(1);
@@ -255,5 +368,12 @@ class IssueDispatchServiceTest {
         iteration.setReviewPassed(passed);
         iteration.setReviewJson(json);
         return iteration;
+    }
+
+    private static PlanningVersion approvedVersion(TrackedIssue issue) {
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 1, "spec", "plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        return approved;
     }
 }

@@ -368,11 +368,28 @@ class PlanFirstServiceTest {
         assertThat(issue.getApprovedPlanningVersion()).isSameAs(current);
         assertThat(issue.getPlanConformanceAttempt()).isZero();
         assertThat(issue.isPlanCorrectionPending()).isFalse();
-        assertThat(issue.getStatus()).isEqualTo(IssueStatus.PENDING);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
         verify(versions).save(current);
         verify(issues).save(issue);
-        verify(events).log(eq("PLAN_APPROVED"), contains("version 3"), eq(issue.getRepo()), eq(issue));
-        verify(notifications).info(eq("Plan Approved"), contains("version 3"), eq(issue));
+        verify(gitHub).addComment("owner", "repo", 42,
+                "Design Spec and Implementation Plan version 3 approved. "
+                        + "Implementation is waiting for a manual start in IssueBot.");
+        verify(events).log("PLAN_APPROVED",
+                "Approved planning version 3 — waiting for manual implementation start",
+                issue.getRepo(), issue);
+        verify(notifications).info("Plan Approved",
+                "owner/repo #42 — version 3 approved; waiting for you to start implementation",
+                issue);
+
+        ArgumentCaptor<String> auditCopy = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> eventCopy = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> notificationCopy = ArgumentCaptor.forClass(String.class);
+        verify(gitHub).addComment(eq("owner"), eq("repo"), eq(42), auditCopy.capture());
+        verify(events).log(eq("PLAN_APPROVED"), eventCopy.capture(), eq(issue.getRepo()), eq(issue));
+        verify(notifications).info(eq("Plan Approved"), notificationCopy.capture(), eq(issue));
+        assertThat(List.of(auditCopy.getValue(), eventCopy.getValue(), notificationCopy.getValue()))
+                .allSatisfy(copy -> assertThat(copy.toLowerCase())
+                        .doesNotContain("queued", "start shortly", "resume", "next poll"));
     }
 
     @Test
@@ -397,7 +414,7 @@ class PlanFirstServiceTest {
     void duplicateApprovalIsRejectedWithoutMutation() {
         PlanningVersion approved = pendingVersion(issue, 3, 9L);
         approved.approve(java.time.LocalDateTime.now());
-        issue.setStatus(IssueStatus.PENDING);
+        issue.setStatus(IssueStatus.READY_TO_START);
         issue.setApprovedPlanningVersion(approved);
         when(issues.findById(8L)).thenReturn(Optional.of(issue));
 
@@ -421,7 +438,7 @@ class PlanFirstServiceTest {
 
         assertThat(current.getState()).isEqualTo(PlanningVersionState.APPROVED);
         assertThat(issue.getApprovedPlanningVersion()).isSameAs(current);
-        assertThat(issue.getStatus()).isEqualTo(IssueStatus.PENDING);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
         verify(versions).save(current);
         verify(issues).save(issue);
         verify(events).log(eq("PLAN_AUDIT_FAILED"), contains("GitHub unavailable"), eq(issue.getRepo()), eq(issue));

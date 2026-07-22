@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -21,7 +22,7 @@ public class IssueDispatchTransactionManager {
 
     static final List<IssueStatus> ACTIVE_STATUSES = List.of(
             IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-            IssueStatus.AWAITING_PLAN_APPROVAL);
+            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START);
 
     private final TrackedIssueRepository issues;
     private final WatchedRepoRepository repos;
@@ -55,6 +56,31 @@ public class IssueDispatchTransactionManager {
         if (issue.getStatus() != IssueStatus.PENDING && issue.getStatus() != IssueStatus.QUEUED) {
             return IssueDispatchService.ClaimResult.rejected(
                     "Cannot start issue in " + issue.getStatus() + " status");
+        }
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
+        mutation.apply(issue);
+        return claim(issue);
+    }
+
+    @Transactional
+    public IssueDispatchService.ClaimResult claimReadyStart(Long issueId) {
+        return claimReadyStart(issueId, StartMutation.none());
+    }
+
+    @Transactional
+    public IssueDispatchService.ClaimResult claimReadyStart(Long issueId, StartMutation mutation) {
+        String pause = rejectIfPaused();
+        if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        if (issue.getStatus() != IssueStatus.READY_TO_START) {
+            return IssueDispatchService.ClaimResult.rejected(
+                    "Cannot start issue in " + issue.getStatus() + " status");
+        }
+        if (issue.getApprovedPlanningVersion() == null) {
+            return IssueDispatchService.ClaimResult.rejected(
+                    "Ready-to-start issue has no approved planning version");
         }
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
@@ -122,6 +148,23 @@ public class IssueDispatchTransactionManager {
         return IssueDispatchService.ClaimResult.claimed(saved);
     }
 
+    @Transactional
+    public IssueDispatchService.TransitionResult releaseReadyToQueue(Long issueId) {
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) {
+            return IssueDispatchService.TransitionResult.rejected("Issue not found", null);
+        }
+        if (issue.getStatus() != IssueStatus.READY_TO_START) {
+            return IssueDispatchService.TransitionResult.rejected(
+                    "Issue is now " + issue.getStatus()
+                            + "; the repository slot was not changed", issue);
+        }
+        issue.setStatus(IssueStatus.QUEUED);
+        issue.setCurrentPhase(null);
+        issue.setSuspensionReason(null);
+        return IssueDispatchService.TransitionResult.transitioned(issues.saveAndFlush(issue));
+    }
+
     private String rejectIfPaused() {
         ProcessingControl control = controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> controls.saveAndFlush(new ProcessingControl(ProcessingState.RUNNING)));
@@ -140,8 +183,15 @@ public class IssueDispatchTransactionManager {
 
     private String repositoryGate(TrackedIssue issue) {
         List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
-        if (active.isEmpty()) return null;
-        TrackedIssue blocker = active.getFirst();
+        TrackedIssue blocker = active.stream()
+                .filter(candidate -> !Objects.equals(candidate.getId(), issue.getId()))
+                .findFirst()
+                .orElse(null);
+        if (blocker == null) return null;
+        if (blocker.getStatus() == IssueStatus.READY_TO_START) {
+            return "Issue #" + blocker.getIssueNumber()
+                    + " has an approved plan and is waiting to start.";
+        }
         return "Issue #" + blocker.getIssueNumber()
                 + " is currently running for this repository";
     }

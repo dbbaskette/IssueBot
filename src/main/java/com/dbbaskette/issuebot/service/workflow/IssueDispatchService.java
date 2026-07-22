@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -17,7 +18,8 @@ import java.util.function.Predicate;
 public class IssueDispatchService {
 
     private static final List<IssueStatus> ACTIVE_STATUSES = List.of(
-            IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL, IssueStatus.AWAITING_PLAN_APPROVAL);
+            IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START);
 
     private final TrackedIssueRepository issues;
     private final ProcessingControlService control;
@@ -70,24 +72,53 @@ public class IssueDispatchService {
     }
 
     /** Applies manual-start options to the fresh locked entity before it becomes runnable. */
-    public ClaimResult claimStart(Long issueId,
-                                  IssueDispatchTransactionManager.StartMutation mutation) {
+    public synchronized ClaimResult claimStart(
+            Long issueId, IssueDispatchTransactionManager.StartMutation mutation) {
         if (transactions != null) return transactions.claimStart(issueId, mutation);
+        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findById(issueId).orElse(null);
-        if (issue != null) mutation.apply(issue);
-        return issue == null ? ClaimResult.rejected("Issue not found") : claimStart(issue);
+        return issue == null
+                ? ClaimResult.rejected("Issue not found")
+                : claimStartLoaded(issue, mutation);
     }
 
     private ClaimResult claimStartLoaded(TrackedIssue issue) {
+        return claimStartLoaded(issue, IssueDispatchTransactionManager.StartMutation.none());
+    }
+
+    private ClaimResult claimStartLoaded(
+            TrackedIssue issue, IssueDispatchTransactionManager.StartMutation mutation) {
         if (issue.getStatus() != IssueStatus.PENDING && issue.getStatus() != IssueStatus.QUEUED) {
             return ClaimResult.rejected("Cannot start issue in " + issue.getStatus() + " status");
         }
-        List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
-        if (!active.isEmpty()) {
-            TrackedIssue blocker = active.getFirst();
-            return ClaimResult.rejected("Issue #" + blocker.getIssueNumber()
-                    + " is currently running for this repository");
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return ClaimResult.rejected(serialized);
+        mutation.apply(issue);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setSuspensionReason(null);
+        issues.save(issue);
+        return ClaimResult.claimed(issue);
+    }
+
+    public synchronized ClaimResult claimReadyStart(Long issueId) {
+        return claimReadyStart(issueId, IssueDispatchTransactionManager.StartMutation.none());
+    }
+
+    public synchronized ClaimResult claimReadyStart(
+            Long issueId, IssueDispatchTransactionManager.StartMutation mutation) {
+        if (transactions != null) return transactions.claimReadyStart(issueId, mutation);
+        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
+        if (issue == null) return ClaimResult.rejected("Issue not found");
+        if (issue.getStatus() != IssueStatus.READY_TO_START) {
+            return ClaimResult.rejected("Cannot start issue in " + issue.getStatus() + " status");
         }
+        if (issue.getApprovedPlanningVersion() == null) {
+            return ClaimResult.rejected("Ready-to-start issue has no approved planning version");
+        }
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return ClaimResult.rejected(serialized);
+        mutation.apply(issue);
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setSuspensionReason(null);
         issues.save(issue);
@@ -131,12 +162,8 @@ public class IssueDispatchService {
         if (additionalRejection != null) {
             return ClaimResult.rejected(additionalRejection);
         }
-        List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
-        if (!active.isEmpty()) {
-            TrackedIssue blocker = active.getFirst();
-            return ClaimResult.rejected("Issue #" + blocker.getIssueNumber()
-                    + " is currently running for this repository");
-        }
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return ClaimResult.rejected(serialized);
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setSuspensionReason(null);
         issues.save(issue);
@@ -175,11 +202,8 @@ public class IssueDispatchService {
         if (issues.countByStatus(IssueStatus.IN_PROGRESS) >= maxConcurrentIssues) {
             return ClaimResult.rejected("Global concurrency limit reached");
         }
-        List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
-        if (!active.isEmpty()) {
-            return ClaimResult.rejected("Issue #" + active.getFirst().getIssueNumber()
-                    + " is currently running for this repository");
-        }
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return ClaimResult.rejected(serialized);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
         issue.setPlanConformanceAttempt(0);
@@ -190,6 +214,36 @@ public class IssueDispatchService {
         issues.save(issue);
         if (legacyGuidance != null) legacyGuidance.save(new com.dbbaskette.issuebot.model.IssueGuidance(issueId, guidance));
         return ClaimResult.claimed(issue);
+    }
+
+    public synchronized TransitionResult releaseReadyToQueue(Long issueId) {
+        if (transactions != null) return transactions.releaseReadyToQueue(issueId);
+        TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
+        if (issue == null) return TransitionResult.rejected("Issue not found", null);
+        if (issue.getStatus() != IssueStatus.READY_TO_START) {
+            return TransitionResult.rejected(
+                    "Issue is now " + issue.getStatus()
+                            + "; the repository slot was not changed", issue);
+        }
+        issue.setStatus(IssueStatus.QUEUED);
+        issue.setCurrentPhase(null);
+        issue.setSuspensionReason(null);
+        issues.save(issue);
+        return TransitionResult.transitioned(issue);
+    }
+
+    private String repositoryGate(TrackedIssue issue) {
+        TrackedIssue blocker = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES).stream()
+                .filter(candidate -> !Objects.equals(candidate.getId(), issue.getId()))
+                .findFirst()
+                .orElse(null);
+        if (blocker == null) return null;
+        if (blocker.getStatus() == IssueStatus.READY_TO_START) {
+            return "Issue #" + blocker.getIssueNumber()
+                    + " has an approved plan and is waiting to start.";
+        }
+        return "Issue #" + blocker.getIssueNumber()
+                + " is currently running for this repository";
     }
 
     private List<Iteration> reviewIterations(TrackedIssue issue) {
@@ -203,6 +257,16 @@ public class IssueDispatchService {
 
         static ClaimResult rejected(String reason) {
             return new ClaimResult(false, reason, null);
+        }
+    }
+
+    public record TransitionResult(boolean transitioned, String reason, TrackedIssue issue) {
+        static TransitionResult transitioned(TrackedIssue issue) {
+            return new TransitionResult(true, null, issue);
+        }
+
+        static TransitionResult rejected(String reason, TrackedIssue issue) {
+            return new TransitionResult(false, reason, issue);
         }
     }
 }
