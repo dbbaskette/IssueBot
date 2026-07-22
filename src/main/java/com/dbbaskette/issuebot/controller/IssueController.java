@@ -276,6 +276,7 @@ public class IssueController {
     public String liveStatus(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id, null, null);
+        model.addAttribute("modelCatalog", selectedModelCatalog());
         // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
         // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
         return "issue-detail :: live-status-poll";

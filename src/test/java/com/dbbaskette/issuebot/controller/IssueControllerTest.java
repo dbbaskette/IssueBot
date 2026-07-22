@@ -10,6 +10,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.event.EventService;
+import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
@@ -234,6 +235,17 @@ class IssueControllerTest {
         IssueNextAction expected = new IssueNextActionResolver().resolve(f.issue);
         org.assertj.core.api.Assertions.assertThat(detailModel.getAttribute("nextAction")).isEqualTo(expected);
         org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("nextAction")).isEqualTo(expected);
+    }
+
+    @Test
+    void liveStatusExposesModelCatalogForRecoveryOobControls() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        org.springframework.ui.Model liveModel = new org.springframework.ui.ExtendedModelMap();
+
+        f.controller.liveStatus(liveModel, 1L);
+
+        org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("modelCatalog"))
+                .isSameAs(ModelCatalog.MODELS);
     }
 
     /**

@@ -1189,7 +1189,9 @@
     <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
     <div th:replace="~{issue-detail :: next-action-callout(true)}"></div>
     <div th:replace="~{issue-detail :: recovery-region(true)}"></div>
-    <div th:replace="~{issue-detail :: plan-review-region(true)}"></div>
+    <th:block th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
+        <div th:replace="~{issue-detail :: plan-review-region(true)}"></div>
+    </th:block>
 </th:block>
 </body>
 </html>

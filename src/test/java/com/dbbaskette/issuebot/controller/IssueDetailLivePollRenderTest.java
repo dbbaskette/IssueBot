@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.ReviewScore;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
@@ -227,7 +228,10 @@ class IssueDetailLivePollRenderTest {
 
             issue.setStatus(terminalStatus);
             issue.setCurrentPhase(null);
-            String terminalPoll = render(issue, "live-status-poll", -1, false);
+            ModelCatalog.ModelInfo model = new ModelCatalog.ModelInfo(
+                    "claude-live-recovery", "Claude Live Recovery", 1.0, 2.0);
+            String terminalPoll = render(issue, "live-status-poll", -1, false,
+                    context -> context.setVariable("modelCatalog", List.of(model)));
 
             assertThat(initiallyRunning)
                     .contains("id=\"recovery\"")
@@ -237,7 +241,11 @@ class IssueDetailLivePollRenderTest {
                     .contains("href=\"/issues/36#recovery\"")
                     .contains("id=\"recovery\" hx-swap-oob=\"true\"")
                     .contains("action=\"/issues/36/retry\" method=\"post\"")
-                    .contains("Guidance for the next attempt");
+                    .contains("Guidance for the next attempt")
+                    .contains("value=\"claude-live-recovery\">Claude Live Recovery</option>");
+            assertThat(occurrences(terminalPoll, "value=\"claude-live-recovery\""))
+                    .as(terminalStatus + " implementation and review selector choices")
+                    .isEqualTo(2);
             assertThat(occurrences(terminalPoll, "id=\"recovery\""))
                     .as(terminalStatus + " recovery target count")
                     .isEqualTo(1);
@@ -274,6 +282,26 @@ class IssueDetailLivePollRenderTest {
                 .contains("action=\"/issues/37/plan/revise\" method=\"post\"");
         assertThat(occurrences(approvalPoll, "id=\"plan-review\""))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void ordinaryRunningPollDoesNotReplacePlanReviewReadingState() {
+        TrackedIssue issue = inProgressIssue(38L, 38, "IMPLEMENTATION");
+        PlanningVersion current = PlanningVersion.pending(
+                issue, 2, "# Current design", "# Current implementation", "CODEX", "gpt-5.6", null);
+
+        String runningPoll = render(issue, "live-status-poll", 1, false, context -> {
+            context.setVariable("planningVersions", List.of(current));
+            context.setVariable("selectedPlanningVersion", current);
+            context.setVariable("currentPlanningVersion", current);
+            context.setVariable("selectedPlanIsHistorical", false);
+            context.setVariable("selectedDesignSpecHtml", "<h1>Current design</h1>");
+            context.setVariable("selectedImplementationPlanHtml", "<h1>Current implementation</h1>");
+        });
+
+        assertThat(runningPoll)
+                .contains("id=\"recovery\" hx-swap-oob=\"true\"")
+                .doesNotContain("id=\"plan-review\"");
     }
 
     @Test
