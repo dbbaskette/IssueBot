@@ -233,6 +233,17 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void planReviewKeepsBothUniqueStableAnchorAndLegacyRegionTarget() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion pending = pending(issue, 3, "# Design", "# Plan", null);
+
+        String html = render(issue, List.of(pending), pending, pending, List.of());
+
+        assertThat(occurrences(html, "id=\"plan-first\"")).isEqualTo(1);
+        assertThat(occurrences(html, "id=\"plan-review\"")).isEqualTo(1);
+    }
+
+    @Test
     void historicalVersionIsReadOnlyAndLinksBackToCurrent() {
         TrackedIssue issue = issueAwaitingApproval();
         PlanningVersion v3Pending = pending(issue, 3, "# Current design", "# Current plan", null);
