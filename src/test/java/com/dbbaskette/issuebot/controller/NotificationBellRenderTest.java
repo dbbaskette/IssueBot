@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import static com.dbbaskette.issuebot.controller.DashboardRenderFixtures.emptyControlRoom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -79,6 +80,7 @@ class NotificationBellRenderTest {
         context.setVariable("repoCount", 10L);
         context.setVariable("totalCost", new BigDecimal("12.34"));
         context.setVariable("events", List.of());
+        context.setVariable("controlRoom", emptyControlRoom());
         context.setVariable("humanize", new HumanizeHelper());
 
         TemplateSpec spec = new TemplateSpec("layout", null,

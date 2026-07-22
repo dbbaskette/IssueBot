@@ -2627,6 +2627,12 @@ details summary:hover { color: var(--text-primary); }
     overflow-wrap: anywhere;
 }
 .control-card-title:hover { color: var(--accent); }
+.control-card-header .status {
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
 .control-card-summary {
     margin: .65rem 0;
     color: var(--text-secondary);
@@ -2653,6 +2659,12 @@ details summary:hover { color: var(--text-primary); }
 }
 .control-room-run-body { display: grid; gap: .55rem; margin-top: .55rem; min-width: 0; }
 .control-room-run-body .running-meta { display: flex; gap: 1rem; flex-wrap: wrap; }
+.control-room-run-body .running-meta > span {
+    max-width: 100%;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
 .control-room-run-body .running-meta i { margin-right: .25rem; }
 .control-lane-empty {
     margin: .8rem 0 0;
