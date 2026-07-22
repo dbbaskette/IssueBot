@@ -1575,7 +1575,8 @@ class IntegrationWorkflowTest {
                 gitHubApi, properties, decompositionService, authoritativePlanFirst,
                 new WorkflowCancellationService(), guidanceRepository, objectMapper,
                 new TimelineAssembler(), mock(NotificationRepository.class), new MarkdownRenderer(),
-                dispatch, lifecycleVersions, mock(ApprovalCardAssembler.class), new IssueNextActionResolver());
+                dispatch, lifecycleVersions, mock(ApprovalCardAssembler.class), new IssueNextActionResolver(),
+                notificationService);
 
         controller.retryPlanImplementation(
                 issue.getId(), "test rollback on network failure", redirectAttributes);

@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -19,6 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -46,6 +51,16 @@ class IssueDispatchTransactionManagerTest {
     @MockitoSpyBean private IssueGuidanceRepository guidance;
     @Autowired private PlatformTransactionManager transactionManager;
 
+    @AfterEach
+    void restoreRunningProcessingState() {
+        new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
+            control.setState(ProcessingState.RUNNING);
+            controls.saveAndFlush(control);
+        });
+    }
+
     @Test
     void approvedPendingIssueClaimsFreshInitializedEntityWithOsivOff() {
         Long issueId = seedApprovedIssue(IssueStatus.PENDING, 0);
@@ -62,18 +77,18 @@ class IssueDispatchTransactionManagerTest {
     }
 
     @Test
-    void realApprovalBecomesPendingThenDispatchesTheExactApprovedImplementationContext() {
+    void readyReservationOwnerCanStartWithApprovedVersion() {
         PendingVersion pending = seedPendingPlanningVersion();
 
         planTransactions.approvePlan(pending.issueId(), pending.versionId());
 
         TrackedIssue approved = issues.findByIdWithApprovedPlanningVersion(pending.issueId())
                 .orElseThrow();
-        assertThat(approved.getStatus()).isEqualTo(IssueStatus.PENDING);
+        assertThat(approved.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
         assertThat(approved.getApprovedPlanningVersion().getState())
                 .isEqualTo(PlanningVersionState.APPROVED);
 
-        IssueDispatchService.ClaimResult claim = dispatch.claimStart(pending.issueId());
+        IssueDispatchService.ClaimResult claim = dispatch.claimReadyStart(pending.issueId());
         PlanFirstService planFirst = new PlanFirstService(
                 mock(ClaudeCodeService.class), mock(GitHubApiClient.class), issues, versions,
                 new PlanArtifactParser(), mock(PlanningWorkspaceService.class),
@@ -86,6 +101,229 @@ class IssueDispatchTransactionManagerTest {
         assertThat(context.versionNumber()).isEqualTo(1);
         assertThat(context.designSpec()).isEqualTo("transactional design");
         assertThat(context.implementationPlan()).isEqualTo("transactional implementation");
+    }
+
+    @Test
+    void readyReservationWithoutApprovedVersionCannotStart() {
+        Long issueId = seedIssue(IssueStatus.READY_TO_START, 44, null);
+
+        IssueDispatchService.ClaimResult result = dispatch.claimReadyStart(issueId);
+
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Ready-to-start issue has no approved planning version");
+        assertThat(issues.findById(issueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
+    }
+
+    @Test
+    void genericClaimStartCannotAutoStartReadyReservation() {
+        Long issueId = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
+
+        IssueDispatchService.ClaimResult result = dispatch.claimStart(issueId);
+
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Cannot start issue in READY_TO_START status");
+        assertThat(issues.findById(issueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
+    }
+
+    @Test
+    void readyReservationBlocksOtherStartAndRetry() {
+        Long ownerId = seedApprovedIssue(IssueStatus.READY_TO_START, 0, 41);
+        TrackedIssue owner = issues.findById(ownerId).orElseThrow();
+        Long startId = seedIssue(owner.getRepo(), IssueStatus.QUEUED, 42);
+        Long retryId = seedIssue(owner.getRepo(), IssueStatus.FAILED, 43);
+
+        IssueDispatchService.ClaimResult start = dispatch.claimStart(startId);
+        IssueDispatchService.ClaimResult retry = dispatch.claimRetry(
+                retryId, issue -> null, IssueDispatchTransactionManager.RetryMutation.none());
+
+        assertThat(start.claimed()).isFalse();
+        assertThat(start.reason())
+                .isEqualTo("Issue #41 has an approved plan and is waiting to start.");
+        assertThat(retry.claimed()).isFalse();
+        assertThat(retry.reason())
+                .isEqualTo("Issue #41 has an approved plan and is waiting to start.");
+        assertThat(issues.findById(startId).orElseThrow().getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(issues.findById(retryId).orElseThrow().getStatus()).isEqualTo(IssueStatus.FAILED);
+    }
+
+    @Test
+    void releaseReadyReservationQueuesIssueAndPreservesApprovedVersion() {
+        Long issueId = seedApprovedIssue(IssueStatus.READY_TO_START, 2);
+        TrackedIssue before = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        Long approvedVersionId = before.getApprovedPlanningVersion().getId();
+        List<Long> historyIds = versions.findByIssueIdOrderByVersionNumberDesc(issueId).stream()
+                .map(PlanningVersion::getId)
+                .toList();
+
+        IssueDispatchService.TransitionResult result = dispatch.releaseReadyToQueue(issueId);
+
+        assertThat(result.transitioned()).isTrue();
+        assertThat(result.issue().getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(result.issue().getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
+        TrackedIssue persisted = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(persisted.getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
+        assertThat(versions.findByIssueIdOrderByVersionNumberDesc(issueId))
+                .extracting(PlanningVersion::getId)
+                .containsExactlyElementsOf(historyIds);
+        assertThat(persisted.getPlanConformanceAttempt()).isEqualTo(2);
+    }
+
+    @Test
+    void releaseRejectsStaleStateWithoutMutation() {
+        Long issueId = seedApprovedIssue(IssueStatus.PENDING, 1);
+        Long approvedVersionId = issues.findByIdWithApprovedPlanningVersion(issueId)
+                .orElseThrow().getApprovedPlanningVersion().getId();
+
+        IssueDispatchService.TransitionResult result = dispatch.releaseReadyToQueue(issueId);
+
+        assertThat(result.transitioned()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Issue is now PENDING; the repository slot was not changed");
+        TrackedIssue persisted = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(IssueStatus.PENDING);
+        assertThat(persisted.getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
+    }
+
+    @Test
+    void concurrentStartAndReleaseHaveExactlyOneWinner() throws Exception {
+        Long issueId = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
+        Long approvedVersionId = issues.findByIdWithApprovedPlanningVersion(issueId)
+                .orElseThrow().getApprovedPlanningVersion().getId();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var start = pool.submit(awaitThen(ready, go, () -> dispatch.claimReadyStart(issueId)));
+            var release = pool.submit(awaitThen(ready, go, () -> dispatch.releaseReadyToQueue(issueId)));
+            ready.await();
+            go.countDown();
+
+            IssueDispatchService.ClaimResult startResult = start.get();
+            IssueDispatchService.TransitionResult releaseResult = release.get();
+            assertThat(List.of(startResult.claimed(), releaseResult.transitioned()))
+                    .containsExactlyInAnyOrder(true, false);
+        }
+
+        TrackedIssue persisted = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        assertThat(persisted.getStatus())
+                .isIn(IssueStatus.IN_PROGRESS, IssueStatus.QUEUED);
+        assertThat(persisted.getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
+    }
+
+    @Test
+    void completedReadyTransitionMakesCompetingCommandStaleInEitherOrder() {
+        Long releaseFirstId = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
+        Long releaseFirstVersionId = issues.findByIdWithApprovedPlanningVersion(releaseFirstId)
+                .orElseThrow().getApprovedPlanningVersion().getId();
+
+        IssueDispatchService.TransitionResult released =
+                dispatch.releaseReadyToQueue(releaseFirstId);
+        IssueDispatchService.ClaimResult staleStart = dispatch.claimReadyStart(releaseFirstId);
+
+        assertThat(released.transitioned()).isTrue();
+        assertThat(staleStart.claimed()).isFalse();
+        assertThat(staleStart.reason()).isEqualTo("Cannot start issue in QUEUED status");
+        TrackedIssue releasedIssue = issues.findByIdWithApprovedPlanningVersion(releaseFirstId)
+                .orElseThrow();
+        assertThat(releasedIssue.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(releasedIssue.getApprovedPlanningVersion().getId())
+                .isEqualTo(releaseFirstVersionId);
+
+        Long startFirstId = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
+        Long startFirstVersionId = issues.findByIdWithApprovedPlanningVersion(startFirstId)
+                .orElseThrow().getApprovedPlanningVersion().getId();
+
+        IssueDispatchService.ClaimResult started = dispatch.claimReadyStart(startFirstId);
+        IssueDispatchService.TransitionResult staleRelease =
+                dispatch.releaseReadyToQueue(startFirstId);
+
+        assertThat(started.claimed()).isTrue();
+        assertThat(staleRelease.transitioned()).isFalse();
+        assertThat(staleRelease.reason())
+                .isEqualTo("Issue is now IN_PROGRESS; the repository slot was not changed");
+        TrackedIssue startedIssue = issues.findByIdWithApprovedPlanningVersion(startFirstId)
+                .orElseThrow();
+        assertThat(startedIssue.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(startedIssue.getApprovedPlanningVersion().getId())
+                .isEqualTo(startFirstVersionId);
+    }
+
+    @Test
+    void concurrentOwnerStartAndCompetingStartCannotBothClaim() throws Exception {
+        Long ownerId = seedApprovedIssue(IssueStatus.READY_TO_START, 0, 41);
+        TrackedIssue owner = issues.findById(ownerId).orElseThrow();
+        Long competingId = seedIssue(owner.getRepo(), IssueStatus.QUEUED, 42);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var ownerStart = pool.submit(
+                    awaitThen(ready, go, () -> dispatch.claimReadyStart(ownerId)));
+            var competingStart = pool.submit(
+                    awaitThen(ready, go, () -> dispatch.claimStart(competingId)));
+            ready.await();
+            go.countDown();
+
+            IssueDispatchService.ClaimResult ownerResult = ownerStart.get();
+            IssueDispatchService.ClaimResult competingResult = competingStart.get();
+            assertThat(ownerResult.claimed()).isTrue();
+            assertThat(competingResult.claimed()).isFalse();
+            assertThat(competingResult.reason()).contains("Issue #41");
+            assertThat(List.of(ownerResult, competingResult).stream()
+                    .filter(IssueDispatchService.ClaimResult::claimed)).hasSize(1);
+        }
+
+        assertThat(issues.findById(ownerId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(issues.findById(competingId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.QUEUED);
+    }
+
+    @Test
+    void pausedReadyReservationCannotStartButCanReleaseSlot() {
+        Long issueId = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
+        Long approvedVersionId = issues.findByIdWithApprovedPlanningVersion(issueId)
+                .orElseThrow().getApprovedPlanningVersion().getId();
+        new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseThrow();
+            control.setState(ProcessingState.PAUSED);
+            controls.saveAndFlush(control);
+        });
+
+        IssueDispatchService.ClaimResult start = dispatch.claimReadyStart(issueId);
+
+        assertThat(start.claimed()).isFalse();
+        assertThat(start.reason()).isEqualTo("Processing is paused");
+        TrackedIssue reserved = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        assertThat(reserved.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(reserved.getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
+
+        IssueDispatchService.TransitionResult release = dispatch.releaseReadyToQueue(issueId);
+
+        assertThat(release.transitioned()).isTrue();
+        assertThat(release.issue().getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(release.issue().getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
+    }
+
+    @Test
+    void readyOwnerCannotStartWhenRepositoryIsUnexpectedlyOccupied() {
+        Long ownerId = seedApprovedIssue(IssueStatus.READY_TO_START, 0, 41);
+        TrackedIssue owner = issues.findById(ownerId).orElseThrow();
+        seedIssue(owner.getRepo(), IssueStatus.IN_PROGRESS, 40);
+
+        IssueDispatchService.ClaimResult result = dispatch.claimReadyStart(ownerId);
+
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason())
+                .isEqualTo("Issue #40 is currently running for this repository");
+        assertThat(issues.findById(ownerId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
     }
 
     @Test
@@ -185,13 +423,17 @@ class IssueDispatchTransactionManagerTest {
     }
 
     private Long seedApprovedIssue(IssueStatus status, int conformanceAttempt) {
+        return seedApprovedIssue(status, conformanceAttempt, 42);
+    }
+
+    private Long seedApprovedIssue(IssueStatus status, int conformanceAttempt, int issueNumber) {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         return tx.execute(ignored -> {
             controls.findById(ProcessingControl.SINGLETON_ID)
                     .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
             WatchedRepo repo = repos.save(new WatchedRepo("acme", "widgets-seed" + System.nanoTime()));
             repo.setPlanFirst(true);
-            TrackedIssue issue = new TrackedIssue(repo, 42, "Approved work");
+            TrackedIssue issue = new TrackedIssue(repo, issueNumber, "Approved work");
             issue.setStatus(status);
             issue.setPlanConformanceAttempt(conformanceAttempt);
             issue = issues.save(issue);
@@ -203,6 +445,33 @@ class IssueDispatchTransactionManagerTest {
             issue.setPlanApproved(true);
             return issues.saveAndFlush(issue).getId();
         });
+    }
+
+    private Long seedIssue(IssueStatus status, int issueNumber, WatchedRepo repo) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        return tx.execute(ignored -> {
+            controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
+            WatchedRepo owner = repo == null
+                    ? repos.save(new WatchedRepo("acme", "unapproved-" + System.nanoTime()))
+                    : repos.findById(repo.getId()).orElseThrow();
+            TrackedIssue issue = new TrackedIssue(owner, issueNumber, "Unapproved work");
+            issue.setStatus(status);
+            return issues.saveAndFlush(issue).getId();
+        });
+    }
+
+    private Long seedIssue(WatchedRepo repo, IssueStatus status, int issueNumber) {
+        return seedIssue(status, issueNumber, repo);
+    }
+
+    private static <T> Callable<T> awaitThen(
+            CountDownLatch ready, CountDownLatch go, Callable<T> command) {
+        return () -> {
+            ready.countDown();
+            go.await();
+            return command.call();
+        };
     }
 
     private PendingVersion seedPendingPlanningVersion() {

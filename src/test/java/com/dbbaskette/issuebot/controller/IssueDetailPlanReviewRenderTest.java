@@ -224,6 +224,7 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("data-plan-tab=\"history\"")
                 .contains("role=\"tab\"")
                 .contains("role=\"tabpanel\"")
+                .contains("Approves this specification and plan. Implementation will not start.")
                 .contains("Approve Version 3")
                 .contains("Revise Spec &amp; Plan")
                 .doesNotContain("name=\"versionId\" value=\"3\"");

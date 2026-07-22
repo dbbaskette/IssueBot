@@ -42,7 +42,7 @@ import static org.mockito.Mockito.when;
 /**
  * Renders the real inbox.html "content" fragment through Thymeleaf, driven by
  * {@link InboxController}'s actual model population (mocked repositories, no Spring context, no
- * database) — mirrors {@link ApprovalsDiffViewerRenderTest}'s harness. Covers the four grouped
+ * database) — mirrors {@link ApprovalsDiffViewerRenderTest}'s harness. Covers the five grouped
  * sections, the empty state, the count chips, and that every action form carries
  * {@code returnTo=inbox} (#91).
  */
@@ -108,15 +108,16 @@ class InboxPageRenderTest {
         assertThat(html).contains("Nothing needs you — the loop is running itself.");
         assertThat(html).contains("2 active");
         assertThat(html).contains("5 queued");
-        // The four grouped sections must not render at all when nothing pends.
+        // The five grouped sections must not render at all when nothing pends.
         assertThat(html).doesNotContain("id=\"approvals\"");
         assertThat(html).doesNotContain("id=\"plan-approvals\"");
+        assertThat(html).doesNotContain("id=\"ready-to-start\"");
         assertThat(html).doesNotContain("id=\"split-proposals\"");
         assertThat(html).doesNotContain("id=\"needs-human\"");
     }
 
     @Test
-    void populatedInbox_rendersAllFourSectionsWithCountChipsAndAnchors() {
+    void populatedInboxRendersReadyToStartAfterPlanApprovalsAsReadOnlyDeepLinks() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
 
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
@@ -130,6 +131,10 @@ class InboxPageRenderTest {
         planApproval.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         planApproval.setImplementationPlan("Step one\nStep two");
 
+        TrackedIssue ready = new TrackedIssue(repo, 41, "Ready implementation");
+        ready.setId(5L);
+        ready.setStatus(IssueStatus.READY_TO_START);
+
         TrackedIssue splitProposal = new TrackedIssue(repo, 3, "Split issue");
         splitProposal.setId(3L);
         splitProposal.setStatus(IssueStatus.AWAITING_DECOMPOSITION);
@@ -142,6 +147,7 @@ class InboxPageRenderTest {
 
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(approval));
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL)).thenReturn(List.of(planApproval));
+        when(issues.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START)).thenReturn(List.of(ready));
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_DECOMPOSITION)).thenReturn(List.of(splitProposal));
         when(issues.findByStatusInOrderByIdDesc(List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)))
                 .thenReturn(List.of(failedIssue));
@@ -157,18 +163,23 @@ class InboxPageRenderTest {
         // Four sections, each with its own stable anchor id for dashboard deep-links (#91).
         assertThat(html).contains("id=\"approvals\"");
         assertThat(html).contains("id=\"plan-approvals\"");
+        assertThat(html).contains("id=\"ready-to-start\"");
         assertThat(html).contains("id=\"split-proposals\"");
         assertThat(html).contains("id=\"needs-human\"");
 
         // Section headers with content.
         assertThat(html).contains("PR Approvals");
         assertThat(html).contains("Plan Approvals");
+        assertThat(html).contains("Ready to Start");
         assertThat(html).contains("Split Proposals");
         assertThat(html).contains("Needs Human");
 
         // Per-issue content actually rendered.
         assertThat(html).contains("Approval issue");
         assertThat(html).contains("Plan awaiting approval");
+        assertThat(html).contains("Ready implementation");
+        assertThat(html).contains("Plan approved. Start implementation when ready or return it to the queue.");
+        assertThat(html).contains("href=\"/issues/5#ready-to-start\"");
         assertThat(html).doesNotContain("Step one");
         assertThat(html).contains("Sub A");
         assertThat(html).contains("Budget exceeded");
@@ -179,6 +190,16 @@ class InboxPageRenderTest {
         long returnToInboxCount = html.lines().filter(l -> l.contains("name=\"returnTo\" value=\"inbox\"")).count();
         assertThat(formCount).isGreaterThan(0);
         assertThat(returnToInboxCount).isEqualTo(formCount);
+
+        int planSection = html.indexOf("id=\"plan-approvals\"");
+        int readySection = html.indexOf("id=\"ready-to-start\"");
+        int splitSection = html.indexOf("id=\"split-proposals\"");
+        assertThat(readySection).isBetween(planSection + 1, splitSection - 1);
+        String readyMarkup = html.substring(readySection, splitSection);
+        assertThat(readyMarkup).doesNotContain("<form")
+                .doesNotContain("method=\"post\"")
+                .doesNotContain("/start")
+                .doesNotContain("/release");
     }
 
     @Test

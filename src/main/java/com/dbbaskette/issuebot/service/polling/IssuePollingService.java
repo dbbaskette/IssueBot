@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -199,19 +201,15 @@ public class IssuePollingService {
         List<TrackedIssue> pending = issueRepository.findByRepoAndStatus(repo, IssueStatus.PENDING);
         if (pending.isEmpty()) return;
 
-        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
-        if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
-            log.debug("{} has active work — {} pending issue(s) will wait", repo.fullName(), pending.size());
-            return;
-        }
-
         // Lowest issue number first, so decomposed parts resume 1/X → N/X (findByRepoAndStatus
         // has no ordering guarantee).
         TrackedIssue next = pending.stream()
                 .min(Comparator.comparingInt(TrackedIssue::getIssueNumber))
                 .orElseThrow();
+        if (repositoryBlocker(repo, next.getId()).isPresent() || hasOpenIssueBotPR(repo)) {
+            log.debug("{} has active work — {} pending issue(s) will wait", repo.fullName(), pending.size());
+            return;
+        }
         log.info("Resuming pending issue {} #{}: {}", repo.fullName(),
                 next.getIssueNumber(), next.getIssueTitle());
         // Claim IN_PROGRESS synchronously before the async dispatch so a subsequent poll cycle
@@ -238,22 +236,21 @@ public class IssuePollingService {
             return;
         }
 
-        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
-        if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
-            log.debug("{} has active issue or open IssueBot PR — {} issue(s) remain queued",
-                    repo.fullName(), queued.size());
-            return;
-        }
-
-        // Gate is clear — process the first queued issue using topological ordering
+        // Pick the candidate before the early reservation check so the candidate itself can be
+        // excluded. The locked dispatch gate remains authoritative immediately before mutation.
         List<TrackedIssue> sorted = dependencyResolver.topologicalSort(queued);
         if (sorted.isEmpty()) {
             log.debug("{} — all queued issues blocked by dependencies", repo.fullName());
             return;
         }
         TrackedIssue next = sorted.getFirst();
+        if (repositoryBlocker(repo, next.getId()).isPresent() || hasOpenIssueBotPR(repo)) {
+            log.debug("{} has active issue or open IssueBot PR — {} issue(s) remain queued",
+                    repo.fullName(), queued.size());
+            return;
+        }
+
+        // Gate is clear — process the first queued issue using topological ordering
         log.info("Gate cleared for {} — dequeuing issue #{}: {}",
                 repo.fullName(), next.getIssueNumber(), next.getIssueTitle());
         // Claim IN_PROGRESS synchronously (NOT PENDING) before the async dispatch. Otherwise the
@@ -284,6 +281,16 @@ public class IssuePollingService {
             // If we can't check, err on the side of caution — assume gated
             return true;
         }
+    }
+
+    private Optional<TrackedIssue> repositoryBlocker(WatchedRepo repo, Long candidateId) {
+        return issueRepository.findByRepoAndStatusIn(repo,
+                        List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                                IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START))
+                .stream()
+                .filter(candidate -> candidateId == null
+                        || !Objects.equals(candidate.getId(), candidateId))
+                .findFirst();
     }
 
     private void pollRepo(WatchedRepo repo, long availableSlots) {
@@ -354,11 +361,34 @@ public class IssuePollingService {
             return WebhookOutcome.QUEUED;
         }
 
-        // Per-repo serialization: queue if another issue is active or an IssueBot PR is open
-        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
-        if (repoHasActiveIssue || hasOpenIssueBotPR(repo)) {
+        // Per-repo serialization: name the actual tracked issue holding the repository slot.
+        Optional<TrackedIssue> blocker = repositoryBlocker(repo, tracked.getId());
+        if (blocker.isPresent()) {
+            TrackedIssue reservation = blocker.orElseThrow();
+            tracked.setStatus(IssueStatus.QUEUED);
+            issueRepository.save(tracked);
+            if (reservation.getStatus() == IssueStatus.READY_TO_START) {
+                String wait = "waiting for issue #" + reservation.getIssueNumber()
+                        + " to start or release the repository slot";
+                eventService.log("ISSUE_QUEUED",
+                        "Issue #" + issueNumber + " queued — " + wait, repo, tracked);
+                notificationService.info("Issue Queued",
+                        repo.fullName() + " #" + issueNumber + ": " + title
+                                + " (" + wait + ")", tracked);
+            } else {
+                String wait = "waiting for issue #" + reservation.getIssueNumber()
+                        + " to complete";
+                eventService.log("ISSUE_QUEUED",
+                        "Issue #" + issueNumber + " queued — " + wait, repo, tracked);
+                notificationService.info("Issue Queued",
+                        repo.fullName() + " #" + issueNumber + ": " + title
+                                + " (" + wait + ")", tracked);
+            }
+            return WebhookOutcome.QUEUED;
+        }
+
+        // An open IssueBot PR can independently hold the gate after tracked work has moved on.
+        if (hasOpenIssueBotPR(repo)) {
             tracked.setStatus(IssueStatus.QUEUED);
             issueRepository.save(tracked);
             eventService.log("ISSUE_QUEUED",

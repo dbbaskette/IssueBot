@@ -73,7 +73,7 @@
          the post-action redirect lands back on the exact filtered/searched page they acted
          from (#87 review) — the endpoints only use them for the redirect, never to decide
          which ids get processed. -->
-    <form id="bulk-form" method="post" action="/issues/bulk/start">
+    <form id="bulk-form" method="post" th:action="@{/issues/bulk/start}">
         <input type="hidden" name="status" th:value="${selectedStatus}">
         <input type="hidden" name="repoId" th:value="${selectedRepoId}">
         <input type="hidden" name="q" th:value="${searchQuery}">
@@ -157,9 +157,13 @@
         hx-target="#content"
         hx-push-url="true">
         <td class="checkbox-col">
-            <input type="checkbox" class="bulk-select" name="ids" th:value="${issue.id}"
+            <input th:if="${issue.status.name() != 'READY_TO_START'}"
+                   type="checkbox" class="bulk-select" name="ids" th:value="${issue.id}"
                    onclick="event.stopPropagation()"
                    th:attr="aria-label='Select issue #' + ${issue.issueNumber}">
+            <span th:if="${issue.status.name() == 'READY_TO_START'}"
+                  class="bulk-read-only" role="note"
+                  th:attr="aria-label='Issue #' + ${issue.issueNumber} + ' is reserved and cannot be selected for bulk actions'">Reserved</span>
         </td>
         <td class="queue-repo-cell" th:text="${issue.repo.fullName()}">owner/repo</td>
         <td class="queue-number-cell" th:text="${'#' + issue.issueNumber}">#1</td>
@@ -191,9 +195,19 @@
         </td>
         <td class="queue-iteration-cell" th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
         <td class="text-sm text-muted queue-updated-cell" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
-        <td class="queue-actions-cell">
+        <td class="queue-actions-cell"
+            th:with="nextAction=${nextActions != null ? nextActions[issue.id] : null}">
+            <a th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
+                       and nextAction != null and nextAction.href() != null
+                       and #strings.endsWith(nextAction.href(), '#ready-to-start')}"
+               class="btn btn-primary btn-sm"
+               th:href="${nextAction.href()}"
+               th:text="${nextAction.ctaLabel()}"
+               onclick="event.stopPropagation()">Open reservation</a>
             <button type="button"
-                    th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
+                    th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
+                             and (nextAction == null or nextAction.href() == null
+                                  or not #strings.endsWith(nextAction.href(), '#ready-to-start'))}"
                     class="btn btn-primary btn-sm"
                     th:disabled="${processingPaused == true}"
                     th:title="${processingPaused == true ? 'Processing is paused' : 'Start this issue now'}"

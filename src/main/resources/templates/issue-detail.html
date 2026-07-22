@@ -66,7 +66,7 @@
                         <i class="ti ti-player-play" aria-hidden="true"></i>
                         <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
                     </button>
-                    <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
+                    <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL' and issue.status.name() != 'READY_TO_START'}"
                             type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
                         <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
                     </button>
@@ -95,6 +95,30 @@
                  class="alert alert-info" role="status">
                 <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
             </div>
+
+            <section th:if="${issue.status.name() == 'READY_TO_START'}"
+                     id="ready-to-start" class="panel mb-3 ready-start-card"
+                     aria-labelledby="ready-to-start-title">
+                <div class="panel-header">
+                    <div>
+                        <span class="eyebrow">Ready to start</span>
+                        <h3 id="ready-to-start-title">Plan approved</h3>
+                    </div>
+                    <span class="status status-ready_to_start">Action required</span>
+                </div>
+                <div class="panel-body">
+                    <p>Implementation is waiting for you. This issue is holding the repository's next-work slot.</p>
+                    <div class="ready-start-actions">
+                        <button type="button" class="btn btn-primary"
+                                th:disabled="${processingPaused == true}"
+                                th:title="${processingPaused == true ? 'Processing is paused' : 'Start implementation'}"
+                                th:aria-label="${processingPaused == true ? 'Start implementation — Processing is paused' : null}"
+                                data-modal-open="start-modal">Start implementation</button>
+                        <button type="button" class="btn btn-ghost"
+                                data-modal-open="release-ready-modal">Return to queue</button>
+                    </div>
+                </div>
+            </section>
 
             <!-- === FAILURE RECOVERY REGION: always present so the live poll can hydrate the
                    CTA destination when a running issue fails. Plan-first guidance and ordinary
@@ -541,7 +565,7 @@
                     </form>
                     <form class="plan-approval-form" th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
                         <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
-                        <p>Approve both documents as the implementation contract.</p>
+                        <p>Approves this specification and plan. Implementation will not start.</p>
                         <button type="submit" class="btn btn-primary"
                                 th:text="${'Approve Version ' + currentPlanningVersion.versionNumber}">Approve Version 3</button>
                     </form>
@@ -821,11 +845,13 @@
            dashboard's Now Running strip). === -->
 
     <!-- === Start Modal === -->
-    <div th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
+    <div th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING' or issue.status.name() == 'READY_TO_START'}"
          id="start-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="start-modal-title">
-            <h3 id="start-modal-title" style="margin:0 0 0.5rem">Start Issue</h3>
-            <p class="text-sm text-muted" style="margin:0 0 1rem">Start processing this issue now?</p>
+            <h3 id="start-modal-title" style="margin:0 0 0.5rem"
+                th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue'}">Start Issue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem"
+               th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation from the approved specification and plan?' : 'Start processing this issue now?'}">Start processing this issue now?</p>
             <form th:action="@{'/issues/' + ${issue.id} + '/start'}" method="post">
                 <div class="field-group">
                     <label for="startImplModel">Implementation model for this run (optional)</label>
@@ -846,7 +872,7 @@
                     <input type="number" id="startBudgetOverride" name="budgetOverrideUsd"
                            step="0.50" min="0" placeholder="unlimited">
                 </div>
-                <div class="field-group">
+                <div class="field-group" th:if="${issue.status.name() != 'READY_TO_START'}">
                     <label for="startPlanFirstOverride">Plan approval (this issue)</label>
                     <select id="startPlanFirstOverride" name="planFirstOverride">
                         <option value="" selected>Use repo setting</option>
@@ -856,14 +882,37 @@
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm">Start Issue</button>
+                    <button type="submit" class="btn btn-primary btn-sm"
+                            th:disabled="${processingPaused == true}"
+                            th:title="${processingPaused == true ? 'Processing is paused' : 'Start implementation'}"
+                            th:aria-label="${processingPaused == true ? 'Start implementation — Processing is paused' : null}"
+                            th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue'}">Start Issue</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- === Release ready reservation confirm modal === -->
+    <div th:if="${issue.status.name() == 'READY_TO_START'}"
+         id="release-ready-modal" class="modal-backdrop" data-modal hidden>
+        <div class="modal glass-card" role="dialog" aria-modal="true"
+             aria-labelledby="release-ready-modal-title">
+            <h3 id="release-ready-modal-title" style="margin:0 0 0.5rem">Return to queue</h3>
+            <p class="text-sm text-muted" style="margin:0 0 1rem">
+                The approved plan will be preserved and this repository slot will be released. Normal automatic processing may start this issue later.
+            </p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/ready/release'}" method="post">
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-ghost btn-sm"
+                            data-modal-close data-modal-autofocus>Cancel</button>
+                    <button type="submit" class="btn btn-ghost btn-sm">Return to queue</button>
                 </div>
             </form>
         </div>
     </div>
 
     <!-- === Mark Complete confirm modal === -->
-    <div th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL'}"
+    <div th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL' and issue.status.name() != 'READY_TO_START'}"
          id="complete-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="complete-modal-title">
             <h3 id="complete-modal-title" style="margin:0 0 0.5rem">Mark Complete</h3>

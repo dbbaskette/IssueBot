@@ -1747,6 +1747,15 @@
   // not on a #filter-form field) and pager link clicks (which carry their
   // own explicit page param) are deliberately left alone.
   document.body.addEventListener('htmx:configRequest', function (evt) {
+    // Thymeleaf-backed forms receive a hidden token automatically. HTMX request
+    // attributes are not normal form actions, so forward the same token using
+    // Spring Security's configured header for every HTMX mutation.
+    var tokenMeta = document.querySelector('meta[name="_csrf"]');
+    var headerMeta = document.querySelector('meta[name="_csrf_header"]');
+    var token = tokenMeta && tokenMeta.getAttribute('content');
+    var header = headerMeta && headerMeta.getAttribute('content');
+    if (token && header) { evt.detail.headers[header] = token; }
+
     var triggerEl = evt.detail.elt;
     if (triggerEl && triggerEl.closest && triggerEl.closest('#filter-form') &&
         (triggerEl.tagName === 'SELECT' || triggerEl.tagName === 'INPUT')) {

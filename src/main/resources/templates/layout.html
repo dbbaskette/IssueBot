@@ -8,6 +8,8 @@
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="_csrf" th:if="${_csrf != null}" th:content="${_csrf.token}">
+    <meta name="_csrf_header" th:if="${_csrf != null}" th:content="${_csrf.headerName}">
     <title th:text="${pageTitle != null ? pageTitle + ' — IssueBot' : 'IssueBot'}">IssueBot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -105,7 +107,7 @@
                     data-modal-open="pause-processing-modal" title="Stop current and future issue processing">
                 <i class="ti ti-player-pause" aria-hidden="true"></i> Pause processing
             </button>
-            <form th:if="${processingPaused == true}" action="/processing/resume" method="post">
+            <form th:if="${processingPaused == true}" th:action="@{/processing/resume}" method="post">
                 <input type="hidden" name="returnTo" th:value="${currentPath != null ? currentPath : '/'}">
                 <button type="submit" class="btn btn-primary btn-sm">
                     <i class="ti ti-player-play" aria-hidden="true"></i> Resume processing
@@ -127,7 +129,7 @@
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="pause-processing-title">
             <h3 id="pause-processing-title" style="margin:0 0 0.5rem">Pause all processing?</h3>
             <p class="text-sm text-muted">Current workflows will stop at their next safe checkpoint and return to Pending. New starts and retries will remain disabled until you resume.</p>
-            <form action="/processing/pause" method="post">
+            <form th:action="@{/processing/pause}" method="post">
                 <input type="hidden" name="returnTo" th:value="${currentPath != null ? currentPath : '/'}">
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Keep processing</button>

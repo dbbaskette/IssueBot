@@ -65,16 +65,17 @@ class TrackedIssueRepositoryInboxQueriesTest {
     }
 
     @Test
-    void countNeedsYou_sumsAllFiveBlockingStatuses() {
+    void countNeedsYou_sumsAllSixBlockingStatuses() {
         WatchedRepo r = repo();
         issue(r, 1, IssueStatus.AWAITING_APPROVAL);
         issue(r, 2, IssueStatus.AWAITING_PLAN_APPROVAL);
-        issue(r, 3, IssueStatus.AWAITING_DECOMPOSITION);
-        issue(r, 4, IssueStatus.FAILED);
-        issue(r, 5, IssueStatus.COOLDOWN);
-        issue(r, 6, IssueStatus.QUEUED); // does not count
+        issue(r, 3, IssueStatus.READY_TO_START);
+        issue(r, 4, IssueStatus.AWAITING_DECOMPOSITION);
+        issue(r, 5, IssueStatus.FAILED);
+        issue(r, 6, IssueStatus.COOLDOWN);
+        issue(r, 7, IssueStatus.QUEUED); // does not count
 
-        assertThat(issueRepository.countNeedsYou()).isEqualTo(5L);
+        assertThat(issueRepository.countNeedsYou()).isEqualTo(6L);
     }
 
     @Test

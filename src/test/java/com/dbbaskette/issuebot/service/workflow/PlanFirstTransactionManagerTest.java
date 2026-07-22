@@ -279,12 +279,17 @@ class PlanFirstTransactionManagerTest {
 
         assertThat(transactionStates).containsExactly(false, false, false);
         assertThat(visibleStatuses).containsExactly(
-                IssueStatus.PENDING, IssueStatus.PENDING, IssueStatus.PENDING);
+                IssueStatus.READY_TO_START,
+                IssueStatus.READY_TO_START,
+                IssueStatus.READY_TO_START);
         TrackedIssue committed = issues.findByIdWithApprovedPlanningVersion(
                 pending.issueId()).orElseThrow();
+        assertThat(committed.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
         assertThat(committed.getApprovedPlanningVersion().getId()).isEqualTo(pending.versionId());
         assertThat(committed.getApprovedPlanningVersion().getState())
                 .isEqualTo(PlanningVersionState.APPROVED);
+        assertThat(committed.getPlanConformanceAttempt()).isZero();
+        assertThat(committed.isPlanCorrectionPending()).isFalse();
     }
 
     @Test

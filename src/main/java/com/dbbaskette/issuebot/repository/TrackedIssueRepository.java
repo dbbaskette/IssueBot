@@ -52,14 +52,15 @@ public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long
 
     /**
      * Sum of every status that blocks on the operator (#91 Needs You inbox): PR approvals,
-     * plan approvals, split proposals, and needs-human (FAILED + COOLDOWN). Five cheap indexed
-     * COUNTs — mirrors the {@code pendingApprovals} single-COUNT pattern each page controller
+     * plan approvals, ready-to-start reservations, split proposals, and needs-human (FAILED + COOLDOWN).
+     * Six cheap indexed COUNTs — mirrors the {@code pendingApprovals} single-COUNT pattern each page controller
      * already runs, so this default method is the one place the sum is computed rather than
-     * duplicating the five-way addition across every controller.
+     * duplicating the six-way addition across every controller.
      */
     default long countNeedsYou() {
         return countByStatus(IssueStatus.AWAITING_APPROVAL)
                 + countByStatus(IssueStatus.AWAITING_PLAN_APPROVAL)
+                + countByStatus(IssueStatus.READY_TO_START)
                 + countByStatus(IssueStatus.AWAITING_DECOMPOSITION)
                 + countByStatus(IssueStatus.FAILED)
                 + countByStatus(IssueStatus.COOLDOWN);

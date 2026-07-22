@@ -817,6 +817,11 @@ main {
     color: var(--warn);
     border-color: rgba(180,83,9,0.3);
 }
+.status-ready_to_start {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 38%, transparent);
+}
 
 /* CI status badges (approval cards) */
 .ci-passed {
@@ -2483,6 +2488,17 @@ details summary:hover { color: var(--text-primary); }
 
 .checkbox-col { width: 2.5rem; text-align: center; }
 .checkbox-col input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--accent); }
+.bulk-read-only {
+    display: inline-block;
+    padding: 0.15rem 0.3rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
 
 /* ============================================================
    Pager (#87)
@@ -3411,6 +3427,31 @@ details summary:hover { color: var(--text-primary); }
 }
 
 /* Failed issues: recovery is the decision surface; history stays quiet. */
+.ready-start-card {
+    min-width: 0;
+    scroll-margin-top: 5rem;
+    overflow-wrap: anywhere;
+    border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--hairline));
+    border-left: 4px solid var(--warn);
+    box-shadow: 0 18px 42px -36px color-mix(in srgb, var(--warn) 58%, transparent);
+}
+.ready-start-card .panel-header {
+    align-items: flex-start;
+    gap: 1rem;
+    background: color-mix(in srgb, var(--warn-soft) 52%, var(--surface));
+}
+.ready-start-card .panel-header h3 { margin-top: .15rem; }
+.ready-start-card .panel-body > p {
+    max-width: 62ch;
+    color: var(--text-secondary);
+}
+.ready-start-actions {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    gap: .65rem;
+    margin-top: 1.15rem;
+}
+
 .recovery-card {
     scroll-margin-top: 5rem;
     border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--hairline));
@@ -3464,6 +3505,9 @@ details summary:hover { color: var(--text-primary); }
     .queue-toolbar .queue-filter { width: 100%; min-width: 0; flex-basis: auto; }
     .next-action-callout { align-items: stretch; flex-direction: column; }
     .next-action-cta { width: 100%; justify-content: center; }
+    .ready-start-card .panel-header { align-items: stretch; }
+    .ready-start-actions { grid-template-columns: 1fr; }
+    .ready-start-actions .btn { width: 100%; justify-content: center; }
     .queue-table-panel { overflow: visible; background: transparent; border: 0; box-shadow: none; }
     .queue-table-panel .data-table { min-width: 0; }
     .queue-table-panel thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

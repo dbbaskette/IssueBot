@@ -58,12 +58,16 @@ class IssuesQueueRenderTest {
     }
 
     private String renderTableRows(List<TrackedIssue> issues) {
+        return renderTableRows(issues, null);
+    }
+
+    private String renderTableRows(List<TrackedIssue> issues, TrackedIssue readyReservation) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issues", issues);
         // Mirrors what UiModelAdvice publishes on every real request.
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("processingPaused", false);
-        context.setVariable("nextActions", resolveNextActions(issues));
+        context.setVariable("nextActions", resolveNextActions(issues, readyReservation));
 
         TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -86,9 +90,14 @@ class IssuesQueueRenderTest {
     }
 
     private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {
+        return resolveNextActions(issues, null);
+    }
+
+    private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues,
+                                                           TrackedIssue readyReservation) {
         IssueNextActionResolver resolver = new IssueNextActionResolver();
         return issues.stream().collect(java.util.stream.Collectors.toMap(
-                TrackedIssue::getId, resolver::resolve));
+                TrackedIssue::getId, issue -> resolver.resolve(issue, readyReservation)));
     }
 
     @Test
@@ -107,9 +116,45 @@ class IssuesQueueRenderTest {
         String html = renderTableRows(List.of(pending, failed, completed));
 
         assertThat(html).contains("Next:")
-                .contains("Ready to start manually or enter the processing queue.")
+                .contains("Waiting to resume or start manually.")
                 .contains("Review the failure, add guidance, or retry.")
                 .contains("No action needed — completed.");
+    }
+
+    @Test
+    void queuedRowNamesAndLinksTheReadyReservationHoldingItsRepository() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(9L);
+        TrackedIssue queued = new TrackedIssue(repo, 46, "Queued issue");
+        queued.setId(46L);
+        queued.setStatus(IssueStatus.QUEUED);
+        TrackedIssue reservation = new TrackedIssue(repo, 41, "Ready implementation");
+        reservation.setId(1L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
+
+        String html = renderTableRows(List.of(queued), reservation);
+
+        assertThat(html)
+                .contains("Waiting for issue #41 to start or release the repository slot.")
+                .contains("href=\"/issues/1#ready-to-start\"")
+                .contains("Open issue #41")
+                .doesNotContain("hx-post=\"/issues/46/start\"");
+    }
+
+    @Test
+    void readyReservationRowIsReadOnlyAndCannotBeBulkSelected() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue reservation = new TrackedIssue(repo, 41, "Ready implementation");
+        reservation.setId(1L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
+
+        String html = renderTableRows(List.of(reservation), reservation);
+
+        assertThat(html)
+                .doesNotContain("class=\"bulk-select\"")
+                .contains("class=\"bulk-read-only")
+                .contains("Issue #41 is reserved and cannot be selected for bulk actions")
+                .contains(">Reserved</span>");
     }
 
     @Test

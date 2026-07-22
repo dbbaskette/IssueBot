@@ -27,7 +27,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for the Needs You inbox's (#91) model population: the four status groups, the
+ * Unit tests for the Needs You inbox's (#91) model population: the five status groups, the
  * total/active/queued counts, the plan excerpt, and the split-proposal titles. Follows this
  * codebase's existing pattern (see {@code IssueControllerTest}) of constructing the controller
  * directly with mocks rather than a full Spring context.
@@ -68,7 +68,7 @@ class InboxControllerTest {
 
     @SuppressWarnings("unchecked")
     @Test
-    void groupsIssuesByStatusIntoFourBuckets() {
+    void groupsIssuesByStatusIntoFiveBucketsWithConsistentNeedsYouTotal() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
 
         TrackedIssue approval = new TrackedIssue(repo(), 1, "Approval issue");
@@ -78,6 +78,10 @@ class InboxControllerTest {
         TrackedIssue planApproval = new TrackedIssue(repo(), 2, "Plan issue");
         planApproval.setId(2L);
         planApproval.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+
+        TrackedIssue ready = new TrackedIssue(repo(), 41, "Ready issue");
+        ready.setId(6L);
+        ready.setStatus(IssueStatus.READY_TO_START);
 
         TrackedIssue splitProposal = new TrackedIssue(repo(), 3, "Split issue");
         splitProposal.setId(3L);
@@ -93,18 +97,22 @@ class InboxControllerTest {
 
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(approval));
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL)).thenReturn(List.of(planApproval));
+        when(issues.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START)).thenReturn(List.of(ready));
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_DECOMPOSITION)).thenReturn(List.of(splitProposal));
         when(issues.findByStatusInOrderByIdDesc(List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)))
                 .thenReturn(List.of(cooldown, failed));
+        when(issues.countNeedsYou()).thenReturn(6L);
 
         Model model = new ExtendedModelMap();
         controller(issues, mock(NotificationRepository.class)).inbox(model, null);
 
         assertThat((List<TrackedIssue>) model.getAttribute("approvals")).containsExactly(approval);
         assertThat((List<TrackedIssue>) model.getAttribute("planApprovals")).containsExactly(planApproval);
+        assertThat((List<TrackedIssue>) model.getAttribute("readyToStart")).containsExactly(ready);
         assertThat((List<TrackedIssue>) model.getAttribute("splitProposals")).containsExactly(splitProposal);
         assertThat((List<TrackedIssue>) model.getAttribute("needsHuman")).containsExactly(cooldown, failed);
-        assertThat(model.getAttribute("totalCount")).isEqualTo(5);
+        assertThat(model.getAttribute("totalCount")).isEqualTo(6);
+        assertThat(model.getAttribute("needsYouCount")).isEqualTo(6L);
     }
 
     @Test

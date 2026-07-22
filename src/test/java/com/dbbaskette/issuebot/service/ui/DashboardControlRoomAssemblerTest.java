@@ -24,8 +24,11 @@ import static com.dbbaskette.issuebot.model.IssueStatus.FAILED;
 import static com.dbbaskette.issuebot.model.IssueStatus.IN_PROGRESS;
 import static com.dbbaskette.issuebot.model.IssueStatus.PENDING;
 import static com.dbbaskette.issuebot.model.IssueStatus.QUEUED;
+import static com.dbbaskette.issuebot.model.IssueStatus.READY_TO_START;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -48,10 +51,11 @@ class DashboardControlRoomAssemblerTest {
         nextActionResolver = mock(IssueNextActionResolver.class);
         assembler = new DashboardControlRoomAssembler(
                 issueRepository, costRepository, nextActionResolver);
-        when(nextActionResolver.resolve(any())).thenAnswer(invocation -> {
+        IssueNextActionResolver realResolver = new IssueNextActionResolver();
+        when(nextActionResolver.resolve(any(), nullable(TrackedIssue.class))).thenAnswer(invocation -> {
             TrackedIssue issue = invocation.getArgument(0);
-            return new IssueNextAction("next-" + issue.getId(), "View", "/issues/" + issue.getId(),
-                    IssueNextAction.Tone.NEUTRAL, false);
+            TrackedIssue reservation = invocation.getArgument(1);
+            return realResolver.resolve(issue, reservation);
         });
     }
 
@@ -59,11 +63,14 @@ class DashboardControlRoomAssemblerTest {
     void assemblesExactLaneMembershipPrioritySafeLabelsAndRunningDetails() {
         TrackedIssue approval = issue(41L, AWAITING_APPROVAL, "Approve PR");
         TrackedIssue plan = issue(7L, AWAITING_PLAN_APPROVAL, "Approve plan");
+        TrackedIssue ready = issue(1L, READY_TO_START, "Ready implementation");
+        ready.setIssueNumber(41);
         TrackedIssue decomposition = issue(99L, AWAITING_DECOMPOSITION, "Split issue");
         TrackedIssue failed = issue(2L, FAILED, "Failure");
-        TrackedIssue cooldown = issue(1L, COOLDOWN, "   ");
-        cooldown.setRepo(null);
-        List<TrackedIssue> decisions = List.of(cooldown, failed, decomposition, plan, approval);
+        failed.setRepo(null);
+        failed.setIssueTitle("   ");
+        TrackedIssue cooldown = issue(6L, COOLDOWN, "Cooldown");
+        List<TrackedIssue> decisions = List.of(cooldown, failed, decomposition, ready, plan, approval);
 
         LocalDateTime oldestStart = NOW.minusMinutes(5);
         LocalDateTime newestStart = NOW.minusMinutes(1);
@@ -82,7 +89,7 @@ class DashboardControlRoomAssemblerTest {
         List<TrackedIssue> upNext = List.of(blocked, pending, queued);
 
         when(issueRepository.findByStatusIn(List.of(AWAITING_APPROVAL, AWAITING_PLAN_APPROVAL,
-                AWAITING_DECOMPOSITION, FAILED, COOLDOWN))).thenReturn(decisions);
+                READY_TO_START, AWAITING_DECOMPOSITION, FAILED, COOLDOWN))).thenReturn(decisions);
         when(issueRepository.findByStatus(IN_PROGRESS)).thenReturn(processing);
         when(issueRepository.findByStatusIn(List.of(QUEUED, PENDING, BLOCKED))).thenReturn(upNext);
         when(costRepository.totalCostForIssue(oldest)).thenReturn(new BigDecimal("2.50"));
@@ -93,7 +100,7 @@ class DashboardControlRoomAssemblerTest {
 
         assertThat(room.needsDecision().cards()).extracting(card -> card.issue().getStatus())
                 .containsExactly(AWAITING_APPROVAL, AWAITING_PLAN_APPROVAL,
-                        AWAITING_DECOMPOSITION, FAILED, COOLDOWN);
+                        READY_TO_START, AWAITING_DECOMPOSITION, FAILED);
         assertThat(room.processing().cards()).extracting(card -> card.issue().getStartedAt())
                 .containsExactly(oldestStart, newestStart, null);
         assertThat(room.upNext().cards()).extracting(card -> card.issue().getStatus())
@@ -102,7 +109,7 @@ class DashboardControlRoomAssemblerTest {
         assertThat(room.needsDecision())
                 .extracting("key", "eyebrow", "title", "emptyMessage", "viewAllHref", "total")
                 .containsExactly("needs-decision", "Intervention", "Needs your decision",
-                        "No decisions need you right now.", "/inbox", 5);
+                        "No decisions need you right now.", "/inbox", 6);
         assertThat(room.processing())
                 .extracting("key", "eyebrow", "title", "emptyMessage", "viewAllHref", "total")
                 .containsExactly("processing", "Execution", "Currently processing",
@@ -122,8 +129,21 @@ class DashboardControlRoomAssemblerTest {
                 .extracting("repositoryLabel", "issueLabel")
                 .containsExactly("Unknown repository", "Untitled issue");
         assertThat(room.needsDecision().cards().getFirst().nextAction())
-                .isEqualTo(new IssueNextAction("next-41", "View", "/issues/41",
-                        IssueNextAction.Tone.NEUTRAL, false));
+                .isEqualTo(new IssueNextAction("Review and decide the pull request.",
+                        "Review approval", "/issues/41#approval-decision",
+                        IssueNextAction.Tone.ACTION, true));
+        assertThat(room.needsDecision().cards().get(2).nextAction())
+                .isEqualTo(new IssueNextAction(
+                        "Plan approved. Start implementation when ready or return it to the queue.",
+                        "Open start controls", "/issues/1#ready-to-start",
+                        IssueNextAction.Tone.ACTION, true));
+        assertThat(room.upNext().cards()).extracting(card -> card.issue().getStatus())
+                .doesNotContain(READY_TO_START);
+        assertThat(room.upNext().cards().getFirst().nextAction())
+                .isEqualTo(new IssueNextAction(
+                        "Waiting for issue #41 to start or release the repository slot.",
+                        "Open issue #41", "/issues/1#ready-to-start",
+                        IssueNextAction.Tone.WAITING, false));
         assertThat(room.needsDecision().cards()).allSatisfy(card -> assertThat(card.runDetails()).isNull());
         assertThat(room.upNext().cards()).allSatisfy(card -> assertThat(card.runDetails()).isNull());
 
@@ -132,7 +152,7 @@ class DashboardControlRoomAssemblerTest {
         visible.addAll(room.processing().cards().stream().map(card -> card.issue()).toList());
         visible.addAll(room.upNext().cards().stream().map(card -> card.issue()).toList());
         for (TrackedIssue issue : visible) {
-            verify(nextActionResolver).resolve(issue);
+            verify(nextActionResolver).resolve(issue, issue.getRepo() == null ? null : ready);
         }
         verifyNoMoreInteractions(nextActionResolver);
         for (TrackedIssue issue : decisions) {
@@ -174,8 +194,8 @@ class DashboardControlRoomAssemblerTest {
         assertThat(room.upNext().cards()).hasSize(5);
         assertThat(room.upNext().total()).isEqualTo(7);
         assertThat(room.upNext().hasMore()).isTrue();
-        verify(nextActionResolver, never()).resolve(queued.get(0));
-        verify(nextActionResolver, never()).resolve(queued.get(2));
+        verify(nextActionResolver, never()).resolve(eq(queued.get(0)), nullable(TrackedIssue.class));
+        verify(nextActionResolver, never()).resolve(eq(queued.get(2)), nullable(TrackedIssue.class));
     }
 
     @Test
@@ -203,6 +223,7 @@ class DashboardControlRoomAssemblerTest {
 
     private static TrackedIssue issue(Long id, IssueStatus status, String title) {
         TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), id == null ? 0 : id.intValue(), title);
+        issue.getRepo().setId(1L);
         issue.setId(id);
         issue.setStatus(status);
         return issue;

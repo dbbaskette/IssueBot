@@ -1,18 +1,32 @@
 package com.dbbaskette.issuebot.service.ui;
 
+import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.util.Humanize;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Component
 public class IssueNextActionResolver {
     public IssueNextAction resolve(TrackedIssue issue) {
+        return resolve(issue, null);
+    }
+
+    public IssueNextAction resolve(TrackedIssue issue, TrackedIssue readyReservation) {
         if (issue == null || issue.getStatus() == null) {
             return action("Review the current issue state.", "View issue", baseHref(issue),
                     IssueNextAction.Tone.NEUTRAL, false);
+        }
+        if (isHeldByReadyReservation(issue, readyReservation)) {
+            return action(
+                    "Waiting for issue #" + readyReservation.getIssueNumber()
+                            + " to start or release the repository slot.",
+                    "Open issue #" + readyReservation.getIssueNumber(),
+                    anchored(readyReservation, "ready-to-start"),
+                    IssueNextAction.Tone.WAITING, false);
         }
         return switch (issue.getStatus()) {
             case AWAITING_APPROVAL -> action(
@@ -21,6 +35,8 @@ public class IssueNextActionResolver {
                     "Review approval", anchored(issue, "approval-decision"), IssueNextAction.Tone.ACTION, true);
             case AWAITING_PLAN_APPROVAL -> action("Review and approve the current plan.",
                     "Review plan", anchored(issue, "plan-review"), IssueNextAction.Tone.ACTION, true);
+            case READY_TO_START -> action("Plan approved. Start implementation when ready or return it to the queue.",
+                    "Open start controls", anchored(issue, "ready-to-start"), IssueNextAction.Tone.ACTION, true);
             case AWAITING_DECOMPOSITION -> action("Review the proposed issue split.",
                     "Review split", anchored(issue, "status-actions"), IssueNextAction.Tone.ACTION, true);
             case FAILED -> action("Review the failure, add guidance, or retry.",
@@ -31,8 +47,8 @@ public class IssueNextActionResolver {
                     anchored(issue, "live-status"), IssueNextAction.Tone.ACTIVE, false);
             case QUEUED -> action("Queued and ready when processing capacity is available.",
                     "View issue", baseHref(issue), IssueNextAction.Tone.WAITING, false);
-            case PENDING -> action("Ready to start manually or enter the processing queue.",
-                    "Review and start", anchored(issue, "status-actions"), IssueNextAction.Tone.WAITING, false);
+            case PENDING -> action("Waiting to resume or start manually.",
+                    "View issue", baseHref(issue), IssueNextAction.Tone.WAITING, false);
             case BLOCKED -> action(blockedSummary(issue), "View blockers",
                     anchored(issue, "status-actions"), IssueNextAction.Tone.WAITING, false);
             case COMPLETED -> action("No action needed — completed.", null, null,
@@ -40,6 +56,28 @@ public class IssueNextActionResolver {
             case DECOMPOSED -> action("No action needed — work continues in the split issues.", null, null,
                     IssueNextAction.Tone.NEUTRAL, false);
         };
+    }
+
+    private static boolean isHeldByReadyReservation(TrackedIssue issue,
+                                                     TrackedIssue readyReservation) {
+        if (issue.getStatus() != IssueStatus.QUEUED
+                && issue.getStatus() != IssueStatus.PENDING) {
+            return false;
+        }
+        if (readyReservation == null
+                || readyReservation.getStatus()
+                != IssueStatus.READY_TO_START
+                || issue.getId() == null || readyReservation.getId() == null
+                || Objects.equals(issue.getId(), readyReservation.getId())) {
+            return false;
+        }
+        if (issue.getRepo() == null || readyReservation.getRepo() == null) {
+            return false;
+        }
+        Long issueRepoId = issue.getRepo().getId();
+        Long reservationRepoId = readyReservation.getRepo().getId();
+        return issue.getRepo() == readyReservation.getRepo()
+                || issueRepoId != null && Objects.equals(issueRepoId, reservationRepoId);
     }
 
     private static String inProgressSummary(TrackedIssue issue) {
