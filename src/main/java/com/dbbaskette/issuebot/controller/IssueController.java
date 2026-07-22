@@ -31,6 +31,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
+import com.dbbaskette.issuebot.service.workflow.RepositoryDispatchGate;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.dbbaskette.issuebot.util.BudgetProgress;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -1023,13 +1024,11 @@ public class IssueController {
 
         // Per-repo gate: no two issues in-flight for the same repo
         WatchedRepo repo = issue.getRepo();
-        TrackedIssue repoBlocker = issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                        IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START)).stream()
-                .filter(candidate -> issue.getId() == null
-                        || !java.util.Objects.equals(candidate.getId(), issue.getId()))
-                .findFirst()
-                .orElse(null);
+        TrackedIssue repoBlocker = RepositoryDispatchGate.blocker(issue,
+                issueRepository.findByRepoAndStatusInOrderByIssueNumberAsc(repo,
+                        List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                                IssueStatus.AWAITING_PLAN_APPROVAL,
+                                IssueStatus.READY_TO_START)));
         if (repoBlocker != null && repoBlocker.getStatus() == IssueStatus.READY_TO_START) {
             return "Issue #" + repoBlocker.getIssueNumber()
                     + " has an approved plan and is waiting to start.";

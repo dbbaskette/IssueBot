@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -233,10 +232,9 @@ public class IssueDispatchService {
     }
 
     private String repositoryGate(TrackedIssue issue) {
-        TrackedIssue blocker = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES).stream()
-                .filter(candidate -> !Objects.equals(candidate.getId(), issue.getId()))
-                .findFirst()
-                .orElse(null);
+        TrackedIssue blocker = RepositoryDispatchGate.blocker(issue,
+                issues.findByRepoAndStatusInOrderByIssueNumberAsc(
+                        issue.getRepo(), ACTIVE_STATUSES));
         if (blocker == null) return null;
         if (blocker.getStatus() == IssueStatus.READY_TO_START) {
             return "Issue #" + blocker.getIssueNumber()

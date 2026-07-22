@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -172,21 +171,18 @@ public class IssueDispatchTransactionManager {
     }
 
     private TrackedIssue lockIssueAndRepo(Long issueId) {
-        TrackedIssue issue = issues.findByIdForDispatch(issueId).orElse(null);
-        if (issue == null) return null;
-        // The repository row is the durable per-repository mutex. Re-fetch the issue only after
-        // the lock is held so a waiter cannot continue with state observed before another claim.
-        repos.findByIdForUpdate(issue.getRepo().getId())
+        Long repoId = issues.findRepoIdByIssueId(issueId).orElse(null);
+        if (repoId == null) return null;
+        // Match approval's lock order: the durable repository mutex is held before any issue row.
+        repos.findByIdForUpdate(repoId)
                 .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
         return issues.findByIdForDispatch(issueId).orElse(null);
     }
 
     private String repositoryGate(TrackedIssue issue) {
-        List<TrackedIssue> active = issues.findByRepoAndStatusIn(issue.getRepo(), ACTIVE_STATUSES);
-        TrackedIssue blocker = active.stream()
-                .filter(candidate -> !Objects.equals(candidate.getId(), issue.getId()))
-                .findFirst()
-                .orElse(null);
+        List<TrackedIssue> active = issues.findByRepoAndStatusInOrderByIssueNumberAsc(
+                issue.getRepo(), ACTIVE_STATUSES);
+        TrackedIssue blocker = RepositoryDispatchGate.blocker(issue, active);
         if (blocker == null) return null;
         if (blocker.getStatus() == IssueStatus.READY_TO_START) {
             return "Issue #" + blocker.getIssueNumber()

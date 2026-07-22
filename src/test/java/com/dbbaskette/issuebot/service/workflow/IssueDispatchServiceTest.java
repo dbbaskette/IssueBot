@@ -39,7 +39,8 @@ class IssueDispatchServiceTest {
         when(issues.findById(1L)).thenAnswer(invocation -> Optional.of(issue));
         when(issues.findByIdWithApprovedPlanningVersion(1L))
                 .thenAnswer(invocation -> Optional.of(issue));
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of());
         when(iterations.findByIssueOrderByIterationNumAsc(issue)).thenReturn(List.of());
         service = new IssueDispatchService(issues, control, iterations);
     }
@@ -68,7 +69,8 @@ class IssueDispatchServiceTest {
     void activeRepoWorkReturnsSpecificReason() {
         TrackedIssue active = new TrackedIssue(issue.getRepo(), 41, "Active");
         active.setStatus(IssueStatus.IN_PROGRESS);
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(active));
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of(active));
 
         IssueDispatchService.ClaimResult result = service.claimStart(1L);
 
@@ -81,7 +83,8 @@ class IssueDispatchServiceTest {
         PlanningVersion approved = approvedVersion(issue);
         issue.setApprovedPlanningVersion(approved);
         issue.setStatus(IssueStatus.READY_TO_START);
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(issue));
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of(issue));
 
         IssueDispatchService.ClaimResult result = service.claimReadyStart(1L);
 
@@ -94,7 +97,8 @@ class IssueDispatchServiceTest {
     void genericClaimStartRejectsReadyReservation() {
         issue.setApprovedPlanningVersion(approvedVersion(issue));
         issue.setStatus(IssueStatus.READY_TO_START);
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(issue));
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of(issue));
 
         IssueDispatchService.ClaimResult result = service.claimStart(1L);
 
@@ -110,7 +114,8 @@ class IssueDispatchServiceTest {
         TrackedIssue reservation = new TrackedIssue(issue.getRepo(), 41, "Reserved");
         reservation.setId(41L);
         reservation.setStatus(IssueStatus.READY_TO_START);
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(reservation));
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of(reservation));
 
         issue.setStatus(IssueStatus.QUEUED);
         IssueDispatchService.ClaimResult start = service.claimStart(1L);
@@ -127,6 +132,12 @@ class IssueDispatchServiceTest {
     }
 
     @Test
+    void legacyLowestReadyReservationOwnsDispatchRegardlessOfRepositoryQueryOrder() {
+        assertLegacyLowestReadyReservationOwnsDispatch(false);
+        assertLegacyLowestReadyReservationOwnsDispatch(true);
+    }
+
+    @Test
     void readyReservationUsesExactWordingForGuidedRetry() {
         issue.getRepo().setPlanFirst(true);
         issue.setStatus(IssueStatus.FAILED);
@@ -137,7 +148,8 @@ class IssueDispatchServiceTest {
         TrackedIssue reservation = new TrackedIssue(issue.getRepo(), 41, "Reserved");
         reservation.setId(41L);
         reservation.setStatus(IssueStatus.READY_TO_START);
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(reservation));
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of(reservation));
         IssueGuidanceRepository guidance = mock(IssueGuidanceRepository.class);
         IssueDispatchService guidedService = new IssueDispatchService(
                 issues, control, guidance, iterations);
@@ -221,7 +233,8 @@ class IssueDispatchServiceTest {
         reset(control);
         TrackedIssue active = new TrackedIssue(issue.getRepo(), 41, "Active");
         active.setStatus(IssueStatus.IN_PROGRESS);
-        when(issues.findByRepoAndStatusIn(any(), any())).thenReturn(List.of(active));
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
+                .thenReturn(List.of(active));
 
         IssueDispatchService.ClaimResult serialized = service.claimRetry(
                 1L, candidate -> true, "not eligible");
@@ -368,6 +381,37 @@ class IssueDispatchServiceTest {
         iteration.setReviewPassed(passed);
         iteration.setReviewJson(json);
         return iteration;
+    }
+
+    private void assertLegacyLowestReadyReservationOwnsDispatch(boolean ownerFirst) {
+        TrackedIssueRepository localIssues = mock(TrackedIssueRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "legacy-ready-order");
+        TrackedIssue owner = new TrackedIssue(repo, 141, "Owner");
+        owner.setId(141L);
+        owner.setStatus(IssueStatus.READY_TO_START);
+        owner.setApprovedPlanningVersion(approvedVersion(owner));
+        TrackedIssue duplicate = new TrackedIssue(repo, 143, "Duplicate");
+        duplicate.setId(143L);
+        duplicate.setStatus(IssueStatus.READY_TO_START);
+        duplicate.setApprovedPlanningVersion(approvedVersion(duplicate));
+        List<TrackedIssue> active = ownerFirst
+                ? List.of(owner, duplicate)
+                : List.of(duplicate, owner);
+        when(localIssues.findByIdWithApprovedPlanningVersion(141L)).thenReturn(Optional.of(owner));
+        when(localIssues.findByIdWithApprovedPlanningVersion(143L)).thenReturn(Optional.of(duplicate));
+        when(localIssues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(active);
+        when(localIssues.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        IssueDispatchService localService = new IssueDispatchService(
+                localIssues, control, mock(IterationRepository.class));
+
+        IssueDispatchService.ClaimResult duplicateResult = localService.claimReadyStart(143L);
+        IssueDispatchService.ClaimResult ownerResult = localService.claimReadyStart(141L);
+
+        assertThat(duplicateResult.claimed()).isFalse();
+        assertThat(duplicateResult.reason())
+                .isEqualTo("Issue #141 has an approved plan and is waiting to start.");
+        assertThat(ownerResult.claimed()).isTrue();
     }
 
     private static PlanningVersion approvedVersion(TrackedIssue issue) {

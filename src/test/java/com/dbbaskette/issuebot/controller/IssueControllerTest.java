@@ -331,6 +331,33 @@ class IssueControllerTest {
     }
 
     @Test
+    void checkGateUsesLowestReadyReservationOwnerRegardlessOfRepositoryQueryOrder() {
+        assertCheckGateUsesLowestReadyReservationOwner(false);
+        assertCheckGateUsesLowestReadyReservationOwner(true);
+    }
+
+    private void assertCheckGateUsesLowestReadyReservationOwner(boolean ownerFirst) {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        f.issue.setId(141L);
+        f.issue.setIssueNumber(141);
+        TrackedIssue duplicate = new TrackedIssue(f.issue.getRepo(), 143, "Duplicate reservation");
+        duplicate.setId(143L);
+        duplicate.setStatus(IssueStatus.READY_TO_START);
+        List<TrackedIssue> active = ownerFirst
+                ? List.of(f.issue, duplicate)
+                : List.of(duplicate, f.issue);
+        when(f.issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(active);
+
+        String duplicateReason = f.controller.checkGate(duplicate, null);
+        String ownerReason = f.controller.checkGate(f.issue, null);
+
+        org.assertj.core.api.Assertions.assertThat(duplicateReason)
+                .isEqualTo("Issue #141 has an approved plan and is waiting to start.");
+        org.assertj.core.api.Assertions.assertThat(ownerReason).isNull();
+    }
+
+    @Test
     void retryStoresModelOverrides() {
         Fixture f = new Fixture(IssueStatus.FAILED);
 
@@ -1834,7 +1861,8 @@ class IssueControllerTest {
 
         when(issues.findById(1L)).thenReturn(Optional.of(queued));
         when(issues.findById(2L)).thenReturn(Optional.of(failed));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
 
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
@@ -1878,7 +1906,8 @@ class IssueControllerTest {
         when(issues.findById(3L)).thenReturn(Optional.of(queued));
         when(issues.findByIdWithApprovedPlanningVersion(1L)).thenReturn(Optional.of(failed));
         when(issues.findByIdWithApprovedPlanningVersion(2L)).thenReturn(Optional.of(cooldown));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
         try {
             when(gitHubApiClient.listOpenPullRequests(any(), any(), any())).thenReturn(List.of());
         } catch (Exception e) {
@@ -2053,7 +2082,8 @@ class IssueControllerTest {
 
         when(issues.findById(1L)).thenReturn(Optional.of(first));
         when(issues.findById(2L)).thenReturn(Optional.of(second));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
 
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
@@ -2107,7 +2137,8 @@ class IssueControllerTest {
         queued.setId(1L);
         queued.setStatus(IssueStatus.QUEUED);
         when(issues.findById(1L)).thenReturn(Optional.of(queued));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
 
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties,
                 mock(EventService.class), mock(IssueWorkflowService.class));
