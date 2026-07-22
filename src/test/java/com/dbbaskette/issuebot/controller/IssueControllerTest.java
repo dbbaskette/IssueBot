@@ -538,6 +538,27 @@ class IssueControllerTest {
     }
 
     @Test
+    void releaseReadyIssueWithoutApprovedVersionStillFreesSlotAndEmitsAvailableIdentifiers() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+
+        String view = f.controller.releaseReadyToQueue(1L, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        verify(f.eventService).log(eq("READY_SLOT_RELEASED"),
+                argThat(message -> message.contains("acme/widgets")
+                        && message.contains("#42") && !message.contains("Plan v")),
+                eq(f.issue.getRepo()), same(f.issue));
+        verify(f.notificationService).info(eq("Repository Slot Released"),
+                argThat(message -> message.contains("acme/widgets")
+                        && message.contains("#42") && !message.contains("Plan v")),
+                same(f.issue));
+        verify(f.redirectAttributes).addFlashAttribute("success",
+                "Returned to queue. The approved plan was preserved; normal automatic processing may start this issue later.");
+        verifyNoInteractions(f.workflowService);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#ready-to-start");
+    }
+
+    @Test
     void staleReadyReleaseDisplaysCurrentStateAndEmitsNoReleaseSignals() {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
         f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 4));

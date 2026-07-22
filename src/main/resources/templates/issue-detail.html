@@ -893,7 +893,7 @@
              aria-labelledby="release-ready-modal-title">
             <h3 id="release-ready-modal-title" style="margin:0 0 0.5rem">Return to queue</h3>
             <p class="text-sm text-muted" style="margin:0 0 1rem">
-                The approved plan will be preserved. Normal automatic processing may start this issue later.
+                The approved plan will be preserved and this repository slot will be released. Normal automatic processing may start this issue later.
             </p>
             <form th:action="@{'/issues/' + ${issue.id} + '/ready/release'}" method="post">
                 <div class="modal-actions">

@@ -517,14 +517,20 @@ public class IssueController {
         }
 
         TrackedIssue issue = result.issue();
-        int version = issue.getApprovedPlanningVersion().getVersionNumber();
         String message = "Released the repository slot for " + issue.getRepo().fullName()
-                + " #" + issue.getIssueNumber() + "; approved Plan v" + version + " was preserved";
+                + " #" + issue.getIssueNumber() + approvedPlanReleaseDescription(issue);
         eventService.log("READY_SLOT_RELEASED", message, issue.getRepo(), issue);
         notificationService.info("Repository Slot Released", message, issue);
         redirectAttributes.addFlashAttribute("success",
                 "Returned to queue. The approved plan was preserved; normal automatic processing may start this issue later.");
         return "redirect:/issues/" + id + "#ready-to-start";
+    }
+
+    private static String approvedPlanReleaseDescription(TrackedIssue issue) {
+        PlanningVersion approved = issue.getApprovedPlanningVersion();
+        return approved == null
+                ? ""
+                : "; approved Plan v" + approved.getVersionNumber() + " was preserved";
     }
 
     @PostMapping("/{id}/complete")

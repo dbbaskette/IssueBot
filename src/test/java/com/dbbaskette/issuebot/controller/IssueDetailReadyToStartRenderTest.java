@@ -93,8 +93,8 @@ class IssueDetailReadyToStartRenderTest {
         assertThat(releaseModal)
                 .contains("aria-modal=\"true\"")
                 .contains("aria-labelledby=\"release-ready-modal-title\"")
-                .contains("The approved plan will be preserved.")
-                .contains("Normal automatic processing may start this issue later.");
+                .contains("The approved plan will be preserved and this repository slot will be released. "
+                        + "Normal automatic processing may start this issue later.");
     }
 
     @Test
