@@ -46,10 +46,10 @@ public class SecurityConfig {
                 );
         }
         http
-            // CSRF is disabled application-wide (no endpoint in this app sends a
-            // CSRF token), which already covers /webhooks/** — GitHub deliveries
-            // never carry one either.
-            .csrf(csrf -> csrf.disable())
+            // Browser mutations use Spring Security's normal CSRF protection. The
+            // one machine-to-machine endpoint authenticates the raw request body
+            // with GitHub's HMAC signature and therefore cannot carry a CSRF token.
+            .csrf(csrf -> csrf.ignoringRequestMatchers("/webhooks/github"))
             .headers(headers -> headers
                 .frameOptions(frame -> frame.sameOrigin())
             );

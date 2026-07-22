@@ -2488,6 +2488,17 @@ details summary:hover { color: var(--text-primary); }
 
 .checkbox-col { width: 2.5rem; text-align: center; }
 .checkbox-col input[type="checkbox"] { width: auto; cursor: pointer; accent-color: var(--accent); }
+.bulk-read-only {
+    display: inline-block;
+    padding: 0.15rem 0.3rem;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
 
 /* ============================================================
    Pager (#87)

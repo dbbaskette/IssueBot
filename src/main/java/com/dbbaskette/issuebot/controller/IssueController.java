@@ -446,7 +446,9 @@ public class IssueController {
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
-        String error = performStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride);
+        String error = readyStart
+                ? performReadyStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd)
+                : performStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride);
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
         } else {
@@ -457,18 +459,32 @@ public class IssueController {
     }
 
     /**
-     * Core start logic shared by {@link #start} and bulk start (#87). Ordinary queue starts and
-     * approved-contract starts use their distinct atomic claims while sharing the same
-     * concurrency/repo/PR gate. Returns an error message if the issue could not be started,
-     * or {@code null} on success.
+     * Core ordinary start logic shared by the single and bulk queue controls. A ready reservation
+     * is deliberately excluded so only the dedicated single-issue command can use its atomic
+     * approved-contract claim.
      */
     private String performStart(TrackedIssue issue, String implModelOverride, String reviewModelOverride,
                                 BigDecimal budgetOverrideUsd, String planFirstOverride) {
-        boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
-        if (!readyStart && issue.getStatus() != IssueStatus.QUEUED && issue.getStatus() != IssueStatus.PENDING) {
+        if (issue.getStatus() != IssueStatus.QUEUED && issue.getStatus() != IssueStatus.PENDING) {
             return "Cannot start issue in " + issue.getStatus()
-                    + " status (must be QUEUED, PENDING, or READY_TO_START)";
+                    + " status (must be QUEUED or PENDING)";
         }
+        return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
+                budgetOverrideUsd, planFirstOverride, false);
+    }
+
+    private String performReadyStart(TrackedIssue issue, String implModelOverride,
+                                     String reviewModelOverride, BigDecimal budgetOverrideUsd) {
+        if (issue.getStatus() != IssueStatus.READY_TO_START) {
+            return "Cannot start issue in " + issue.getStatus() + " status";
+        }
+        return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
+                budgetOverrideUsd, null, true);
+    }
+
+    private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
+                                         String reviewModelOverride, BigDecimal budgetOverrideUsd,
+                                         String planFirstOverride, boolean readyStart) {
 
         // Enforce the same gating as the polling service
         String gateReason = checkGate(issue, null);
@@ -552,6 +568,10 @@ public class IssueController {
     private String performMarkComplete(TrackedIssue issue) {
         if (issue.getStatus() == IssueStatus.COMPLETED) {
             return "Issue is already completed";
+        }
+
+        if (issue.getStatus() == IssueStatus.READY_TO_START) {
+            return "Cannot mark a ready-to-start issue as completed; start implementation or return it to the queue";
         }
 
         if (issue.getStatus() == IssueStatus.IN_PROGRESS || issue.getStatus() == IssueStatus.AWAITING_APPROVAL) {

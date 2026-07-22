@@ -142,6 +142,22 @@ class IssuesQueueRenderTest {
     }
 
     @Test
+    void readyReservationRowIsReadOnlyAndCannotBeBulkSelected() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue reservation = new TrackedIssue(repo, 41, "Ready implementation");
+        reservation.setId(1L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
+
+        String html = renderTableRows(List.of(reservation), reservation);
+
+        assertThat(html)
+                .doesNotContain("class=\"bulk-select\"")
+                .contains("class=\"bulk-read-only")
+                .contains("Issue #41 is reserved and cannot be selected for bulk actions")
+                .contains(">Reserved</span>");
+    }
+
+    @Test
     void phaseColumn_showsHumanizedPhaseName_notRawEnumValue() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the thing");

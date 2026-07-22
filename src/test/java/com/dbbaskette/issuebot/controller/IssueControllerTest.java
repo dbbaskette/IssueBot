@@ -1892,6 +1892,65 @@ class IssueControllerTest {
     }
 
     @Test
+    void bulkStartCannotClaimReadyReservation() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        PlanningVersion approved = approvedVersion(f.issue, 5);
+        f.issue.setApprovedPlanningVersion(approved);
+
+        f.controller.bulkStart(List.of(1L), null, null, null, null, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getApprovedPlanningVersion()).isSameAs(approved);
+        verify(f.dispatchService, never()).claimReadyStart(anyLong(), any());
+        verify(f.issues, never()).save(any());
+        verifyNoInteractions(f.workflowService);
+    }
+
+    @Test
+    void bulkRetryCannotClaimReadyReservation() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        PlanningVersion approved = approvedVersion(f.issue, 5);
+        f.issue.setApprovedPlanningVersion(approved);
+
+        f.controller.bulkRetry(List.of(1L), null, null, null, null, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getApprovedPlanningVersion()).isSameAs(approved);
+        verify(f.issues, never()).save(any());
+        verifyNoInteractions(f.workflowService);
+    }
+
+    @Test
+    void bulkCloseCannotCompleteReadyReservation() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        PlanningVersion approved = approvedVersion(f.issue, 5);
+        f.issue.setApprovedPlanningVersion(approved);
+
+        f.controller.bulkClose(List.of(1L), null, null, null, null, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getApprovedPlanningVersion()).isSameAs(approved);
+        verify(f.issues, never()).save(any());
+        verify(f.eventService, never()).log(eq("MANUAL_COMPLETE"), anyString(), any(), any());
+    }
+
+    @Test
+    void directCompleteCannotCompleteReadyReservation() {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        PlanningVersion approved = approvedVersion(f.issue, 5);
+        f.issue.setApprovedPlanningVersion(approved);
+
+        f.controller.markComplete(1L, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getApprovedPlanningVersion()).isSameAs(approved);
+        verify(f.issues, never()).save(any());
+        verify(f.eventService, never()).log(eq("MANUAL_COMPLETE"), anyString(), any(), any());
+        verify(f.redirectAttributes).addFlashAttribute("error",
+                "Cannot mark a ready-to-start issue as completed; start implementation or return it to the queue");
+    }
+
+    @Test
     void bulkStartWithNullIdsFlashesNoIssuesSelected() {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         IssueController controller = newBulkController(issues, mock(WatchedRepoRepository.class),
