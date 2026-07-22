@@ -237,6 +237,45 @@ class IssueControllerTest {
     }
 
     @Test
+    void tableUsesLowestIssueNumberReservationOwnerRegardlessOfRepositoryResultOrder() {
+        TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(9L);
+        TrackedIssue queued = new TrackedIssue(repo, 144, "Queued issue");
+        queued.setId(1440L);
+        queued.setStatus(IssueStatus.QUEUED);
+        TrackedIssue owner = new TrackedIssue(repo, 141, "Reservation owner");
+        owner.setId(1410L);
+        owner.setStatus(IssueStatus.READY_TO_START);
+        TrackedIssue duplicate = new TrackedIssue(repo, 143, "Stale duplicate reservation");
+        duplicate.setId(1430L);
+        duplicate.setStatus(IssueStatus.READY_TO_START);
+        org.springframework.data.domain.Page<TrackedIssue> page =
+                new org.springframework.data.domain.PageImpl<>(List.of(queued));
+        when(issues.search(any(), any(), any(), any())).thenReturn(page);
+        when(issues.findByStatus(IssueStatus.READY_TO_START))
+                .thenReturn(List.of(duplicate, owner), List.of(owner, duplicate));
+        IssueController controller = newBulkController(
+                issues, repos, mock(GitHubApiClient.class), mock(IssueBotProperties.class),
+                mock(EventService.class), mock(IssueWorkflowService.class));
+
+        for (int run = 0; run < 2; run++) {
+            org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+            controller.table(model, null, null, null, 0);
+
+            @SuppressWarnings("unchecked")
+            java.util.Map<Long, IssueNextAction> nextActions =
+                    (java.util.Map<Long, IssueNextAction>) model.getAttribute("nextActions");
+            org.assertj.core.api.Assertions.assertThat(nextActions.get(queued.getId()))
+                    .isEqualTo(new IssueNextAction(
+                            "Waiting for issue #141 to start or release the repository slot.",
+                            "Open issue #141", "/issues/1410#ready-to-start",
+                            IssueNextAction.Tone.WAITING, false));
+        }
+    }
+
+    @Test
     void detailAndLiveStatusExposeHeldNextActionFromOneReservationQueryPerRequest() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
         f.issue.getRepo().setId(9L);
@@ -328,6 +367,33 @@ class IssueControllerTest {
                     planningVersions, approvalCardAssembler, new IssueNextActionResolver(),
                     notificationService);
         }
+    }
+
+    @Test
+    void checkGateUsesLowestReadyReservationOwnerRegardlessOfRepositoryQueryOrder() {
+        assertCheckGateUsesLowestReadyReservationOwner(false);
+        assertCheckGateUsesLowestReadyReservationOwner(true);
+    }
+
+    private void assertCheckGateUsesLowestReadyReservationOwner(boolean ownerFirst) {
+        Fixture f = new Fixture(IssueStatus.READY_TO_START);
+        f.issue.setId(141L);
+        f.issue.setIssueNumber(141);
+        TrackedIssue duplicate = new TrackedIssue(f.issue.getRepo(), 143, "Duplicate reservation");
+        duplicate.setId(143L);
+        duplicate.setStatus(IssueStatus.READY_TO_START);
+        List<TrackedIssue> active = ownerFirst
+                ? List.of(f.issue, duplicate)
+                : List.of(duplicate, f.issue);
+        when(f.issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(active);
+
+        String duplicateReason = f.controller.checkGate(duplicate, null);
+        String ownerReason = f.controller.checkGate(f.issue, null);
+
+        org.assertj.core.api.Assertions.assertThat(duplicateReason)
+                .isEqualTo("Issue #141 has an approved plan and is waiting to start.");
+        org.assertj.core.api.Assertions.assertThat(ownerReason).isNull();
     }
 
     @Test
@@ -739,6 +805,52 @@ class IssueControllerTest {
         String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
 
         verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("Stale approval"));
+        verify(f.redirectAttributes, never()).addFlashAttribute(eq("planError"), any());
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
+    }
+
+    @Test
+    void approvePlanFlashesExactEarlierIssueReservationErrorAndKeepsPendingPlan() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        String message = "Issue #141 must finish before issue #143 can reserve this repository.";
+        doThrow(new IllegalStateException(message)).when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute("error", message);
+        verify(f.redirectAttributes).addFlashAttribute("planError", message);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-first");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+    }
+
+    @Test
+    void approvePlanFlashesExactProtectedLaterWorkErrorAndKeepsPendingPlan() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        String message = "Issue #143 is already running later work in this repository. "
+                + "Finish or stop it before approving issue #141.";
+        doThrow(new IllegalStateException(message)).when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute("error", message);
+        verify(f.redirectAttributes).addFlashAttribute("planError", message);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-first");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+    }
+
+    @Test
+    void approvePlanSanitizesUnrecognizedServiceFailures() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        doThrow(new IllegalStateException("database password exposed"))
+                .when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(
+                "error", "Unable to approve plan. Please try again.");
+        verify(f.redirectAttributes, never()).addFlashAttribute(eq("planError"), any());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
     }
 
@@ -1792,7 +1904,8 @@ class IssueControllerTest {
 
         when(issues.findById(1L)).thenReturn(Optional.of(queued));
         when(issues.findById(2L)).thenReturn(Optional.of(failed));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
 
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
@@ -1836,7 +1949,8 @@ class IssueControllerTest {
         when(issues.findById(3L)).thenReturn(Optional.of(queued));
         when(issues.findByIdWithApprovedPlanningVersion(1L)).thenReturn(Optional.of(failed));
         when(issues.findByIdWithApprovedPlanningVersion(2L)).thenReturn(Optional.of(cooldown));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
         try {
             when(gitHubApiClient.listOpenPullRequests(any(), any(), any())).thenReturn(List.of());
         } catch (Exception e) {
@@ -2011,7 +2125,8 @@ class IssueControllerTest {
 
         when(issues.findById(1L)).thenReturn(Optional.of(first));
         when(issues.findById(2L)).thenReturn(Optional.of(second));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
 
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties, eventService, workflowService);
         RedirectAttributes ra = mock(RedirectAttributes.class);
@@ -2065,7 +2180,8 @@ class IssueControllerTest {
         queued.setId(1L);
         queued.setStatus(IssueStatus.QUEUED);
         when(issues.findById(1L)).thenReturn(Optional.of(queued));
-        when(issues.findByRepoAndStatusIn(any(), anyList())).thenReturn(List.of());
+        when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
 
         IssueController controller = newBulkController(issues, repos, gitHubApiClient, properties,
                 mock(EventService.class), mock(IssueWorkflowService.class));

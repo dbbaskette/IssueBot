@@ -1458,6 +1458,15 @@ class IntegrationWorkflowTest {
             }
             return version;
         });
+        WatchedRepoRepository lifecycleRepos = mock(WatchedRepoRepository.class);
+        Long repoId = issue.getRepo().getId();
+        when(issueRepository.findRepoIdByIssueId(issue.getId()))
+                .thenReturn(Optional.of(repoId));
+        when(lifecycleRepos.findByIdForUpdate(repoId))
+                .thenReturn(Optional.of(issue.getRepo()));
+        when(issueRepository.findByRepoIdForUpdateOrderByIssueNumber(repoId))
+                .thenReturn(List.of(issue));
+        when(lifecycleRepos.findById(repoId)).thenReturn(Optional.of(issue.getRepo()));
 
         PlanningWorkspaceService planningWorkspaces = mock(PlanningWorkspaceService.class);
         PlanningWorkspaceService.PlanningWorkspace planningWorkspace =
@@ -1465,8 +1474,10 @@ class IntegrationWorkflowTest {
         when(planningWorkspaces.open(any(Path.class))).thenReturn(planningWorkspace);
         when(planningWorkspace.path()).thenReturn(Path.of("/tmp/repo"));
         PlanFirstService authoritativePlanFirst = new PlanFirstService(
-                claudeCode, gitHubApi, issueRepository, lifecycleVersions,
-                new PlanArtifactParser(), planningWorkspaces, eventService, notificationService);
+                claudeCode, gitHubApi,
+                new PlanFirstTransactionManager(issueRepository, lifecycleVersions, lifecycleRepos),
+                new PlanArtifactParser(), planningWorkspaces, eventService, notificationService,
+                new WorkflowCancellationService());
         when(claudeCode.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
                 .thenReturn(planningResult("first spec", "first plan"),
                         planningResult("second spec with rollback", "second plan with rollback test"));
@@ -1515,8 +1526,6 @@ class IntegrationWorkflowTest {
             }
             return Optional.empty();
         });
-        WatchedRepoRepository lifecycleRepos = mock(WatchedRepoRepository.class);
-        when(lifecycleRepos.findById(issue.getRepo().getId())).thenReturn(Optional.of(issue.getRepo()));
         IterationManager authoritativeIterations = spy(new IterationManager(
                 issueRepository, lifecycleRepos, iterationRepository,
                 gitHubApi, eventService, notificationService));

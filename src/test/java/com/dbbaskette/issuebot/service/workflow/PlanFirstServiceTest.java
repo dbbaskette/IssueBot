@@ -8,6 +8,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -43,6 +44,7 @@ class PlanFirstServiceTest {
     private GitHubApiClient gitHub;
     private TrackedIssueRepository issues;
     private PlanningVersionRepository versions;
+    private WatchedRepoRepository repos;
     private EventService events;
     private NotificationService notifications;
     private PlanningWorkspaceService planningWorkspaces;
@@ -57,6 +59,7 @@ class PlanFirstServiceTest {
         gitHub = mock(GitHubApiClient.class);
         issues = mock(TrackedIssueRepository.class);
         versions = mock(PlanningVersionRepository.class);
+        repos = mock(WatchedRepoRepository.class);
         events = mock(EventService.class);
         notifications = mock(NotificationService.class);
         planningWorkspaces = mock(PlanningWorkspaceService.class);
@@ -64,10 +67,6 @@ class PlanFirstServiceTest {
         cancellations = mock(WorkflowCancellationService.class);
         when(planningWorkspaces.open(REPO_PATH)).thenReturn(planningWorkspace);
         when(planningWorkspace.path()).thenReturn(REPO_PATH);
-        service = new PlanFirstService(agent, gitHub,
-                new PlanFirstTransactionManager(issues, versions), new PlanArtifactParser(),
-                planningWorkspaces, events, notifications, cancellations);
-
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
         issue = new TrackedIssue(repo, 42, "Add pagination");
@@ -77,6 +76,12 @@ class PlanFirstServiceTest {
         issue.setResolvedImplModel("gpt-5.6-sol");
         issue.setResolvedAgentProvider(AgentProvider.CODEX);
         when(issues.findByIdForPlanning(8L)).thenReturn(Optional.of(issue));
+        when(issues.findRepoIdByIssueId(8L)).thenReturn(Optional.of(1L));
+        when(repos.findByIdForUpdate(1L)).thenReturn(Optional.of(repo));
+        when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(issue));
+        service = new PlanFirstService(agent, gitHub,
+                new PlanFirstTransactionManager(issues, versions, repos), new PlanArtifactParser(),
+                planningWorkspaces, events, notifications, cancellations);
 
         details = new ObjectMapper().createObjectNode()
                 .put("title", "Add pagination")
@@ -390,6 +395,36 @@ class PlanFirstServiceTest {
         assertThat(List.of(auditCopy.getValue(), eventCopy.getValue(), notificationCopy.getValue()))
                 .allSatisfy(copy -> assertThat(copy.toLowerCase())
                         .doesNotContain("queued", "start shortly", "resume", "next poll"));
+    }
+
+    @Test
+    void approvalRecordsOneInvalidationEventWithoutPublishingOrNotifyingLaterIssue() {
+        PlanningVersion current = pendingVersion(issue, 3, 9L);
+        issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        TrackedIssue later = new TrackedIssue(issue.getRepo(), 143, "Later work");
+        later.setId(10L);
+        later.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(issue, later));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
+
+        service.approvePlan(8L, 9L);
+
+        InOrder sideEffects = inOrder(gitHub, events, notifications);
+        sideEffects.verify(gitHub).addComment("owner", "repo", 42,
+                "Design Spec and Implementation Plan version 3 approved. "
+                        + "Implementation is waiting for a manual start in IssueBot.");
+        sideEffects.verify(events).log("PLAN_APPROVED",
+                "Approved planning version 3 — waiting for manual implementation start",
+                issue.getRepo(), issue);
+        sideEffects.verify(notifications).info("Plan Approved",
+                "owner/repo #42 — version 3 approved; waiting for you to start implementation",
+                issue);
+        sideEffects.verify(events).log("PLAN_INVALIDATED",
+                "Plan deleted because earlier issue #42 reserved the repository; "
+                        + "a new plan will be generated after that work completes.",
+                later.getRepo(), later);
+        verifyNoMoreInteractions(gitHub);
+        verify(notifications, never()).info(eq("Plan Invalidated"), anyString(), eq(later));
     }
 
     @Test

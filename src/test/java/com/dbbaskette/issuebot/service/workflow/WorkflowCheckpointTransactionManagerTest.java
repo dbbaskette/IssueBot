@@ -3,6 +3,9 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -12,14 +15,28 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.SQLException;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @DataJpaTest
-@Import(WorkflowCheckpointTransactionManager.class)
+@Import({WorkflowCheckpointTransactionManager.class, PlanFirstTransactionManager.class})
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"
@@ -28,11 +45,18 @@ import static org.mockito.Mockito.reset;
 class WorkflowCheckpointTransactionManagerTest {
 
     @Autowired private WorkflowCheckpointTransactionManager checkpoints;
-    @Autowired private WatchedRepoRepository repos;
-    @Autowired private TrackedIssueRepository issues;
+    @Autowired private PlanFirstTransactionManager planTransactions;
+    @MockitoSpyBean private WatchedRepoRepository repos;
+    @MockitoSpyBean private TrackedIssueRepository issues;
     @Autowired private PlanningVersionRepository versions;
     @MockitoSpyBean private IterationRepository iterations;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
+    @Autowired private EntityManager entityManager;
+
+    @AfterEach
+    void restoreLockingSpies() {
+        reset(issues, repos);
+    }
 
     @Test
     void guidanceIsConsumedOnlyWithDurableExactImplementationContext() {
@@ -103,6 +127,67 @@ class WorkflowCheckpointTransactionManagerTest {
         assertThat(checkpoint.iteration().getImplementationSucceeded()).isTrue();
         assertThat(checkpoint.iteration().getClaudeOutput()).isEqualTo("implementation completed");
         assertThat(checkpoint.iteration().getDiff()).isEqualTo("+ durable diff");
+    }
+
+    @Test
+    void implementationCheckpointLocksRepositoryBeforeJoinedIssueQuery() {
+        Baseline baseline = seed();
+        Long repoId = issues.findRepoIdByIssueId(baseline.issueId()).orElseThrow();
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("implementation completed");
+        clearInvocations(issues, repos);
+
+        checkpoints.persistImplementationComplete(
+                baseline.issueId(), baseline.iterationId(), result, "+ durable diff");
+
+        org.mockito.InOrder locking = inOrder(issues, repos);
+        locking.verify(issues).findRepoIdByIssueId(baseline.issueId());
+        locking.verify(repos).findByIdForUpdate(repoId);
+        locking.verify(issues).findByIdForDispatch(baseline.issueId());
+    }
+
+    @Test
+    void concurrentApprovalAndImplementationCheckpointSerializeWithoutDeadlock()
+            throws Exception {
+        CheckpointRaceSeed seed = seedCheckpointRace();
+        ClaudeCodeResult result = new ClaudeCodeResult();
+        result.setSuccess(true);
+        result.setOutput("implementation completed during approval race");
+
+        CheckpointRace race = raceApprovalAgainstCheckpoint(seed, () ->
+                checkpoints.persistImplementationComplete(
+                        seed.implementationIssueId(), seed.iterationId(), result, "+ durable diff"));
+
+        assertThat(race.approval().value()).isNull();
+        assertThat(race.approval().failure())
+                .hasMessage("Issue #42 is already running later work in this repository. "
+                        + "Finish or stop it before approving issue #41.");
+        assertThat(race.checkpoint().failure()).isNull();
+        assertThat(race.checkpoint().value()).isNotNull();
+        assertNoSerializationFailure(race.approval().failure());
+        assertThat(issues.findById(seed.ownerIssueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(issues.findById(seed.implementationIssueId()).orElseThrow().getCurrentPhase())
+                .isEqualTo("LOCAL_CHECKS");
+        assertThat(iterations.findById(seed.iterationId()).orElseThrow()
+                .getImplementationSucceeded()).isTrue();
+    }
+
+    @Test
+    void checkpointCompatibilityConstructorFailsClosedBeforeAnyMutationAccess() {
+        TrackedIssueRepository mockIssues = mock(TrackedIssueRepository.class);
+        IterationRepository mockIterations = mock(IterationRepository.class);
+        IssueGuidanceRepository mockGuidance = mock(IssueGuidanceRepository.class);
+        WorkflowCheckpointTransactionManager unlocked =
+                new WorkflowCheckpointTransactionManager(
+                        mockIssues, mockIterations, mockGuidance);
+
+        assertThatThrownBy(() -> unlocked.cancelForOperator(99L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Repository locking is required for workflow checkpoint mutations");
+
+        verifyNoInteractions(mockIssues, mockIterations, mockGuidance);
     }
 
     @Test
@@ -257,5 +342,121 @@ class WorkflowCheckpointTransactionManagerTest {
         return new Baseline(issue.getId(), iteration.getId());
     }
 
+    private CheckpointRaceSeed seedCheckpointRace() {
+        WatchedRepo repo = repos.saveAndFlush(new WatchedRepo(
+                "acme", "checkpoint-race-" + System.nanoTime()));
+        TrackedIssue owner = new TrackedIssue(repo, 41, "Plan approval owner");
+        owner.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        owner = issues.saveAndFlush(owner);
+        PlanningVersion ownerVersion = versions.saveAndFlush(PlanningVersion.pending(
+                owner, 1, "owner design", "owner plan", "CODEX", "gpt-5.6-sol", null));
+
+        TrackedIssue implementation = new TrackedIssue(repo, 42, "Implementation checkpoint");
+        implementation.setStatus(IssueStatus.IN_PROGRESS);
+        implementation.setCurrentIteration(1);
+        implementation.setCurrentPhase("IMPLEMENTATION");
+        implementation = issues.saveAndFlush(implementation);
+        Iteration iteration = new Iteration(implementation, 1);
+        iteration.setImplModel("gpt-5.6-sol");
+        iteration = iterations.saveAndFlush(iteration);
+        return new CheckpointRaceSeed(
+                repo.getId(), owner.getId(), ownerVersion.getId(),
+                implementation.getId(), iteration.getId());
+    }
+
+    private CheckpointRace raceApprovalAgainstCheckpoint(CheckpointRaceSeed seed,
+                                                          CheckpointOperation operation)
+            throws Exception {
+        CountDownLatch approvalHasOrderedIssueLocks = new CountDownLatch(1);
+        CountDownLatch releaseApproval = new CountDownLatch(1);
+        CountDownLatch checkpointRequestsRepositoryLock = new CountDownLatch(1);
+        AtomicInteger repositoryLockRequests = new AtomicInteger();
+        doAnswer(invocation -> {
+            if (repositoryLockRequests.incrementAndGet() > 1) {
+                checkpointRequestsRepositoryLock.countDown();
+            }
+            return entityManager.createQuery(
+                            "select repo from WatchedRepo repo where repo.id = :repoId",
+                            WatchedRepo.class)
+                    .setParameter("repoId", seed.repoId())
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .getResultStream()
+                    .findFirst();
+        }).when(repos).findByIdForUpdate(seed.repoId());
+        doAnswer(invocation -> {
+            List<TrackedIssue> locked = entityManager.createQuery(
+                            "select distinct issue from TrackedIssue issue "
+                                    + "left join fetch issue.approvedPlanningVersion "
+                                    + "join fetch issue.repo "
+                                    + "where issue.repo.id = :repoId "
+                                    + "order by issue.issueNumber",
+                            TrackedIssue.class)
+                    .setParameter("repoId", seed.repoId())
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .getResultList();
+            approvalHasOrderedIssueLocks.countDown();
+            assertThat(releaseApproval.await(5, TimeUnit.SECONDS)).isTrue();
+            return locked;
+        }).when(issues).findByRepoIdForUpdateOrderByIssueNumber(seed.repoId());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<RaceAttempt<PlanFirstTransactionManager.LifecycleCommit>> approval =
+                    executor.submit(() -> attempt(() -> planTransactions.approvePlan(
+                            seed.ownerIssueId(), seed.ownerVersionId())));
+            assertThat(approvalHasOrderedIssueLocks.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<RaceAttempt<WorkflowCheckpointTransactionManager.ImplementationCheckpoint>>
+                    checkpoint = executor.submit(() -> attempt(operation::run));
+            // The old checkpoint order goes straight to the joined issue lock and never reaches
+            // this repository-mutex assertion while approval holds the ordered issue set.
+            assertThat(checkpointRequestsRepositoryLock.await(5, TimeUnit.SECONDS)).isTrue();
+            releaseApproval.countDown();
+            return new CheckpointRace(
+                    approval.get(10, TimeUnit.SECONDS),
+                    checkpoint.get(10, TimeUnit.SECONDS));
+        } finally {
+            releaseApproval.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private static <T> RaceAttempt<T> attempt(CheckpointOperationWithResult<T> operation) {
+        try {
+            return new RaceAttempt<>(operation.run(), null);
+        } catch (RuntimeException failure) {
+            return new RaceAttempt<>(null, failure);
+        }
+    }
+
+    private static void assertNoSerializationFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof SQLException sql) {
+                assertThat(sql.getSQLState()).isNotEqualTo("40001");
+            }
+        }
+    }
+
     private record Baseline(Long issueId, Long iterationId) { }
+
+    @FunctionalInterface
+    private interface CheckpointOperation {
+        WorkflowCheckpointTransactionManager.ImplementationCheckpoint run();
+    }
+
+    @FunctionalInterface
+    private interface CheckpointOperationWithResult<T> {
+        T run();
+    }
+
+    private record CheckpointRaceSeed(Long repoId,
+                                      Long ownerIssueId,
+                                      Long ownerVersionId,
+                                      Long implementationIssueId,
+                                      Long iterationId) { }
+
+    private record RaceAttempt<T>(T value, RuntimeException failure) { }
+
+    private record CheckpointRace(
+            RaceAttempt<PlanFirstTransactionManager.LifecycleCommit> approval,
+            RaceAttempt<WorkflowCheckpointTransactionManager.ImplementationCheckpoint> checkpoint) { }
 }

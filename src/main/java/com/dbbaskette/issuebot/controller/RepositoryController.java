@@ -9,13 +9,13 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.service.workflow.RepositoryDeletionTransactionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -46,6 +46,7 @@ public class RepositoryController {
     private final IssuePollingService pollingService;
     private final NotificationRepository notificationRepository;
     private final PlanningVersionRepository planningVersionRepository;
+    private final RepositoryDeletionTransactionManager deletionTransactions;
 
     @Autowired(required = false)
     private IssueBotProperties properties;
@@ -53,6 +54,7 @@ public class RepositoryController {
     @Autowired(required = false)
     private CodexModelCatalog codexModelCatalog;
 
+    @Autowired
     public RepositoryController(WatchedRepoRepository repoRepository,
                                  TrackedIssueRepository issueRepository,
                                  IterationRepository iterationRepository,
@@ -61,7 +63,8 @@ public class RepositoryController {
                                  RepoLessonRepository lessonRepository,
                                  IssuePollingService pollingService,
                                  NotificationRepository notificationRepository,
-                                 PlanningVersionRepository planningVersionRepository) {
+                                 PlanningVersionRepository planningVersionRepository,
+                                 RepositoryDeletionTransactionManager deletionTransactions) {
         this.repoRepository = repoRepository;
         this.issueRepository = issueRepository;
         this.iterationRepository = iterationRepository;
@@ -71,6 +74,22 @@ public class RepositoryController {
         this.pollingService = pollingService;
         this.notificationRepository = notificationRepository;
         this.planningVersionRepository = planningVersionRepository;
+        this.deletionTransactions = deletionTransactions;
+    }
+
+    /** Compatibility constructor for focused controller fixtures that never remove repositories. */
+    public RepositoryController(WatchedRepoRepository repoRepository,
+                                TrackedIssueRepository issueRepository,
+                                IterationRepository iterationRepository,
+                                CostTrackingRepository costRepository,
+                                EventRepository eventRepository,
+                                RepoLessonRepository lessonRepository,
+                                IssuePollingService pollingService,
+                                NotificationRepository notificationRepository,
+                                PlanningVersionRepository planningVersionRepository) {
+        this(repoRepository, issueRepository, iterationRepository, costRepository, eventRepository,
+                lessonRepository, pollingService, notificationRepository, planningVersionRepository,
+                null);
     }
 
     @GetMapping
@@ -177,29 +196,13 @@ public class RepositoryController {
     }
 
     @DeleteMapping("/{id}")
-    @Transactional
     public String delete(Model model, @PathVariable Long id,
                          @RequestHeader(value = "HX-Request", required = false) String hx) {
-        repoRepository.findById(id).ifPresent(repo -> {
-            // planning_versions and tracked_issues form an intentional FK cycle through the
-            // approved-version pointer. Break and flush that pointer before deleting versions.
-            eventRepository.deleteByRepo(repo);
-            List<TrackedIssue> issues = issueRepository.findByRepo(repo);
-            List<Long> issueIds = issues.stream().map(TrackedIssue::getId).toList();
-            if (!issueIds.isEmpty()) {
-                issues.forEach(issue -> issue.setApprovedPlanningVersion(null));
-                issueRepository.saveAllAndFlush(issues);
-                planningVersionRepository.deleteByIssueIds(issueIds);
-                planningVersionRepository.flush();
-            }
-            for (TrackedIssue issue : issues) {
-                costRepository.deleteByIssue(issue);
-                iterationRepository.deleteByIssue(issue);
-            }
-            issueRepository.deleteAll(issues);
-            issueRepository.flush();
-            repoRepository.delete(repo);
-        });
+        if (deletionTransactions == null) {
+            throw new IllegalStateException(
+                    "Transactional repository deletion is required for repository removal");
+        }
+        deletionTransactions.delete(id);
         populateModel(model, "Repository removed.", null);
         return ViewResolver.view("repositories", hx != null);
     }

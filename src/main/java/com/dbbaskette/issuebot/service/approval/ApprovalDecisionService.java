@@ -4,11 +4,13 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -42,15 +44,27 @@ public class ApprovalDecisionService {
     private final IterationManager iterations;
     private final GitHubApiClient gitHub;
     private final EventService events;
+    private final WatchedRepoRepository repos;
 
+    @Autowired
     public ApprovalDecisionService(TrackedIssueRepository issues,
                                    IterationManager iterations,
                                    GitHubApiClient gitHub,
-                                   EventService events) {
+                                   EventService events,
+                                   WatchedRepoRepository repos) {
         this.issues = issues;
         this.iterations = iterations;
         this.gitHub = gitHub;
         this.events = events;
+        this.repos = repos;
+    }
+
+    /** Compatibility constructor for focused fixtures; decision mutations deliberately fail closed. */
+    public ApprovalDecisionService(TrackedIssueRepository issues,
+                                   IterationManager iterations,
+                                   GitHubApiClient gitHub,
+                                   EventService events) {
+        this(issues, iterations, gitHub, events, null);
     }
 
     @Transactional
@@ -127,6 +141,13 @@ public class ApprovalDecisionService {
     }
 
     private TrackedIssue lockedIssue(Long issueId) {
+        if (repos == null) {
+            throw new IllegalStateException(
+                    "Repository locking is required for approval decisions");
+        }
+        Long repoId = issues.findRepoIdByIssueId(issueId).orElseThrow();
+        repos.findByIdForUpdate(repoId)
+                .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
         return issues.findByIdForDispatch(issueId).orElseThrow();
     }
 

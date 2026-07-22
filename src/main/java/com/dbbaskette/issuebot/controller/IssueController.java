@@ -31,6 +31,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
+import com.dbbaskette.issuebot.service.workflow.RepositoryDispatchGate;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.dbbaskette.issuebot.util.BudgetProgress;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,8 +50,10 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BinaryOperator;
 import java.util.function.Function;
 
 @Controller
@@ -69,6 +72,11 @@ public class IssueController {
      * unbounded. Over the cap: flash an error, process nothing.
      */
     static final int MAX_BULK_IDS = 200;
+
+    private static final Comparator<TrackedIssue> RESERVATION_OWNER_ORDER =
+            Comparator.comparingInt(TrackedIssue::getIssueNumber)
+                    .thenComparing(TrackedIssue::getId,
+                            Comparator.nullsLast(Comparator.naturalOrder()));
 
     private final TrackedIssueRepository issueRepository;
     private final WatchedRepoRepository repoRepository;
@@ -846,9 +854,22 @@ public class IssueController {
                               RedirectAttributes redirectAttributes) {
         try {
             planFirstService.approvePlan(id, versionId);
+        } catch (IllegalStateException e) {
+            log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
+            if (isReservationOrderingFailure(e.getMessage())) {
+                redirectAttributes.addFlashAttribute("error", e.getMessage());
+                redirectAttributes.addFlashAttribute("planError", e.getMessage());
+                return planFirstRedirect(id);
+            }
+            if (isStalePlanApproval(e.getMessage())) {
+                redirectAttributes.addFlashAttribute("error", e.getMessage());
+                return planReviewRedirect(id);
+            }
+            redirectAttributes.addFlashAttribute("error", "Unable to approve plan. Please try again.");
+            return planReviewRedirect(id);
         } catch (Exception e) {
             log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
-            redirectAttributes.addFlashAttribute("error", e.getMessage());
+            redirectAttributes.addFlashAttribute("error", "Unable to approve plan. Please try again.");
             return planReviewRedirect(id);
         }
 
@@ -937,6 +958,22 @@ public class IssueController {
         return "redirect:/issues/" + id + "#plan-review";
     }
 
+    private static String planFirstRedirect(Long id) {
+        return "redirect:/issues/" + id + "#plan-first";
+    }
+
+    private static boolean isReservationOrderingFailure(String message) {
+        return message != null && (message.matches(
+                "Issue #\\d+ must finish before issue #\\d+ can reserve this repository\\.")
+                || message.matches("Issue #\\d+ is already running later work in this repository\\. "
+                + "Finish or stop it before approving issue #\\d+\\."));
+    }
+
+    private static boolean isStalePlanApproval(String message) {
+        return message != null && message.matches(
+                "Stale approval: current pending version is \\d+");
+    }
+
     private static String normalize(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
     }
@@ -995,13 +1032,11 @@ public class IssueController {
 
         // Per-repo gate: no two issues in-flight for the same repo
         WatchedRepo repo = issue.getRepo();
-        TrackedIssue repoBlocker = issueRepository.findByRepoAndStatusIn(repo,
-                List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                        IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START)).stream()
-                .filter(candidate -> issue.getId() == null
-                        || !java.util.Objects.equals(candidate.getId(), issue.getId()))
-                .findFirst()
-                .orElse(null);
+        TrackedIssue repoBlocker = RepositoryDispatchGate.blocker(issue,
+                issueRepository.findByRepoAndStatusInOrderByIssueNumberAsc(repo,
+                        List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                                IssueStatus.AWAITING_PLAN_APPROVAL,
+                                IssueStatus.READY_TO_START)));
         if (repoBlocker != null && repoBlocker.getStatus() == IssueStatus.READY_TO_START) {
             return "Issue #" + repoBlocker.getIssueNumber()
                     + " has an approved plan and is waiting to start.";
@@ -1138,7 +1173,8 @@ public class IssueController {
         return issueRepository.findByStatus(IssueStatus.READY_TO_START).stream()
                 .filter(issue -> issue.getRepo() != null && issue.getRepo().getId() != null)
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
-                        issue -> issue.getRepo().getId(), issue -> issue, (left, right) -> left));
+                        issue -> issue.getRepo().getId(), issue -> issue,
+                        BinaryOperator.minBy(RESERVATION_OWNER_ORDER)));
     }
 
     private static TrackedIssue readyReservationFor(

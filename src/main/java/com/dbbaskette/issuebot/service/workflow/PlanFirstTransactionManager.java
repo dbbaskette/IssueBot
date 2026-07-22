@@ -7,12 +7,16 @@ import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Transactional authority for the Plan First lifecycle.
@@ -24,13 +28,41 @@ import java.util.Objects;
 @Service
 public class PlanFirstTransactionManager {
 
+    private static final Set<IssueStatus> EARLIER_ORDERING_BLOCKERS = EnumSet.of(
+            IssueStatus.PENDING,
+            IssueStatus.QUEUED,
+            IssueStatus.IN_PROGRESS,
+            IssueStatus.AWAITING_APPROVAL,
+            IssueStatus.AWAITING_PLAN_APPROVAL,
+            IssueStatus.READY_TO_START);
+    private static final Set<IssueStatus> PLANNING_RESETTABLE = EnumSet.of(
+            IssueStatus.PENDING,
+            IssueStatus.QUEUED,
+            IssueStatus.BLOCKED,
+            IssueStatus.FAILED,
+            IssueStatus.COOLDOWN,
+            IssueStatus.AWAITING_PLAN_APPROVAL,
+            IssueStatus.READY_TO_START);
+    private static final Set<IssueStatus> PROTECTED_RUNNING = EnumSet.of(
+            IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL);
+
     private final TrackedIssueRepository issues;
     private final PlanningVersionRepository versions;
+    private final WatchedRepoRepository repos;
 
+    @Autowired
     public PlanFirstTransactionManager(TrackedIssueRepository issues,
-                                       PlanningVersionRepository versions) {
+                                       PlanningVersionRepository versions,
+                                       WatchedRepoRepository repos) {
         this.issues = issues;
         this.versions = versions;
+        this.repos = repos;
+    }
+
+    /** Compatibility constructor for focused fixtures; mutation methods deliberately fail closed. */
+    public PlanFirstTransactionManager(TrackedIssueRepository issues,
+                                       PlanningVersionRepository versions) {
+        this(issues, versions, null);
     }
 
     /** Captures an immutable generation token without retaining a managed entity across AI I/O. */
@@ -84,23 +116,61 @@ public class PlanFirstTransactionManager {
     /** Approves exactly the latest pending row and its pointer in one transaction. */
     @Transactional
     public LifecycleCommit approvePlan(Long issueId, Long expectedVersionId) {
-        TrackedIssue issue = requireIssueForUpdate(issueId);
+        List<TrackedIssue> ordered = lockRepositoryIssuesForApproval(issueId);
+        TrackedIssue issue = ordered.stream()
+                .filter(candidate -> Objects.equals(candidate.getId(), issueId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
         PlanningVersion current = requireCurrentPending(issue);
-        if (!Objects.equals(current.getId(), expectedVersionId)) {
-            throw new IllegalStateException(
-                    "Stale approval: current pending version is " + current.getVersionNumber());
+        requireExpectedVersion(current, expectedVersionId);
+
+        int candidateIndex = ordered.indexOf(issue);
+        TrackedIssue earlierBlocker = ordered.subList(0, candidateIndex).stream()
+                .filter(candidate -> EARLIER_ORDERING_BLOCKERS.contains(candidate.getStatus()))
+                .findFirst()
+                .orElse(null);
+        if (earlierBlocker != null) {
+            throw new IllegalStateException("Issue #" + earlierBlocker.getIssueNumber()
+                    + " must finish before issue #" + issue.getIssueNumber()
+                    + " can reserve this repository.");
         }
+
+        List<TrackedIssue> later = ordered.subList(candidateIndex + 1, ordered.size());
+        TrackedIssue protectedRunning = later.stream()
+                .filter(candidate -> PROTECTED_RUNNING.contains(candidate.getStatus()))
+                .findFirst()
+                .orElse(null);
+        if (protectedRunning != null) {
+            throw new IllegalStateException("Issue #" + protectedRunning.getIssueNumber()
+                    + " is already running later work in this repository. Finish or stop it "
+                    + "before approving issue #" + issue.getIssueNumber() + ".");
+        }
+        List<TrackedIssue> invalidatedIssues = later.stream()
+                .filter(candidate -> PLANNING_RESETTABLE.contains(candidate.getStatus()))
+                .toList();
 
         current.approve(LocalDateTime.now());
         versions.save(current);
-        versions.flush();
         issue.setApprovedPlanningVersion(current);
         issue.setPlanConformanceAttempt(0);
         issue.setPlanCorrectionPending(false);
         issue.setStatus(IssueStatus.READY_TO_START);
         issues.save(issue);
+        invalidatedIssues.forEach(TrackedIssue::resetPlanningStateToQueued);
+        issues.saveAll(invalidatedIssues);
+
+        versions.flush();
         issues.flush();
-        return new LifecycleCommit(issue, current);
+        if (!invalidatedIssues.isEmpty()) {
+            versions.deleteByIssueIds(invalidatedIssues.stream()
+                    .map(TrackedIssue::getId)
+                    .toList());
+        }
+
+        List<InvalidatedPlan> invalidatedPlans = invalidatedIssues.stream()
+                .map(invalidated -> new InvalidatedPlan(invalidated, issue.getIssueNumber()))
+                .toList();
+        return new LifecycleCommit(issue, current, invalidatedPlans);
     }
 
     /** Supersedes exactly the latest pending row and queues its feedback atomically. */
@@ -120,7 +190,7 @@ public class PlanFirstTransactionManager {
         issue.setStatus(IssueStatus.PENDING);
         issues.save(issue);
         issues.flush();
-        return new LifecycleCommit(issue, current);
+        return new LifecycleCommit(issue, current, List.of());
     }
 
     /**
@@ -158,8 +228,29 @@ public class PlanFirstTransactionManager {
     }
 
     private TrackedIssue requireIssueForUpdate(Long issueId) {
+        requireRepositoryLocking("plan lifecycle mutations");
+        Long repoId = issues.findRepoIdByIssueId(issueId)
+                .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
+        repos.findByIdForUpdate(repoId)
+                .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
         return issues.findByIdForPlanning(issueId)
                 .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
+    }
+
+    private List<TrackedIssue> lockRepositoryIssuesForApproval(Long issueId) {
+        requireRepositoryLocking("plan approval");
+        Long repoId = issues.findRepoIdByIssueId(issueId)
+                .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
+        repos.findByIdForUpdate(repoId)
+                .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
+        return issues.findByRepoIdForUpdateOrderByIssueNumber(repoId);
+    }
+
+    private void requireRepositoryLocking(String mutation) {
+        if (repos == null) {
+            throw new IllegalStateException(
+                    "Repository locking is required for " + mutation);
+        }
     }
 
     private PlanningVersion requireCurrentPending(TrackedIssue issue) {
@@ -180,6 +271,13 @@ public class PlanFirstTransactionManager {
     private PlanningVersion latestForUpdate(Long issueId) {
         List<PlanningVersion> latest = versions.findLatestByIssueIdForUpdate(issueId);
         return latest.isEmpty() ? null : latest.getFirst();
+    }
+
+    private void requireExpectedVersion(PlanningVersion current, Long expectedVersionId) {
+        if (!Objects.equals(current.getId(), expectedVersionId)) {
+            throw new IllegalStateException(
+                    "Stale approval: current pending version is " + current.getVersionNumber());
+        }
     }
 
     private void requireUnchangedGenerationContext(GenerationContext expected,
@@ -226,7 +324,18 @@ public class PlanFirstTransactionManager {
     public record GenerationCommit(TrackedIssue issue, PlanningVersion version,
                                    boolean revision) {}
 
-    public record LifecycleCommit(TrackedIssue issue, PlanningVersion version) {}
+    public record LifecycleCommit(TrackedIssue issue, PlanningVersion version,
+                                  List<InvalidatedPlan> invalidatedPlans) {
+        public LifecycleCommit {
+            invalidatedPlans = List.copyOf(invalidatedPlans);
+        }
+
+        public LifecycleCommit(TrackedIssue issue, PlanningVersion version) {
+            this(issue, version, List.of());
+        }
+    }
+
+    public record InvalidatedPlan(TrackedIssue issue, int ownerIssueNumber) {}
 
     public record FailureCommit(boolean committed, TrackedIssue issue) {}
 

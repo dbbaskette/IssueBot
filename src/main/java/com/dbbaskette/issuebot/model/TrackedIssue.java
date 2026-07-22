@@ -248,6 +248,31 @@ public class TrackedIssue {
         this.planCorrectionPending = planCorrectionPending;
     }
 
+    /** Clears all runtime workflow state so planning can restart against current repository code. */
+    public void resetPlanningStateToQueued() {
+        status = IssueStatus.QUEUED;
+        currentIteration = 0;
+        currentReviewIteration = 0;
+        currentPhase = null;
+        cooldownUntil = null;
+        startedAt = null;
+        branchName = null;
+        prNumber = null;
+        claudeSessionId = null;
+        resolvedImplModel = null;
+        resolvedReviewModel = null;
+        resolvedAgentProvider = null;
+        lastFailureReason = null;
+        suspensionReason = null;
+        planFeedback = null;
+        planRejections = 0;
+        planConformanceAttempt = 0;
+        planCorrectionPending = false;
+        implementationPlan = null;
+        planApproved = false;
+        approvedPlanningVersion = null;
+    }
+
     /**
      * Effective spend ceiling for this issue (#66): the per-issue override wins over
      * the repo default; null means unlimited. Single source of truth for budget

@@ -30,7 +30,8 @@ public interface PlanningVersionRepository extends JpaRepository<PlanningVersion
 
     List<PlanningVersion> findByIssueIdInAndState(Collection<Long> issueIds, PlanningVersionState state);
 
-    @Modifying(flushAutomatically = true)
+    /** Bulk deletion clears the persistence context so removed approved versions cannot linger. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("DELETE FROM PlanningVersion p WHERE p.issue.id IN :issueIds")
     int deleteByIssueIds(@Param("issueIds") Collection<Long> issueIds);
 }

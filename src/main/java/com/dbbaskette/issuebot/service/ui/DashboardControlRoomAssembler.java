@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BinaryOperator;
 
 import static com.dbbaskette.issuebot.model.IssueStatus.AWAITING_APPROVAL;
 import static com.dbbaskette.issuebot.model.IssueStatus.AWAITING_DECOMPOSITION;
@@ -52,6 +53,9 @@ public class DashboardControlRoomAssembler {
     private static final Comparator<Long> NULLS_LAST_ID = Comparator.nullsLast(Comparator.naturalOrder());
     private static final Comparator<LocalDateTime> NULLS_LAST_START =
             Comparator.nullsLast(Comparator.naturalOrder());
+    private static final Comparator<TrackedIssue> RESERVATION_OWNER_ORDER =
+            Comparator.comparingInt(TrackedIssue::getIssueNumber)
+                    .thenComparing(TrackedIssue::getId, NULLS_LAST_ID);
 
     private final TrackedIssueRepository issueRepository;
     private final CostTrackingRepository costRepository;
@@ -77,7 +81,8 @@ public class DashboardControlRoomAssembler {
                 .filter(issue -> issue.getStatus() == READY_TO_START)
                 .filter(issue -> issue.getRepo() != null && issue.getRepo().getId() != null)
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
-                        issue -> issue.getRepo().getId(), issue -> issue, (left, right) -> left));
+                        issue -> issue.getRepo().getId(), issue -> issue,
+                        BinaryOperator.minBy(RESERVATION_OWNER_ORDER)));
 
         return new ControlRoom(
                 lane("needs-decision", "Intervention", "Needs your decision",

@@ -33,6 +33,14 @@ public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long
     @Query("SELECT t FROM TrackedIssue t WHERE t.id = :id")
     Optional<TrackedIssue> findByIdForPlanning(@Param("id") Long id);
 
+    @Query("SELECT t.repo.id FROM TrackedIssue t WHERE t.id = :issueId")
+    Optional<Long> findRepoIdByIssueId(@Param("issueId") Long issueId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"approvedPlanningVersion", "repo"})
+    @Query("SELECT t FROM TrackedIssue t WHERE t.repo.id = :repoId ORDER BY t.issueNumber ASC")
+    List<TrackedIssue> findByRepoIdForUpdateOrderByIssueNumber(@Param("repoId") Long repoId);
+
     Optional<TrackedIssue> findByRepoAndIssueNumber(WatchedRepo repo, int issueNumber);
 
     List<TrackedIssue> findByStatus(IssueStatus status);
@@ -71,6 +79,9 @@ public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long
     List<TrackedIssue> findByRepoAndStatus(WatchedRepo repo, IssueStatus status);
 
     List<TrackedIssue> findByRepoAndStatusIn(WatchedRepo repo, List<IssueStatus> statuses);
+
+    List<TrackedIssue> findByRepoAndStatusInOrderByIssueNumberAsc(
+            WatchedRepo repo, List<IssueStatus> statuses);
 
     long countByRepoAndStatusNot(WatchedRepo repo, IssueStatus status);
 

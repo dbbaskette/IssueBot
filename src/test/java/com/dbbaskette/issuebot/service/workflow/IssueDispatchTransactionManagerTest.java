@@ -9,6 +9,7 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
@@ -21,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -28,9 +30,7 @@ import java.util.concurrent.Executors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.*;
 
 @DataJpaTest
 @Import({IssueDispatchTransactionManager.class, PlanFirstTransactionManager.class})
@@ -148,6 +148,43 @@ class IssueDispatchTransactionManagerTest {
                 .isEqualTo("Issue #41 has an approved plan and is waiting to start.");
         assertThat(issues.findById(startId).orElseThrow().getStatus()).isEqualTo(IssueStatus.QUEUED);
         assertThat(issues.findById(retryId).orElseThrow().getStatus()).isEqualTo(IssueStatus.FAILED);
+    }
+
+    @Test
+    void lowestReadyReservationOwnsDispatchRegardlessOfRepositoryQueryOrder() {
+        assertLowestReadyReservationOwnsDispatch(false);
+        assertLowestReadyReservationOwnsDispatch(true);
+    }
+
+    @Test
+    void dispatchLocksRepositoryBeforeTargetIssue() {
+        TrackedIssueRepository mockIssues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository mockRepos = mock(WatchedRepoRepository.class);
+        ProcessingControlRepository mockControls = mock(ProcessingControlRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "lock-order");
+        repo.setId(9L);
+        TrackedIssue candidate = new TrackedIssue(repo, 42, "Candidate");
+        candidate.setId(42L);
+        candidate.setStatus(IssueStatus.PENDING);
+        when(mockControls.findByIdForUpdate(ProcessingControl.SINGLETON_ID))
+                .thenReturn(Optional.of(new ProcessingControl(ProcessingState.RUNNING)));
+        when(mockIssues.findRepoIdByIssueId(42L)).thenReturn(Optional.of(9L));
+        when(mockRepos.findByIdForUpdate(9L)).thenReturn(Optional.of(repo));
+        when(mockIssues.findByIdForDispatch(42L)).thenReturn(Optional.of(candidate));
+        when(mockIssues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(List.of());
+        when(mockIssues.saveAndFlush(candidate)).thenReturn(candidate);
+        IssueDispatchTransactionManager manager = new IssueDispatchTransactionManager(
+                mockIssues, mockRepos, mockControls, mock(IssueGuidanceRepository.class),
+                mock(IterationRepository.class));
+
+        IssueDispatchService.ClaimResult result = manager.claimStart(42L);
+
+        assertThat(result.claimed()).isTrue();
+        InOrder locking = inOrder(mockIssues, mockRepos);
+        locking.verify(mockIssues).findRepoIdByIssueId(42L);
+        locking.verify(mockRepos).findByIdForUpdate(9L);
+        locking.verify(mockIssues).findByIdForDispatch(42L);
     }
 
     @Test
@@ -424,6 +461,47 @@ class IssueDispatchTransactionManagerTest {
 
     private Long seedApprovedIssue(IssueStatus status, int conformanceAttempt) {
         return seedApprovedIssue(status, conformanceAttempt, 42);
+    }
+
+    private void assertLowestReadyReservationOwnsDispatch(boolean ownerFirst) {
+        TrackedIssueRepository mockIssues = mock(TrackedIssueRepository.class);
+        WatchedRepoRepository mockRepos = mock(WatchedRepoRepository.class);
+        ProcessingControlRepository mockControls = mock(ProcessingControlRepository.class);
+        WatchedRepo repo = new WatchedRepo("acme", "legacy-ready-order");
+        repo.setId(9L);
+        TrackedIssue owner = readyIssue(repo, 141L, 141);
+        TrackedIssue duplicate = readyIssue(repo, 143L, 143);
+        List<TrackedIssue> active = ownerFirst
+                ? List.of(owner, duplicate)
+                : List.of(duplicate, owner);
+        when(mockControls.findByIdForUpdate(ProcessingControl.SINGLETON_ID))
+                .thenReturn(Optional.of(new ProcessingControl(ProcessingState.RUNNING)));
+        when(mockIssues.findRepoIdByIssueId(anyLong())).thenReturn(Optional.of(9L));
+        when(mockRepos.findByIdForUpdate(9L)).thenReturn(Optional.of(repo));
+        when(mockIssues.findByIdForDispatch(141L)).thenReturn(Optional.of(owner));
+        when(mockIssues.findByIdForDispatch(143L)).thenReturn(Optional.of(duplicate));
+        when(mockIssues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), anyList()))
+                .thenReturn(active);
+        when(mockIssues.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        IssueDispatchTransactionManager manager = new IssueDispatchTransactionManager(
+                mockIssues, mockRepos, mockControls, mock(IssueGuidanceRepository.class),
+                mock(IterationRepository.class));
+
+        IssueDispatchService.ClaimResult duplicateResult = manager.claimReadyStart(143L);
+        IssueDispatchService.ClaimResult ownerResult = manager.claimReadyStart(141L);
+
+        assertThat(duplicateResult.claimed()).isFalse();
+        assertThat(duplicateResult.reason())
+                .isEqualTo("Issue #141 has an approved plan and is waiting to start.");
+        assertThat(ownerResult.claimed()).isTrue();
+    }
+
+    private static TrackedIssue readyIssue(WatchedRepo repo, Long id, int issueNumber) {
+        TrackedIssue issue = new TrackedIssue(repo, issueNumber, "Ready " + issueNumber);
+        issue.setId(id);
+        issue.setStatus(IssueStatus.READY_TO_START);
+        issue.setApprovedPlanningVersion(mock(PlanningVersion.class));
+        return issue;
     }
 
     private Long seedApprovedIssue(IssueStatus status, int conformanceAttempt, int issueNumber) {
