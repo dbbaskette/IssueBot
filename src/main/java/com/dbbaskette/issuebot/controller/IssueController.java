@@ -927,10 +927,18 @@ public class IssueController {
 
         // Per-repo gate: no two issues in-flight for the same repo
         WatchedRepo repo = issue.getRepo();
-        boolean repoHasActiveIssue = !issueRepository.findByRepoAndStatusIn(repo,
+        TrackedIssue repoBlocker = issueRepository.findByRepoAndStatusIn(repo,
                 List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                        IssueStatus.AWAITING_PLAN_APPROVAL)).isEmpty();
-        if (repoHasActiveIssue) {
+                        IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START)).stream()
+                .filter(candidate -> issue.getId() == null
+                        || !java.util.Objects.equals(candidate.getId(), issue.getId()))
+                .findFirst()
+                .orElse(null);
+        if (repoBlocker != null && repoBlocker.getStatus() == IssueStatus.READY_TO_START) {
+            return "Issue #" + repoBlocker.getIssueNumber()
+                    + " has an approved plan and is waiting to start.";
+        }
+        if (repoBlocker != null) {
             return repo.fullName() + " already has an active issue. Wait for it to complete.";
         }
 

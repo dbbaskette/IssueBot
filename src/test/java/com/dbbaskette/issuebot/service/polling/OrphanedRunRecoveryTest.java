@@ -473,4 +473,27 @@ class OrphanedRunRecoveryTest {
         verify(issueRepository, never()).findByStatus(IssueStatus.COOLDOWN);
         verifyNoInteractions(versionRepository, eventService);
     }
+
+    @Test
+    void staleRecoveryResponseCannotChangeReadyReservation() {
+        TrackedIssue ready = new TrackedIssue(repo, 53, "Approved and waiting");
+        ready.setId(53L);
+        ready.setStatus(IssueStatus.READY_TO_START);
+        ready.setCurrentIteration(2);
+        ready.setCurrentPhase("HUMAN_START_GATE");
+        PlanningVersion approved = PlanningVersion.pending(
+                ready, 2, "approved spec", "approved plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        ready.setApprovedPlanningVersion(approved);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(ready));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.READY_TO_START, ready.getStatus());
+        assertEquals(approved, ready.getApprovedPlanningVersion());
+        assertEquals(2, ready.getCurrentIteration());
+        assertEquals("HUMAN_START_GATE", ready.getCurrentPhase());
+        verify(issueRepository, never()).save(ready);
+        verifyNoInteractions(iterationRepository, versionRepository, eventService);
+    }
 }

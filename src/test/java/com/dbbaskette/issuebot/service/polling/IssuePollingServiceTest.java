@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.polling;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
@@ -35,6 +36,9 @@ class IssuePollingServiceTest {
     private WatchedRepoRepository repoRepository;
     private GitHubApiClient gitHubApiClient;
     private IssueWorkflowService workflowService;
+    private EventService eventService;
+    private NotificationService notificationService;
+    private IssueDispatchService dispatchService;
     private IssueBotProperties properties;
     private DependencyResolverService dependencyResolver;
     private ProcessingControlService processingControl;
@@ -47,21 +51,24 @@ class IssuePollingServiceTest {
         repoRepository = mock(WatchedRepoRepository.class);
         gitHubApiClient = mock(GitHubApiClient.class);
         workflowService = mock(IssueWorkflowService.class);
+        eventService = mock(EventService.class);
+        notificationService = mock(NotificationService.class);
         properties = new IssueBotProperties();
         dependencyResolver = mock(DependencyResolverService.class);
         processingControl = mock(ProcessingControlService.class);
+        dispatchService = spy(new IssueDispatchService(
+                issueRepository, processingControl, mock(IterationRepository.class)));
         pollingService = new IssuePollingService(
                 gitHubApiClient,
                 repoRepository,
                 issueRepository,
-                mock(EventService.class),
-                mock(NotificationService.class),
+                eventService,
+                notificationService,
                 workflowService,
                 properties,
                 dependencyResolver,
                 processingControl,
-                new IssueDispatchService(
-                        issueRepository, processingControl, mock(IterationRepository.class))
+                dispatchService
         );
         testRepo = new WatchedRepo("owner", "repo");
     }
@@ -119,6 +126,83 @@ class IssuePollingServiceTest {
         verify(workflowService, never()).processIssueAsync(any());
         verify(issueRepository).findByRepoAndStatusIn(eq(testRepo), argThat(statuses ->
                 statuses.contains(IssueStatus.AWAITING_PLAN_APPROVAL)));
+    }
+
+    @Test
+    void fullPollDoesNotAttemptQueuedDispatchPastReadyReservation() {
+        TrackedIssue ready = readyReservation(1);
+        TrackedIssue queued = trackedIssue(2, IssueStatus.QUEUED);
+        stubFullPollWithReservation(ready, queued);
+
+        pollingService.pollForIssues();
+
+        assertEquals(IssueStatus.READY_TO_START, ready.getStatus());
+        verify(dispatchService, never()).claimStart(argThat((TrackedIssue issue) ->
+                issue.getId().equals(queued.getId())));
+        verify(workflowService, never()).processIssueAsync(argThat(issue ->
+                issue.getId().equals(queued.getId())));
+    }
+
+    @Test
+    void webhookQueuesBehindReadyReservationAndNamesItsOwner() {
+        TrackedIssue ready = readyReservation(1);
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 3)).thenReturn(Optional.empty());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList()))
+                .thenAnswer(invocation -> invocation.<List<IssueStatus>>getArgument(1)
+                        .contains(IssueStatus.READY_TO_START) ? List.of(ready) : List.of());
+        when(issueRepository.save(any(TrackedIssue.class))).thenAnswer(invocation -> {
+            TrackedIssue saved = invocation.getArgument(0);
+            saved.setId(3L);
+            return saved;
+        });
+        when(dependencyResolver.resolve(testRepo, 3)).thenReturn(
+                new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("number", 3);
+        node.put("title", "Later work");
+
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, node);
+
+        assertEquals(WebhookOutcome.QUEUED, outcome);
+        ArgumentCaptor<TrackedIssue> queued = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository).save(queued.capture());
+        assertEquals(IssueStatus.QUEUED, queued.getValue().getStatus());
+        verify(dispatchService, never()).claimStart(any(TrackedIssue.class));
+        verify(workflowService, never()).processIssueAsync(any());
+        verify(eventService).log("ISSUE_QUEUED",
+                "Issue #3 queued — waiting for issue #1 to start or release the repository slot",
+                testRepo, queued.getValue());
+        verify(notificationService).info(eq("Issue Queued"),
+                argThat(message -> message.contains("issue #1")
+                        && message.contains("start or release the repository slot")),
+                same(queued.getValue()));
+    }
+
+    @Test
+    void fullPollDoesNotResumePendingIssuePastReadyReservation() {
+        TrackedIssue ready = readyReservation(1);
+        TrackedIssue pending = trackedIssue(2, IssueStatus.PENDING);
+        stubFullPollWithReservation(ready, pending);
+
+        pollingService.pollForIssues();
+
+        verify(dispatchService, never()).claimStart(argThat((TrackedIssue issue) ->
+                issue.getId().equals(pending.getId())));
+        verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void fullPollDoesNotDrainQueuedIssuePastReadyReservation() {
+        TrackedIssue ready = readyReservation(1);
+        TrackedIssue queued = trackedIssue(2, IssueStatus.QUEUED);
+        stubFullPollWithReservation(ready, queued);
+
+        pollingService.pollForIssues();
+
+        verify(dispatchService, never()).claimStart(argThat((TrackedIssue issue) ->
+                issue.getId().equals(queued.getId())));
+        verify(workflowService, never()).processIssueAsync(any());
     }
 
     @Test
@@ -597,5 +681,46 @@ class IssuePollingServiceTest {
 
         assertEquals(IssueStatus.QUEUED, blocked.getStatus());
         verify(gitHubApiClient).closeIssue("owner", "repo", 10);
+    }
+
+    private TrackedIssue readyReservation(int issueNumber) {
+        TrackedIssue ready = trackedIssue(issueNumber, IssueStatus.READY_TO_START);
+        PlanningVersion approved = PlanningVersion.pending(
+                ready, 1, "approved spec", "approved plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(LocalDateTime.now());
+        ready.setApprovedPlanningVersion(approved);
+        return ready;
+    }
+
+    private TrackedIssue trackedIssue(int issueNumber, IssueStatus status) {
+        TrackedIssue issue = new TrackedIssue(testRepo, issueNumber, "Issue " + issueNumber);
+        issue.setId((long) issueNumber);
+        issue.setStatus(status);
+        return issue;
+    }
+
+    private void stubFullPollWithReservation(TrackedIssue ready, TrackedIssue candidate) {
+        properties.setMaxConcurrentIssues(3);
+        testRepo.setAutoStart(true);
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.BLOCKED)).thenReturn(List.of());
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.QUEUED))
+                .thenReturn(candidate.getStatus() == IssueStatus.QUEUED
+                        ? List.of(candidate) : List.of());
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.PENDING))
+                .thenReturn(candidate.getStatus() == IssueStatus.PENDING
+                        ? List.of(candidate) : List.of());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList()))
+                .thenAnswer(invocation -> invocation.<List<IssueStatus>>getArgument(1)
+                        .contains(IssueStatus.READY_TO_START) ? List.of(ready) : List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("issuebot-parent"), anyString()))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(), eq("agent-ready"), anyString()))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenReturn(List.of());
+        when(dependencyResolver.topologicalSort(anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 }

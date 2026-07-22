@@ -30,6 +30,7 @@ class WorkflowCheckpointTransactionManagerTest {
     @Autowired private WorkflowCheckpointTransactionManager checkpoints;
     @Autowired private WatchedRepoRepository repos;
     @Autowired private TrackedIssueRepository issues;
+    @Autowired private PlanningVersionRepository versions;
     @MockitoSpyBean private IterationRepository iterations;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
 
@@ -210,6 +211,37 @@ class WorkflowCheckpointTransactionManagerTest {
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
         assertThat(suspended.getCurrentPhase()).isNull();
         assertThat(suspended.getLastFailureReason()).isNull();
+    }
+
+    @Test
+    void globalPauseRacingAfterApprovalPreservesReadyReservation() {
+        Baseline baseline = seed();
+        TrackedIssue issue = issues.findById(baseline.issueId()).orElseThrow();
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 1, "approved spec", "approved plan", "CODEX", "gpt-5.6-sol", null);
+        approved.approve(java.time.LocalDateTime.now());
+        approved = versions.saveAndFlush(approved);
+        issue.setApprovedPlanningVersion(approved);
+        issue.setCurrentIteration(2);
+        issue.setCurrentPhase("IMPLEMENTATION");
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(false);
+        issue.setSuspensionReason("approved plan awaits operator start");
+        issue.setLastFailureReason("historical diagnostic");
+        issue.setStatus(IssueStatus.READY_TO_START);
+        issues.saveAndFlush(issue);
+
+        TrackedIssue suspended = checkpoints.suspendForGlobalPause(issue.getId());
+
+        assertThat(suspended.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(suspended.getApprovedPlanningVersion().getId()).isEqualTo(approved.getId());
+        assertThat(suspended.getCurrentIteration()).isEqualTo(2);
+        assertThat(suspended.getCurrentPhase()).isEqualTo("IMPLEMENTATION");
+        assertThat(suspended.getPlanConformanceAttempt()).isEqualTo(1);
+        assertThat(suspended.isPlanCorrectionPending()).isFalse();
+        assertThat(suspended.getSuspensionReason())
+                .isEqualTo("approved plan awaits operator start");
+        assertThat(suspended.getLastFailureReason()).isEqualTo("historical diagnostic");
     }
 
     private Baseline seed() {

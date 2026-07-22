@@ -93,6 +93,11 @@ public class WorkflowCheckpointTransactionManager {
     public TrackedIssue suspendForGlobalPause(Long issueId) {
         TrackedIssue issue = issues.findByIdForDispatch(issueId)
                 .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        // Approval owns a durable human gate. A racing cancellation must not rewrite any part of
+        // that checkpoint; the operator will explicitly start or release the reservation.
+        if (issue.getStatus() == IssueStatus.READY_TO_START) {
+            return issue;
+        }
         IssueStatus durableHumanGate = issue.getStatus();
         String phase = issue.getCurrentPhase();
         if ("IMPLEMENTATION".equalsIgnoreCase(phase) && issue.getCurrentIteration() > 0) {
