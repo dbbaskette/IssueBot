@@ -24,10 +24,11 @@ import java.util.Map;
 
 /**
  * The "Needs You" inbox (#91) — every checkpoint that blocks on the operator, grouped by type,
- * on one page: PR approvals, plan approvals, split proposals, and needs-human (FAILED/COOLDOWN)
- * issues. Deliberately read-mostly: plan approvals route to the issue's Plan Review card, while
- * PR and decomposition actions reuse their existing endpoints with {@code returnTo=inbox} so the
- * operator lands back here instead of on the originating page.
+ * on one page: PR approvals, plan approvals, ready-to-start reservations, split proposals, and
+ * needs-human (FAILED/COOLDOWN) issues. Deliberately read-mostly: plan approvals and ready
+ * reservations route to their issue controls, while PR and decomposition actions reuse their
+ * existing endpoints with {@code returnTo=inbox} so the operator lands back here instead of on
+ * the originating page.
  */
 @Controller
 public class InboxController {
@@ -58,6 +59,7 @@ public class InboxController {
                         @RequestHeader(value = "HX-Request", required = false) String hx) {
         List<TrackedIssue> approvals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL);
         List<TrackedIssue> planApprovals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL);
+        List<TrackedIssue> readyToStart = issueRepository.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START);
         List<TrackedIssue> splitProposals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_DECOMPOSITION);
         List<TrackedIssue> needsHuman = issueRepository.findByStatusInOrderByIdDesc(
                 List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN));
@@ -85,7 +87,8 @@ public class InboxController {
                     objectMapper, issue.getDecompositionProposal(), issue.getId()));
         }
 
-        int totalCount = approvals.size() + planApprovals.size() + splitProposals.size() + needsHuman.size();
+        int totalCount = approvals.size() + planApprovals.size() + readyToStart.size()
+                + splitProposals.size() + needsHuman.size();
 
         model.addAttribute("activePage", "inbox");
         model.addAttribute("contentTemplate", "inbox");
@@ -98,6 +101,8 @@ public class InboxController {
         model.addAttribute("planApprovals", planApprovals);
         model.addAttribute("planVersions", planVersions);
         model.addAttribute("planAges", planAges);
+
+        model.addAttribute("readyToStart", readyToStart);
 
         model.addAttribute("splitProposals", splitProposals);
         model.addAttribute("proposalTitles", proposalTitles);

@@ -163,12 +163,17 @@ class IssueControllerTest {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(9L);
         TrackedIssue issue = new TrackedIssue(repo, 1, "Something");
         issue.setId(41L);
         issue.setStatus(IssueStatus.PENDING);
+        TrackedIssue reservation = new TrackedIssue(repo, 41, "Ready implementation");
+        reservation.setId(1L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
         org.springframework.data.domain.Page<TrackedIssue> page = new org.springframework.data.domain.PageImpl<>(
                 List.of(issue), org.springframework.data.domain.PageRequest.of(1, IssueController.PAGE_SIZE), 60);
         when(issues.search(any(), any(), any(), any())).thenReturn(page);
+        when(issues.findByStatus(IssueStatus.READY_TO_START)).thenReturn(List.of(reservation));
         when(repos.findAll()).thenReturn(List.of());
 
         IssueController c = new IssueController(issues, repos,
@@ -197,7 +202,8 @@ class IssueControllerTest {
         java.util.Map<Long, IssueNextAction> nextActions =
                 (java.util.Map<Long, IssueNextAction>) model.getAttribute("nextActions");
         org.assertj.core.api.Assertions.assertThat(nextActions)
-                .containsEntry(41L, new IssueNextActionResolver().resolve(issue));
+                .containsEntry(41L, new IssueNextActionResolver().resolve(issue, reservation));
+        verify(issues).findByStatus(IssueStatus.READY_TO_START);
     }
 
     @Test
@@ -205,11 +211,16 @@ class IssueControllerTest {
         TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
-        TrackedIssue issue = new TrackedIssue(repo, 42, "Needs review");
+        repo.setId(9L);
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Queued issue");
         issue.setId(42L);
-        issue.setStatus(IssueStatus.FAILED);
+        issue.setStatus(IssueStatus.QUEUED);
+        TrackedIssue reservation = new TrackedIssue(repo, 41, "Ready implementation");
+        reservation.setId(1L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
         when(issues.search(any(), any(), any(), any()))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(issue)));
+        when(issues.findByStatus(IssueStatus.READY_TO_START)).thenReturn(List.of(reservation));
 
         IssueController c = newBulkController(issues, repos, mock(GitHubApiClient.class),
                 mock(IssueBotProperties.class), mock(EventService.class), mock(IssueWorkflowService.class));
@@ -221,21 +232,28 @@ class IssueControllerTest {
         java.util.Map<Long, IssueNextAction> nextActions =
                 (java.util.Map<Long, IssueNextAction>) model.getAttribute("nextActions");
         org.assertj.core.api.Assertions.assertThat(nextActions)
-                .containsEntry(42L, new IssueNextActionResolver().resolve(issue));
+                .containsEntry(42L, new IssueNextActionResolver().resolve(issue, reservation));
+        verify(issues).findByStatus(IssueStatus.READY_TO_START);
     }
 
     @Test
-    void detailAndLiveStatusExposeNextAction() {
-        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+    void detailAndLiveStatusExposeHeldNextActionFromOneReservationQueryPerRequest() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+        f.issue.getRepo().setId(9L);
+        TrackedIssue reservation = new TrackedIssue(f.issue.getRepo(), 41, "Ready implementation");
+        reservation.setId(7L);
+        reservation.setStatus(IssueStatus.READY_TO_START);
+        when(f.issues.findByStatus(IssueStatus.READY_TO_START)).thenReturn(List.of(reservation));
         org.springframework.ui.Model detailModel = new org.springframework.ui.ExtendedModelMap();
         org.springframework.ui.Model liveModel = new org.springframework.ui.ExtendedModelMap();
 
         f.controller.detail(detailModel, 1L, null, null, null);
         f.controller.liveStatus(liveModel, 1L);
 
-        IssueNextAction expected = new IssueNextActionResolver().resolve(f.issue);
+        IssueNextAction expected = new IssueNextActionResolver().resolve(f.issue, reservation);
         org.assertj.core.api.Assertions.assertThat(detailModel.getAttribute("nextAction")).isEqualTo(expected);
         org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("nextAction")).isEqualTo(expected);
+        verify(f.issues, times(2)).findByStatus(IssueStatus.READY_TO_START);
     }
 
     @Test

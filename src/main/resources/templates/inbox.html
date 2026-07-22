@@ -140,6 +140,36 @@
             </div>
         </div>
 
+        <!-- === READY TO START === -->
+        <div id="ready-to-start" class="panel mb-3">
+            <div class="panel-header">
+                <h3>Ready to Start <span class="badge" th:text="${#lists.size(readyToStart)}">0</span></h3>
+            </div>
+            <div class="panel-body">
+                <p class="text-muted text-sm" th:if="${#lists.isEmpty(readyToStart)}">Nothing here right now.</p>
+
+                <div th:each="issue : ${readyToStart}" class="glass-card mb-2" style="padding:1rem">
+                    <div class="flex-between mb-1" style="gap:0.75rem;flex-wrap:wrap">
+                        <div style="min-width:0;overflow-wrap:anywhere">
+                            <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
+                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                        </div>
+                        <span class="status status-ready_to_start">READY TO START</span>
+                    </div>
+
+                    <p class="text-sm text-muted mb-2" style="overflow-wrap:anywhere">
+                        Plan approved. Start implementation when ready or return it to the queue.
+                    </p>
+                    <div class="form-actions flex gap-1" style="flex-wrap:wrap">
+                        <a class="btn btn-primary btn-sm"
+                           th:href="@{'/issues/' + ${issue.id} + '#ready-to-start'}">
+                            <i class="ti ti-player-play" aria-hidden="true"></i> Open start controls
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- === SPLIT PROPOSALS === -->
         <div id="split-proposals" class="panel mb-3">
             <div class="panel-header">

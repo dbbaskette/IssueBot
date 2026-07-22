@@ -25,6 +25,7 @@ import static com.dbbaskette.issuebot.model.IssueStatus.FAILED;
 import static com.dbbaskette.issuebot.model.IssueStatus.IN_PROGRESS;
 import static com.dbbaskette.issuebot.model.IssueStatus.PENDING;
 import static com.dbbaskette.issuebot.model.IssueStatus.QUEUED;
+import static com.dbbaskette.issuebot.model.IssueStatus.READY_TO_START;
 
 @Component
 public class DashboardControlRoomAssembler {
@@ -32,15 +33,17 @@ public class DashboardControlRoomAssembler {
     private static final int CARD_LIMIT = 5;
 
     private static final List<IssueStatus> NEEDS_DECISION_STATUSES = List.of(
-            AWAITING_APPROVAL, AWAITING_PLAN_APPROVAL, AWAITING_DECOMPOSITION, FAILED, COOLDOWN);
+            AWAITING_APPROVAL, AWAITING_PLAN_APPROVAL, READY_TO_START,
+            AWAITING_DECOMPOSITION, FAILED, COOLDOWN);
     private static final List<IssueStatus> UP_NEXT_STATUSES = List.of(QUEUED, PENDING, BLOCKED);
 
     private static final Map<IssueStatus, Integer> NEEDS_DECISION_RANK = Map.of(
             AWAITING_APPROVAL, 0,
             AWAITING_PLAN_APPROVAL, 1,
-            AWAITING_DECOMPOSITION, 2,
-            FAILED, 3,
-            COOLDOWN, 4);
+            READY_TO_START, 2,
+            AWAITING_DECOMPOSITION, 3,
+            FAILED, 4,
+            COOLDOWN, 5);
     private static final Map<IssueStatus, Integer> UP_NEXT_RANK = Map.of(
             QUEUED, 0,
             PENDING, 1,
@@ -70,32 +73,41 @@ public class DashboardControlRoomAssembler {
         List<TrackedIssue> needsDecision = issueRepository.findByStatusIn(NEEDS_DECISION_STATUSES);
         List<TrackedIssue> processing = issueRepository.findByStatus(IN_PROGRESS);
         List<TrackedIssue> upNext = issueRepository.findByStatusIn(UP_NEXT_STATUSES);
+        Map<Long, TrackedIssue> readyReservations = needsDecision.stream()
+                .filter(issue -> issue.getStatus() == READY_TO_START)
+                .filter(issue -> issue.getRepo() != null && issue.getRepo().getId() != null)
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        issue -> issue.getRepo().getId(), issue -> issue, (left, right) -> left));
 
         return new ControlRoom(
                 lane("needs-decision", "Intervention", "Needs your decision",
                         "No decisions need you right now.", "/inbox", needsDecision,
-                        rankedComparator(NEEDS_DECISION_RANK), false, now),
+                        rankedComparator(NEEDS_DECISION_RANK), false, now, readyReservations),
                 lane("processing", "Execution", "Currently processing",
                         "IssueBot is not processing an issue.", "/issues?status=IN_PROGRESS", processing,
-                        processingComparator(), true, now),
+                        processingComparator(), true, now, readyReservations),
                 lane("up-next", "Queue", "Up next",
                         "No issues are waiting to run.", "/issues", upNext,
-                        rankedComparator(UP_NEXT_RANK), false, now));
+                        rankedComparator(UP_NEXT_RANK), false, now, readyReservations));
     }
 
     private Lane lane(String key, String eyebrow, String title, String emptyMessage,
                       String viewAllHref, List<TrackedIssue> issues,
-                      Comparator<TrackedIssue> order, boolean processing, LocalDateTime now) {
+                      Comparator<TrackedIssue> order, boolean processing, LocalDateTime now,
+                      Map<Long, TrackedIssue> readyReservations) {
         List<Card> cards = issues.stream()
                 .sorted(order)
                 .limit(CARD_LIMIT)
-                .map(issue -> card(issue, processing, now))
+                .map(issue -> card(issue, processing, now, readyReservations))
                 .toList();
         return new Lane(key, eyebrow, title, emptyMessage, viewAllHref, issues.size(), cards);
     }
 
-    private Card card(TrackedIssue issue, boolean processing, LocalDateTime now) {
-        return new Card(issue, nextActionResolver.resolve(issue), repositoryLabel(issue),
+    private Card card(TrackedIssue issue, boolean processing, LocalDateTime now,
+                      Map<Long, TrackedIssue> readyReservations) {
+        Long repositoryId = issue.getRepo() == null ? null : issue.getRepo().getId();
+        TrackedIssue reservation = repositoryId == null ? null : readyReservations.get(repositoryId);
+        return new Card(issue, nextActionResolver.resolve(issue, reservation), repositoryLabel(issue),
                 issueLabel(issue), stateLabel(issue, processing),
                 processing ? runDetails(issue, now) : null);
     }

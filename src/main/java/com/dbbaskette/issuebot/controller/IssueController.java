@@ -1057,7 +1057,8 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
-        model.addAttribute("nextAction", nextActionResolver.resolve(issue));
+        model.addAttribute("nextAction", nextActionResolver.resolve(
+                issue, readyReservationFor(issue, readyReservationsByRepository())));
         model.addAttribute("latestFailureDiagnostic", failureDiagnosticService == null
                 ? null : failureDiagnosticService.latestFor(issue).orElse(null));
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
@@ -1104,10 +1105,26 @@ public class IssueController {
     }
 
     private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {
+        Map<Long, TrackedIssue> readyReservations = readyReservationsByRepository();
         return issues.stream()
                 .filter(issue -> issue.getId() != null)
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
-                        TrackedIssue::getId, nextActionResolver::resolve));
+                        TrackedIssue::getId,
+                        issue -> nextActionResolver.resolve(
+                                issue, readyReservationFor(issue, readyReservations))));
+    }
+
+    private Map<Long, TrackedIssue> readyReservationsByRepository() {
+        return issueRepository.findByStatus(IssueStatus.READY_TO_START).stream()
+                .filter(issue -> issue.getRepo() != null && issue.getRepo().getId() != null)
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        issue -> issue.getRepo().getId(), issue -> issue, (left, right) -> left));
+    }
+
+    private static TrackedIssue readyReservationFor(
+            TrackedIssue issue, Map<Long, TrackedIssue> readyReservations) {
+        Long repositoryId = issue.getRepo() == null ? null : issue.getRepo().getId();
+        return repositoryId == null ? null : readyReservations.get(repositoryId);
     }
 
     private PlanReviewSelection populatePlanReviewModel(Model model, TrackedIssue issue,
