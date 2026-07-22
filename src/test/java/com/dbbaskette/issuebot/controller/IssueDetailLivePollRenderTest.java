@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
@@ -25,6 +26,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -68,6 +70,11 @@ class IssueDetailLivePollRenderTest {
     }
 
     private String render(TrackedIssue issue, String fragment, int phaseIndex, boolean phaseCompleted) {
+        return render(issue, fragment, phaseIndex, phaseCompleted, context -> { });
+    }
+
+    private String render(TrackedIssue issue, String fragment, int phaseIndex, boolean phaseCompleted,
+                          Consumer<WebContext> customize) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", null);
@@ -86,6 +93,14 @@ class IssueDetailLivePollRenderTest {
         context.setVariable("approvalPrUrl",
                 "https://github.com/acme/widgets/pull/" + issue.getPrNumber());
         context.setVariable("nextAction", new IssueNextActionResolver().resolve(issue));
+        context.setVariable("showPlanGuidance", false);
+        context.setVariable("processingPaused", false);
+        context.setVariable("planningVersions", List.of());
+        context.setVariable("selectedPlanningVersion", null);
+        context.setVariable("currentPlanningVersion", null);
+        context.setVariable("selectedPlanIsHistorical", false);
+        context.setVariable("planReviewAttempts", List.of());
+        customize.accept(context);
 
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -201,6 +216,63 @@ class IssueDetailLivePollRenderTest {
         assertThat(occurrences(terminalPoll, "id=\"approval-decision-region\""))
                 .isEqualTo(1);
         assertThat(occurrences(terminalPoll, "id=\"issue-approval-modal-region\""))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void runningToFailedOrCooldownPollUpdatesRecoveryCtaAndTargetTogether() {
+        for (IssueStatus terminalStatus : List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)) {
+            TrackedIssue issue = inProgressIssue(36L, 36, "IMPLEMENTATION");
+            String initiallyRunning = render(issue, "content", 1, false);
+
+            issue.setStatus(terminalStatus);
+            issue.setCurrentPhase(null);
+            String terminalPoll = render(issue, "live-status-poll", -1, false);
+
+            assertThat(initiallyRunning)
+                    .contains("id=\"recovery\"")
+                    .doesNotContain("action=\"/issues/36/retry\"");
+            assertThat(terminalPoll)
+                    .contains("id=\"next-action-callout\"")
+                    .contains("href=\"/issues/36#recovery\"")
+                    .contains("id=\"recovery\" hx-swap-oob=\"true\"")
+                    .contains("action=\"/issues/36/retry\" method=\"post\"")
+                    .contains("Guidance for the next attempt");
+            assertThat(occurrences(terminalPoll, "id=\"recovery\""))
+                    .as(terminalStatus + " recovery target count")
+                    .isEqualTo(1);
+        }
+    }
+
+    @Test
+    void runningToAwaitingPlanApprovalPollUpdatesPlanCtaAndReviewControlsTogether() {
+        TrackedIssue issue = inProgressIssue(37L, 37, "PLANNING");
+        String initiallyRunning = render(issue, "content", 1, false);
+
+        issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        issue.setCurrentPhase(null);
+        PlanningVersion pending = PlanningVersion.pending(
+                issue, 1, "# Design", "# Implementation", "CODEX", "gpt-5.6", null);
+        String approvalPoll = render(issue, "live-status-poll", -1, false, context -> {
+            context.setVariable("planningVersions", List.of(pending));
+            context.setVariable("selectedPlanningVersion", pending);
+            context.setVariable("currentPlanningVersion", pending);
+            context.setVariable("selectedPlanIsHistorical", false);
+            context.setVariable("selectedDesignSpecHtml", "<h1>Design</h1>");
+            context.setVariable("selectedImplementationPlanHtml", "<h1>Implementation</h1>");
+        });
+
+        assertThat(initiallyRunning)
+                .contains("id=\"plan-review\"")
+                .doesNotContain("class=\"plan-review-actions\"");
+        assertThat(approvalPoll)
+                .contains("id=\"next-action-callout\"")
+                .contains("href=\"/issues/37#plan-review\"")
+                .contains("id=\"plan-review\" hx-swap-oob=\"true\"")
+                .contains("class=\"plan-review-actions\"")
+                .contains("action=\"/issues/37/plan/approve\" method=\"post\"")
+                .contains("action=\"/issues/37/plan/revise\" method=\"post\"");
+        assertThat(occurrences(approvalPoll, "id=\"plan-review\""))
                 .isEqualTo(1);
     }
 

@@ -139,6 +139,19 @@ class DashboardControlRoomRenderTest {
                 "hx-target=\"this\"");
     }
 
+    @Test
+    void laneSectionIsProgrammaticallyDescribedByItsTotal() {
+        String html = render(emptyControlRoom());
+
+        assertThat(html).contains(
+                "aria-labelledby=\"control-lane-needs-decision\" aria-describedby=\"control-lane-needs-decision-count\"",
+                "id=\"control-lane-needs-decision-count\"",
+                "aria-labelledby=\"control-lane-processing\" aria-describedby=\"control-lane-processing-count\"",
+                "id=\"control-lane-processing-count\"",
+                "aria-labelledby=\"control-lane-up-next\" aria-describedby=\"control-lane-up-next-count\"",
+                "id=\"control-lane-up-next-count\"");
+    }
+
     private String render(ControlRoom controlRoom) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("completed", 1L);

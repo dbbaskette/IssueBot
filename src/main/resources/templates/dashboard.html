@@ -188,13 +188,13 @@
 
 <section th:fragment="control-room-lane(lane)" class="control-lane"
          th:classappend="${' control-lane--' + lane.key()}"
-         th:attr="aria-labelledby=${'control-lane-' + lane.key()}">
+         th:attr="aria-labelledby=${'control-lane-' + lane.key()},aria-describedby=${'control-lane-' + lane.key() + '-count'}">
     <header class="control-lane-heading">
         <div>
             <span class="eyebrow" th:text="${lane.eyebrow()}">Lane</span>
             <h4 th:id="${'control-lane-' + lane.key()}" th:text="${lane.title()}">Lane title</h4>
         </div>
-        <span class="control-lane-count" th:text="${lane.total()}"
+        <span class="control-lane-count" th:id="${'control-lane-' + lane.key() + '-count'}" th:text="${lane.total()}"
               th:attr="aria-label=${lane.total() + ' matching issues'}">0</span>
     </header>
 

@@ -1,7 +1,7 @@
 # Next Actions and Operator Control Room Design
 
-**Date:** 2026-07-22  
-**GitHub issues:** #130, #138  
+**Date:** 2026-07-22
+**GitHub issues:** #130, #138
 **Status:** Approved design
 
 ## Purpose
