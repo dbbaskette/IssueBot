@@ -161,9 +161,15 @@
                    onclick="event.stopPropagation()"
                    th:attr="aria-label='Select issue #' + ${issue.issueNumber}">
         </td>
-        <td th:text="${issue.repo.fullName()}">owner/repo</td>
-        <td th:text="${'#' + issue.issueNumber}">#1</td>
-        <td th:text="${issue.issueTitle}">Issue title</td>
+        <td class="queue-repo-cell" th:text="${issue.repo.fullName()}">owner/repo</td>
+        <td class="queue-number-cell" th:text="${'#' + issue.issueNumber}">#1</td>
+        <td class="queue-title-cell">
+            <span class="queue-title" th:text="${issue.issueTitle}">Issue title</span>
+            <span class="queue-next-action" th:if="${nextActions != null and nextActions[issue.id] != null}">
+                <strong>Next:</strong>
+                <span th:text="${nextActions[issue.id].summary()}">Review the issue.</span>
+            </span>
+        </td>
         <td class="issue-status-cell">
             <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
                   th:text="${humanize.status(issue.status)}">Pending</span>
@@ -171,7 +177,7 @@
                   th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN') and issue.lastFailureReason != null}"
                   th:text="${issue.lastFailureReason}">Failure reason</span>
         </td>
-        <td class="text-sm">
+        <td class="text-sm queue-phase-cell">
             <span th:if="${issue.status.name() != 'BLOCKED' or issue.blockedByIssues == null}"
                   th:text="${issue.currentPhase != null ? humanize.phase(issue.currentPhase) : '—'}">—</span>
             <span th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}">
@@ -183,9 +189,9 @@
                    th:text="${(iter.first ? '' : ', ') + '#' + num}">#5</a>
             </span>
         </td>
-        <td th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
-        <td class="text-sm text-muted" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
-        <td>
+        <td class="queue-iteration-cell" th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
+        <td class="text-sm text-muted queue-updated-cell" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
+        <td class="queue-actions-cell">
             <button type="button"
                     th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                     class="btn btn-primary btn-sm"

@@ -21,6 +21,8 @@ import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
+import com.dbbaskette.issuebot.service.ui.IssueNextAction;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
@@ -86,6 +88,7 @@ public class IssueController {
     private final IssueDispatchService dispatchService;
     private final PlanningVersionRepository planningVersionRepository;
     private final ApprovalCardAssembler approvalCardAssembler;
+    private final IssueNextActionResolver nextActionResolver;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -113,7 +116,8 @@ public class IssueController {
                             MarkdownRenderer markdownRenderer,
                             IssueDispatchService dispatchService,
                             PlanningVersionRepository planningVersionRepository,
-                            ApprovalCardAssembler approvalCardAssembler) {
+                            ApprovalCardAssembler approvalCardAssembler,
+                            IssueNextActionResolver nextActionResolver) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -135,6 +139,7 @@ public class IssueController {
         this.dispatchService = dispatchService;
         this.planningVersionRepository = planningVersionRepository;
         this.approvalCardAssembler = approvalCardAssembler;
+        this.nextActionResolver = nextActionResolver;
     }
 
     @GetMapping
@@ -148,7 +153,9 @@ public class IssueController {
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issues");
-        model.addAttribute("issues", issuePage.getContent());
+        List<TrackedIssue> pageIssues = issuePage.getContent();
+        model.addAttribute("issues", pageIssues);
+        model.addAttribute("nextActions", resolveNextActions(pageIssues));
         model.addAttribute("repos", repoRepository.findAll());
         model.addAttribute("statuses", IssueStatus.values());
         model.addAttribute("selectedStatus", status);
@@ -176,7 +183,9 @@ public class IssueController {
                         @RequestParam(required = false) Long repoId,
                         @RequestParam(required = false) String q,
                         @RequestParam(defaultValue = "0") int page) {
-        model.addAttribute("issues", searchIssues(status, repoId, q, page).getContent());
+        List<TrackedIssue> pageIssues = searchIssues(status, repoId, q, page).getContent();
+        model.addAttribute("issues", pageIssues);
+        model.addAttribute("nextActions", resolveNextActions(pageIssues));
         return "issues :: table-rows";
     }
 
@@ -995,6 +1004,7 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        model.addAttribute("nextAction", nextActionResolver.resolve(issue));
         model.addAttribute("latestFailureDiagnostic", failureDiagnosticService == null
                 ? null : failureDiagnosticService.latestFor(issue).orElse(null));
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
@@ -1038,6 +1048,13 @@ public class IssueController {
                 model.addAttribute("decompositionProposal", proposal);
             }
         }
+    }
+
+    private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {
+        return issues.stream()
+                .filter(issue -> issue.getId() != null)
+                .collect(java.util.stream.Collectors.toUnmodifiableMap(
+                        TrackedIssue::getId, nextActionResolver::resolve));
     }
 
     private PlanReviewSelection populatePlanReviewModel(Model model, TrackedIssue issue,

@@ -77,6 +77,20 @@
                 </div>
             </div>
 
+            <section th:fragment="next-action-callout(oob)" id="next-action-callout"
+                     th:if="${nextAction != null}"
+                     class="next-action-callout mb-3"
+                     th:classappend="${' next-action--' + nextAction.tone().name().toLowerCase()}"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}"
+                     aria-labelledby="next-action-heading">
+                <div>
+                    <span class="eyebrow">Next action</span>
+                    <p id="next-action-heading" th:text="${nextAction.summary()}">Review the current issue state.</p>
+                </div>
+                <a th:if="${nextAction.hasAction()}" class="btn btn-outline btn-sm next-action-cta"
+                   th:href="${nextAction.href()}" th:text="${nextAction.ctaLabel()}">View issue</a>
+            </section>
+
             <div th:if="${issue.status.name() == 'PENDING' and issue.suspensionReason != null}"
                  class="alert alert-info" role="status">
                 <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
@@ -1164,6 +1178,7 @@
     <div th:replace="~{issue-detail :: timeline-panel(true)}"></div>
     <div th:replace="~{issue-detail :: approval-decision-region(true)}"></div>
     <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
+    <div th:replace="~{issue-detail :: next-action-callout(true)}"></div>
 </th:block>
 </body>
 </html>

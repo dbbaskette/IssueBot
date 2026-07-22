@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.ReviewScore;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -84,6 +85,7 @@ class IssueDetailLivePollRenderTest {
         context.setVariable("approvalCiStatus", "passed");
         context.setVariable("approvalPrUrl",
                 "https://github.com/acme/widgets/pull/" + issue.getPrNumber());
+        context.setVariable("nextAction", new IssueNextActionResolver().resolve(issue));
 
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -159,6 +161,8 @@ class IssueDetailLivePollRenderTest {
         assertThat(html).contains("id=\"status-actions\"");  // OOB: status header
         assertThat(html).contains("id=\"goal-budget\"");     // OOB: iteration/review counters
         assertThat(html).contains("hx-swap-oob=\"true\"");   // → updated in place on each poll
+        assertThat(html).contains("id=\"next-action-callout\"")
+                .contains("hx-swap-oob=\"true\"");
     }
 
     @Test
@@ -240,6 +244,7 @@ class IssueDetailLivePollRenderTest {
         ctx.setVariable("modelCatalog", List.of());
         ctx.setVariable("humanize", new HumanizeHelper());
         ctx.setVariable("timeline", timeline);
+        ctx.setVariable("nextAction", new IssueNextActionResolver().resolve(issue));
 
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("live-status-poll"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);

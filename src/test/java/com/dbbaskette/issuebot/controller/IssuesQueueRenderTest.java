@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
+import com.dbbaskette.issuebot.service.ui.IssueNextAction;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -20,6 +22,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 import java.io.StringWriter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,6 +63,7 @@ class IssuesQueueRenderTest {
         // Mirrors what UiModelAdvice publishes on every real request.
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("processingPaused", false);
+        context.setVariable("nextActions", resolveNextActions(issues));
 
         TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -73,11 +77,39 @@ class IssuesQueueRenderTest {
         context.setVariable("issues", issues);
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("processingPaused", paused);
+        context.setVariable("nextActions", resolveNextActions(issues));
         TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {
+        IssueNextActionResolver resolver = new IssueNextActionResolver();
+        return issues.stream().collect(java.util.stream.Collectors.toMap(
+                TrackedIssue::getId, resolver::resolve));
+    }
+
+    @Test
+    void titleCellShowsNextActionSummaryForPendingFailedAndCompletedIssues() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue pending = new TrackedIssue(repo, 46, "Pending issue");
+        pending.setId(46L);
+        pending.setStatus(IssueStatus.PENDING);
+        TrackedIssue failed = new TrackedIssue(repo, 47, "Failed issue");
+        failed.setId(47L);
+        failed.setStatus(IssueStatus.FAILED);
+        TrackedIssue completed = new TrackedIssue(repo, 48, "Completed issue");
+        completed.setId(48L);
+        completed.setStatus(IssueStatus.COMPLETED);
+
+        String html = renderTableRows(List.of(pending, failed, completed));
+
+        assertThat(html).contains("Next:")
+                .contains("Ready to start manually or enter the processing queue.")
+                .contains("Review the failure, add guidance, or retry.")
+                .contains("No action needed — completed.");
     }
 
     @Test

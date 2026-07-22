@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
+import com.dbbaskette.issuebot.service.ui.IssueNextAction;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -20,6 +22,7 @@ import org.thymeleaf.web.servlet.JakartaServletWebApplication;
 import java.io.StringWriter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,12 +71,19 @@ class IssuesQueueUpgradeRenderTest {
         context.setVariable("totalPages", totalPages);
         context.setVariable("hasPrevious", hasPrevious);
         context.setVariable("hasNext", hasNext);
+        context.setVariable("nextActions", resolveNextActions(issues));
 
         TemplateSpec spec = new TemplateSpec("issues", Set.of("content"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {
+        IssueNextActionResolver resolver = new IssueNextActionResolver();
+        return issues.stream().collect(java.util.stream.Collectors.toMap(
+                TrackedIssue::getId, resolver::resolve));
     }
 
     private TrackedIssue issue(int number, String title, IssueStatus status) {
@@ -133,6 +143,9 @@ class IssuesQueueUpgradeRenderTest {
         assertThat(html).contains("class=\"bulk-select\"");
         assertThat(html).contains("name=\"ids\"");
         assertThat(html).contains("class=\"panel queue-table-panel\"");
+        assertThat(html).contains("class=\"queue-title-cell\"")
+                .contains("Next:")
+                .contains("Queued and ready when processing capacity is available.");
     }
 
     @Test
