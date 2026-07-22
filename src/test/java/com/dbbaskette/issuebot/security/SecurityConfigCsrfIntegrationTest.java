@@ -5,12 +5,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -88,6 +92,31 @@ class SecurityConfigCsrfIntegrationTest {
                     .contains("meta[name=\"_csrf\"]", "meta[name=\"_csrf_header\"]")
                     .contains("evt.detail.headers[header] = token");
         }
+    }
+
+    @Test
+    void htmxStylePostWithPublishedCsrfHeaderReachesController() throws Exception {
+        MvcResult page = mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andReturn();
+        MockHttpSession session = (MockHttpSession) page.getRequest().getSession(false);
+        String html = page.getResponse().getContentAsString();
+        String token = metaContent(html, "_csrf");
+        String header = metaContent(html, "_csrf_header");
+
+        assertThat(session).isNotNull();
+        mockMvc.perform(post("/issues/999999/start")
+                        .session(session)
+                        .header("HX-Request", "true")
+                        .header(header, token))
+                .andExpect(status().isNotFound());
+    }
+
+    private static String metaContent(String html, String name) {
+        Matcher matcher = Pattern.compile("<meta name=\\\"" + Pattern.quote(name)
+                + "\\\" content=\\\"([^\\\"]+)\\\">").matcher(html);
+        assertThat(matcher.find()).as("meta[%s] is rendered", name).isTrue();
+        return matcher.group(1);
     }
 
     private static String sign(byte[] body) throws Exception {
