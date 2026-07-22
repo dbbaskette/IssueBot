@@ -59,10 +59,7 @@ public class PlanFirstTransactionManager {
         this.repos = repos;
     }
 
-    /**
-     * Compatibility constructor for generation and revision fixtures. Plan approval requires the
-     * repository-aware constructor so its ordering checks can lock the repository first.
-     */
+    /** Compatibility constructor for focused fixtures; mutation methods deliberately fail closed. */
     public PlanFirstTransactionManager(TrackedIssueRepository issues,
                                        PlanningVersionRepository versions) {
         this(issues, versions, null);
@@ -231,20 +228,29 @@ public class PlanFirstTransactionManager {
     }
 
     private TrackedIssue requireIssueForUpdate(Long issueId) {
+        requireRepositoryLocking("plan lifecycle mutations");
+        Long repoId = issues.findRepoIdByIssueId(issueId)
+                .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
+        repos.findByIdForUpdate(repoId)
+                .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
         return issues.findByIdForPlanning(issueId)
                 .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
     }
 
     private List<TrackedIssue> lockRepositoryIssuesForApproval(Long issueId) {
-        if (repos == null) {
-            throw new IllegalStateException(
-                    "Repository locking is required for plan approval");
-        }
+        requireRepositoryLocking("plan approval");
         Long repoId = issues.findRepoIdByIssueId(issueId)
                 .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
         repos.findByIdForUpdate(repoId)
                 .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
         return issues.findByRepoIdForUpdateOrderByIssueNumber(repoId);
+    }
+
+    private void requireRepositoryLocking(String mutation) {
+        if (repos == null) {
+            throw new IllegalStateException(
+                    "Repository locking is required for " + mutation);
+        }
     }
 
     private PlanningVersion requireCurrentPending(TrackedIssue issue) {

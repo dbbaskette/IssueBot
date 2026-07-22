@@ -82,7 +82,11 @@ public class PlanFirstService {
         this.cancellations = cancellations;
     }
 
-    /** Convenience constructor for focused unit/integration fixtures; Spring uses the proxy constructor above. */
+    /**
+     * Source-compatibility constructor for read-only focused fixtures. Lifecycle mutations through
+     * its repository-unaware transaction manager deliberately fail closed; Spring uses the
+     * repository-aware proxied constructor above.
+     */
     PlanFirstService(ClaudeCodeService agent,
                      GitHubApiClient gitHub,
                      TrackedIssueRepository issues,

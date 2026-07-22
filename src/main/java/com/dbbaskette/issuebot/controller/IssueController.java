@@ -50,8 +50,10 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BinaryOperator;
 import java.util.function.Function;
 
 @Controller
@@ -70,6 +72,11 @@ public class IssueController {
      * unbounded. Over the cap: flash an error, process nothing.
      */
     static final int MAX_BULK_IDS = 200;
+
+    private static final Comparator<TrackedIssue> RESERVATION_OWNER_ORDER =
+            Comparator.comparingInt(TrackedIssue::getIssueNumber)
+                    .thenComparing(TrackedIssue::getId,
+                            Comparator.nullsLast(Comparator.naturalOrder()));
 
     private final TrackedIssueRepository issueRepository;
     private final WatchedRepoRepository repoRepository;
@@ -851,6 +858,7 @@ public class IssueController {
             log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
             if (isReservationOrderingFailure(e.getMessage())) {
                 redirectAttributes.addFlashAttribute("error", e.getMessage());
+                redirectAttributes.addFlashAttribute("planError", e.getMessage());
                 return planFirstRedirect(id);
             }
             if (isStalePlanApproval(e.getMessage())) {
@@ -1165,7 +1173,8 @@ public class IssueController {
         return issueRepository.findByStatus(IssueStatus.READY_TO_START).stream()
                 .filter(issue -> issue.getRepo() != null && issue.getRepo().getId() != null)
                 .collect(java.util.stream.Collectors.toUnmodifiableMap(
-                        issue -> issue.getRepo().getId(), issue -> issue, (left, right) -> left));
+                        issue -> issue.getRepo().getId(), issue -> issue,
+                        BinaryOperator.minBy(RESERVATION_OWNER_ORDER)));
     }
 
     private static TrackedIssue readyReservationFor(

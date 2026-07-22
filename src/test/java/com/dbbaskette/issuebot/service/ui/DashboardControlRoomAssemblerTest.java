@@ -178,6 +178,32 @@ class DashboardControlRoomAssemblerTest {
     }
 
     @Test
+    void upNextUsesLowestIssueNumberReservationOwnerRegardlessOfInputOrder() {
+        TrackedIssue owner = issue(1410L, READY_TO_START, "Reservation owner");
+        owner.setIssueNumber(141);
+        TrackedIssue duplicate = issue(1430L, READY_TO_START, "Stale duplicate reservation");
+        duplicate.setIssueNumber(143);
+        TrackedIssue queued = issue(1440L, QUEUED, "Queued issue");
+        queued.setIssueNumber(144);
+        when(issueRepository.findByStatusIn(List.of(AWAITING_APPROVAL, AWAITING_PLAN_APPROVAL,
+                READY_TO_START, AWAITING_DECOMPOSITION, FAILED, COOLDOWN)))
+                .thenReturn(List.of(duplicate, owner), List.of(owner, duplicate));
+        when(issueRepository.findByStatus(IN_PROGRESS)).thenReturn(List.of());
+        when(issueRepository.findByStatusIn(List.of(QUEUED, PENDING, BLOCKED)))
+                .thenReturn(List.of(queued));
+
+        for (int run = 0; run < 2; run++) {
+            ControlRoom room = assembler.assemble(NOW);
+
+            assertThat(room.upNext().cards().getFirst().nextAction())
+                    .isEqualTo(new IssueNextAction(
+                            "Waiting for issue #141 to start or release the repository slot.",
+                            "Open issue #141", "/issues/1410#ready-to-start",
+                            IssueNextAction.Tone.WAITING, false));
+        }
+    }
+
+    @Test
     void limitsEachLaneToFiveWhilePreservingTotalAndHasMore() {
         List<TrackedIssue> queued = List.of(
                 issue(7L, QUEUED, "Seven"), issue(2L, QUEUED, "Two"),

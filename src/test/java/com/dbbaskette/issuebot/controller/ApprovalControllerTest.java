@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.approval.ApprovalDecisionService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -38,9 +39,21 @@ class ApprovalControllerTest {
                                                   EventService eventService, IssuePollingService pollingService,
                                                   NotificationRepository notifications) {
         ApprovalDecisionService decisions =
-                new ApprovalDecisionService(issues, iterationManager, gitHubApi, eventService);
+                repositoryLockedDecisions(issues, iterationManager, gitHubApi, eventService);
         return new ApprovalController(issues, decisions, pollingService,
                 notifications, new ApprovalCardAssembler(iterations, gitHubApi));
+    }
+
+    private static ApprovalDecisionService repositoryLockedDecisions(
+            TrackedIssueRepository issues, IterationManager iterationManager,
+            GitHubApiClient gitHubApi, EventService eventService) {
+        WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
+        WatchedRepo locked = new WatchedRepo("acme", "widgets");
+        locked.setId(1L);
+        when(issues.findRepoIdByIssueId(anyLong())).thenReturn(java.util.Optional.of(1L));
+        when(repos.findByIdForUpdate(1L)).thenReturn(java.util.Optional.of(locked));
+        return new ApprovalDecisionService(
+                issues, iterationManager, gitHubApi, eventService, repos);
     }
 
     private static ApprovalController controller(TrackedIssueRepository issues,

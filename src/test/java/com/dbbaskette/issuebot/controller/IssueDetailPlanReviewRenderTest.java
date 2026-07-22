@@ -244,6 +244,24 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void reservationOrderingFailureRendersExactInlineMessageAtDeepPlanAnchor() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion pending = pending(issue, 3, "# Design", "# Plan", null);
+        String message = "Issue #141 must finish before issue #143 can reserve this repository.";
+        WebContext context = context(issue, List.of(pending), pending, pending, List.of());
+        context.setVariable("planError", message);
+
+        String html = render(context, "plan-review-region");
+
+        assertThat(html)
+                .contains("id=\"plan-first\"")
+                .contains("id=\"plan-error\"")
+                .contains(message);
+        assertThat(html.indexOf("id=\"plan-first\""))
+                .isLessThan(html.indexOf("id=\"plan-error\""));
+    }
+
+    @Test
     void historicalVersionIsReadOnlyAndLinksBackToCurrent() {
         TrackedIssue issue = issueAwaitingApproval();
         PlanningVersion v3Pending = pending(issue, 3, "# Current design", "# Current plan", null);

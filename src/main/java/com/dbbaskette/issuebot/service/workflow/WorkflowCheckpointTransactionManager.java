@@ -7,7 +7,9 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,13 +26,24 @@ public class WorkflowCheckpointTransactionManager {
     private final TrackedIssueRepository issues;
     private final IterationRepository iterations;
     private final IssueGuidanceRepository guidance;
+    private final WatchedRepoRepository repos;
 
+    @Autowired
     public WorkflowCheckpointTransactionManager(TrackedIssueRepository issues,
                                                 IterationRepository iterations,
-                                                IssueGuidanceRepository guidance) {
+                                                IssueGuidanceRepository guidance,
+                                                WatchedRepoRepository repos) {
         this.issues = issues;
         this.iterations = iterations;
         this.guidance = guidance;
+        this.repos = repos;
+    }
+
+    /** Compatibility constructor for focused fixtures; mutation methods deliberately fail closed. */
+    public WorkflowCheckpointTransactionManager(TrackedIssueRepository issues,
+                                                IterationRepository iterations,
+                                                IssueGuidanceRepository guidance) {
+        this(issues, iterations, guidance, null);
     }
 
     /**
@@ -40,8 +53,7 @@ public class WorkflowCheckpointTransactionManager {
     @Transactional
     public ImplementationContext prepareImplementationContext(
             Long issueId, Long iterationId, String baseContext) {
-        TrackedIssue issue = issues.findByIdForDispatch(issueId)
-                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        TrackedIssue issue = requireIssueForUpdate(issueId);
         Iteration iteration = iterations.findByIdForUpdate(iterationId)
                 .orElseThrow(() -> new IllegalStateException("Iteration no longer exists"));
         requireSameIssue(issue, iteration);
@@ -67,8 +79,7 @@ public class WorkflowCheckpointTransactionManager {
         if (result == null || !result.isSuccess()) {
             throw new IllegalArgumentException("Only a successful implementation can be checkpointed");
         }
-        TrackedIssue issue = issues.findByIdForDispatch(issueId)
-                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        TrackedIssue issue = requireIssueForUpdate(issueId);
         Iteration iteration = iterations.findByIdForUpdate(iterationId)
                 .orElseThrow(() -> new IllegalStateException("Iteration no longer exists"));
         requireSameIssue(issue, iteration);
@@ -91,8 +102,7 @@ public class WorkflowCheckpointTransactionManager {
      */
     @Transactional
     public TrackedIssue suspendForGlobalPause(Long issueId) {
-        TrackedIssue issue = issues.findByIdForDispatch(issueId)
-                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        TrackedIssue issue = requireIssueForUpdate(issueId);
         // Approval owns a durable human gate. A racing cancellation must not rewrite any part of
         // that checkpoint; the operator will explicitly start or release the reservation.
         if (issue.getStatus() == IssueStatus.READY_TO_START) {
@@ -129,13 +139,25 @@ public class WorkflowCheckpointTransactionManager {
 
     @Transactional
     public TrackedIssue cancelForOperator(Long issueId) {
-        TrackedIssue issue = issues.findByIdForDispatch(issueId)
-                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        TrackedIssue issue = requireIssueForUpdate(issueId);
         issue.setStatus(com.dbbaskette.issuebot.model.IssueStatus.FAILED);
         issue.setCurrentPhase(null);
         issue.setSuspensionReason(null);
         issue.setLastFailureReason("Cancelled by operator");
         return issues.saveAndFlush(issue);
+    }
+
+    private TrackedIssue requireIssueForUpdate(Long issueId) {
+        if (repos == null) {
+            throw new IllegalStateException(
+                    "Repository locking is required for workflow checkpoint mutations");
+        }
+        Long repoId = issues.findRepoIdByIssueId(issueId)
+                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        repos.findByIdForUpdate(repoId)
+                .orElseThrow(() -> new IllegalStateException("Repository no longer exists"));
+        return issues.findByIdForDispatch(issueId)
+                .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
     }
 
     private static String combine(String baseContext, List<IssueGuidance> pending) {

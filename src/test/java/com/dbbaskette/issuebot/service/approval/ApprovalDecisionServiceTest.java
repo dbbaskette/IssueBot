@@ -4,11 +4,14 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.workflow.IterationManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.mockito.InOrder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
@@ -25,9 +28,17 @@ class ApprovalDecisionServiceTest {
     private final IterationManager iterations = mock(IterationManager.class);
     private final GitHubApiClient gitHub = mock(GitHubApiClient.class);
     private final EventService events = mock(EventService.class);
+    private final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
     private final ApprovalDecisionService decisions =
-            new ApprovalDecisionService(issues, iterations, gitHub, events);
+            new ApprovalDecisionService(issues, iterations, gitHub, events, repos);
     private final ObjectMapper json = new ObjectMapper();
+
+    @BeforeEach
+    void configureRepositoryLock() {
+        when(issues.findRepoIdByIssueId(1L)).thenReturn(Optional.of(10L));
+        when(repos.findByIdForUpdate(10L))
+                .thenReturn(Optional.of(new WatchedRepo("acme", "widgets")));
+    }
 
     @Test
     void decisionMethodsAreTransactionalAndUseFreshLockedIssueReads() throws Exception {
@@ -43,8 +54,24 @@ class ApprovalDecisionServiceTest {
 
         assertThat(decisions.approve(1L, false).outcome()).isEqualTo(APPROVED);
 
-        verify(issues).findByIdForDispatch(1L);
+        InOrder locking = inOrder(issues, repos);
+        locking.verify(issues).findRepoIdByIssueId(1L);
+        locking.verify(repos).findByIdForUpdate(10L);
+        locking.verify(issues).findByIdForDispatch(1L);
         verify(issues, never()).findById(1L);
+    }
+
+    @Test
+    void compatibilityConstructorFailsClosedBeforeAnyDecisionMutationAccess() {
+        TrackedIssueRepository mockIssues = mock(TrackedIssueRepository.class);
+        ApprovalDecisionService unlocked = new ApprovalDecisionService(
+                mockIssues, iterations, gitHub, events);
+
+        assertThatThrownBy(() -> unlocked.approve(99L, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Repository locking is required for approval decisions");
+
+        verifyNoInteractions(mockIssues);
     }
 
     @Test

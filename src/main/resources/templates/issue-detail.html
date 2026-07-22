@@ -457,6 +457,10 @@
             <div th:fragment="plan-review-region(oob)" id="plan-review"
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <span id="plan-first" aria-hidden="true"></span>
+                <div id="plan-error" th:if="${planError != null}"
+                     class="alert alert-danger" role="alert" th:text="${planError}">
+                    Plan approval could not reserve this repository.
+                </div>
             <section th:if="${selectedPlanningVersion != null}"
                      class="panel mb-3 plan-review" data-plan-review>
                 <header class="panel-header plan-review-header">

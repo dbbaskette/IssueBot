@@ -16,6 +16,8 @@ import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -33,6 +35,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -43,6 +46,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -72,8 +76,9 @@ class PlanFirstTransactionManagerTest {
     @Autowired private PlanFirstTransactionManager transactions;
     @MockitoSpyBean private TrackedIssueRepository issues;
     @MockitoSpyBean private PlanningVersionRepository versions;
-    @Autowired private WatchedRepoRepository repos;
+    @MockitoSpyBean private WatchedRepoRepository repos;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private EntityManager entityManager;
 
     @MockitoBean private ClaudeCodeService agent;
     @MockitoBean private GitHubApiClient gitHub;
@@ -84,7 +89,7 @@ class PlanFirstTransactionManagerTest {
 
     @AfterEach
     void restoreRepositorySpies() {
-        reset(issues, versions);
+        reset(issues, versions, repos);
     }
 
     @Test
@@ -156,6 +161,46 @@ class PlanFirstTransactionManagerTest {
                 .getApprovedPlanningVersion()).isNull();
         assertThat(versions.findById(pending.versionId()).orElseThrow().getState())
                 .isEqualTo(PlanningVersionState.PENDING);
+    }
+
+    @Test
+    void planningGenerationLocksRepositoryBeforeJoinedIssueQuery() {
+        Long issueId = seedIssue(IssueStatus.IN_PROGRESS, "planning");
+        Long repoId = issues.findRepoIdByIssueId(issueId).orElseThrow();
+        org.mockito.Mockito.clearInvocations(issues, repos);
+
+        transactions.prepareGeneration(issueId);
+
+        org.mockito.InOrder locking = org.mockito.Mockito.inOrder(issues, repos);
+        locking.verify(issues).findRepoIdByIssueId(issueId);
+        locking.verify(repos).findByIdForUpdate(repoId);
+        locking.verify(issues).findByIdForPlanning(issueId);
+    }
+
+    @Test
+    void planRevisionLocksRepositoryBeforeJoinedIssueQuery() {
+        Pending pending = seedPendingVersion();
+        Long repoId = issues.findRepoIdByIssueId(pending.issueId()).orElseThrow();
+        org.mockito.Mockito.clearInvocations(issues, repos);
+
+        transactions.requestRevision(pending.issueId(), pending.versionId(), "preserve the API");
+
+        org.mockito.InOrder locking = org.mockito.Mockito.inOrder(issues, repos);
+        locking.verify(issues).findRepoIdByIssueId(pending.issueId());
+        locking.verify(repos).findByIdForUpdate(repoId);
+        locking.verify(issues).findByIdForPlanning(pending.issueId());
+    }
+
+    @Test
+    void planningCompatibilityConstructorFailsClosedBeforeAnyRepositoryAccess() {
+        PlanFirstTransactionManager unlocked = new PlanFirstTransactionManager(issues, versions);
+        org.mockito.Mockito.clearInvocations(issues, versions, repos);
+
+        assertThatThrownBy(() -> unlocked.prepareGeneration(99L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Repository locking is required for plan lifecycle mutations");
+
+        verifyNoInteractions(issues, versions);
     }
 
     @Test
@@ -440,6 +485,70 @@ class PlanFirstTransactionManagerTest {
     }
 
     @Test
+    void concurrentApprovalAndGenerationCommitSerializeOnRepositoryWithoutDeadlock()
+            throws Exception {
+        Long repoId = seedRepo();
+        Pending owner = seedPlannedIssue(repoId, 141,
+                IssueStatus.AWAITING_PLAN_APPROVAL, false);
+        Long generatingIssueId = seedPlainIssue(repoId, 142, IssueStatus.IN_PROGRESS);
+        configureIssue(generatingIssueId, issue -> {
+            issue.setCurrentPhase("PLANNING");
+            issue.setResolvedAgentProvider(AgentProvider.CODEX);
+            issue.setResolvedImplModel("gpt-5.6-sol");
+        });
+        PlanFirstTransactionManager.GenerationContext context =
+                transactions.prepareGeneration(generatingIssueId);
+
+        ApprovalLifecycleRace<PlanFirstTransactionManager.GenerationCommit> race =
+                raceApprovalAgainstLifecycle(repoId, owner, () ->
+                        transactions.persistGeneratedVersion(
+                                context, "generated design", "generated plan"));
+
+        assertThat(race.approval().value()).isNull();
+        assertThat(race.approval().failure())
+                .hasMessage("Issue #142 is already running later work in this repository. "
+                        + "Finish or stop it before approving issue #141.");
+        assertThat(race.lifecycle().value()).isNotNull();
+        assertThat(race.lifecycle().failure()).isNull();
+        assertNoSerializationFailure(race.approval().failure());
+        assertThat(issues.findById(owner.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(issues.findById(generatingIssueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(versions.findByIssueIdOrderByVersionNumberDesc(generatingIssueId))
+                .singleElement()
+                .satisfies(version -> assertThat(version.getDesignSpec())
+                        .isEqualTo("generated design"));
+    }
+
+    @Test
+    void concurrentApprovalAndPlanRevisionSerializeOnRepositoryWithoutDeadlock()
+            throws Exception {
+        Long repoId = seedRepo();
+        Pending owner = seedPlannedIssue(repoId, 141,
+                IssueStatus.AWAITING_PLAN_APPROVAL, false);
+        Pending revising = seedPlannedIssue(repoId, 142,
+                IssueStatus.AWAITING_PLAN_APPROVAL, false);
+
+        ApprovalLifecycleRace<PlanFirstTransactionManager.LifecycleCommit> race =
+                raceApprovalAgainstLifecycle(repoId, owner, () ->
+                        transactions.requestRevision(
+                                revising.issueId(), revising.versionId(), "revise after approval"));
+
+        assertThat(race.approval().failure()).isNull();
+        assertThat(race.approval().value()).isNotNull();
+        assertThat(race.lifecycle().value()).isNull();
+        assertThat(race.lifecycle().failure())
+                .hasMessage("Issue is not awaiting plan approval: QUEUED");
+        assertNoSerializationFailure(race.lifecycle().failure());
+        assertThat(issues.findById(owner.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(issues.findById(revising.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.QUEUED);
+        assertThat(versions.findById(revising.versionId())).isEmpty();
+    }
+
+    @Test
     void revisionIssueSaveFailureRollsBackSupersessionAndFeedback() {
         Pending pending = seedPendingVersion();
         doThrow(new IllegalStateException("injected revision issue fault"))
@@ -716,6 +825,80 @@ class PlanFirstTransactionManagerTest {
         }
     }
 
+    private <T> ApprovalLifecycleRace<T> raceApprovalAgainstLifecycle(
+            Long repoId,
+            Pending approval,
+            RaceOperation<T> lifecycleOperation) throws Exception {
+        CountDownLatch approvalHasOrderedIssueLocks = new CountDownLatch(1);
+        CountDownLatch releaseApproval = new CountDownLatch(1);
+        CountDownLatch lifecycleRequestsRepositoryLock = new CountDownLatch(1);
+        AtomicInteger repositoryLockRequests = new AtomicInteger();
+
+        doAnswer(invocation -> {
+            if (repositoryLockRequests.incrementAndGet() > 1) {
+                lifecycleRequestsRepositoryLock.countDown();
+            }
+            return entityManager.createQuery(
+                            "select repo from WatchedRepo repo where repo.id = :repoId",
+                            WatchedRepo.class)
+                    .setParameter("repoId", repoId)
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .getResultStream()
+                    .findFirst();
+        }).when(repos).findByIdForUpdate(repoId);
+        doAnswer(invocation -> {
+            List<TrackedIssue> locked = entityManager.createQuery(
+                            "select distinct issue from TrackedIssue issue "
+                                    + "left join fetch issue.approvedPlanningVersion "
+                                    + "join fetch issue.repo "
+                                    + "where issue.repo.id = :repoId "
+                                    + "order by issue.issueNumber",
+                            TrackedIssue.class)
+                    .setParameter("repoId", repoId)
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .getResultList();
+            approvalHasOrderedIssueLocks.countDown();
+            assertThat(releaseApproval.await(5, TimeUnit.SECONDS)).isTrue();
+            return locked;
+        }).when(issues).findByRepoIdForUpdateOrderByIssueNumber(repoId);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<RaceAttempt<PlanFirstTransactionManager.LifecycleCommit>> approving =
+                    executor.submit(() -> attempt(() -> transactions.approvePlan(
+                            approval.issueId(), approval.versionId())));
+            assertThat(approvalHasOrderedIssueLocks.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<RaceAttempt<T>> lifecycle = executor.submit(() -> attempt(lifecycleOperation));
+            // This is the regression assertion: generation/revision must request the repository
+            // mutex before their joined pessimistic issue read. The old order never reaches it.
+            assertThat(lifecycleRequestsRepositoryLock.await(5, TimeUnit.SECONDS)).isTrue();
+            releaseApproval.countDown();
+
+            return new ApprovalLifecycleRace<>(
+                    approving.get(10, TimeUnit.SECONDS),
+                    lifecycle.get(10, TimeUnit.SECONDS));
+        } finally {
+            releaseApproval.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private static <T> RaceAttempt<T> attempt(RaceOperation<T> operation) {
+        try {
+            return new RaceAttempt<>(operation.run(), null);
+        } catch (RuntimeException failure) {
+            return new RaceAttempt<>(null, failure);
+        }
+    }
+
+    private static void assertNoSerializationFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof SQLException sql) {
+                assertThat(sql.getSQLState()).isNotEqualTo("40001");
+            }
+        }
+    }
+
     private void assertOriginalPlanningState(Long issueId) {
         TrackedIssue issue = issues.findById(issueId).orElseThrow();
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
@@ -761,4 +944,15 @@ class PlanFirstTransactionManagerTest {
     private record ApprovalAttempt(int issueNumber,
                                    PlanFirstTransactionManager.LifecycleCommit commit,
                                    RuntimeException failure) {}
+
+    @FunctionalInterface
+    private interface RaceOperation<T> {
+        T run();
+    }
+
+    private record RaceAttempt<T>(T value, RuntimeException failure) { }
+
+    private record ApprovalLifecycleRace<T>(
+            RaceAttempt<PlanFirstTransactionManager.LifecycleCommit> approval,
+            RaceAttempt<T> lifecycle) { }
 }
