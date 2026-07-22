@@ -743,6 +743,48 @@ class IssueControllerTest {
     }
 
     @Test
+    void approvePlanFlashesExactEarlierIssueReservationErrorAndKeepsPendingPlan() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        String message = "Issue #141 must finish before issue #143 can reserve this repository.";
+        doThrow(new IllegalStateException(message)).when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute("error", message);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-first");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+    }
+
+    @Test
+    void approvePlanFlashesExactProtectedLaterWorkErrorAndKeepsPendingPlan() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        String message = "Issue #143 is already running later work in this repository. "
+                + "Finish or stop it before approving issue #141.";
+        doThrow(new IllegalStateException(message)).when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute("error", message);
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-first");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+    }
+
+    @Test
+    void approvePlanSanitizesUnrecognizedServiceFailures() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        doThrow(new IllegalStateException("database password exposed"))
+                .when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute(
+                "error", "Unable to approve plan. Please try again.");
+        org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1#plan-review");
+    }
+
+    @Test
     void revisePlanRequiresGuidance() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
 

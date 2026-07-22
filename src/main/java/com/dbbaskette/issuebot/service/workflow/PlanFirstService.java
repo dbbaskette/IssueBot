@@ -198,6 +198,15 @@ public class PlanFirstService {
                                 + " — version " + current.getVersionNumber()
                                 + " approved; waiting for you to start implementation",
                         issue));
+        for (PlanFirstTransactionManager.InvalidatedPlan invalidated : commit.invalidatedPlans()) {
+            TrackedIssue later = invalidated.issue();
+            runAfterPersistence("record plan invalidation event",
+                    () -> events.log("PLAN_INVALIDATED",
+                            "Plan deleted because earlier issue #" + invalidated.ownerIssueNumber()
+                                    + " reserved the repository; a new plan will be generated after "
+                                    + "that work completes.",
+                            later.getRepo(), later));
+        }
     }
 
     /** Supersedes exactly the latest pending version and queues a guided regeneration. */

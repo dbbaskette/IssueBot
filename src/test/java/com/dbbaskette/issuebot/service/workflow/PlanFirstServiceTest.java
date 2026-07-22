@@ -398,6 +398,36 @@ class PlanFirstServiceTest {
     }
 
     @Test
+    void approvalRecordsOneInvalidationEventWithoutPublishingOrNotifyingLaterIssue() {
+        PlanningVersion current = pendingVersion(issue, 3, 9L);
+        issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        TrackedIssue later = new TrackedIssue(issue.getRepo(), 143, "Later work");
+        later.setId(10L);
+        later.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(issue, later));
+        when(versions.findLatestByIssueIdForUpdate(8L)).thenReturn(List.of(current));
+
+        service.approvePlan(8L, 9L);
+
+        InOrder sideEffects = inOrder(gitHub, events, notifications);
+        sideEffects.verify(gitHub).addComment("owner", "repo", 42,
+                "Design Spec and Implementation Plan version 3 approved. "
+                        + "Implementation is waiting for a manual start in IssueBot.");
+        sideEffects.verify(events).log("PLAN_APPROVED",
+                "Approved planning version 3 — waiting for manual implementation start",
+                issue.getRepo(), issue);
+        sideEffects.verify(notifications).info("Plan Approved",
+                "owner/repo #42 — version 3 approved; waiting for you to start implementation",
+                issue);
+        sideEffects.verify(events).log("PLAN_INVALIDATED",
+                "Plan deleted because earlier issue #42 reserved the repository; "
+                        + "a new plan will be generated after that work completes.",
+                later.getRepo(), later);
+        verifyNoMoreInteractions(gitHub);
+        verify(notifications, never()).info(eq("Plan Invalidated"), anyString(), eq(later));
+    }
+
+    @Test
     void staleApprovalCannotApproveAnOlderVersion() {
         PlanningVersion current = pendingVersion(issue, 3, 9L);
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);

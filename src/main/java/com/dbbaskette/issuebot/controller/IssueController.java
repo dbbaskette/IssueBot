@@ -846,9 +846,21 @@ public class IssueController {
                               RedirectAttributes redirectAttributes) {
         try {
             planFirstService.approvePlan(id, versionId);
+        } catch (IllegalStateException e) {
+            log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
+            if (isReservationOrderingFailure(e.getMessage())) {
+                redirectAttributes.addFlashAttribute("error", e.getMessage());
+                return planFirstRedirect(id);
+            }
+            if (isStalePlanApproval(e.getMessage())) {
+                redirectAttributes.addFlashAttribute("error", e.getMessage());
+                return planReviewRedirect(id);
+            }
+            redirectAttributes.addFlashAttribute("error", "Unable to approve plan. Please try again.");
+            return planReviewRedirect(id);
         } catch (Exception e) {
             log.warn("Failed to approve plan for issue {}: {}", id, e.getMessage());
-            redirectAttributes.addFlashAttribute("error", e.getMessage());
+            redirectAttributes.addFlashAttribute("error", "Unable to approve plan. Please try again.");
             return planReviewRedirect(id);
         }
 
@@ -935,6 +947,22 @@ public class IssueController {
 
     private static String planReviewRedirect(Long id) {
         return "redirect:/issues/" + id + "#plan-review";
+    }
+
+    private static String planFirstRedirect(Long id) {
+        return "redirect:/issues/" + id + "#plan-first";
+    }
+
+    private static boolean isReservationOrderingFailure(String message) {
+        return message != null && (message.matches(
+                "Issue #\\d+ must finish before issue #\\d+ can reserve this repository\\.")
+                || message.matches("Issue #\\d+ is already running later work in this repository\\. "
+                + "Finish or stop it before approving issue #\\d+\\."));
+    }
+
+    private static boolean isStalePlanApproval(String message) {
+        return message != null && message.matches(
+                "Stale approval: current pending version is \\d+");
     }
 
     private static String normalize(String s) {
