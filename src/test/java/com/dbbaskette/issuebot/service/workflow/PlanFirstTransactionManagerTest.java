@@ -57,6 +57,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @DataJpaTest
@@ -133,6 +134,26 @@ class PlanFirstTransactionManagerTest {
         TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(pending.issueId()).orElseThrow();
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
         assertThat(issue.getApprovedPlanningVersion()).isNull();
+        assertThat(versions.findById(pending.versionId()).orElseThrow().getState())
+                .isEqualTo(PlanningVersionState.PENDING);
+    }
+
+    @Test
+    void approvalWithoutRepositoryLockingFailsBeforeReadingOrMutatingIssueState() {
+        Pending pending = seedPendingVersion();
+        reset(issues, versions);
+        PlanFirstTransactionManager unlocked =
+                new PlanFirstTransactionManager(issues, versions);
+
+        assertThatThrownBy(() -> unlocked.approvePlan(pending.issueId(), pending.versionId()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Repository locking is required for plan approval");
+
+        verifyNoInteractions(issues, versions);
+        assertThat(issues.findById(pending.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(issues.findByIdWithApprovedPlanningVersion(pending.issueId()).orElseThrow()
+                .getApprovedPlanningVersion()).isNull();
         assertThat(versions.findById(pending.versionId()).orElseThrow().getState())
                 .isEqualTo(PlanningVersionState.PENDING);
     }

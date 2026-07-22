@@ -59,7 +59,10 @@ public class PlanFirstTransactionManager {
         this.repos = repos;
     }
 
-    /** Convenience constructor for focused fixtures that do not exercise repository ordering. */
+    /**
+     * Compatibility constructor for generation and revision fixtures. Plan approval requires the
+     * repository-aware constructor so its ordering checks can lock the repository first.
+     */
     public PlanFirstTransactionManager(TrackedIssueRepository issues,
                                        PlanningVersionRepository versions) {
         this(issues, versions, null);
@@ -233,10 +236,9 @@ public class PlanFirstTransactionManager {
     }
 
     private List<TrackedIssue> lockRepositoryIssuesForApproval(Long issueId) {
-        // The two-argument constructor remains available for focused lifecycle fixtures whose
-        // mocked repositories contain only one issue and do not exercise reservation ordering.
         if (repos == null) {
-            return List.of(requireIssueForUpdate(issueId));
+            throw new IllegalStateException(
+                    "Repository locking is required for plan approval");
         }
         Long repoId = issues.findRepoIdByIssueId(issueId)
                 .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
