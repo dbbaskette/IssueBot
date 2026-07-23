@@ -24,6 +24,7 @@ import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.ui.IssueNextAction;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
+import com.dbbaskette.issuebot.service.ui.DecompositionGroupViewAssembler;
 import com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
@@ -34,6 +35,7 @@ import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
 import com.dbbaskette.issuebot.service.workflow.RepositoryDispatchGate;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
+import com.dbbaskette.issuebot.service.workflow.DecompositionGroupService;
 import com.dbbaskette.issuebot.util.BudgetProgress;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -109,6 +111,12 @@ public class IssueController {
 
     @Autowired(required = false)
     private CodexModelCatalog codexModelCatalog;
+
+    @Autowired(required = false)
+    private DecompositionGroupViewAssembler decompositionGroupViews;
+
+    @Autowired(required = false)
+    private DecompositionGroupService decompositionGroups;
 
     public IssueController(TrackedIssueRepository issueRepository,
                             WatchedRepoRepository repoRepository,
@@ -576,6 +584,12 @@ public class IssueController {
      * an error message if the issue could not be closed, or {@code null} on success.
      */
     private String performMarkComplete(TrackedIssue issue) {
+        if (decompositionGroupViews != null
+                && decompositionGroupViews.forIssue(issue)
+                    .filter(view -> view.parent() && view.releasable()).isPresent()) {
+            return "Cannot complete a decomposition parent while its group owns the repository. "
+                    + "Complete every child or use Release control with a reason.";
+        }
         if (issue.getStatus() == IssueStatus.COMPLETED) {
             return "Issue is already completed";
         }
@@ -850,6 +864,22 @@ public class IssueController {
         return ViewResolver.redirectTarget(returnTo, "redirect:/issues/" + id);
     }
 
+    @PostMapping("/{id}/decomposition/release")
+    public String releaseDecomposition(@PathVariable Long id,
+                                       @RequestParam(required = false) String reason,
+                                       java.security.Principal principal,
+                                       RedirectAttributes redirectAttributes) {
+        if (decompositionGroups == null) {
+            redirectAttributes.addFlashAttribute("error", "Durable decomposition is unavailable.");
+            return "redirect:/issues/" + id;
+        }
+        String actor = principal == null ? "local operator" : principal.getName();
+        DecompositionGroupService.AbandonResult result =
+                decompositionGroups.abandon(id, reason, actor);
+        redirectAttributes.addFlashAttribute(result.completed() ? "success" : "error", result.message());
+        return "redirect:/issues/" + id + "#decomposition-group";
+    }
+
     @PostMapping("/{id}/plan/approve")
     public String approvePlan(@PathVariable Long id,
                               @RequestParam Long versionId,
@@ -1038,7 +1068,8 @@ public class IssueController {
                 issueRepository.findByRepoAndStatusInOrderByIssueNumberAsc(repo,
                         List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
                                 IssueStatus.AWAITING_PLAN_APPROVAL,
-                                IssueStatus.READY_TO_START)));
+                                IssueStatus.READY_TO_START,
+                                IssueStatus.AWAITING_DECOMPOSITION)));
         if (repoBlocker != null && repoBlocker.getStatus() == IssueStatus.READY_TO_START) {
             return "Issue #" + repoBlocker.getIssueNumber()
                     + " has an approved plan and is waiting to start.";
@@ -1142,6 +1173,8 @@ public class IssueController {
         model.addAttribute("issueSpent", totalCost);
         model.addAttribute("effectiveBudget", effectiveBudget);
         model.addAttribute("budgetPct", budgetPct(totalCost, effectiveBudget));
+        model.addAttribute("decompositionGroup", decompositionGroupViews == null
+                ? null : decompositionGroupViews.forIssue(issue).orElse(null));
 
         if (issue.getStatus() == IssueStatus.AWAITING_APPROVAL) {
             ApprovalCardAssembler.Cards cards = approvalCardAssembler.assemble(List.of(issue));

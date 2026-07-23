@@ -18,7 +18,8 @@ public class IssueDispatchService {
 
     private static final List<IssueStatus> ACTIVE_STATUSES = List.of(
             IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START);
+            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START,
+            IssueStatus.AWAITING_DECOMPOSITION);
 
     private final TrackedIssueRepository issues;
     private final ProcessingControlService control;

@@ -66,7 +66,8 @@
                         <i class="ti ti-player-play" aria-hidden="true"></i>
                         <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
                     </button>
-                    <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL' and issue.status.name() != 'READY_TO_START'}"
+                    <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL' and issue.status.name() != 'READY_TO_START'
+                                       and not (decompositionGroup != null and decompositionGroup.parent() and decompositionGroup.releasable())}"
                             type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
                         <i class="ti ti-check" aria-hidden="true"></i> Mark Complete
                     </button>
@@ -89,6 +90,70 @@
                 </div>
                 <a th:if="${nextAction.hasAction()}" class="btn btn-outline btn-sm next-action-cta"
                    th:href="${nextAction.href()}" th:text="${nextAction.ctaLabel()}">View issue</a>
+            </section>
+
+            <section th:if="${decompositionGroup != null}" id="decomposition-group"
+                     class="panel mb-3 decomposition-progress"
+                     aria-labelledby="decomposition-title">
+                <header class="panel-header decomposition-progress__header">
+                    <div>
+                        <span class="eyebrow">Ordered decomposition</span>
+                        <h3 id="decomposition-title"
+                            th:text="${'Parent #' + decompositionGroup.parentNumber()
+                                + ' · ' + decompositionGroup.completedCount()
+                                + ' of ' + decompositionGroup.totalCount() + ' complete'}">
+                            Parent #153 · 1 of 4 complete
+                        </h3>
+                    </div>
+                    <span class="status"
+                          th:classappend="${decompositionGroup.state().name() == 'NEEDS_ATTENTION'
+                              ? 'status-failed' : (decompositionGroup.state().name() == 'COMPLETED'
+                              ? 'status-completed' : 'status-in_progress')}"
+                          th:text="${humanize.status(decompositionGroup.state().name())}">Active</span>
+                </header>
+                <div class="panel-body">
+                    <div class="decomposition-progress__bar" role="progressbar"
+                         th:aria-valuenow="${decompositionGroup.progressPercent()}"
+                         aria-valuemin="0" aria-valuemax="100">
+                        <span th:style="'width:' + ${decompositionGroup.progressPercent()} + '%'"></span>
+                    </div>
+                    <p th:if="${decompositionGroup.attentionReason() != null}"
+                       class="alert alert-warning" th:text="${decompositionGroup.attentionReason()}"></p>
+                    <ol class="decomposition-steps">
+                        <li th:each="child : ${decompositionGroup.children()}"
+                            th:classappend="${child.current() ? ' is-current' : ''}
+                                + ${child.status() != null and child.status().name() == 'COMPLETED' ? ' is-complete' : ''}">
+                            <span class="decomposition-step__number">
+                                <i th:if="${child.status() != null and child.status().name() == 'COMPLETED'}"
+                                   class="ti ti-check" aria-hidden="true"></i>
+                                <span th:unless="${child.status() != null and child.status().name() == 'COMPLETED'}"
+                                      th:text="${child.position()}">1</span>
+                            </span>
+                            <div>
+                                <a th:if="${child.trackedIssueId() != null}"
+                                   th:href="@{'/issues/' + ${child.trackedIssueId()}}"
+                                   th:text="${'#' + child.issueNumber() + ' · ' + child.title()}">#155 · First</a>
+                                <strong th:unless="${child.trackedIssueId() != null}"
+                                        th:text="${child.title()}">Creating child</strong>
+                                <small th:text="${child.current() ? 'Current — repository reserved'
+                                    : (child.status() == null ? 'Creating'
+                                    : humanize.status(child.status()))}">Queued</small>
+                            </div>
+                        </li>
+                    </ol>
+                    <details th:if="${decompositionGroup.parent() and decompositionGroup.releasable()}"
+                             class="decomposition-release">
+                        <summary>Release repository control</summary>
+                        <p class="text-sm text-muted">Stops active work safely, cancels unfinished children, and leaves the parent open for follow-up.</p>
+                        <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/release'}" method="post">
+                            <label for="decomposition-release-reason">Reason for releasing</label>
+                            <textarea id="decomposition-release-reason" name="reason" rows="3"
+                                      maxlength="2000" required
+                                      placeholder="Why should this ordered decomposition stop?"></textarea>
+                            <button type="submit" class="btn btn-danger btn-sm">Release control</button>
+                        </form>
+                    </details>
+                </div>
             </section>
 
             <div th:if="${issue.status.name() == 'PENDING' and issue.suspensionReason != null}"

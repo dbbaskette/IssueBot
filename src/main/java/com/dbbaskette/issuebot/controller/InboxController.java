@@ -10,6 +10,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
+import com.dbbaskette.issuebot.service.ui.DecompositionGroupViewAssembler;
 import com.dbbaskette.issuebot.util.ElapsedFormatter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Controller;
@@ -21,6 +22,8 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * The "Needs You" inbox (#91) — every checkpoint that blocks on the operator, grouped by type,
@@ -39,6 +42,8 @@ public class InboxController {
     private final NotificationRepository notificationRepository;
     private final ApprovalCardAssembler cardAssembler;
     private final ObjectMapper objectMapper;
+    @Autowired(required = false)
+    private DecompositionGroupViewAssembler decompositionGroupViews;
 
     public InboxController(TrackedIssueRepository issueRepository,
                             PlanningVersionRepository planningVersionRepository,
@@ -57,12 +62,19 @@ public class InboxController {
     @GetMapping("/inbox")
     public String inbox(Model model,
                         @RequestHeader(value = "HX-Request", required = false) String hx) {
-        List<TrackedIssue> approvals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL);
-        List<TrackedIssue> planApprovals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL);
-        List<TrackedIssue> readyToStart = issueRepository.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START);
+        List<DecompositionGroupViewAssembler.GroupView> groupAttention =
+                decompositionGroupViews == null ? List.of() : decompositionGroupViews.attentionGroups();
+        Set<Long> groupedIssueIds = decompositionGroupViews == null
+                ? Set.of() : decompositionGroupViews.memberIssueIds(groupAttention);
+        List<TrackedIssue> approvals = withoutGrouped(
+                issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL), groupedIssueIds);
+        List<TrackedIssue> planApprovals = withoutGrouped(
+                issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL), groupedIssueIds);
+        List<TrackedIssue> readyToStart = withoutGrouped(
+                issueRepository.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START), groupedIssueIds);
         List<TrackedIssue> splitProposals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_DECOMPOSITION);
-        List<TrackedIssue> needsHuman = issueRepository.findByStatusInOrderByIdDesc(
-                List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN));
+        List<TrackedIssue> needsHuman = withoutGrouped(issueRepository.findByStatusInOrderByIdDesc(
+                List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)), groupedIssueIds);
 
         ApprovalCardAssembler.Cards cards = cardAssembler.assemble(approvals);
 
@@ -88,7 +100,7 @@ public class InboxController {
         }
 
         int totalCount = approvals.size() + planApprovals.size() + readyToStart.size()
-                + splitProposals.size() + needsHuman.size();
+                + splitProposals.size() + needsHuman.size() + groupAttention.size();
 
         model.addAttribute("activePage", "inbox");
         model.addAttribute("contentTemplate", "inbox");
@@ -108,6 +120,7 @@ public class InboxController {
         model.addAttribute("proposalTitles", proposalTitles);
 
         model.addAttribute("needsHuman", needsHuman);
+        model.addAttribute("decompositionAttention", groupAttention);
 
         model.addAttribute("totalCount", totalCount);
         // Empty-state copy ("Nothing needs you — the loop is running itself.") also surfaces
@@ -123,5 +136,10 @@ public class InboxController {
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         return ViewResolver.view("inbox", hx != null);
+    }
+
+    private static List<TrackedIssue> withoutGrouped(List<TrackedIssue> issues, Set<Long> groupedIds) {
+        if (groupedIds.isEmpty()) return issues;
+        return issues.stream().filter(issue -> !groupedIds.contains(issue.getId())).toList();
     }
 }

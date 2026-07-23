@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
+import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
+import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,13 +23,15 @@ public class IssueDispatchTransactionManager {
 
     static final List<IssueStatus> ACTIVE_STATUSES = List.of(
             IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START);
+            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START,
+            IssueStatus.AWAITING_DECOMPOSITION);
 
     private final TrackedIssueRepository issues;
     private final WatchedRepoRepository repos;
     private final ProcessingControlRepository controls;
     private final IssueGuidanceRepository guidance;
     private final IterationRepository iterations;
+    private final DecompositionReservationService decompositionReservations;
 
     public IssueDispatchTransactionManager(TrackedIssueRepository issues,
                                            WatchedRepoRepository repos,
@@ -39,6 +43,24 @@ public class IssueDispatchTransactionManager {
         this.controls = controls;
         this.guidance = guidance;
         this.iterations = iterations;
+        this.decompositionReservations = null;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public IssueDispatchTransactionManager(TrackedIssueRepository issues,
+                                           WatchedRepoRepository repos,
+                                           ProcessingControlRepository controls,
+                                           IssueGuidanceRepository guidance,
+                                           IterationRepository iterations,
+                                           DecompositionGroupRepository decompositionGroups,
+                                           DecompositionChildRepository decompositionChildren) {
+        this.issues = issues;
+        this.repos = repos;
+        this.controls = controls;
+        this.guidance = guidance;
+        this.iterations = iterations;
+        this.decompositionReservations =
+                new DecompositionReservationService(decompositionGroups, decompositionChildren);
     }
 
     @Transactional
@@ -180,6 +202,11 @@ public class IssueDispatchTransactionManager {
     }
 
     private String repositoryGate(TrackedIssue issue) {
+        if (decompositionReservations != null) {
+            DecompositionReservationService.ReservationDecision decision =
+                    decompositionReservations.evaluate(issue);
+            if (!decision.allowed()) return decision.reason();
+        }
         List<TrackedIssue> active = issues.findByRepoAndStatusInOrderByIssueNumberAsc(
                 issue.getRepo(), ACTIVE_STATUSES);
         TrackedIssue blocker = RepositoryDispatchGate.blocker(issue, active);
