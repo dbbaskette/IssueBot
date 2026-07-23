@@ -225,7 +225,7 @@ class WorkflowCheckpointTransactionManagerTest {
         correction.setImplementationContextPrepared(true);
         correction = iterations.saveAndFlush(correction);
 
-        TrackedIssue suspended = checkpoints.suspendForGlobalPause(issue.getId());
+        TrackedIssue suspended = checkpoints.suspendForRecovery(issue.getId());
 
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.PENDING);
         assertThat(suspended.getCurrentIteration()).isEqualTo(1);
@@ -244,7 +244,7 @@ class WorkflowCheckpointTransactionManagerTest {
         checkpoints.persistImplementationComplete(
                 baseline.issueId(), baseline.iterationId(), result, "+diff");
 
-        TrackedIssue suspended = checkpoints.suspendForGlobalPause(baseline.issueId());
+        TrackedIssue suspended = checkpoints.suspendForRecovery(baseline.issueId());
 
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.PENDING);
         assertThat(suspended.getCurrentPhase()).isEqualTo("LOCAL_CHECKS");
@@ -258,7 +258,7 @@ class WorkflowCheckpointTransactionManagerTest {
         issue.setCurrentPhase("INDEPENDENT_REVIEW");
         issues.saveAndFlush(issue);
 
-        TrackedIssue suspended = checkpoints.suspendForGlobalPause(issue.getId());
+        TrackedIssue suspended = checkpoints.suspendForRecovery(issue.getId());
 
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.PENDING);
         assertThat(suspended.getCurrentPhase()).isEqualTo("INDEPENDENT_REVIEW");
@@ -274,7 +274,7 @@ class WorkflowCheckpointTransactionManagerTest {
         issue.setLastFailureReason("provider exited after cancellation");
         issues.saveAndFlush(issue);
 
-        TrackedIssue suspended = checkpoints.suspendForGlobalPause(issue.getId());
+        TrackedIssue suspended = checkpoints.suspendForRecovery(issue.getId());
 
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.PENDING);
         assertThat(suspended.getCurrentPhase()).isNull();
@@ -291,7 +291,7 @@ class WorkflowCheckpointTransactionManagerTest {
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         issues.saveAndFlush(issue);
 
-        TrackedIssue suspended = checkpoints.suspendForGlobalPause(issue.getId());
+        TrackedIssue suspended = checkpoints.suspendForRecovery(issue.getId());
 
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
         assertThat(suspended.getCurrentPhase()).isNull();
@@ -316,7 +316,7 @@ class WorkflowCheckpointTransactionManagerTest {
         issue.setStatus(IssueStatus.READY_TO_START);
         issues.saveAndFlush(issue);
 
-        TrackedIssue suspended = checkpoints.suspendForGlobalPause(issue.getId());
+        TrackedIssue suspended = checkpoints.suspendForRecovery(issue.getId());
 
         assertThat(suspended.getStatus()).isEqualTo(IssueStatus.READY_TO_START);
         assertThat(suspended.getApprovedPlanningVersion().getId()).isEqualTo(approved.getId());

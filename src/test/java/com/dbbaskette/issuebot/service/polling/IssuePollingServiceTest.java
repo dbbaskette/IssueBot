@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.polling;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
@@ -20,6 +21,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
@@ -80,8 +83,9 @@ class IssuePollingServiceTest {
         assertTrue(pollingService.qualifiesForProcessing(testRepo, 1));
     }
 
-    @Test
-    void pausedPollDoesNotDispatchWork() {
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void nonRunningPollDoesNotDispatchWork(ProcessingState ignoredMode) {
         when(processingControl.isRunning()).thenReturn(false);
 
         pollingService.pollForIssues();
@@ -90,8 +94,10 @@ class IssuePollingServiceTest {
         verifyNoInteractions(workflowService);
     }
 
-    @Test
-    void pausedWebhookTracksNewIssueAsQueuedWithoutCheckingCapacityOrDispatching() {
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void nonRunningWebhookQueuesOnceWithoutCapacityRoutingOrDispatch(
+            ProcessingState ignoredMode) {
         when(processingControl.isRunning()).thenReturn(false);
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 42)).thenReturn(Optional.empty());
         ObjectNode node = objectMapper.createObjectNode();
@@ -106,6 +112,86 @@ class IssuePollingServiceTest {
         assertEquals(WebhookOutcome.QUEUED, outcome);
         verify(issueRepository, never()).countByStatus(IssueStatus.IN_PROGRESS);
         verify(workflowService, never()).processIssueAsync(any());
+    }
+
+    @Test
+    void transitionBeforeQueueDrainPreventsQueuedAndPendingClaims() {
+        when(processingControl.isRunning()).thenReturn(true, true, false);
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.BLOCKED))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(),
+                eq("issuebot-parent"), anyString())).thenReturn(List.of());
+
+        pollingService.pollForIssues();
+
+        verify(issueRepository, never()).findByRepoAndStatus(testRepo, IssueStatus.QUEUED);
+        verify(issueRepository, never()).findByRepoAndStatus(testRepo, IssueStatus.PENDING);
+        verify(dispatchService, never()).claimStart(any(TrackedIssue.class));
+        verifyNoInteractions(workflowService);
+    }
+
+    @Test
+    void transitionBetweenDrainAndPendingResumePreventsPendingClaim() {
+        when(processingControl.isRunning()).thenReturn(true, true, true, false);
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.BLOCKED))
+                .thenReturn(List.of());
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.QUEUED))
+                .thenReturn(List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(),
+                eq("issuebot-parent"), anyString())).thenReturn(List.of());
+
+        pollingService.pollForIssues();
+
+        verify(issueRepository, never()).findByRepoAndStatus(testRepo, IssueStatus.PENDING);
+        verify(dispatchService, never()).claimStart(any(TrackedIssue.class));
+        verifyNoInteractions(workflowService);
+    }
+
+    @Test
+    void transitionBetweenEvaluatedIssuesQueuesLaterDiscoveryWithoutStartingIt() {
+        java.util.concurrent.atomic.AtomicBoolean running =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+        when(processingControl.isRunning()).thenAnswer(ignored -> running.get());
+        properties.setMaxConcurrentIssues(3);
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(eq(testRepo), any())).thenReturn(List.of());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList())).thenReturn(List.of());
+        when(issueRepository.findByRepoAndIssueNumber(eq(testRepo), anyInt()))
+                .thenReturn(Optional.empty());
+        when(gitHubApiClient.listIssues(anyString(), anyString(),
+                eq("issuebot-parent"), anyString())).thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenReturn(List.of());
+        when(dependencyResolver.resolve(eq(testRepo), anyInt()))
+                .thenReturn(new DependencyResolverService.DependencyResult(
+                        List.of(), List.of(), "", false));
+        ObjectNode first = objectMapper.createObjectNode();
+        first.put("number", 201);
+        first.put("title", "First");
+        ObjectNode second = objectMapper.createObjectNode();
+        second.put("number", 202);
+        second.put("title", "Second");
+        when(gitHubApiClient.listIssues(anyString(), anyString(),
+                eq("agent-ready"), anyString())).thenReturn(List.of(first, second));
+        doAnswer(invocation -> {
+            running.set(false);
+            return null;
+        }).when(workflowService).processIssueAsync(any());
+
+        pollingService.pollForIssues();
+
+        ArgumentCaptor<TrackedIssue> saved = ArgumentCaptor.forClass(TrackedIssue.class);
+        verify(issueRepository, times(3)).save(saved.capture());
+        TrackedIssue later = saved.getAllValues().getLast();
+        assertEquals(202, later.getIssueNumber());
+        assertEquals(IssueStatus.QUEUED, later.getStatus());
+        verify(workflowService, times(1)).processIssueAsync(
+                argThat(issue -> issue.getIssueNumber() == 201));
     }
 
     @Test

@@ -28,6 +28,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -351,6 +352,67 @@ class IssueDispatchTransactionManagerTest {
         assertThat(release.issue().getApprovedPlanningVersion().getId()).isEqualTo(approvedVersionId);
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void everyClaimPathRejectsBeforeMutationWhenNotRunning(ProcessingState mode) {
+        Long startId = seedIssue(IssueStatus.QUEUED, 51, null);
+        Long retryId = seedIssue(IssueStatus.FAILED, 52, null);
+        Long guidedId = seedApprovedIssue(IssueStatus.FAILED, 2, 53);
+        seedReview(guidedId, 2, false, "{}");
+        setProcessingState(mode);
+        AtomicBoolean startMutation = new AtomicBoolean();
+        AtomicBoolean retryMutation = new AtomicBoolean();
+
+        IssueDispatchService.ClaimResult start = dispatch.claimStart(startId, issue -> {
+            startMutation.set(true);
+            issue.setIssueTitle("mutated start");
+        });
+        IssueDispatchService.ClaimResult retry = dispatch.claimRetry(
+                retryId, issue -> null, issue -> {
+                    retryMutation.set(true);
+                    issue.setCurrentIteration(99);
+                });
+        IssueDispatchService.ClaimResult guided =
+                dispatch.claimGuidedRetry(guidedId, "must not persist", 10);
+
+        assertThat(List.of(start, retry, guided))
+                .allSatisfy(result -> {
+                    assertThat(result.claimed()).isFalse();
+                    assertThat(result.reason()).isEqualTo("Processing is paused");
+                });
+        assertThat(startMutation).isFalse();
+        assertThat(retryMutation).isFalse();
+        assertThat(issues.findById(startId).orElseThrow().getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(issues.findById(retryId).orElseThrow().getStatus()).isEqualTo(IssueStatus.FAILED);
+        TrackedIssue guidedIssue = issues.findById(guidedId).orElseThrow();
+        assertThat(guidedIssue.getStatus()).isEqualTo(IssueStatus.FAILED);
+        assertThat(guidedIssue.getPlanConformanceAttempt()).isEqualTo(2);
+        assertThat(guidance.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(guidedId)).isEmpty();
+    }
+
+    @Test
+    void restartMakesQueuedIssueEligibleForExactlyOneCompetingClaim() throws Exception {
+        Long issueId = seedIssue(IssueStatus.QUEUED, 54, null);
+        setProcessingState(ProcessingState.STOPPED);
+        assertThat(dispatch.claimStart(issueId).claimed()).isFalse();
+        setProcessingState(ProcessingState.RUNNING);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = pool.submit(awaitThen(ready, go, () -> dispatch.claimStart(issueId)));
+            var second = pool.submit(awaitThen(ready, go, () -> dispatch.claimStart(issueId)));
+            ready.await();
+            go.countDown();
+
+            assertThat(List.of(first.get(), second.get()).stream()
+                    .filter(IssueDispatchService.ClaimResult::claimed)).hasSize(1);
+        }
+
+        assertThat(issues.findById(issueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.IN_PROGRESS);
+    }
+
     @Test
     void readyOwnerCannotStartWhenRepositoryIsUnexpectedlyOccupied() {
         Long ownerId = seedApprovedIssue(IssueStatus.READY_TO_START, 0, 41);
@@ -584,6 +646,15 @@ class IssueDispatchTransactionManagerTest {
             iteration.setReviewPassed(passed);
             iteration.setReviewJson(reviewJson);
             iterations.saveAndFlush(iteration);
+        });
+    }
+
+    private void setProcessingState(ProcessingState state) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
+            control.setState(state);
+            controls.saveAndFlush(control);
         });
     }
 

@@ -327,7 +327,6 @@ public class IssuePollingService {
 
         long slotsUsed = 0;
         for (JsonNode issueNode : ordered) {
-            if (!processingControl.isRunning()) break;
             if (slotsUsed >= availableSlots) break;
             if (evaluateIssue(repo, issueNode) == WebhookOutcome.STARTED) {
                 slotsUsed++;
