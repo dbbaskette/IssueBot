@@ -74,6 +74,25 @@ class DecompositionReservationServiceTest {
     }
 
     @Test
+    void waitingGroupWithoutCurrentChildAllowsPreexistingUnrelatedWorkToAdvance() {
+        WatchedRepo repo = repo(1L);
+        TrackedIssue parent = issue(repo, 153, 10L);
+        DecompositionGroup group =
+                new DecompositionGroup(repo, parent, DecompositionGroupState.WAITING);
+        TrackedIssue completed = issue(repo, 155, 11L);
+        completed.setStatus(IssueStatus.COMPLETED);
+        TrackedIssue existing = issue(repo, 154, 13L);
+        existing.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        DecompositionChild child = child(group, 1, 155, completed);
+        when(groups.findOldestUnfinishedByRepo(1L)).thenReturn(Optional.of(group));
+        when(children.findByGroupOrderBySequencePositionAsc(group))
+                .thenReturn(List.of(child));
+
+        assertThat(service.evaluate(existing).allowed()).isTrue();
+        verify(children).findByGroupOrderBySequencePositionAsc(group);
+    }
+
+    @Test
     void activeGroupStillBlocksUnrelatedPlanApproval() {
         WatchedRepo repo = repo(1L);
         TrackedIssue parent = issue(repo, 153, 10L);

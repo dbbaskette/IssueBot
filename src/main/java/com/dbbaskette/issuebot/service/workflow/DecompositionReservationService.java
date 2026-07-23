@@ -34,26 +34,29 @@ public class DecompositionReservationService {
     }
 
     public ReservationDecision evaluate(TrackedIssue candidate) {
-        Optional<Reservation> reservation = reservationFor(candidate.getRepo());
+        Optional<ReservationContext> reservation = reservationContextFor(candidate.getRepo());
         if (reservation.isEmpty()) return ReservationDecision.permitted();
-        Reservation owner = reservation.orElseThrow();
+        ReservationContext context = reservation.orElseThrow();
+        Reservation owner = context.reservation();
         int parent = owner.group().getParentIssue().getIssueNumber();
-        if (owner.currentChild() == null || owner.currentChild().getTrackedIssue() == null) {
-            return ReservationDecision.rejected(
-                    "Decomposition #" + parent + " is completing and still owns this repository.", owner);
-        }
-        TrackedIssue current = owner.currentChild().getTrackedIssue();
-        if (Objects.equals(current.getId(), candidate.getId())) {
-            return ReservationDecision.permitted(owner);
-        }
-        boolean member = children.findByGroupOrderBySequencePositionAsc(owner.group()).stream()
+        boolean member = context.orderedChildren().stream()
                 .map(DecompositionChild::getTrackedIssue)
                 .filter(Objects::nonNull)
                 .anyMatch(issue -> Objects.equals(issue.getId(), candidate.getId()));
+        TrackedIssue current = owner.currentChild() == null
+                ? null
+                : owner.currentChild().getTrackedIssue();
+        if (current != null && Objects.equals(current.getId(), candidate.getId())) {
+            return ReservationDecision.permitted(owner);
+        }
         if (owner.group().getState() == DecompositionGroupState.WAITING
                 && !member
                 && PREEXISTING_ACTIVE.contains(candidate.getStatus())) {
             return ReservationDecision.permitted(owner);
+        }
+        if (current == null) {
+            return ReservationDecision.rejected(
+                    "Decomposition #" + parent + " is completing and still owns this repository.", owner);
         }
         String reason = member
                 ? "Child #" + candidate.getIssueNumber() + " is waiting for #"
@@ -65,12 +68,20 @@ public class DecompositionReservationService {
     }
 
     public Optional<Reservation> reservationFor(WatchedRepo repo) {
+        return reservationContextFor(repo).map(ReservationContext::reservation);
+    }
+
+    private Optional<ReservationContext> reservationContextFor(WatchedRepo repo) {
         return groups.findOldestUnfinishedByRepo(repo.getId()).map(group -> {
             List<DecompositionChild> ordered = children.findByGroupOrderBySequencePositionAsc(group);
-            return new Reservation(group, group.currentChild(ordered).orElse(null));
+            Reservation reservation =
+                    new Reservation(group, group.currentChild(ordered).orElse(null));
+            return new ReservationContext(reservation, ordered);
         });
     }
 
+    private record ReservationContext(
+            Reservation reservation, List<DecompositionChild> orderedChildren) {}
     public record Reservation(DecompositionGroup group, DecompositionChild currentChild) {}
     public record ReservationDecision(boolean allowed, String reason, Reservation reservation) {
         static ReservationDecision permitted() { return new ReservationDecision(true, null, null); }

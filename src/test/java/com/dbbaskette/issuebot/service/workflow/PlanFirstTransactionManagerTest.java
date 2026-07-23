@@ -343,6 +343,33 @@ class PlanFirstTransactionManagerTest {
                 .isEqualTo(IssueStatus.QUEUED);
     }
 
+    @Test
+    void waitingDecompositionWithOnlyCompletedChildrenAllowsPreexistingPlanApproval() {
+        Long repoId = seedRepo();
+        Long parentId = seedPlainIssue(repoId, 153, IssueStatus.DECOMPOSED);
+        Pending existing = seedPlannedIssue(
+                repoId, 154, IssueStatus.AWAITING_PLAN_APPROVAL, false);
+        Long childId = seedPlainIssue(repoId, 155, IssueStatus.COMPLETED);
+        tx().executeWithoutResult(ignored -> {
+            WatchedRepo repo = repos.findById(repoId).orElseThrow();
+            DecompositionGroup group = decompositionGroups.saveAndFlush(
+                    new DecompositionGroup(repo, issues.findById(parentId).orElseThrow(),
+                            DecompositionGroupState.WAITING));
+            DecompositionChild child =
+                    new DecompositionChild(
+                            group, 1, "Part 1", "Body", "handoff:completed");
+            child.link(155, issues.findById(childId).orElseThrow());
+            decompositionChildren.saveAndFlush(child);
+        });
+
+        transactions.approvePlan(existing.issueId(), existing.versionId());
+
+        assertThat(issues.findById(existing.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(issues.findById(childId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.COMPLETED);
+    }
+
     @ParameterizedTest
     @EnumSource(value = IssueStatus.class, names = {
             "PENDING", "QUEUED", "BLOCKED", "FAILED", "COOLDOWN",
