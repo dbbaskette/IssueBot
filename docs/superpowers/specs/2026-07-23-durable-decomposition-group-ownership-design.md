@@ -1,7 +1,7 @@
 # Durable Decomposition Group Ownership
 
-**Status:** Approved design  
-**Date:** 2026-07-23  
+**Status:** Approved design
+**Date:** 2026-07-23
 **Scope:** Decomposition creation, repository reservation, sequential child execution, parent completion, recovery, and operator controls
 
 ## Problem

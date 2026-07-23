@@ -32,7 +32,7 @@
 - `src/main/java/com/dbbaskette/issuebot/model/DecompositionChild.java` — ordered child intent and GitHub/tracked-issue identity.
 - `src/main/java/com/dbbaskette/issuebot/repository/DecompositionGroupRepository.java` — owner, waiting, parent, and lock queries.
 - `src/main/java/com/dbbaskette/issuebot/repository/DecompositionChildRepository.java` — ordered membership and identity queries.
-- `src/main/resources/db/migration/V33__durable_decomposition_groups.sql` — schema, indexes, and foreign keys.
+- `src/main/resources/db/migration/V34__durable_decomposition_groups.sql` — schema, indexes, and foreign keys.
 
 ### New workflow files
 
@@ -56,7 +56,7 @@
 ### Task 1: Persist decomposition groups and ordered children
 
 **Files:**
-- Create: `src/main/resources/db/migration/V33__durable_decomposition_groups.sql`
+- Create: `src/main/resources/db/migration/V34__durable_decomposition_groups.sql`
 - Create: `src/main/java/com/dbbaskette/issuebot/model/DecompositionGroupState.java`
 - Create: `src/main/java/com/dbbaskette/issuebot/model/DecompositionChildState.java`
 - Create: `src/main/java/com/dbbaskette/issuebot/model/DecompositionGroup.java`
@@ -73,7 +73,7 @@
 - Produces: `DecompositionGroupRepository.findOwningByRepo(...)`
 - Produces: `DecompositionChildRepository.findByGroupOrderBySequencePositionAsc(...)`
 
-- [ ] **Step 1: Write migration and repository tests that fail before V33 exists**
+- [ ] **Step 1: Write migration and repository tests that fail before V34 exists**
 
 The migration test must start Flyway at version 32, insert a watched repository and parent tracked issue, migrate to latest, and assert:
 
@@ -95,7 +95,7 @@ Run:
 ./mvnw -Dtest=DecompositionGroupMigrationTest,DecompositionGroupRepositoryTest test
 ```
 
-Expected: compilation or Flyway failure because the entities, repositories, and V33 do not exist.
+Expected: compilation or Flyway failure because the entities, repositories, and V34 do not exist.
 
 - [ ] **Step 3: Add the schema**
 
@@ -211,7 +211,7 @@ Expected: all tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/main/resources/db/migration/V33__durable_decomposition_groups.sql \
+git add src/main/resources/db/migration/V34__durable_decomposition_groups.sql \
   src/main/java/com/dbbaskette/issuebot/model \
   src/main/java/com/dbbaskette/issuebot/repository \
   src/test/java/com/dbbaskette/issuebot/repository
@@ -883,5 +883,5 @@ git commit -m "test: verify decomposition group sequencing"
 - [ ] Wait for CI and merge the PR.
 - [ ] Fast-forward local `main`, rebuild the JAR, and restart `com.dbbaskette.issuebot`.
 - [ ] Verify liveness and readiness are `UP`.
-- [ ] Verify V33 applies and live #153 reconstructs with #155 as the next group child unless a preexisting active issue still owns the repository.
+- [ ] Verify V34 applies and live #153 reconstructs with #155 as the next group child unless a preexisting active issue still owns the repository.
 - [ ] Verify #154 cannot start while the recovered #153 group owns the repository.

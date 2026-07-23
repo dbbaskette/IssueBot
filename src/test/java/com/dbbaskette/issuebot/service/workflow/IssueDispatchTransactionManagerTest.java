@@ -167,6 +167,7 @@ class IssueDispatchTransactionManagerTest {
         assertThat(later.reason()).isEqualTo(
                 "Child #156 is waiting for #155 in decomposition #153.");
         assertThat(current.claimed()).isTrue();
+        markCompleted(ids[1]);
     }
 
     @Test
@@ -198,6 +199,7 @@ class IssueDispatchTransactionManagerTest {
         assertThat(unrelated.claimed()).isFalse();
         assertThat(unrelated.reason()).contains("Decomposition #153 owns this repository");
         assertThat(current.claimed()).isTrue();
+        markCompleted(ids[1]);
     }
 
     @Test
@@ -676,6 +678,14 @@ class IssueDispatchTransactionManagerTest {
 
     private Long seedApprovedIssue(IssueStatus status, int conformanceAttempt) {
         return seedApprovedIssue(status, conformanceAttempt, 42);
+    }
+
+    private void markCompleted(Long issueId) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            TrackedIssue issue = issues.findById(issueId).orElseThrow();
+            issue.setStatus(IssueStatus.COMPLETED);
+            issues.saveAndFlush(issue);
+        });
     }
 
     private void assertLowestReadyReservationOwnsDispatch(boolean ownerFirst) {
