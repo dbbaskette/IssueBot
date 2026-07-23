@@ -2184,103 +2184,78 @@ details summary:hover { color: var(--text-primary); }
     border-bottom-color: var(--accent-border);
 }
 
-.phase-pipeline {
-    display: flex;
-    gap: 0;
-    align-items: stretch;
+.workflow-stage-list {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
-
-.phase-step {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 1rem 0.5rem;
+.workflow-stage {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr;
+    justify-items: center;
+    gap: 0.25rem;
+    padding: 0.85rem 0.35rem;
     position: relative;
     text-align: center;
 }
-
-.phase-step:not(:last-child)::after {
+.workflow-stage:not(:last-child)::after {
     content: '';
     position: absolute;
-    top: calc(0.5rem + 12px);
-    left: calc(50% + 14px);
-    right: calc(-50% + 14px);
+    top: 1.25rem;
+    left: calc(50% + 12px);
+    right: calc(-50% + 12px);
     height: 2px;
     background: var(--hairline);
     z-index: 0;
 }
-.phase-step.done:not(:last-child)::after {
+.workflow-stage.stage--completed:not(:last-child)::after {
     background: var(--ok);
-    box-shadow: 0 0 4px var(--ok-soft);
 }
-.phase-step.active:not(:last-child)::after {
+.workflow-stage.stage--current:not(:last-child)::after {
     background: linear-gradient(90deg, var(--info), var(--hairline));
 }
-
-.phase-indicator {
-    width: 24px;
-    height: 24px;
+.workflow-stage-icon {
+    display: grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
     border-radius: 50%;
-    border: 2px solid var(--glass-border);
     background: var(--glass-bg-strong);
     position: relative;
     z-index: 1;
-    transition: all 0.3s var(--ease-out);
 }
-.phase-step.done .phase-indicator {
-    background: var(--ok);
-    border-color: var(--ok);
-    box-shadow: 0 0 8px var(--ok-soft);
-}
-.phase-step.done .phase-indicator::after {
-    content: '\2713';
-    color: var(--page-bg);
-    font-size: 0.7rem;
-    font-weight: 600;
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.phase-step.active .phase-indicator {
-    background: var(--info);
-    border-color: var(--info);
-    box-shadow: 0 0 12px var(--info-soft);
-    animation: phase-pulse 2s ease-in-out infinite;
-}
-@keyframes phase-pulse {
-    0%, 100% { box-shadow: 0 0 8px var(--info-soft); }
-    50% { box-shadow: 0 0 18px var(--info-soft); }
-}
-.phase-step.pending .phase-indicator { opacity: 0.45; }
-
-.phase-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    align-items: center;
-}
-
-.phase-name {
-    font-family: var(--font-sans);
+.stage--completed .workflow-stage-icon { color: var(--ok); }
+.stage--current .workflow-stage-icon { color: var(--info); animation: phase-pulse 2s ease-in-out infinite; }
+.stage--paused .workflow-stage-icon { color: var(--warn); }
+.stage--failed .workflow-stage-icon { color: var(--danger); }
+.stage--upcoming .workflow-stage-icon { color: var(--text-tertiary); }
+.workflow-stage-label {
     font-size: 0.74rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    color: var(--text-tertiary);
+    font-weight: 650;
     text-transform: uppercase;
 }
-.phase-step.active .phase-name { color: var(--info); }
-.phase-step.done .phase-name { color: var(--ok); }
-
-.phase-desc {
-    font-size: 0.74rem;
-    color: var(--text-tertiary);
-    line-height: 1.3;
+.workflow-stage-state {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
 }
-.phase-step.active .phase-desc { color: var(--text-secondary); }
+.workflow-stage-detail {
+    font-size: 0.7rem;
+    line-height: 1.3;
+    color: var(--text-secondary);
+}
+.workflow-current-summary {
+    display: none;
+}
+.stage--current .workflow-stage-label { color: var(--info); }
+.stage--completed .workflow-stage-label { color: var(--ok); }
+.stage--paused .workflow-stage-label { color: var(--warn); }
+.stage--failed .workflow-stage-label { color: var(--danger); }
+@keyframes phase-pulse {
+    0%, 100% { filter: drop-shadow(0 0 2px var(--info-soft)); }
+    50% { filter: drop-shadow(0 0 7px var(--info)); }
+}
 
 /* Review scores block inside iteration timeline */
 .review-scores {
@@ -2952,12 +2927,22 @@ details summary:hover { color: var(--text-primary); }
     }
     .events-feed .type { min-width: unset; }
 
-    .phase-pipeline { flex-wrap: wrap; gap: 0.25rem; }
-    .phase-step { min-width: 0; padding: 0.6rem 0.3rem; }
-    .phase-name { font-size: 0.62rem; word-break: break-word; }
-    .phase-desc { font-size: 0.64rem; }
-    .phase-indicator { width: 20px; height: 20px; }
-    .phase-step:not(:last-child)::after { display: none; }
+    .workflow-current-summary {
+        display: grid;
+        grid-template-columns: auto auto auto 1fr;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.7rem;
+        margin-bottom: 0.5rem;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-md);
+    }
+    .workflow-stage-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .workflow-stage { padding: 0.55rem 0.2rem; }
+    .workflow-stage:not(:last-child)::after { display: none; }
+    .workflow-stage-detail { display: none; }
+    .workflow-stage-label { font-size: 0.65rem; }
+    .workflow-stage-state { font-size: 0.62rem; }
 
     .live-terminal { font-size: 11px; padding: 0.75rem; overflow-x: auto; }
     .live-terminal .terminal-line { font-size: inherit; }

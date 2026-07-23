@@ -72,6 +72,7 @@ class IssueDetailGoalCardRenderTest {
         context.setVariable("events", List.of());
         context.setVariable("phaseIndex", -1);
         context.setVariable("phaseCompleted", false);
+        context.setVariable("workflowStepper", new com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler().assemble(issue));
         context.setVariable("modelCatalog", List.of());
         // Mirrors what UiModelAdvice publishes on every real request (#80).
         context.setVariable("humanize", new HumanizeHelper());

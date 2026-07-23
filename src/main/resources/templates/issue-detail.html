@@ -979,7 +979,7 @@
     </div>
 
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
-    <details class="panel mb-3 secondary-section history-section"
+    <details id="iteration-history" class="panel mb-3 secondary-section history-section"
              th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
         <summary class="panel-header">
             <h3>Iteration History</h3>
@@ -1070,7 +1070,7 @@
     </details>
 
     <!-- === ACTIVITY LOG (full width, below the grid) === -->
-    <details class="panel secondary-section activity-section"
+    <details id="activity-log" class="panel secondary-section activity-section"
              th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
         <summary class="panel-header">
             <h3>Activity Log</h3>
@@ -1150,82 +1150,35 @@
         </div>
     </div>
 
-    <!-- Phase pipeline — shown while in progress, or when completed (all steps done) -->
-    <div th:if="${(issue.status.name() == 'IN_PROGRESS' and issue.currentPhase != null) or phaseCompleted}"
-         class="panel mb-3 live-monitor">
+    <!-- Compact semantic workflow progress for every issue state. -->
+    <div class="panel mb-3 live-monitor workflow-stepper">
         <div class="panel-header">
             <h3>Live Progress</h3>
-            <span th:if="${phaseCompleted}" class="status status-completed" style="font-size:0.6rem">COMPLETED</span>
-            <span th:unless="${phaseCompleted}" class="status status-in_progress" style="font-size:0.6rem">ACTIVE</span>
+            <a class="text-sm" th:href="${not #lists.isEmpty(iterations) ? '#iteration-history' : '#activity-log'}">View timing details</a>
         </div>
         <div class="panel-body">
-            <div class="phase-pipeline">
-                <!-- 0: Setup -->
-                <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 0 ? 'done' : (phaseIndex == 0 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">Setup</div>
-                        <div class="phase-desc">Clone &amp; branch</div>
-                    </div>
-                </div>
-                <!-- 1: Implementation -->
-                <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 1 ? 'done' : (phaseIndex == 1 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">Implementation</div>
-                        <div class="phase-desc"
-                             th:text="${issue.resolvedImplModel != null ? (issue.resolvedImplModel + ' writing code') : 'Implementation model writing code'}">Implementation model writing code</div>
-                    </div>
-                </div>
-                <!-- 2: Local Checks (only when the repo has verification commands configured) -->
-                <div class="phase-step" th:if="${issue.repo.verificationCommands != null}"
-                     th:classappend="${phaseCompleted or phaseIndex > 2 ? 'done' : (phaseIndex == 2 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">Local Checks</div>
-                        <div class="phase-desc">Operator-defined verification</div>
-                    </div>
-                </div>
-                <!-- 3: CI Checks -->
-                <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 3 ? 'done' : (phaseIndex == 3 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">CI Checks</div>
-                        <div class="phase-desc">Compile &amp; test</div>
-                    </div>
-                </div>
-                <!-- 4: Draft PR -->
-                <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 4 ? 'done' : (phaseIndex == 4 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">Draft PR</div>
-                        <div class="phase-desc">Create pull request</div>
-                    </div>
-                </div>
-                <!-- 5: Code Review -->
-                <div class="phase-step"
-                     th:classappend="${phaseCompleted or phaseIndex > 5 ? 'done' : (phaseIndex == 5 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">Code Review</div>
-                        <div class="phase-desc"
-                             th:text="${issue.resolvedReviewModel != null ? (issue.resolvedReviewModel + ' review') : 'Independent review'}">Independent review</div>
-                    </div>
-                </div>
-                <!-- 6: Completion -->
-                <div class="phase-step"
-                     th:classappend="${phaseCompleted ? 'done' : (phaseIndex == 6 ? 'active' : 'pending')}">
-                    <div class="phase-indicator"></div>
-                    <div class="phase-info">
-                        <div class="phase-name">Completion</div>
-                        <div class="phase-desc">Finalize &amp; merge</div>
-                    </div>
-                </div>
+            <div class="workflow-current-summary"
+                 th:with="stage=${workflowStepper.selectedStage}"
+                 th:classappend="${'stage--' + stage.state.cssName()}">
+                <i class="ti" th:classappend="${stage.icon}" aria-hidden="true"></i>
+                <span class="workflow-stage-label" th:text="${stage.label}">Work</span>
+                <span class="workflow-stage-state" th:text="${stage.stateText}">Current</span>
+                <span class="workflow-stage-detail" th:if="${stage.detail != null}" th:text="${stage.detail}">Implementation in progress</span>
             </div>
+            <nav aria-label="Issue workflow progress">
+                <ol class="workflow-stage-list">
+                    <li th:each="stage : ${workflowStepper.stages}"
+                        class="workflow-stage"
+                        th:classappend="${'stage--' + stage.state.cssName()}"
+                        th:attr="aria-label=${stage.accessibleLabel},
+                                 aria-current=${stage.selected and stage.state.name() != 'COMPLETED' ? 'step' : null}">
+                        <i class="ti workflow-stage-icon" th:classappend="${stage.icon}" aria-hidden="true"></i>
+                        <span class="workflow-stage-label" th:text="${stage.label}">Intake</span>
+                        <span class="workflow-stage-state" th:text="${stage.stateText}">Completed</span>
+                        <span class="workflow-stage-detail" th:if="${stage.detail != null}" th:text="${stage.detail}">Detail</span>
+                    </li>
+                </ol>
+            </nav>
         </div>
     </div>
 </div>
