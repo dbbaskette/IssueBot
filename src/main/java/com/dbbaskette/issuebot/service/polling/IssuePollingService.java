@@ -76,7 +76,7 @@ public class IssuePollingService {
         if (!enabled.get()) {
             return;
         }
-        if (processingControl.isPaused()) {
+        if (!processingControl.isRunning()) {
             log.debug("Global processing is paused, skipping dispatch poll");
             return;
         }
@@ -353,7 +353,7 @@ public class IssuePollingService {
         // No blockers — existing flow
         TrackedIssue tracked = new TrackedIssue(repo, issueNumber, title);
 
-        if (processingControl.isPaused()) {
+        if (!processingControl.isRunning()) {
             tracked.setStatus(IssueStatus.QUEUED);
             issueRepository.save(tracked);
             eventService.log("ISSUE_QUEUED",

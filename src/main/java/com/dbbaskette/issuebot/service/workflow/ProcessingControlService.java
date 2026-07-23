@@ -17,7 +17,7 @@ public class ProcessingControlService {
     private final ProcessingControlRepository repository;
     private final TrackedIssueRepository issues;
     private final WorkflowCancellationService cancellationService;
-    private final AtomicReference<ProcessingState> state = new AtomicReference<>(ProcessingState.RUNNING);
+    private final AtomicReference<ProcessingState> mode = new AtomicReference<>(ProcessingState.RUNNING);
 
     public ProcessingControlService(ProcessingControlRepository repository,
                                     TrackedIssueRepository issues,
@@ -31,34 +31,41 @@ public class ProcessingControlService {
     public void initialize() {
         ProcessingControl control = repository.findById(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> repository.save(new ProcessingControl(ProcessingState.RUNNING)));
-        state.set(control.getState());
+        mode.set(control.getState());
     }
 
-    public ProcessingState state() {
-        return state.get();
+    public ProcessingState mode() {
+        return mode.get();
     }
 
-    public boolean isPaused() {
-        return state() == ProcessingState.PAUSED;
+    public boolean isRunning() {
+        return mode() == ProcessingState.RUNNING;
     }
 
     @Transactional
-    public synchronized void pause() {
-        persist(ProcessingState.PAUSED);
+    public synchronized void pauseAfterCurrent() {
+        transitionTo(ProcessingState.PAUSE_AFTER_CURRENT);
+    }
+
+    @Transactional
+    public synchronized void stopNow() {
+        if (!transitionTo(ProcessingState.STOPPED)) return;
         issues.findByStatus(IssueStatus.IN_PROGRESS).forEach(issue ->
                 cancellationService.requestCancel(issue.getId(), CancellationReason.GLOBAL_PAUSE));
     }
 
     @Transactional
-    public synchronized void resume() {
-        persist(ProcessingState.RUNNING);
+    public synchronized void restart() {
+        transitionTo(ProcessingState.RUNNING);
     }
 
-    private void persist(ProcessingState next) {
+    private boolean transitionTo(ProcessingState next) {
         ProcessingControl control = repository.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
-                .orElseGet(() -> new ProcessingControl(state.get()));
+                .orElseGet(() -> new ProcessingControl(mode.get()));
+        if (control.getState() == next) return false;
         control.setState(next);
         repository.save(control);
-        state.set(next);
+        mode.set(next);
+        return true;
     }
 }

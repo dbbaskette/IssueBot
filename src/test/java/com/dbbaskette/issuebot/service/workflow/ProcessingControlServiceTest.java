@@ -8,10 +8,13 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -25,49 +28,102 @@ class ProcessingControlServiceTest {
     private final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     private final WorkflowCancellationService cancellationService = mock(WorkflowCancellationService.class);
 
-    @Test
-    void startsFromPersistedStateAndCachesReads() {
+    @ParameterizedTest
+    @EnumSource(ProcessingState.class)
+    void startsFromEveryPersistedModeAndCachesReads(ProcessingState persistedMode) {
         when(repository.findById(ProcessingControl.SINGLETON_ID))
-                .thenReturn(Optional.of(new ProcessingControl(ProcessingState.PAUSED)));
+                .thenReturn(Optional.of(new ProcessingControl(persistedMode)));
         ProcessingControlService service = service();
 
         service.initialize();
 
-        assertThat(service.isPaused()).isTrue();
-        service.isPaused();
-        verify(repository, times(1)).findById(ProcessingControl.SINGLETON_ID);
+        assertThat(service.mode()).isEqualTo(persistedMode);
+        assertThat(service.isRunning()).isEqualTo(persistedMode == ProcessingState.RUNNING);
+        service.mode();
+        verify(repository).findById(ProcessingControl.SINGLETON_ID);
     }
 
     @Test
-    void failedPausePersistenceDoesNotCancelWork() {
-        when(repository.save(any())).thenThrow(new DataAccessResourceFailureException("disk full"));
+    void missingRowInitializationPersistsAndCachesRunning() {
+        ProcessingControl running = new ProcessingControl(ProcessingState.RUNNING);
+        when(repository.findById(ProcessingControl.SINGLETON_ID)).thenReturn(Optional.empty());
+        when(repository.save(any())).thenReturn(running);
 
-        assertThatThrownBy(() -> service().pause()).isInstanceOf(DataAccessResourceFailureException.class);
+        ProcessingControlService service = service();
+        service.initialize();
 
-        verifyNoInteractions(cancellationService);
+        assertThat(service.mode()).isEqualTo(ProcessingState.RUNNING);
+        verify(repository).save(argThat(c -> c.getState() == ProcessingState.RUNNING));
     }
 
     @Test
-    void pausePersistsBeforeCancellingEveryActiveIssue() {
+    void pauseAfterCurrentPersistsWithoutCancellationAndIsIdempotent() {
+        ProcessingControlService service = serviceWithPersistedMode(ProcessingState.RUNNING);
+
+        service.pauseAfterCurrent();
+        service.pauseAfterCurrent();
+
+        assertThat(service.mode()).isEqualTo(ProcessingState.PAUSE_AFTER_CURRENT);
+        verify(repository).save(argThat(c -> c.getState() == ProcessingState.PAUSE_AFTER_CURRENT));
+        verifyNoInteractions(issues, cancellationService);
+        verify(repository, times(2)).findByIdForUpdate(ProcessingControl.SINGLETON_ID);
+    }
+
+    @Test
+    void stopNowPersistsBeforeCancellingAndIsIdempotent() {
         TrackedIssue active = issue(1L, IssueStatus.IN_PROGRESS);
         when(issues.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(active));
+        ProcessingControlService service = serviceWithPersistedMode(ProcessingState.RUNNING);
 
-        service().pause();
+        service.stopNow();
+        service.stopNow();
 
-        var order = inOrder(repository, cancellationService);
-        order.verify(repository).save(argThat(c -> c.getState() == ProcessingState.PAUSED));
+        var order = inOrder(repository, issues, cancellationService);
+        order.verify(repository).save(argThat(c -> c.getState() == ProcessingState.STOPPED));
+        order.verify(issues).findByStatus(IssueStatus.IN_PROGRESS);
         order.verify(cancellationService).requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
+        verify(issues).findByStatus(IssueStatus.IN_PROGRESS);
+        verifyNoMoreInteractions(cancellationService);
     }
 
     @Test
-    void resumePersistsRunningState() {
-        ProcessingControlService service = service();
-        service.pause();
+    void failedStopPersistenceLeavesCacheAndWorkUntouched() {
+        ProcessingControlService service = serviceWithPersistedMode(ProcessingState.RUNNING);
+        doThrow(new DataAccessResourceFailureException("disk full")).when(repository).save(any());
 
-        service.resume();
+        assertThatThrownBy(service::stopNow).isInstanceOf(DataAccessResourceFailureException.class);
 
-        assertThat(service.state()).isEqualTo(ProcessingState.RUNNING);
+        assertThat(service.mode()).isEqualTo(ProcessingState.RUNNING);
+        verifyNoInteractions(issues, cancellationService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void restartPersistsRunningAndRepeatedRestartIsIdempotent(ProcessingState initialMode) {
+        ProcessingControlService service = serviceWithPersistedMode(initialMode);
+
+        service.restart();
+        service.restart();
+
+        assertThat(service.mode()).isEqualTo(ProcessingState.RUNNING);
         verify(repository).save(argThat(c -> c.getState() == ProcessingState.RUNNING));
+    }
+
+    private ProcessingControlService serviceWithPersistedMode(ProcessingState initialMode) {
+        AtomicReference<ProcessingControl> persisted = new AtomicReference<>(new ProcessingControl(initialMode));
+        when(repository.findByIdForUpdate(ProcessingControl.SINGLETON_ID))
+                .thenAnswer(invocation -> Optional.of(persisted.get()));
+        when(repository.save(any())).thenAnswer(invocation -> {
+            ProcessingControl saved = invocation.getArgument(0);
+            persisted.set(saved);
+            return saved;
+        });
+        ProcessingControlService service = service();
+        if (initialMode != ProcessingState.RUNNING) {
+            when(repository.findById(ProcessingControl.SINGLETON_ID)).thenReturn(Optional.of(persisted.get()));
+            service.initialize();
+        }
+        return service;
     }
 
     private ProcessingControlService service() {

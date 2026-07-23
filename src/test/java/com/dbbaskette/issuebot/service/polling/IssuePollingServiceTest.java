@@ -56,6 +56,7 @@ class IssuePollingServiceTest {
         properties = new IssueBotProperties();
         dependencyResolver = mock(DependencyResolverService.class);
         processingControl = mock(ProcessingControlService.class);
+        when(processingControl.isRunning()).thenReturn(true);
         dispatchService = spy(new IssueDispatchService(
                 issueRepository, processingControl, mock(IterationRepository.class)));
         pollingService = new IssuePollingService(
@@ -81,7 +82,7 @@ class IssuePollingServiceTest {
 
     @Test
     void pausedPollDoesNotDispatchWork() {
-        when(processingControl.isPaused()).thenReturn(true);
+        when(processingControl.isRunning()).thenReturn(false);
 
         pollingService.pollForIssues();
 
@@ -91,7 +92,7 @@ class IssuePollingServiceTest {
 
     @Test
     void pausedWebhookTracksNewIssueAsQueued() {
-        when(processingControl.isPaused()).thenReturn(true);
+        when(processingControl.isRunning()).thenReturn(false);
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 42)).thenReturn(Optional.empty());
         ObjectNode node = objectMapper.createObjectNode();
         node.put("number", 42);

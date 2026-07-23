@@ -17,7 +17,7 @@ public class ProcessingControlController {
     @PostMapping("/pause")
     public String pause(@RequestParam(defaultValue = "/") String returnTo, RedirectAttributes redirects) {
         try {
-            control.pause();
+            control.stopNow();
             redirects.addFlashAttribute("success", "Processing paused — active work is stopping");
         } catch (RuntimeException e) {
             redirects.addFlashAttribute("error", "Processing could not be paused; active work was not stopped");
@@ -27,7 +27,7 @@ public class ProcessingControlController {
 
     @PostMapping("/resume")
     public String resume(@RequestParam(defaultValue = "/") String returnTo, RedirectAttributes redirects) {
-        control.resume();
+        control.restart();
         redirects.addFlashAttribute("success", "Processing resumed");
         return redirect(returnTo);
     }

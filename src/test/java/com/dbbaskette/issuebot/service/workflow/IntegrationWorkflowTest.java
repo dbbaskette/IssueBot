@@ -1570,6 +1570,7 @@ class IntegrationWorkflowTest {
         when(guidanceRepository.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(issue.getId()))
                 .thenAnswer(invocation -> List.copyOf(storedGuidance));
         ProcessingControlService processingControl = mock(ProcessingControlService.class);
+        when(processingControl.isRunning()).thenReturn(true);
         when(issueRepository.findByIdWithApprovedPlanningVersion(issue.getId()))
                 .thenReturn(Optional.of(issue));
         when(issueRepository.findByRepoAndStatusIn(eq(issue.getRepo()), anyList()))
