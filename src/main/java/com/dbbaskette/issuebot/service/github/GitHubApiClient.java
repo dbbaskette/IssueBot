@@ -66,7 +66,7 @@ public class GitHubApiClient {
     public List<JsonNode> listIssues(String owner, String repo, String label, String state) {
         log.debug("Listing issues for {}/{} with label={}, state={}", owner, repo, label, state);
         return webClient.get()
-                .uri("/repos/{owner}/{repo}/issues?labels={label}&state={state}&per_page=30",
+                .uri("/repos/{owner}/{repo}/issues?labels={label}&state={state}&per_page=100",
                         owner, repo, label, state)
                 .retrieve()
                 .bodyToFlux(JsonNode.class)
@@ -94,6 +94,17 @@ public class GitHubApiClient {
                 .bodyToMono(JsonNode.class)
                 .retryWhen(retryOnServerError())
                 .block(Duration.ofSeconds(15));
+    }
+
+    public List<JsonNode> listIssueComments(String owner, String repo, int issueNumber) {
+        return webClient.get()
+                .uri("/repos/{owner}/{repo}/issues/{number}/comments?per_page=100",
+                        owner, repo, issueNumber)
+                .retrieve()
+                .bodyToFlux(JsonNode.class)
+                .retryWhen(retryOnServerError())
+                .collectList()
+                .block(Duration.ofSeconds(30));
     }
 
     public void assignIssue(String owner, String repo, int issueNumber, List<String> assignees) {

@@ -51,6 +51,8 @@ class IssueDispatchTransactionManagerTest {
     @Autowired private PlanningVersionRepository versions;
     @Autowired private IterationRepository iterations;
     @Autowired private ProcessingControlRepository controls;
+    @Autowired private DecompositionGroupRepository decompositionGroups;
+    @Autowired private DecompositionChildRepository decompositionChildren;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
     @Autowired private PlatformTransactionManager transactionManager;
 
@@ -130,6 +132,74 @@ class IssueDispatchTransactionManagerTest {
                 .isEqualTo("Cannot start issue in READY_TO_START status");
         assertThat(issues.findById(issueId).orElseThrow().getStatus())
                 .isEqualTo(IssueStatus.READY_TO_START);
+    }
+
+    @Test
+    void durableGroupAllowsOnlyCurrentChildToClaimRepository() {
+        Long[] ids = new TransactionTemplate(transactionManager).execute(ignored -> {
+            controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
+            WatchedRepo repo = repos.save(new WatchedRepo("acme", "decomposition-dispatch"));
+            TrackedIssue parent = issues.save(new TrackedIssue(repo, 153, "Parent"));
+            parent.setStatus(IssueStatus.DECOMPOSED);
+            TrackedIssue unrelated = issues.save(new TrackedIssue(repo, 154, "Unrelated"));
+            unrelated.setStatus(IssueStatus.QUEUED);
+            TrackedIssue current = issues.save(new TrackedIssue(repo, 155, "First"));
+            current.setStatus(IssueStatus.QUEUED);
+            TrackedIssue later = issues.save(new TrackedIssue(repo, 156, "Second"));
+            later.setStatus(IssueStatus.QUEUED);
+            DecompositionGroup group = decompositionGroups.save(
+                    new DecompositionGroup(repo, parent, DecompositionGroupState.ACTIVE));
+            DecompositionChild one = new DecompositionChild(group, 1, "First", "Body", "g:1");
+            one.link(155, current);
+            decompositionChildren.save(one);
+            DecompositionChild two = new DecompositionChild(group, 2, "Second", "Body", "g:2");
+            two.link(156, later);
+            decompositionChildren.save(two);
+            return new Long[]{unrelated.getId(), current.getId(), later.getId()};
+        });
+
+        IssueDispatchService.ClaimResult unrelated = dispatch.claimStart(ids[0]);
+        IssueDispatchService.ClaimResult later = dispatch.claimStart(ids[2]);
+        IssueDispatchService.ClaimResult current = dispatch.claimStart(ids[1]);
+
+        assertThat(unrelated.reason()).contains("Decomposition #153 owns this repository");
+        assertThat(later.reason()).isEqualTo(
+                "Child #156 is waiting for #155 in decomposition #153.");
+        assertThat(current.claimed()).isTrue();
+        markCompleted(ids[1]);
+    }
+
+    @Test
+    void waitingGroupOwnsTheDispatchHandoffBeforePollingPromotesIt() {
+        Long[] ids = new TransactionTemplate(transactionManager).execute(ignored -> {
+            controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
+            WatchedRepo repo = repos.save(new WatchedRepo("acme", "decomposition-handoff"));
+            TrackedIssue parent = issues.save(new TrackedIssue(repo, 153, "Parent"));
+            parent.setStatus(IssueStatus.DECOMPOSED);
+            TrackedIssue completedBlocker = issues.save(new TrackedIssue(repo, 154, "Previous work"));
+            completedBlocker.setStatus(IssueStatus.COMPLETED);
+            TrackedIssue current = issues.save(new TrackedIssue(repo, 155, "First"));
+            current.setStatus(IssueStatus.QUEUED);
+            TrackedIssue unrelated = issues.save(new TrackedIssue(repo, 160, "Unrelated"));
+            unrelated.setStatus(IssueStatus.QUEUED);
+            DecompositionGroup group = decompositionGroups.save(
+                    new DecompositionGroup(repo, parent, DecompositionGroupState.WAITING));
+            DecompositionChild child =
+                    new DecompositionChild(group, 1, "First", "Body", "handoff:1");
+            child.link(155, current);
+            decompositionChildren.save(child);
+            return new Long[]{unrelated.getId(), current.getId()};
+        });
+
+        IssueDispatchService.ClaimResult unrelated = dispatch.claimStart(ids[0]);
+        IssueDispatchService.ClaimResult current = dispatch.claimStart(ids[1]);
+
+        assertThat(unrelated.claimed()).isFalse();
+        assertThat(unrelated.reason()).contains("Decomposition #153 owns this repository");
+        assertThat(current.claimed()).isTrue();
+        markCompleted(ids[1]);
     }
 
     @Test
@@ -608,6 +678,14 @@ class IssueDispatchTransactionManagerTest {
 
     private Long seedApprovedIssue(IssueStatus status, int conformanceAttempt) {
         return seedApprovedIssue(status, conformanceAttempt, 42);
+    }
+
+    private void markCompleted(Long issueId) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            TrackedIssue issue = issues.findById(issueId).orElseThrow();
+            issue.setStatus(IssueStatus.COMPLETED);
+            issues.saveAndFlush(issue);
+        });
     }
 
     private void assertLowestReadyReservationOwnsDispatch(boolean ownerFirst) {

@@ -117,6 +117,7 @@ public final class WorkflowStepperAssembler {
             case COOLDOWN -> exceptional(issue, StageState.PAUSED, "Waiting for retry cooldown");
             case FAILED -> exceptional(issue, StageState.FAILED, "Workflow failed");
             case COMPLETED -> terminal("Workflow completed");
+            case CANCELLED -> terminal("Decomposition child cancelled");
         };
     }
 

@@ -268,7 +268,7 @@ class PlanFirstTransactionManagerTest {
     @ParameterizedTest
     @EnumSource(value = IssueStatus.class, names = {
             "PENDING", "QUEUED", "IN_PROGRESS", "AWAITING_APPROVAL",
-            "AWAITING_PLAN_APPROVAL", "READY_TO_START"
+            "AWAITING_PLAN_APPROVAL", "READY_TO_START", "AWAITING_DECOMPOSITION"
     })
     void lowerOrderingBlockerRejectsOutOfOrderApprovalWithoutMutatingPendingVersion(
             IssueStatus blockerStatus) {
@@ -290,7 +290,7 @@ class PlanFirstTransactionManagerTest {
 
     @ParameterizedTest
     @EnumSource(value = IssueStatus.class, names = {
-            "BLOCKED", "FAILED", "COOLDOWN", "AWAITING_DECOMPOSITION"
+            "BLOCKED", "FAILED", "COOLDOWN"
     })
     void lowerNonRunnableIssueDoesNotBlockPlanReservation(IssueStatus lowerStatus) {
         Long repoId = seedRepo();

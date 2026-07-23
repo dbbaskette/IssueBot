@@ -69,6 +69,7 @@ Plan First review uses a fixed two-attempt conformance cycle. The first miss aut
 - **Cancel Running Issues** - A Stop button on the issue-detail page stops the running agent process at the next workflow checkpoint
 - **Pause All Processing** - A persisted global control stops active workflows at safe checkpoints and prevents future automatic starts, manual starts, and retries until processing is resumed
 - **Manual Start for Pending Work** - Pending or queued issues can be started directly from the queue or issue page while preserving repository and open-PR safety gates
+- **Durable Ordered Decomposition** - A split parent reserves its repository while IssueBot creates and runs child issues in order, survives restarts and partial GitHub failures, and closes the parent only after every child completes
 - **Actionable Failure Recovery** - Failed issues show a sanitized summary, suggested next step, optional technical details, and a guidance field for the retry
 - **Mid-Loop Guidance** - Steer a running issue from the dashboard; guidance is injected at the next iteration boundary
 - **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration

@@ -36,7 +36,8 @@ public final class Humanize {
             Map.entry("DECOMPOSED", "Decomposed"),
             Map.entry("AWAITING_DECOMPOSITION", "Awaiting split approval"),
             Map.entry("AWAITING_PLAN_APPROVAL", "Awaiting plan approval"),
-            Map.entry("READY_TO_START", "Ready to start")
+            Map.entry("READY_TO_START", "Ready to start"),
+            Map.entry("CANCELLED", "Cancelled")
     );
 
     private Humanize() {

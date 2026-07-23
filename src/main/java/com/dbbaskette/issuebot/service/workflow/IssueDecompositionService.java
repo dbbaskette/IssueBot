@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
+import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -49,6 +50,9 @@ public class IssueDecompositionService {
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
     private final IterationManager iterationManager;
+    private DecompositionGroupTransactionManager groupTransactions;
+    private DecompositionGroupService groupService;
+    private DecompositionChildRepository decompositionChildren;
 
     public IssueDecompositionService(ClaudeCodeService claudeCode,
                                       GitHubApiClient gitHubApi,
@@ -64,6 +68,16 @@ public class IssueDecompositionService {
         this.notificationService = notificationService;
         this.objectMapper = objectMapper;
         this.iterationManager = iterationManager;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureDurableDecomposition(
+            DecompositionGroupTransactionManager groupTransactions,
+            DecompositionGroupService groupService,
+            DecompositionChildRepository decompositionChildren) {
+        this.groupTransactions = groupTransactions;
+        this.groupService = groupService;
+        this.decompositionChildren = decompositionChildren;
     }
 
     /**
@@ -148,7 +162,11 @@ public class IssueDecompositionService {
             return true;
         }
 
-        // AUTO mode: create sub-issues immediately
+        if (groupService != null) {
+            return createDurableGroup(trackedIssue, subIssues);
+        }
+
+        // Compatibility path for isolated unit fixtures; production uses durable groups.
         List<Integer> createdNumbers = createSubIssues(repo, subIssues, issueNumber);
 
         if (createdNumbers.isEmpty()) {
@@ -267,6 +285,13 @@ public class IssueDecompositionService {
         List<SubIssue> subIssues = objectMapper.readValue(
                 issue.getDecompositionProposal(), new TypeReference<List<SubIssue>>() {});
 
+        if (groupService != null) {
+            if (!createDurableGroup(issue, subIssues)) {
+                throw new IllegalStateException("Could not finish creating the decomposition group; it will resume automatically");
+            }
+            return;
+        }
+
         List<Integer> createdNumbers = createSubIssues(repo, subIssues, issueNumber);
 
         if (createdNumbers.isEmpty()) {
@@ -301,6 +326,33 @@ public class IssueDecompositionService {
         notificationService.info("Issue Decomposed",
                 repo.fullName() + " #" + issueNumber + " split into "
                         + createdNumbers.size() + " sub-issues", issue);
+    }
+
+    private boolean createDurableGroup(TrackedIssue issue, List<SubIssue> subIssues) {
+        List<DecompositionGroupTransactionManager.ChildIntent> intents = new ArrayList<>();
+        for (int index = 0; index < subIssues.size(); index++) {
+            SubIssue sub = subIssues.get(index);
+            intents.add(new DecompositionGroupTransactionManager.ChildIntent(
+                    index + 1, sub.title(), buildSubIssueBody(sub, issue.getIssueNumber())));
+        }
+        var group = groupTransactions.beginGroup(issue.getId(), intents);
+        groupService.createOrResume(group.getId());
+        var refreshed = groupTransactions == null ? group : group;
+        boolean complete = decompositionChildren.findByGroupOrderBySequencePositionAsc(refreshed).stream()
+                .allMatch(child -> child.getCreationState()
+                        == com.dbbaskette.issuebot.model.DecompositionChildState.CREATED);
+        if (complete) {
+            eventService.log("DECOMPOSITION_COMPLETED",
+                    "Durable decomposition group created with " + subIssues.size() + " ordered children",
+                    issue.getRepo(), issue);
+            notificationService.info("Issue Decomposed",
+                    issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " split into "
+                            + subIssues.size() + " ordered sub-issues", issue);
+        }
+        // Once the durable group exists, the workflow must stop. A partial GitHub failure
+        // remains CREATING and reconciliation resumes it; returning false would incorrectly
+        // fall through into implementation of the original parent.
+        return true;
     }
 
     /**

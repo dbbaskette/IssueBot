@@ -3510,3 +3510,102 @@ details summary:hover { color: var(--text-primary); }
     .event-technical { grid-column: 2; justify-self: start; }
     .event-technical[open] { grid-column: 1 / -1; }
 }
+.decomposition-progress {
+    overflow: hidden;
+    border-color: color-mix(in srgb, var(--primary, #2563eb) 28%, var(--border));
+}
+
+.decomposition-progress__header {
+    background: linear-gradient(135deg, rgba(37, 99, 235, .09), rgba(20, 184, 166, .06));
+}
+
+.decomposition-progress__bar {
+    height: .55rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--surface-muted, #e8edf5);
+    margin-bottom: 1.25rem;
+}
+
+.decomposition-progress__bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2563eb, #14b8a6);
+    transition: width .25s ease;
+}
+
+.decomposition-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.decomposition-steps li {
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: .75rem;
+    padding: .75rem;
+    border-radius: .75rem;
+}
+
+.decomposition-steps li.is-current {
+    background: rgba(37, 99, 235, .08);
+    box-shadow: inset 3px 0 #2563eb;
+}
+
+.decomposition-step__number {
+    display: grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-muted);
+    font-weight: 700;
+}
+
+.decomposition-steps .is-complete .decomposition-step__number {
+    color: #087f5b;
+    border-color: #5eead4;
+    background: #ccfbf1;
+}
+
+.decomposition-steps a,
+.decomposition-steps strong,
+.decomposition-steps small {
+    display: block;
+}
+
+.decomposition-steps small {
+    margin-top: .15rem;
+    color: var(--text-muted);
+}
+
+.decomposition-release {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+}
+
+.decomposition-release textarea {
+    width: 100%;
+    margin: .35rem 0 .75rem;
+}
+
+.decomposition-inbox-card {
+    padding: 1rem;
+    border-left: 3px solid #e11d48;
+}
+
+.queue-group-context {
+    display: block;
+    width: fit-content;
+    margin-top: .3rem;
+    padding: .15rem .45rem;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, .08);
+    color: #1d4ed8;
+    font-size: .72rem;
+    font-weight: 700;
+}

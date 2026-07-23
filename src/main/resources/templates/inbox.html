@@ -21,6 +21,33 @@
 
     <div th:if="${totalCount > 0}">
 
+        <div id="decomposition-attention" class="panel mb-3"
+             th:if="${not #lists.isEmpty(decompositionAttention)}">
+            <div class="panel-header">
+                <h3>Decomposition Groups <span class="badge"
+                    th:text="${#lists.size(decompositionAttention)}">1</span></h3>
+            </div>
+            <div class="panel-body">
+                <div th:each="group : ${decompositionAttention}"
+                     class="glass-card mb-2 decomposition-inbox-card">
+                    <div class="flex-between mb-1">
+                        <div>
+                            <strong th:text="${'Parent #' + group.parentNumber()}">Parent #153</strong>
+                            <span class="text-muted text-sm"
+                                  th:text="${' — ' + group.completedCount() + ' of '
+                                    + group.totalCount() + ' children complete'}">1 of 4 complete</span>
+                        </div>
+                        <span class="status status-failed">ACTION REQUIRED</span>
+                    </div>
+                    <p th:text="${group.attentionReason()}">The current child needs attention.</p>
+                    <a class="btn btn-primary btn-sm"
+                       th:href="@{'/issues/' + ${group.parentId()} + '#decomposition-group'}">
+                        Review group
+                    </a>
+                </div>
+            </div>
+        </div>
+
         <!-- === PR APPROVALS === -->
         <div id="approvals" class="panel mb-3">
             <div class="panel-header">

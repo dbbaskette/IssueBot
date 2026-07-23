@@ -70,7 +70,8 @@ class WorkflowStepperAssemblerTest {
 
     @Test
     void successfulTerminalOutcomesCompleteEveryStage() {
-        for (IssueStatus status : List.of(IssueStatus.COMPLETED, IssueStatus.DECOMPOSED)) {
+        for (IssueStatus status : List.of(
+                IssueStatus.COMPLETED, IssueStatus.DECOMPOSED, IssueStatus.CANCELLED)) {
             assertThat(assembler.assemble(issue(status, null)).stages())
                     .extracting(WorkflowStepperAssembler.Stage::state)
                     .containsOnly(StageState.COMPLETED);

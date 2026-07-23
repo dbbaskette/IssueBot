@@ -33,6 +33,7 @@ public class PlanFirstTransactionManager {
             IssueStatus.QUEUED,
             IssueStatus.IN_PROGRESS,
             IssueStatus.AWAITING_APPROVAL,
+            IssueStatus.AWAITING_DECOMPOSITION,
             IssueStatus.AWAITING_PLAN_APPROVAL,
             IssueStatus.READY_TO_START);
     private static final Set<IssueStatus> PLANNING_RESETTABLE = EnumSet.of(
@@ -49,6 +50,7 @@ public class PlanFirstTransactionManager {
     private final TrackedIssueRepository issues;
     private final PlanningVersionRepository versions;
     private final WatchedRepoRepository repos;
+    private DecompositionReservationService decompositionReservations;
 
     @Autowired
     public PlanFirstTransactionManager(TrackedIssueRepository issues,
@@ -57,6 +59,11 @@ public class PlanFirstTransactionManager {
         this.issues = issues;
         this.versions = versions;
         this.repos = repos;
+    }
+
+    @Autowired(required = false)
+    void configureDecompositionReservations(DecompositionReservationService reservations) {
+        this.decompositionReservations = reservations;
     }
 
     /** Compatibility constructor for focused fixtures; mutation methods deliberately fail closed. */
@@ -123,6 +130,11 @@ public class PlanFirstTransactionManager {
                 .orElseThrow(() -> new IllegalArgumentException("Issue not found: " + issueId));
         PlanningVersion current = requireCurrentPending(issue);
         requireExpectedVersion(current, expectedVersionId);
+        if (decompositionReservations != null) {
+            DecompositionReservationService.ReservationDecision reservation =
+                    decompositionReservations.evaluate(issue);
+            if (!reservation.allowed()) throw new IllegalStateException(reservation.reason());
+        }
 
         int candidateIndex = ordered.indexOf(issue);
         TrackedIssue earlierBlocker = ordered.subList(0, candidateIndex).stream()

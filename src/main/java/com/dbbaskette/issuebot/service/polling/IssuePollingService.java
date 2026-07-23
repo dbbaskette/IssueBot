@@ -15,6 +15,8 @@ import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
+import com.dbbaskette.issuebot.service.workflow.DecompositionGroupService;
+import com.dbbaskette.issuebot.service.workflow.DecompositionReservationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +50,8 @@ public class IssuePollingService {
     private final ProcessingControlService processingControl;
     private final IssueDispatchService dispatchService;
     private final AtomicBoolean enabled = new AtomicBoolean(true);
+    private DecompositionGroupService decompositionGroups;
+    private DecompositionReservationService decompositionReservations;
 
     public IssuePollingService(GitHubApiClient gitHubApiClient,
                                 WatchedRepoRepository repoRepository,
@@ -69,6 +73,14 @@ public class IssuePollingService {
         this.dependencyResolver = dependencyResolver;
         this.processingControl = processingControl;
         this.dispatchService = dispatchService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureDecompositionGroups(
+            DecompositionGroupService decompositionGroups,
+            DecompositionReservationService decompositionReservations) {
+        this.decompositionGroups = decompositionGroups;
+        this.decompositionReservations = decompositionReservations;
     }
 
     @Scheduled(fixedDelayString = "${issuebot.poll-interval-seconds:60}000")
@@ -116,7 +128,8 @@ public class IssuePollingService {
      */
     public void recheckRepo(WatchedRepo repo) {
         recheckBlockedIssues(repo);
-        closeCompletedParents(repo);
+        if (decompositionGroups != null) decompositionGroups.reconcileRepo(repo);
+        else closeCompletedParents(repo);
     }
 
     // A decomposed sub-issue's body carries "decomposed from #<parent>" (buildSubIssueBody);
@@ -205,9 +218,9 @@ public class IssuePollingService {
 
         // Lowest issue number first, so decomposed parts resume 1/X → N/X (findByRepoAndStatus
         // has no ordering guarantee).
-        TrackedIssue next = pending.stream()
+        TrackedIssue next = reservedCandidate(repo, pending).orElseGet(() -> pending.stream()
                 .min(Comparator.comparingInt(TrackedIssue::getIssueNumber))
-                .orElseThrow();
+                .orElseThrow());
         if (repositoryBlocker(repo, next.getId()).isPresent() || hasOpenIssueBotPR(repo)) {
             log.debug("{} has active work — {} pending issue(s) will wait", repo.fullName(), pending.size());
             return;
@@ -246,7 +259,7 @@ public class IssuePollingService {
             log.debug("{} — all queued issues blocked by dependencies", repo.fullName());
             return;
         }
-        TrackedIssue next = sorted.getFirst();
+        TrackedIssue next = reservedCandidate(repo, sorted).orElse(sorted.getFirst());
         if (repositoryBlocker(repo, next.getId()).isPresent() || hasOpenIssueBotPR(repo)) {
             log.debug("{} has active issue or open IssueBot PR — {} issue(s) remain queued",
                     repo.fullName(), queued.size());
@@ -287,13 +300,37 @@ public class IssuePollingService {
     }
 
     private Optional<TrackedIssue> repositoryBlocker(WatchedRepo repo, Long candidateId) {
+        if (decompositionReservations != null) {
+            Optional<DecompositionReservationService.Reservation> reservation =
+                    decompositionReservations.reservationFor(repo);
+            if (reservation.isPresent()) {
+                TrackedIssue current = reservation.orElseThrow().currentChild() == null
+                        ? reservation.orElseThrow().group().getParentIssue()
+                        : reservation.orElseThrow().currentChild().getTrackedIssue();
+                if (current == null || candidateId == null || !Objects.equals(current.getId(), candidateId)) {
+                    return Optional.ofNullable(current);
+                }
+            }
+        }
         return issueRepository.findByRepoAndStatusIn(repo,
                         List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
-                                IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START))
+                                IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START,
+                                IssueStatus.AWAITING_DECOMPOSITION))
                 .stream()
                 .filter(candidate -> candidateId == null
                         || !Objects.equals(candidate.getId(), candidateId))
                 .findFirst();
+    }
+
+    private Optional<TrackedIssue> reservedCandidate(WatchedRepo repo, List<TrackedIssue> candidates) {
+        if (decompositionReservations == null) return Optional.empty();
+        return decompositionReservations.reservationFor(repo)
+                .map(DecompositionReservationService.Reservation::currentChild)
+                .filter(Objects::nonNull)
+                .map(com.dbbaskette.issuebot.model.DecompositionChild::getTrackedIssue)
+                .filter(Objects::nonNull)
+                .filter(current -> candidates.stream().anyMatch(
+                        candidate -> Objects.equals(candidate.getId(), current.getId())));
     }
 
     private void pollRepo(WatchedRepo repo, long availableSlots) {

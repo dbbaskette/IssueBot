@@ -55,6 +55,8 @@ public class IssueNextActionResolver {
                     IssueNextAction.Tone.SUCCESS, false);
             case DECOMPOSED -> action("No action needed — work continues in the split issues.", null, null,
                     IssueNextAction.Tone.NEUTRAL, false);
+            case CANCELLED -> action("No action needed — cancelled.", null, null,
+                    IssueNextAction.Tone.NEUTRAL, false);
         };
     }
 
