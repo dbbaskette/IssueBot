@@ -59,9 +59,13 @@
     <div id="bulk-action-bar" class="bulk-action-bar" hidden>
         <span id="bulk-selected-count" class="bulk-count">0 selected</span>
         <button type="submit" form="bulk-form" formaction="/issues/bulk/start" formmethod="post"
-                class="btn btn-primary btn-sm">Start selected</button>
+                class="btn btn-primary btn-sm"
+                th:disabled="${processingMode?.name() != 'RUNNING'}"
+                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start selected issues'}">Start selected</button>
         <button type="submit" form="bulk-form" formaction="/issues/bulk/retry" formmethod="post"
-                class="btn btn-outline btn-sm">Retry selected</button>
+                class="btn btn-outline btn-sm"
+                th:disabled="${processingMode?.name() != 'RUNNING'}"
+                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry selected issues'}">Retry selected</button>
         <button type="button" class="btn btn-danger btn-sm" data-modal-open="bulk-close-modal">Close selected</button>
     </div>
 

@@ -235,7 +235,9 @@
                         <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
                         <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
                                   placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
-                        <button type="submit" class="btn btn-primary">Retry Implementation</button>
+                        <button type="submit" class="btn btn-primary"
+                                th:disabled="${processingMode?.name() != 'RUNNING'}"
+                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                     </form>
                 </div>
             </section>

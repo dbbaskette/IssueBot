@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
@@ -357,6 +358,38 @@ class IssueDetailPlanReviewRenderTest {
             assertThat(occurrences(html, "id=\"recovery\""))
                     .as(status + " recovery target count")
                     .isEqualTo(1);
+        }
+    }
+
+    @Test
+    void planGuidanceRetryFollowsEveryProcessingMode() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setPlanConformanceAttempt(2);
+        PlanningVersion approved = pending(issue, 2, "# Approved design", "# Approved plan", null);
+        approved.approve(LocalDateTime.of(2026, 7, 17, 9, 30));
+        issue.setApprovedPlanningVersion(approved);
+        List<Iteration> attempts = List.of(failedReview(issue, 2, "{}"));
+
+        for (ProcessingState mode : ProcessingState.values()) {
+            WebContext context = context(issue, List.of(approved), approved, approved, attempts);
+            context.setVariable("showPlanGuidance", true);
+            context.setVariable("processingMode", mode);
+            String retry = slice(render(context), "class=\"plan-guidance-form\"", "</form>");
+
+            if (mode == ProcessingState.RUNNING) {
+                assertThat(retry)
+                        .contains("title=\"Retry implementation with this guidance\"")
+                        .doesNotContain("disabled=\"disabled\"");
+            } else if (mode == ProcessingState.PAUSE_AFTER_CURRENT) {
+                assertThat(retry)
+                        .contains("disabled=\"disabled\"")
+                        .contains("Processing is waiting for current work to finish and will not start another issue.");
+            } else {
+                assertThat(retry)
+                        .contains("disabled=\"disabled\"")
+                        .contains("Processing is stopped and must be restarted before starting or retrying work.");
+            }
         }
     }
 
@@ -810,5 +843,11 @@ class IssueDetailPlanReviewRenderTest {
 
     private static int occurrences(String value, String needle) {
         return (value.length() - value.replace(needle, "").length()) / needle.length();
+    }
+
+    private static String slice(String value, String startMarker, String endMarker) {
+        int start = value.indexOf(startMarker);
+        int end = value.indexOf(endMarker, start);
+        return value.substring(start, end + endMarker.length());
     }
 }
