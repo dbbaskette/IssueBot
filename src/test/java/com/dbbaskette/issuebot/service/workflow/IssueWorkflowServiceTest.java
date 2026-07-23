@@ -845,20 +845,20 @@ class IssueWorkflowServiceTest {
     }
 
     @Test
-    void globalPauseFinalizesAsPendingNotFailed() {
+    void operatorStopFinalizesAsFailed() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
         issue.setId(1L);
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setLastFailureReason("old failure");
-        cancellationService.requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
+        cancellationService.requestCancel(1L, CancellationReason.OPERATOR_STOP);
 
         assertTrue(workflowService.cancelled(issue));
 
-        assertEquals(IssueStatus.PENDING, issue.getStatus());
-        assertEquals("Processing paused by operator", issue.getSuspensionReason());
-        assertNull(issue.getLastFailureReason());
-        verify(eventService).log("WORKFLOW_SUSPENDED", "Processing paused by operator", repo, issue);
+        assertEquals(IssueStatus.FAILED, issue.getStatus());
+        assertNull(issue.getSuspensionReason());
+        assertEquals("Cancelled by operator", issue.getLastFailureReason());
+        verify(eventService).log("WORKFLOW_CANCELLED", "Cancelled by operator", repo, issue);
     }
 
     /**

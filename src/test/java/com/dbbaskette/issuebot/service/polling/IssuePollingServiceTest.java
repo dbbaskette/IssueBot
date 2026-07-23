@@ -91,7 +91,7 @@ class IssuePollingServiceTest {
     }
 
     @Test
-    void pausedWebhookTracksNewIssueAsQueued() {
+    void pausedWebhookTracksNewIssueAsQueuedWithoutCheckingCapacityOrDispatching() {
         when(processingControl.isRunning()).thenReturn(false);
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 42)).thenReturn(Optional.empty());
         ObjectNode node = objectMapper.createObjectNode();
@@ -101,9 +101,10 @@ class IssuePollingServiceTest {
                 new com.dbbaskette.issuebot.service.dependency.DependencyResolverService.DependencyResult(
                         List.of(), List.of(), "", false));
 
-        WebhookOutcome outcome = pollingService.evaluateIssue(testRepo, node);
+        WebhookOutcome outcome = pollingService.evaluateSingleIssueFromWebhook(testRepo, node);
 
         assertEquals(WebhookOutcome.QUEUED, outcome);
+        verify(issueRepository, never()).countByStatus(IssueStatus.IN_PROGRESS);
         verify(workflowService, never()).processIssueAsync(any());
     }
 

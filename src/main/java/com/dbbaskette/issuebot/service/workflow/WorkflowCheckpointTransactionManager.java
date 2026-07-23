@@ -97,8 +97,8 @@ public class WorkflowCheckpointTransactionManager {
     }
 
     /**
-     * Converts a global stop into a resumable pending checkpoint. An implementation claim that
-     * has not produced a durable result is rearmed; every post-result phase remains exact.
+     * Recovery primitive for converting interrupted work into a resumable checkpoint. This is
+     * deliberately not used by pause-after-current, which lets active workflows finish normally.
      */
     @Transactional
     public TrackedIssue suspendForGlobalPause(Long issueId) {
