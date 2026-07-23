@@ -194,6 +194,59 @@ class IssuePollingServiceTest {
                 argThat(issue -> issue.getIssueNumber() == 201));
     }
 
+    @ParameterizedTest
+    @EnumSource(value = IssueStatus.class, names = {"PENDING", "QUEUED"})
+    void repeatedPollsAfterRestartDispatchEligiblePersistedIssueOnce(IssueStatus restartStatus) {
+        TrackedIssue persisted = trackedIssue(210, restartStatus);
+        stubRestartPoll(persisted);
+        when(processingControl.isRunning()).thenReturn(false);
+
+        pollingService.pollForIssues();
+
+        verifyNoInteractions(workflowService);
+
+        when(processingControl.isRunning()).thenReturn(true);
+        pollingService.pollForIssues();
+        pollingService.pollForIssues();
+
+        assertEquals(IssueStatus.IN_PROGRESS, persisted.getStatus());
+        verify(workflowService, times(1)).processIssueAsync(persisted);
+    }
+
+    @Test
+    void pausedWebhookThenRestartAndRepeatedPollingDispatchesTrackedIssueOnce() {
+        TrackedIssue[] persisted = new TrackedIssue[1];
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("number", 211);
+        node.put("title", "Webhook queued across restart");
+        when(processingControl.isRunning()).thenReturn(false);
+        when(issueRepository.findByRepoAndIssueNumber(testRepo, 211))
+                .thenAnswer(ignored -> Optional.ofNullable(persisted[0]));
+        when(issueRepository.save(any(TrackedIssue.class))).thenAnswer(invocation -> {
+            TrackedIssue saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(211L);
+            persisted[0] = saved;
+            return saved;
+        });
+        when(dependencyResolver.resolve(testRepo, 211)).thenReturn(
+                new DependencyResolverService.DependencyResult(List.of(), List.of(), "", false));
+
+        assertEquals(WebhookOutcome.QUEUED,
+                pollingService.evaluateSingleIssueFromWebhook(testRepo, node));
+        assertNotNull(persisted[0]);
+        assertEquals(IssueStatus.QUEUED, persisted[0].getStatus());
+
+        stubRestartPoll(persisted[0]);
+        when(processingControl.isRunning()).thenReturn(true);
+        pollingService.pollForIssues();
+        pollingService.pollForIssues();
+
+        assertEquals(WebhookOutcome.ALREADY_TRACKED,
+                pollingService.evaluateSingleIssueFromWebhook(testRepo, node));
+        verify(workflowService, times(1)).processIssueAsync(persisted[0]);
+        verify(dependencyResolver, times(1)).resolve(testRepo, 211);
+    }
+
     @Test
     void awaitingPlanApprovalBlocksSecondIssueInSameRepository() {
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 43)).thenReturn(Optional.empty());
@@ -806,6 +859,32 @@ class IssuePollingServiceTest {
                 .thenReturn(List.of());
         when(gitHubApiClient.listIssues(anyString(), anyString(), eq("agent-ready"), anyString()))
                 .thenReturn(List.of());
+        when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenReturn(List.of());
+        when(dependencyResolver.topologicalSort(anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    private void stubRestartPoll(TrackedIssue issue) {
+        properties.setMaxConcurrentIssues(3);
+        testRepo.setAutoStart(true);
+        when(repoRepository.findAll()).thenReturn(List.of(testRepo));
+        when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.BLOCKED))
+                .thenReturn(List.of());
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.QUEUED))
+                .thenAnswer(ignored -> issue.getStatus() == IssueStatus.QUEUED
+                        ? List.of(issue) : List.of());
+        when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.PENDING))
+                .thenAnswer(ignored -> issue.getStatus() == IssueStatus.PENDING
+                        ? List.of(issue) : List.of());
+        when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList()))
+                .thenAnswer(invocation -> invocation.<List<IssueStatus>>getArgument(1)
+                        .contains(issue.getStatus()) ? List.of(issue) : List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(),
+                eq("issuebot-parent"), anyString())).thenReturn(List.of());
+        when(gitHubApiClient.listIssues(anyString(), anyString(),
+                eq("agent-ready"), anyString())).thenReturn(List.of());
         when(gitHubApiClient.listOpenPullRequests(anyString(), anyString(), anyString()))
                 .thenReturn(List.of());
         when(dependencyResolver.topologicalSort(anyList()))

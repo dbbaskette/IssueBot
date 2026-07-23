@@ -14,6 +14,8 @@ import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
@@ -24,6 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+
 /** Real Hibernate exercise of retry claiming with OSIV/test transaction disabled. */
 @DataJpaTest
 @Import(IssueDispatchTransactionManager.class)
@@ -90,5 +94,37 @@ class IssueDispatchServicePersistenceTest {
         Long preservedVersionId = tx.execute(status ->
                 issues.findById(ids[0]).orElseThrow().getApprovedPlanningVersion().getId());
         assertThat(preservedVersionId).isEqualTo(ids[1]);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void replacementControlServiceReloadsPersistedModeAcrossRestart(ProcessingState persistedMode) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(status ->
+                controls.saveAndFlush(new ProcessingControl(persistedMode)));
+
+        ProcessingControlService replacement = replacementControlService();
+        replacement.initialize();
+
+        assertThat(replacement.mode()).isEqualTo(persistedMode);
+        assertThat(replacement.isRunning()).isFalse();
+
+        tx.executeWithoutResult(status -> {
+            ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseThrow();
+            control.setState(ProcessingState.RUNNING);
+            controls.saveAndFlush(control);
+        });
+
+        ProcessingControlService restarted = replacementControlService();
+        restarted.initialize();
+
+        assertThat(restarted.mode()).isEqualTo(ProcessingState.RUNNING);
+        assertThat(restarted.isRunning()).isTrue();
+    }
+
+    private ProcessingControlService replacementControlService() {
+        return new ProcessingControlService(
+                controls, issues, mock(WorkflowCancellationService.class));
     }
 }
