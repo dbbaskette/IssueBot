@@ -65,6 +65,10 @@ public class DecompositionGroupTransactionManager {
         }
         tracked = issues.saveAndFlush(tracked);
         child.link(githubNumber, tracked);
+        if (lockedGroup.getState() == DecompositionGroupState.ABANDONING
+                || !lockedGroup.getState().unfinished()) {
+            child.cancel();
+        }
         return children.saveAndFlush(child);
     }
 
@@ -74,11 +78,20 @@ public class DecompositionGroupTransactionManager {
         repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
         group = groups.findByIdForUpdate(groupId).orElseThrow();
         final DecompositionGroup lockedGroup = group;
+        if (lockedGroup.getState() == DecompositionGroupState.ABANDONING
+                || !lockedGroup.getState().unfinished()) {
+            return lockedGroup;
+        }
         List<DecompositionChild> members = children.findByGroupOrderBySequencePositionAsc(lockedGroup);
         if (members.stream().anyMatch(c -> c.getCreationState() != DecompositionChildState.CREATED
                 || c.getTrackedIssue() == null)) {
             throw new IllegalStateException("Cannot activate an incompletely-created decomposition");
         }
+        boolean olderUnfinishedGroup = groups.findByRepoIdAndStateInForUpdate(
+                        lockedGroup.getRepo().getId(), DecompositionGroupRepository.UNFINISHED_STATES)
+                .stream().findFirst()
+                .filter(oldest -> !Objects.equals(oldest.getId(), lockedGroup.getId()))
+                .isPresent();
         var memberIds = members.stream().map(DecompositionChild::getTrackedIssue)
                 .map(TrackedIssue::getId).toList();
         boolean unrelatedActive = issues.findByRepoAndStatusIn(lockedGroup.getRepo(), ACTIVE).stream()
@@ -89,7 +102,7 @@ public class DecompositionGroupTransactionManager {
         parent.setCurrentPhase(null);
         parent.setDecompositionProposal(null);
         issues.save(parent);
-        lockedGroup.transitionTo(unrelatedActive
+        lockedGroup.transitionTo(olderUnfinishedGroup || unrelatedActive
                 ? DecompositionGroupState.WAITING : DecompositionGroupState.ACTIVE);
         return groups.saveAndFlush(lockedGroup);
     }
@@ -103,26 +116,50 @@ public class DecompositionGroupTransactionManager {
     }
 
     @Transactional
-    public void reconcileState(Long groupId, DecompositionGroupState state, String attention) {
+    public AbandonPreparation requestAbandon(Long groupId, String reason, String actor) {
         DecompositionGroup group = groups.findById(groupId).orElseThrow();
         repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
         group = groups.findByIdForUpdate(groupId).orElseThrow();
+        if (!group.getState().unfinished()) {
+            throw new IllegalStateException("Decomposition group is already released.");
+        }
+        group.requestAbandon(reason, actor);
+        groups.saveAndFlush(group);
+        Long runningIssueId = children.findByGroupOrderBySequencePositionAsc(group).stream()
+                .map(DecompositionChild::getTrackedIssue).filter(Objects::nonNull)
+                .filter(issue -> issue.getStatus() == IssueStatus.IN_PROGRESS)
+                .map(TrackedIssue::getId).findFirst().orElse(null);
+        return new AbandonPreparation(group.getId(), runningIssueId);
+    }
+
+    @Transactional
+    public boolean reconcileState(Long groupId, DecompositionGroupState state, String attention) {
+        DecompositionGroup group = groups.findById(groupId).orElseThrow();
+        repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
+        group = groups.findByIdForUpdate(groupId).orElseThrow();
+        if (!group.getState().unfinished()
+                || group.getState() == DecompositionGroupState.ABANDONING) {
+            return false;
+        }
         if (state == DecompositionGroupState.NEEDS_ATTENTION) group.requireAttention(attention);
         else group.transitionTo(state);
         group.setLastReconciledAt(java.time.LocalDateTime.now());
         groups.save(group);
+        return true;
     }
 
     @Transactional
-    public void complete(Long groupId) {
+    public boolean complete(Long groupId) {
         DecompositionGroup group = groups.findById(groupId).orElseThrow();
         repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
         group = groups.findByIdForUpdate(groupId).orElseThrow();
+        if (group.getState() != DecompositionGroupState.COMPLETING) return false;
         group.getParentIssue().setStatus(IssueStatus.COMPLETED);
         issues.save(group.getParentIssue());
         group.transitionTo(DecompositionGroupState.COMPLETED);
         groups.save(group);
         promoteWaiting(group.getRepo());
+        return true;
     }
 
     @Transactional
@@ -130,7 +167,15 @@ public class DecompositionGroupTransactionManager {
         DecompositionGroup group = groups.findById(groupId).orElseThrow();
         repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
         group = groups.findByIdForUpdate(groupId).orElseThrow();
-        for (DecompositionChild child : children.findByGroupOrderBySequencePositionAsc(group)) {
+        if (group.getState() != DecompositionGroupState.ABANDONING) {
+            throw new IllegalStateException("Decomposition group must be abandoning before release.");
+        }
+        List<DecompositionChild> ordered = children.findByGroupOrderBySequencePositionAsc(group);
+        if (ordered.stream().map(DecompositionChild::getTrackedIssue).filter(Objects::nonNull)
+                .anyMatch(issue -> issue.getStatus() == IssueStatus.IN_PROGRESS)) {
+            throw new IllegalStateException("An active child must stop before the group can be released.");
+        }
+        for (DecompositionChild child : ordered) {
             if (child.getTrackedIssue() == null
                     || child.getTrackedIssue().getStatus() != IssueStatus.IN_PROGRESS) child.cancel();
         }
@@ -153,4 +198,5 @@ public class DecompositionGroupTransactionManager {
     }
 
     public record ChildIntent(int position, String title, String body) {}
+    public record AbandonPreparation(Long groupId, Long runningIssueId) {}
 }

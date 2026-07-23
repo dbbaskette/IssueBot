@@ -25,7 +25,7 @@ class DecompositionReservationServiceTest {
         TrackedIssue unrelated = issue(repo, 154, 13L);
         DecompositionChild one = child(group, 1, 155, first);
         DecompositionChild two = child(group, 2, 157, later);
-        when(groups.findOwningByRepo(1L)).thenReturn(Optional.of(group));
+        when(groups.findOldestUnfinishedByRepo(1L)).thenReturn(Optional.of(group));
         when(children.findByGroupOrderBySequencePositionAsc(group)).thenReturn(List.of(one, two));
 
         assertThat(service.evaluate(first).allowed()).isTrue();
@@ -36,10 +36,18 @@ class DecompositionReservationServiceTest {
     }
 
     @Test
-    void waitingGroupDoesNotReserveRepository() {
+    void waitingGroupReservesTheHandoffFromUnrelatedWork() {
         WatchedRepo repo = repo(1L);
-        when(groups.findOwningByRepo(1L)).thenReturn(Optional.empty());
-        assertThat(service.evaluate(issue(repo, 154, 13L)).allowed()).isTrue();
+        TrackedIssue parent = issue(repo, 153, 10L);
+        DecompositionGroup group = new DecompositionGroup(repo, parent, DecompositionGroupState.WAITING);
+        TrackedIssue current = issue(repo, 155, 11L);
+        DecompositionChild child = child(group, 1, 155, current);
+        when(groups.findOldestUnfinishedByRepo(1L)).thenReturn(Optional.of(group));
+        when(children.findByGroupOrderBySequencePositionAsc(group)).thenReturn(List.of(child));
+
+        assertThat(service.evaluate(issue(repo, 154, 13L)).reason())
+                .contains("Decomposition #153 owns this repository");
+        assertThat(service.evaluate(current).allowed()).isTrue();
     }
 
     private static WatchedRepo repo(long id) {

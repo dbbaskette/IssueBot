@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +57,41 @@ public class DecompositionGroupViewAssembler {
                 .collect(Collectors.toSet());
     }
 
+    public Map<Long, MembershipView> memberships(List<TrackedIssue> issueRows) {
+        Map<Long, MembershipView> result = new HashMap<>();
+        Map<Long, Optional<DecompositionGroup>> ownerByRepo = new HashMap<>();
+        for (TrackedIssue issue : issueRows) {
+            children.findByTrackedIssue(issue).ifPresent(child -> {
+                DecompositionGroup group = child.getGroup();
+                List<DecompositionChild> ordered =
+                        children.findByGroupOrderBySequencePositionAsc(group);
+                DecompositionChild current = group.currentChild(ordered).orElse(null);
+                Integer currentNumber = current == null ? null : current.getGithubIssueNumber();
+                result.put(issue.getId(), new MembershipView(
+                        group.getParentIssue().getIssueNumber(),
+                        child.getSequencePosition(), ordered.size(),
+                        current != null && current.getId().equals(child.getId()),
+                        currentNumber, group.getState(), true));
+            });
+        }
+        for (TrackedIssue issue : issueRows) {
+            if (result.containsKey(issue.getId())) continue;
+            Optional<DecompositionGroup> owner = ownerByRepo.computeIfAbsent(
+                    issue.getRepo().getId(), groups::findOwningByRepo);
+            if (owner.isEmpty()
+                    || owner.orElseThrow().getParentIssue().getId().equals(issue.getId())) continue;
+            DecompositionGroup group = owner.orElseThrow();
+            List<DecompositionChild> ordered =
+                    children.findByGroupOrderBySequencePositionAsc(group);
+            DecompositionChild current = group.currentChild(ordered).orElse(null);
+            result.put(issue.getId(), new MembershipView(
+                    group.getParentIssue().getIssueNumber(), 0, ordered.size(), false,
+                    current == null ? null : current.getGithubIssueNumber(),
+                    group.getState(), false));
+        }
+        return result;
+    }
+
     public record GroupView(Long id, Long parentId, int parentNumber,
                             DecompositionGroupState state, boolean parent,
                             int completedCount, int totalCount,
@@ -67,4 +104,7 @@ public class DecompositionGroupViewAssembler {
     }
     public record ChildView(int position, Integer issueNumber, String title,
                             Long trackedIssueId, IssueStatus status, boolean current) {}
+    public record MembershipView(int parentNumber, int position, int total,
+                                 boolean current, Integer currentIssueNumber,
+                                 DecompositionGroupState groupState, boolean member) {}
 }

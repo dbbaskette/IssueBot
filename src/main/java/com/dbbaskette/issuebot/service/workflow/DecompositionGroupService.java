@@ -53,6 +53,22 @@ public class DecompositionGroupService {
                         .filter(node -> node.path("body").asText("").contains(marker))
                         .findFirst().orElse(null);
                 if (found == null) {
+                    int parentNumber = group.getParentIssue().getIssueNumber();
+                    Set<Integer> claimed = children.findByGroupOrderBySequencePositionAsc(group).stream()
+                            .map(DecompositionChild::getGithubIssueNumber).filter(Objects::nonNull)
+                            .collect(java.util.stream.Collectors.toSet());
+                    found = remote.stream()
+                            .filter(node -> !claimed.contains(node.path("number").asInt()))
+                            .filter(node -> node.path("title").asText("")
+                                    .equals(child.getProposedTitle()))
+                            .filter(node -> {
+                                Matcher legacy = LEGACY_PARENT.matcher(node.path("body").asText(""));
+                                return legacy.find()
+                                        && Integer.parseInt(legacy.group(1)) == parentNumber;
+                            })
+                            .findFirst().orElse(null);
+                }
+                if (found == null) {
                     JsonNode created = github.createIssue(repo.getOwner(), repo.getName(),
                             child.getProposedTitle(),
                             child.getProposedBody() + "\n\n" + marker,
@@ -61,7 +77,14 @@ public class DecompositionGroupService {
                     remote = new ArrayList<>(remote);
                     remote.add(created);
                 }
-                transactions.linkCreatedChild(groupId, child.getId(), found.path("number").asInt());
+                int linkedNumber = found.path("number").asInt();
+                transactions.linkCreatedChild(groupId, child.getId(), linkedNumber);
+                DecompositionGroup currentGroup = groups.findById(groupId).orElseThrow();
+                if (currentGroup.getState() == DecompositionGroupState.ABANDONING
+                        || !currentGroup.getState().unfinished()) {
+                    github.removeLabel(repo.getOwner(), repo.getName(), linkedNumber, "agent-ready");
+                    return;
+                }
             }
             postCreatedCommentOnce(group);
             github.addLabels(repo.getOwner(), repo.getName(),
@@ -134,8 +157,9 @@ public class DecompositionGroupService {
             ensureParentOpen(group);
             return;
         }
-        transactions.reconcileState(groupId, DecompositionGroupState.COMPLETING, null);
-        completeParent(groupId);
+        if (transactions.reconcileState(groupId, DecompositionGroupState.COMPLETING, null)) {
+            completeParent(groupId);
+        }
     }
 
     private void completeParent(Long groupId) {
@@ -144,34 +168,52 @@ public class DecompositionGroupService {
         int parent = group.getParentIssue().getIssueNumber();
         try {
             String marker = completeMarker(groupId);
+            JsonNode remote = github.getIssue(repo.getOwner(), repo.getName(), parent);
+            if (!"closed".equals(remote.path("state").asText())) {
+                github.closeIssue(repo.getOwner(), repo.getName(), parent);
+                remote = github.getIssue(repo.getOwner(), repo.getName(), parent);
+            }
+            if (!"closed".equals(remote.path("state").asText())) return;
+            if (!transactions.complete(groupId)) {
+                ensureParentOpenStrict(group);
+                return;
+            }
             List<JsonNode> comments = safe(github.listIssueComments(
                     repo.getOwner(), repo.getName(), parent));
             if (comments.stream().noneMatch(c -> c.path("body").asText("").contains(marker))) {
                 github.addComment(repo.getOwner(), repo.getName(), parent,
                         "All decomposition children completed in IssueBot. Closing the tracking issue.\n\n" + marker);
             }
-            JsonNode remote = github.getIssue(repo.getOwner(), repo.getName(), parent);
-            if (!"closed".equals(remote.path("state").asText())) {
-                github.closeIssue(repo.getOwner(), repo.getName(), parent);
-                remote = github.getIssue(repo.getOwner(), repo.getName(), parent);
-            }
-            if ("closed".equals(remote.path("state").asText())) transactions.complete(groupId);
         } catch (Exception failure) {
             transactions.recordError(groupId, failure.getMessage());
         }
     }
 
-    private void ensureParentOpen(DecompositionGroup group) {
+    private boolean ensureParentOpen(DecompositionGroup group) {
+        int parentNumber = group.getParentIssue().getIssueNumber();
         try {
             JsonNode parent = github.getIssue(group.getRepo().getOwner(), group.getRepo().getName(),
-                    group.getParentIssue().getIssueNumber());
+                    parentNumber);
             if ("closed".equals(parent.path("state").asText())) {
                 github.reopenIssue(group.getRepo().getOwner(), group.getRepo().getName(),
-                        group.getParentIssue().getIssueNumber());
+                        parentNumber);
+                parent = github.getIssue(group.getRepo().getOwner(), group.getRepo().getName(),
+                        parentNumber);
             }
+            if ("open".equals(parent.path("state").asText())) return true;
+            markParentReopenFailure(group, "GitHub did not confirm that the parent is open.");
         } catch (Exception failure) {
-            transactions.recordError(group.getId(), failure.getMessage());
+            markParentReopenFailure(group, failure.getMessage());
         }
+        return false;
+    }
+
+    private void markParentReopenFailure(DecompositionGroup group, String detail) {
+        String reason = "Parent #" + group.getParentIssue().getIssueNumber()
+                + " is closed and could not be reopened. Reopen it on GitHub, then retry.";
+        transactions.reconcileState(group.getId(), DecompositionGroupState.NEEDS_ATTENTION, reason);
+        transactions.recordError(group.getId(),
+                detail == null || detail.isBlank() ? reason : detail);
     }
 
     public List<DecompositionGroup> recoverLegacyGroups(WatchedRepo repo) {
@@ -187,7 +229,8 @@ public class DecompositionGroupService {
         for (JsonNode remoteParent : parents) {
             int parentNumber = remoteParent.path("number").asInt();
             Optional<TrackedIssue> parent = issues.findByRepoAndIssueNumber(repo, parentNumber);
-            if (parent.isEmpty() || groups.findByParentIssue(parent.orElseThrow()).isPresent()) continue;
+            if (parent.isEmpty() || parent.orElseThrow().getStatus() != IssueStatus.DECOMPOSED
+                    || groups.findByParentIssue(parent.orElseThrow()).isPresent()) continue;
             List<JsonNode> matching = subs.stream().filter(sub -> {
                 Matcher matcher = LEGACY_PARENT.matcher(sub.path("body").asText(""));
                 return matcher.find() && Integer.parseInt(matcher.group(1)) == parentNumber;
@@ -214,24 +257,25 @@ public class DecompositionGroupService {
 
     public AbandonResult abandon(Long parentIssueId, String reason, String actor) {
         if (reason == null || reason.isBlank()) return new AbandonResult(false, "A release reason is required.");
+        if (reason.strip().length() > 2000) {
+            return new AbandonResult(false, "The release reason must be 2,000 characters or fewer.");
+        }
+        reason = reason.strip();
+        actor = actor == null || actor.isBlank() ? "local operator"
+                : actor.strip().substring(0, Math.min(actor.strip().length(), 255));
         TrackedIssue parent = issues.findById(parentIssueId).orElse(null);
         if (parent == null) return new AbandonResult(false, "Parent issue not found.");
         DecompositionGroup group = groups.findByParentIssue(parent).orElse(null);
         if (group == null || !group.getState().unfinished()) {
             return new AbandonResult(false, "No active decomposition group exists.");
         }
-        Optional<TrackedIssue> running = children.findByGroupOrderBySequencePositionAsc(group).stream()
-                .map(DecompositionChild::getTrackedIssue).filter(Objects::nonNull)
-                .filter(i -> i.getStatus() == IssueStatus.IN_PROGRESS).findFirst();
-        if (running.isPresent()) {
-            cancellations.requestCancel(running.orElseThrow().getId());
-            group.requestAbandon(reason, actor);
-            groups.save(group);
+        DecompositionGroupTransactionManager.AbandonPreparation preparation =
+                transactions.requestAbandon(group.getId(), reason, actor);
+        if (preparation.runningIssueId() != null) {
+            cancellations.requestCancel(preparation.runningIssueId());
             return new AbandonResult(false, "Cancellation requested; ownership remains until the worker stops.");
         }
-        group.requestAbandon(reason, actor);
-        groups.save(group);
-        finalizeAbandon(group);
+        finalizeAbandon(groups.findById(group.getId()).orElseThrow());
         return new AbandonResult(true, "Decomposition released.");
     }
 
@@ -253,16 +297,12 @@ public class DecompositionGroupService {
         for (DecompositionChild child : children.findByGroupOrderBySequencePositionAsc(group)) {
             if (child.getGithubIssueNumber() == null || child.getTrackedIssue() != null
                     && child.getTrackedIssue().getStatus() == IssueStatus.COMPLETED) continue;
-            try {
-                github.removeLabel(group.getRepo().getOwner(), group.getRepo().getName(),
-                        child.getGithubIssueNumber(), "agent-ready");
-            } catch (Exception ignored) {
-                log.warn("Could not remove agent-ready from abandoned child #{}", child.getGithubIssueNumber());
-            }
+            github.removeLabel(group.getRepo().getOwner(), group.getRepo().getName(),
+                    child.getGithubIssueNumber(), "agent-ready");
         }
-        ensureParentOpen(group);
-        transactions.abandon(group.getId(), reason, actor);
+        ensureParentOpenStrict(group);
         postAbandonComment(group, reason, actor);
+        transactions.abandon(group.getId(), reason, actor);
     }
 
     private void postCreatedCommentOnce(DecompositionGroup group) {
@@ -278,14 +318,27 @@ public class DecompositionGroupService {
     }
 
     private void postAbandonComment(DecompositionGroup group, String reason, String actor) {
-        try {
-            github.addComment(group.getRepo().getOwner(), group.getRepo().getName(),
-                    group.getParentIssue().getIssueNumber(),
-                    "IssueBot decomposition released by " + actor + ".\n\nReason: " + reason
-                            + "\n\n<!-- issuebot-decomposition-abandoned:" + group.getId() + " -->");
-        } catch (Exception ignored) {
-            log.warn("Could not post decomposition release comment for #{}",
+        String marker = "<!-- issuebot-decomposition-abandoned:" + group.getId() + " -->";
+        List<JsonNode> comments = safe(github.listIssueComments(group.getRepo().getOwner(),
+                group.getRepo().getName(), group.getParentIssue().getIssueNumber()));
+        if (comments.stream().anyMatch(comment -> comment.path("body").asText("").contains(marker))) return;
+        github.addComment(group.getRepo().getOwner(), group.getRepo().getName(),
+                group.getParentIssue().getIssueNumber(),
+                "IssueBot decomposition released by " + actor + ".\n\nReason: " + reason
+                        + "\n\n" + marker);
+    }
+
+    private void ensureParentOpenStrict(DecompositionGroup group) {
+        JsonNode parent = github.getIssue(group.getRepo().getOwner(), group.getRepo().getName(),
+                group.getParentIssue().getIssueNumber());
+        if ("closed".equals(parent.path("state").asText())) {
+            github.reopenIssue(group.getRepo().getOwner(), group.getRepo().getName(),
                     group.getParentIssue().getIssueNumber());
+            JsonNode confirmed = github.getIssue(group.getRepo().getOwner(), group.getRepo().getName(),
+                    group.getParentIssue().getIssueNumber());
+            if (!"open".equals(confirmed.path("state").asText())) {
+                throw new IllegalStateException("GitHub did not confirm that the parent was reopened.");
+            }
         }
     }
 

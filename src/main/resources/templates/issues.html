@@ -161,11 +161,17 @@
         hx-target="#content"
         hx-push-url="true">
         <td class="checkbox-col">
-            <input th:if="${issue.status.name() != 'READY_TO_START'}"
+            <input th:if="${issue.status.name() != 'READY_TO_START'
+                          and (decompositionMemberships == null
+                               or decompositionMemberships[issue.id] == null
+                               or decompositionMemberships[issue.id].current())}"
                    type="checkbox" class="bulk-select" name="ids" th:value="${issue.id}"
                    onclick="event.stopPropagation()"
                    th:attr="aria-label='Select issue #' + ${issue.issueNumber}">
-            <span th:if="${issue.status.name() == 'READY_TO_START'}"
+            <span th:if="${issue.status.name() == 'READY_TO_START'
+                         or (decompositionMemberships != null
+                             and decompositionMemberships[issue.id] != null
+                             and not decompositionMemberships[issue.id].current())}"
                   class="bulk-read-only" role="note"
                   th:attr="aria-label='Issue #' + ${issue.issueNumber} + ' is reserved and cannot be selected for bulk actions'">Reserved</span>
         </td>
@@ -173,6 +179,19 @@
         <td class="queue-number-cell" th:text="${'#' + issue.issueNumber}">#1</td>
         <td class="queue-title-cell">
             <span class="queue-title" th:text="${issue.issueTitle}">Issue title</span>
+            <span class="queue-group-context"
+                  th:if="${decompositionMemberships != null and decompositionMemberships[issue.id] != null}"
+                  th:with="membership=${decompositionMemberships[issue.id]}"
+                  th:text="${membership.member()
+                    ? 'Decomposition #' + membership.parentNumber() + ' · '
+                      + membership.position() + '/' + membership.total() + ' · '
+                      + (membership.current() ? 'Current — repository reserved'
+                        : 'Waiting for #' + membership.currentIssueNumber())
+                    : 'Repository reserved by decomposition #' + membership.parentNumber()
+                      + (membership.currentIssueNumber() != null
+                        ? ' · Current child #' + membership.currentIssueNumber() : '')}">
+                Decomposition #153 · 1/4 · Current
+            </span>
             <span class="queue-next-action" th:if="${nextActions != null and nextActions[issue.id] != null}">
                 <strong>Next:</strong>
                 <span th:text="${nextActions[issue.id].summary()}">Review the issue.</span>
@@ -210,6 +229,9 @@
                onclick="event.stopPropagation()">Open reservation</a>
             <button type="button"
                     th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
+                             and (decompositionMemberships == null
+                                  or decompositionMemberships[issue.id] == null
+                                  or decompositionMemberships[issue.id].current())
                              and (nextAction == null or nextAction.href() == null
                                   or not #strings.endsWith(nextAction.href(), '#ready-to-start'))}"
                     class="btn btn-primary btn-sm"
@@ -220,6 +242,16 @@
                     hx-target="#content"
                     hx-disabled-elt="this"
                     onclick="event.stopPropagation()">Start</button>
+            <span class="text-sm text-muted"
+                  th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
+                    and decompositionMemberships != null
+                    and decompositionMemberships[issue.id] != null
+                    and not decompositionMemberships[issue.id].current()}"
+                  th:text="${decompositionMemberships[issue.id].member()
+                    ? 'Reserved for child #' + decompositionMemberships[issue.id].currentIssueNumber()
+                    : 'Reserved by decomposition #' + decompositionMemberships[issue.id].parentNumber()}">
+                Reserved for current child
+            </span>
             <!-- hx-include carries the filter bar's status/repoId/q/page along with the POST
                  purely so the endpoint's redirect can land back on this exact view (#87
                  review). app.js's page-reset configRequest hook only fires for triggers

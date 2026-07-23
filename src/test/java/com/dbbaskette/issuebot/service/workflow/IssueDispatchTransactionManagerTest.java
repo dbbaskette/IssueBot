@@ -170,6 +170,37 @@ class IssueDispatchTransactionManagerTest {
     }
 
     @Test
+    void waitingGroupOwnsTheDispatchHandoffBeforePollingPromotesIt() {
+        Long[] ids = new TransactionTemplate(transactionManager).execute(ignored -> {
+            controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
+            WatchedRepo repo = repos.save(new WatchedRepo("acme", "decomposition-handoff"));
+            TrackedIssue parent = issues.save(new TrackedIssue(repo, 153, "Parent"));
+            parent.setStatus(IssueStatus.DECOMPOSED);
+            TrackedIssue completedBlocker = issues.save(new TrackedIssue(repo, 154, "Previous work"));
+            completedBlocker.setStatus(IssueStatus.COMPLETED);
+            TrackedIssue current = issues.save(new TrackedIssue(repo, 155, "First"));
+            current.setStatus(IssueStatus.QUEUED);
+            TrackedIssue unrelated = issues.save(new TrackedIssue(repo, 160, "Unrelated"));
+            unrelated.setStatus(IssueStatus.QUEUED);
+            DecompositionGroup group = decompositionGroups.save(
+                    new DecompositionGroup(repo, parent, DecompositionGroupState.WAITING));
+            DecompositionChild child =
+                    new DecompositionChild(group, 1, "First", "Body", "handoff:1");
+            child.link(155, current);
+            decompositionChildren.save(child);
+            return new Long[]{unrelated.getId(), current.getId()};
+        });
+
+        IssueDispatchService.ClaimResult unrelated = dispatch.claimStart(ids[0]);
+        IssueDispatchService.ClaimResult current = dispatch.claimStart(ids[1]);
+
+        assertThat(unrelated.claimed()).isFalse();
+        assertThat(unrelated.reason()).contains("Decomposition #153 owns this repository");
+        assertThat(current.claimed()).isTrue();
+    }
+
+    @Test
     void readyReservationBlocksOtherStartAndRetry() {
         Long ownerId = seedApprovedIssue(IssueStatus.READY_TO_START, 0, 41);
         TrackedIssue owner = issues.findById(ownerId).orElseThrow();

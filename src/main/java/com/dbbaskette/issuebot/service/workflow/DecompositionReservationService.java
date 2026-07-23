@@ -49,7 +49,7 @@ public class DecompositionReservationService {
     }
 
     public Optional<Reservation> reservationFor(WatchedRepo repo) {
-        return groups.findOwningByRepo(repo.getId()).map(group -> {
+        return groups.findOldestUnfinishedByRepo(repo.getId()).map(group -> {
             List<DecompositionChild> ordered = children.findByGroupOrderBySequencePositionAsc(group);
             return new Reservation(group, group.currentChild(ordered).orElse(null));
         });

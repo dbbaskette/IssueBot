@@ -180,6 +180,8 @@ public class IssueController {
         List<TrackedIssue> pageIssues = issuePage.getContent();
         model.addAttribute("issues", pageIssues);
         model.addAttribute("nextActions", resolveNextActions(pageIssues));
+        model.addAttribute("decompositionMemberships", decompositionGroupViews == null
+                ? Map.of() : decompositionGroupViews.memberships(pageIssues));
         model.addAttribute("repos", repoRepository.findAll());
         model.addAttribute("statuses", IssueStatus.values());
         model.addAttribute("selectedStatus", status);
@@ -210,6 +212,8 @@ public class IssueController {
         List<TrackedIssue> pageIssues = searchIssues(status, repoId, q, page).getContent();
         model.addAttribute("issues", pageIssues);
         model.addAttribute("nextActions", resolveNextActions(pageIssues));
+        model.addAttribute("decompositionMemberships", decompositionGroupViews == null
+                ? Map.of() : decompositionGroupViews.memberships(pageIssues));
         return "issues :: table-rows";
     }
 
@@ -874,9 +878,16 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
         String actor = principal == null ? "local operator" : principal.getName();
-        DecompositionGroupService.AbandonResult result =
-                decompositionGroups.abandon(id, reason, actor);
-        redirectAttributes.addFlashAttribute(result.completed() ? "success" : "error", result.message());
+        try {
+            DecompositionGroupService.AbandonResult result =
+                    decompositionGroups.abandon(id, reason, actor);
+            redirectAttributes.addFlashAttribute(
+                    result.completed() ? "success" : "error", result.message());
+        } catch (Exception failure) {
+            log.warn("Could not release decomposition for issue {}: {}", id, failure.getMessage());
+            redirectAttributes.addFlashAttribute("error",
+                    "Release could not finish. Repository control is still retained and cleanup will retry.");
+        }
         return "redirect:/issues/" + id + "#decomposition-group";
     }
 
