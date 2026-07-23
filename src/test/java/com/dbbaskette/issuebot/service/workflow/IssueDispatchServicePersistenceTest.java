@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,7 +31,7 @@ import static org.mockito.Mockito.mock;
 
 /** Real Hibernate exercise of retry claiming with OSIV/test transaction disabled. */
 @DataJpaTest
-@Import(IssueDispatchTransactionManager.class)
+@Import({IssueDispatchTransactionManager.class, ProcessingControlService.class})
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"
@@ -58,6 +59,12 @@ class IssueDispatchServicePersistenceTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private ProcessingControlService processingControl;
+
+    @MockitoBean
+    private WorkflowCancellationService cancellationService;
 
     @Test
     void guidedRetryLoadsAndPreservesApprovedVersionOutsideRepositoryTransaction() {
@@ -109,12 +116,13 @@ class IssueDispatchServicePersistenceTest {
         assertThat(replacement.mode()).isEqualTo(persistedMode);
         assertThat(replacement.isRunning()).isFalse();
 
-        tx.executeWithoutResult(status -> {
-            ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
-                    .orElseThrow();
-            control.setState(ProcessingState.RUNNING);
-            controls.saveAndFlush(control);
-        });
+        processingControl.initialize();
+        processingControl.restart();
+        processingControl.restart();
+
+        ProcessingState durableMode = tx.execute(status ->
+                controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow().getState());
+        assertThat(durableMode).isEqualTo(ProcessingState.RUNNING);
 
         ProcessingControlService restarted = replacementControlService();
         restarted.initialize();

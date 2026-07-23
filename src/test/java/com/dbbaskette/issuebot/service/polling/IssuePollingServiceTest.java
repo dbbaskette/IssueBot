@@ -3,10 +3,12 @@ package com.dbbaskette.issuebot.service.polling;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
+import com.dbbaskette.issuebot.model.ProcessingControl;
 import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.dependency.DependencyResolverService;
@@ -28,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -45,6 +48,7 @@ class IssuePollingServiceTest {
     private IssueBotProperties properties;
     private DependencyResolverService dependencyResolver;
     private ProcessingControlService processingControl;
+    private ProcessingControlRepository controlRepository;
     private WatchedRepo testRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -198,19 +202,23 @@ class IssuePollingServiceTest {
     @EnumSource(value = IssueStatus.class, names = {"PENDING", "QUEUED"})
     void repeatedPollsAfterRestartDispatchEligiblePersistedIssueOnce(IssueStatus restartStatus) {
         TrackedIssue persisted = trackedIssue(210, restartStatus);
+        useStatefulProcessingControl(ProcessingState.STOPPED);
         stubRestartPoll(persisted);
-        when(processingControl.isRunning()).thenReturn(false);
 
         pollingService.pollForIssues();
 
         verifyNoInteractions(workflowService);
 
-        when(processingControl.isRunning()).thenReturn(true);
+        processingControl.restart();
+        processingControl.restart();
         pollingService.pollForIssues();
         pollingService.pollForIssues();
 
         assertEquals(IssueStatus.IN_PROGRESS, persisted.getStatus());
+        verify(dispatchService, times(1)).claimStart(persisted);
         verify(workflowService, times(1)).processIssueAsync(persisted);
+        verify(controlRepository, times(1)).save(
+                argThat(control -> control.getState() == ProcessingState.RUNNING));
     }
 
     @Test
@@ -219,7 +227,7 @@ class IssuePollingServiceTest {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("number", 211);
         node.put("title", "Webhook queued across restart");
-        when(processingControl.isRunning()).thenReturn(false);
+        useStatefulProcessingControl(ProcessingState.PAUSE_AFTER_CURRENT);
         when(issueRepository.findByRepoAndIssueNumber(testRepo, 211))
                 .thenAnswer(ignored -> Optional.ofNullable(persisted[0]));
         when(issueRepository.save(any(TrackedIssue.class))).thenAnswer(invocation -> {
@@ -237,14 +245,19 @@ class IssuePollingServiceTest {
         assertEquals(IssueStatus.QUEUED, persisted[0].getStatus());
 
         stubRestartPoll(persisted[0]);
-        when(processingControl.isRunning()).thenReturn(true);
+        processingControl.restart();
+        processingControl.restart();
         pollingService.pollForIssues();
         pollingService.pollForIssues();
 
         assertEquals(WebhookOutcome.ALREADY_TRACKED,
                 pollingService.evaluateSingleIssueFromWebhook(testRepo, node));
+        verify(dispatchService, times(1)).claimStart(persisted[0]);
         verify(workflowService, times(1)).processIssueAsync(persisted[0]);
         verify(dependencyResolver, times(1)).resolve(testRepo, 211);
+        verify(issueRepository, times(2)).save(persisted[0]);
+        verify(controlRepository, times(1)).save(
+                argThat(control -> control.getState() == ProcessingState.RUNNING));
     }
 
     @Test
@@ -889,5 +902,30 @@ class IssuePollingServiceTest {
                 .thenReturn(List.of());
         when(dependencyResolver.topologicalSort(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    private void useStatefulProcessingControl(ProcessingState initialState) {
+        AtomicReference<ProcessingControl> persisted =
+                new AtomicReference<>(new ProcessingControl(initialState));
+        controlRepository = mock(ProcessingControlRepository.class);
+        when(controlRepository.findById(ProcessingControl.SINGLETON_ID))
+                .thenAnswer(ignored -> Optional.of(persisted.get()));
+        when(controlRepository.findByIdForUpdate(ProcessingControl.SINGLETON_ID))
+                .thenAnswer(ignored -> Optional.of(persisted.get()));
+        when(controlRepository.save(any(ProcessingControl.class))).thenAnswer(invocation -> {
+            ProcessingControl saved = invocation.getArgument(0);
+            persisted.set(saved);
+            return saved;
+        });
+        processingControl = new ProcessingControlService(
+                controlRepository, issueRepository, mock(
+                        com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService.class));
+        processingControl.initialize();
+        dispatchService = spy(new IssueDispatchService(
+                issueRepository, processingControl, mock(IterationRepository.class)));
+        pollingService = new IssuePollingService(
+                gitHubApiClient, repoRepository, issueRepository, eventService,
+                notificationService, workflowService, properties, dependencyResolver,
+                processingControl, dispatchService);
     }
 }

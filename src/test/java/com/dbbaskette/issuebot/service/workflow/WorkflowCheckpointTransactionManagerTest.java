@@ -7,6 +7,8 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
@@ -191,6 +193,26 @@ class WorkflowCheckpointTransactionManagerTest {
     }
 
     @Test
+    void operatorCancellationPersistsTerminalStateAndClearsResumeMarkers() {
+        Baseline baseline = seed();
+        TrackedIssue issue = issues.findById(baseline.issueId()).orElseThrow();
+        issue.setSuspensionReason("old resumable checkpoint");
+        issues.saveAndFlush(issue);
+
+        TrackedIssue cancelled = checkpoints.cancelForOperator(baseline.issueId());
+
+        assertThat(cancelled.getStatus()).isEqualTo(IssueStatus.FAILED);
+        assertThat(cancelled.getCurrentPhase()).isNull();
+        assertThat(cancelled.getSuspensionReason()).isNull();
+        assertThat(cancelled.getLastFailureReason()).isEqualTo("Cancelled by operator");
+        TrackedIssue persisted = issues.findById(baseline.issueId()).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(IssueStatus.FAILED);
+        assertThat(persisted.getCurrentPhase()).isNull();
+        assertThat(persisted.getSuspensionReason()).isNull();
+        assertThat(persisted.getLastFailureReason()).isEqualTo("Cancelled by operator");
+    }
+
+    @Test
     void implementationCheckpointFaultRollsBackResultAndPhase() {
         Baseline baseline = seed();
         ClaudeCodeResult result = new ClaudeCodeResult();
@@ -282,18 +304,20 @@ class WorkflowCheckpointTransactionManagerTest {
         assertThat(suspended.getSuspensionReason()).contains("paused");
     }
 
-    @Test
-    void globalPauseRacingAfterProposalCommitPreservesThePlanApprovalGate() {
+    @ParameterizedTest
+    @EnumSource(value = IssueStatus.class,
+            names = {"AWAITING_APPROVAL", "AWAITING_PLAN_APPROVAL"})
+    void globalPauseRacingAfterHumanGateCommitPreservesTheGate(IssueStatus gateStatus) {
         Baseline baseline = seed();
         TrackedIssue issue = issues.findById(baseline.issueId()).orElseThrow();
         issue.setCurrentIteration(0);
         issue.setCurrentPhase(null);
-        issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        issue.setStatus(gateStatus);
         issues.saveAndFlush(issue);
 
         TrackedIssue suspended = checkpoints.suspendForRecovery(issue.getId());
 
-        assertThat(suspended.getStatus()).isEqualTo(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(suspended.getStatus()).isEqualTo(gateStatus);
         assertThat(suspended.getCurrentPhase()).isNull();
         assertThat(suspended.getLastFailureReason()).isNull();
     }

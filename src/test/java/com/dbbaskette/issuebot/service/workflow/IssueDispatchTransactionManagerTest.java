@@ -324,6 +324,38 @@ class IssueDispatchTransactionManagerTest {
                 .isEqualTo(IssueStatus.QUEUED);
     }
 
+    @Test
+    void concurrentClaimsForDifferentIssuesInOneRepositoryHaveOneWinner() throws Exception {
+        Long firstId = seedIssue(IssueStatus.QUEUED, 45, null);
+        TrackedIssue first = issues.findById(firstId).orElseThrow();
+        Long secondId = seedIssue(first.getRepo(), IssueStatus.QUEUED, 46);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var firstClaim = pool.submit(
+                    awaitThen(ready, go, () -> dispatch.claimStart(firstId)));
+            var secondClaim = pool.submit(
+                    awaitThen(ready, go, () -> dispatch.claimStart(secondId)));
+            ready.await();
+            go.countDown();
+
+            assertThat(List.of(firstClaim.get(), secondClaim.get()).stream()
+                    .filter(IssueDispatchService.ClaimResult::claimed)).hasSize(1);
+        }
+
+        assertThat(List.of(
+                issues.findById(firstId).orElseThrow().getStatus(),
+                issues.findById(secondId).orElseThrow().getStatus()))
+                .containsExactlyInAnyOrder(IssueStatus.IN_PROGRESS, IssueStatus.QUEUED);
+        TrackedIssue winner = issues.findById(firstId).orElseThrow();
+        if (winner.getStatus() != IssueStatus.IN_PROGRESS) {
+            winner = issues.findById(secondId).orElseThrow();
+        }
+        winner.setStatus(IssueStatus.COMPLETED);
+        issues.saveAndFlush(winner);
+    }
+
     @ParameterizedTest
     @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
     void nonRunningReadyReservationCannotStartButCanReleaseSlot(ProcessingState mode) {
@@ -390,6 +422,51 @@ class IssueDispatchTransactionManagerTest {
         assertThat(guidance.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(guidedId)).isEmpty();
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void committedModeTransitionWinsAgainstConcurrentClaimAttempt(ProcessingState mode)
+            throws Exception {
+        Long issueId = seedIssue(IssueStatus.QUEUED, 53, null);
+        CountDownLatch transitionHasLock = new CountDownLatch(1);
+        CountDownLatch claimAttempted = new CountDownLatch(1);
+
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var transition = pool.submit(() -> {
+                new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+                    ProcessingControl control =
+                            controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
+                                    .orElseThrow();
+                    control.setState(mode);
+                    controls.saveAndFlush(control);
+                    transitionHasLock.countDown();
+                    try {
+                        claimAttempted.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                });
+                return mode;
+            });
+            var claim = pool.submit(() -> {
+                transitionHasLock.await();
+                claimAttempted.countDown();
+                return dispatch.claimStart(issueId);
+            });
+
+            assertThat(transition.get()).isEqualTo(mode);
+            IssueDispatchService.ClaimResult result = claim.get();
+
+            assertThat(result.claimed()).isFalse();
+            assertThat(result.reason()).isEqualTo("Processing is paused");
+        }
+
+        assertThat(controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow().getState())
+                .isEqualTo(mode);
+        assertThat(issues.findById(issueId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.QUEUED);
+    }
+
     @Test
     void restartMakesQueuedIssueEligibleForExactlyOneCompetingClaim() throws Exception {
         Long issueId = seedIssue(IssueStatus.QUEUED, 54, null);
@@ -428,13 +505,16 @@ class IssueDispatchTransactionManagerTest {
                 .isEqualTo(IssueStatus.READY_TO_START);
     }
 
-    @Test
-    void awaitingPlanApprovalSerializesAnotherIssueInSameRepository() {
+    @ParameterizedTest
+    @EnumSource(value = IssueStatus.class,
+            names = {"IN_PROGRESS", "AWAITING_APPROVAL", "AWAITING_PLAN_APPROVAL"})
+    void everyActiveStatusSerializesAnotherIssueInSameRepository(IssueStatus activeStatus) {
         controls.findById(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
-        WatchedRepo repo = repos.save(new WatchedRepo("acme", "serialized"));
+        WatchedRepo repo = repos.save(new WatchedRepo(
+                "acme", "serialized-" + activeStatus.name().toLowerCase()));
         TrackedIssue waiting = new TrackedIssue(repo, 1, "Waiting");
-        waiting.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        waiting.setStatus(activeStatus);
         issues.save(waiting);
         TrackedIssue candidate = new TrackedIssue(repo, 2, "Candidate");
         candidate.setStatus(IssueStatus.QUEUED);
@@ -446,6 +526,8 @@ class IssueDispatchTransactionManagerTest {
         assertThat(result.reason()).contains("#1", "currently running");
         assertThat(issues.findById(candidate.getId()).orElseThrow().getStatus())
                 .isEqualTo(IssueStatus.QUEUED);
+        waiting.setStatus(IssueStatus.COMPLETED);
+        issues.saveAndFlush(waiting);
     }
 
     @Test
