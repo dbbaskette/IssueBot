@@ -68,6 +68,7 @@ class IssueDetailPipelineStampRenderTest {
         context.setVariable("events", List.of());
         context.setVariable("phaseIndex", -1);
         context.setVariable("phaseCompleted", false);
+        context.setVariable("workflowStepper", new com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler().assemble(issue));
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);

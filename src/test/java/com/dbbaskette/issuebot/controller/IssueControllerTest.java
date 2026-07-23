@@ -1288,6 +1288,8 @@ class IssueControllerTest {
         verifyNoInteractions(f.approvalCardAssembler);
         org.assertj.core.api.Assertions.assertThat(model.asMap())
                 .doesNotContainKeys("approvalReviewScore", "approvalCiStatus", "approvalPrUrl");
+        org.assertj.core.api.Assertions.assertThat(model.getAttribute("workflowStepper"))
+                .isInstanceOf(com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler.WorkflowStepper.class);
     }
 
     @Test
@@ -1317,6 +1319,11 @@ class IssueControllerTest {
                 .isEqualTo("passed");
         org.assertj.core.api.Assertions.assertThat(awaitingModel.getAttribute("approvalPrUrl"))
                 .isEqualTo("https://github.com/acme/widgets/pull/55");
+        var stepper = (com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler.WorkflowStepper)
+                awaitingModel.getAttribute("workflowStepper");
+        org.assertj.core.api.Assertions.assertThat(stepper.selectedStage().key()).isEqualTo("review");
+        org.assertj.core.api.Assertions.assertThat(stepper.selectedStage().state())
+                .isEqualTo(com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler.StageState.PAUSED);
         verify(f.approvalCardAssembler).assemble(List.of(f.issue));
     }
 

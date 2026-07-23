@@ -24,6 +24,7 @@ import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
 import com.dbbaskette.issuebot.service.ui.IssueNextAction;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
+import com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler;
 import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
@@ -101,6 +102,7 @@ public class IssueController {
     private final ApprovalCardAssembler approvalCardAssembler;
     private final IssueNextActionResolver nextActionResolver;
     private final NotificationService notificationService;
+    private final WorkflowStepperAssembler workflowStepperAssembler = new WorkflowStepperAssembler();
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -1108,7 +1110,6 @@ public class IssueController {
         List<TimelineAssembler.RunTimeline> timeline = timelineAssembler.assemble(
                 issue, allEvents, iterations, costRows, java.time.LocalDateTime.now());
 
-        boolean completed = issue.getStatus() == IssueStatus.COMPLETED;
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
@@ -1132,8 +1133,7 @@ public class IssueController {
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
         model.addAttribute("timeline", timeline);
-        model.addAttribute("phaseIndex", phaseIndex(issue));
-        model.addAttribute("phaseCompleted", completed);
+        model.addAttribute("workflowStepper", workflowStepperAssembler.assemble(issue));
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
@@ -1237,35 +1237,4 @@ public class IssueController {
     private record PlanReviewSelection(
             PlanningVersion current, PlanningVersion selected, boolean historical) {}
 
-    /**
-     * Maps the workflow's {@code currentPhase} to a 0..6 pipeline index used by the
-     * issue-detail phase pipeline. When the issue is COMPLETED, every step (including
-     * the final COMPLETION step) renders as done — callers detect that via the
-     * {@code phaseCompleted} flag. Returns -1 when no phase is set / unknown.
-     * Phase values are set in IssueWorkflowService#setCurrentPhase.
-     *
-     * Index 2 (LOCAL_CHECKS) is always reserved for the "Local Checks" step, whether or
-     * not the repo has verification commands configured — the template simply omits that
-     * step's markup when it isn't configured, so CI/PR/Review/Completion keep stable
-     * indices (3/4/5/6) either way.
-     */
-    private int phaseIndex(TrackedIssue issue) {
-        if (issue.getStatus() == IssueStatus.COMPLETED) {
-            return 7; // all seven steps (indices 0..6) are < phaseIndex => done
-        }
-        String phase = issue.getCurrentPhase();
-        if (phase == null) {
-            return -1;
-        }
-        return switch (phase) {
-            case "SETUP" -> 0;
-            case "IMPLEMENTATION" -> 1;
-            case "LOCAL_CHECKS" -> 2;
-            case "CI_VERIFICATION" -> 3;
-            case "PR_CREATION" -> 4;
-            case "INDEPENDENT_REVIEW" -> 5;
-            case "COMPLETION" -> 6;
-            default -> -1;
-        };
-    }
 }

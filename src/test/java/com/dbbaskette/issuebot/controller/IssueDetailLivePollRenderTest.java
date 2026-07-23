@@ -85,6 +85,7 @@ class IssueDetailLivePollRenderTest {
         context.setVariable("events", List.of());
         context.setVariable("phaseIndex", phaseIndex);
         context.setVariable("phaseCompleted", phaseCompleted);
+        context.setVariable("workflowStepper", new com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler().assemble(issue));
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
         context.setVariable("approvalReviewScore", new ReviewScore(
@@ -141,7 +142,7 @@ class IssueDetailLivePollRenderTest {
     }
 
     @Test
-    void liveStatusFragment_containsPhasePipelineMarkup_soItCannotDriftOutsideTheFragment() {
+    void liveStatusFragment_containsWorkflowStepperMarkup_soItCannotDriftOutsideTheFragment() {
         // The /issues/{id}/live-status poll endpoint returns exactly this fragment. If the phase
         // pipeline markup were ever moved to a sibling rendered outside this fragment, the poll
         // would keep firing but would have nothing live left to update — a much quieter variant
@@ -149,21 +150,46 @@ class IssueDetailLivePollRenderTest {
         // land silently.
         String html = render(inProgressIssue(22L, 22, "IMPLEMENTATION"), "live-status", 1, false);
 
-        assertThat(html).contains("phase-pipeline");
+        assertThat(html).contains("workflow-stepper");
+        assertThat(html).contains("aria-label=\"Issue workflow progress\"");
         assertThat(html).contains("Live Progress");
     }
 
     @Test
-    void phaseStepClasses_reflectPhaseIndex_onEachIndependentPollRender() {
-        // Sanity check that the poll endpoint's own per-request phaseIndex computation (done
-        // server-side in IssueController#phaseIndex, exercised here via the plain int passed to
-        // render()) drives the done/active/pending classes correctly — the mechanism the
-        // re-trigger fix exists to keep alive. Setup done, Implementation active, nothing later
-        // started yet.
+    void workflowStageClassesReflectCurrentIssueOnEachIndependentPollRender() {
         String html = render(inProgressIssue(23L, 23, "IMPLEMENTATION"), "live-status", 1, false);
 
-        assertThat(html).contains("phase-step done");
-        assertThat(html).contains("phase-step active");
+        assertThat(html).contains("workflow-stage stage--completed");
+        assertThat(html).contains("workflow-stage stage--current");
+        assertThat(html).contains("aria-current=\"step\"");
+    }
+
+    @Test
+    void workflowStepperRendersPausedFailedCompletedAndUnknownPhasePaths() {
+        TrackedIssue blocked = inProgressIssue(24L, 24, null);
+        blocked.setStatus(IssueStatus.BLOCKED);
+        assertThat(render(blocked, "live-status", -1, false))
+                .contains("stage--paused", "Intake", "Paused", "Blocked by dependencies");
+
+        TrackedIssue approval = inProgressIssue(25L, 25, null);
+        approval.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        assertThat(render(approval, "live-status", -1, false))
+                .contains("stage--paused", "Plan", "Waiting for plan approval");
+
+        TrackedIssue failed = inProgressIssue(26L, 26, "CI_VERIFICATION");
+        failed.setStatus(IssueStatus.FAILED);
+        assertThat(render(failed, "live-status", -1, false))
+                .contains("stage--failed", "Verify", "Failed", "Workflow failed");
+
+        TrackedIssue completed = inProgressIssue(27L, 27, null);
+        completed.setStatus(IssueStatus.COMPLETED);
+        String completedHtml = render(completed, "live-status", 7, true);
+        assertThat(completedHtml).contains("Done", "Workflow completed")
+                .doesNotContain("stage--upcoming", "aria-current=\"step\"");
+
+        String unknown = render(inProgressIssue(28L, 28, "FUTURE_PHASE"),
+                "live-status", -1, false);
+        assertThat(unknown).contains("Work", "Current", "Implementation in progress");
     }
 
     @Test
@@ -341,6 +367,7 @@ class IssueDetailLivePollRenderTest {
         ctx.setVariable("events", List.of());
         ctx.setVariable("phaseIndex", 1);
         ctx.setVariable("phaseCompleted", false);
+        ctx.setVariable("workflowStepper", new com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler().assemble(issue));
         ctx.setVariable("modelCatalog", List.of());
         ctx.setVariable("humanize", new HumanizeHelper());
         ctx.setVariable("timeline", timeline);
