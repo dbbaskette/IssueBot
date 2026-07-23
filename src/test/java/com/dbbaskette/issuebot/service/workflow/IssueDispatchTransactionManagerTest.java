@@ -203,6 +203,48 @@ class IssueDispatchTransactionManagerTest {
     }
 
     @Test
+    void waitingDecompositionAllowsPreexistingReadyIssueToStart() {
+        Long[] ids = new TransactionTemplate(transactionManager).execute(ignored -> {
+            controls.findById(ProcessingControl.SINGLETON_ID)
+                    .orElseGet(() -> controls.save(
+                            new ProcessingControl(ProcessingState.RUNNING)));
+            WatchedRepo repo =
+                    repos.save(new WatchedRepo("acme", "decomposition-existing-start"));
+            TrackedIssue parent = issues.save(new TrackedIssue(repo, 153, "Parent"));
+            parent.setStatus(IssueStatus.DECOMPOSED);
+            TrackedIssue existing = issues.save(new TrackedIssue(repo, 154, "Existing"));
+            existing.setStatus(IssueStatus.READY_TO_START);
+            PlanningVersion approved = PlanningVersion.pending(
+                    existing, 1, "design", "plan", "CODEX", "gpt-5.6-sol", null);
+            approved.approve(LocalDateTime.now());
+            approved = versions.save(approved);
+            existing.setApprovedPlanningVersion(approved);
+            issues.save(existing);
+            TrackedIssue current = issues.save(new TrackedIssue(repo, 155, "First child"));
+            current.setStatus(IssueStatus.QUEUED);
+            DecompositionGroup group = decompositionGroups.save(
+                    new DecompositionGroup(repo, parent, DecompositionGroupState.WAITING));
+            DecompositionChild child =
+                    new DecompositionChild(group, 1, "First child", "Body", "start:1");
+            child.link(155, current);
+            decompositionChildren.save(child);
+            return new Long[]{existing.getId(), current.getId()};
+        });
+
+        IssueDispatchService.ClaimResult childAttempt = dispatch.claimStart(ids[1]);
+        IssueDispatchService.ClaimResult claim = dispatch.claimReadyStart(ids[0]);
+
+        assertThat(childAttempt.claimed()).isFalse();
+        assertThat(childAttempt.reason())
+                .isEqualTo("Issue #154 has an approved plan and is waiting to start.");
+        assertThat(claim.claimed()).isTrue();
+        assertThat(claim.issue().getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(issues.findById(ids[1]).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.QUEUED);
+        markCompleted(ids[0]);
+    }
+
+    @Test
     void readyReservationBlocksOtherStartAndRetry() {
         Long ownerId = seedApprovedIssue(IssueStatus.READY_TO_START, 0, 41);
         TrackedIssue owner = issues.findById(ownerId).orElseThrow();
