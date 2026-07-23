@@ -66,6 +66,10 @@ A group belongs to one watched repository and one tracked parent issue. It recor
 - `released_at`
 - `release_reason`
 - `released_by`
+- `attention_reason`
+- `last_error`
+- `last_reconciled_at`
+- `version`
 
 Only one unfinished group owns a repository at a time. Multiple legacy groups may exist; they are ordered by parent GitHub issue number.
 
