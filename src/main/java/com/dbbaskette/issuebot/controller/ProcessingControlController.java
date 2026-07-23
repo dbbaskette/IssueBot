@@ -14,21 +14,44 @@ public class ProcessingControlController {
 
     public ProcessingControlController(ProcessingControlService control) { this.control = control; }
 
-    @PostMapping("/pause")
-    public String pause(@RequestParam(defaultValue = "/") String returnTo, RedirectAttributes redirects) {
+    @PostMapping("/pause-after-current")
+    public String pauseAfterCurrent(@RequestParam(defaultValue = "/") String returnTo,
+                                    RedirectAttributes redirects) {
         try {
-            control.stopNow();
-            redirects.addFlashAttribute("success", "Processing paused — active work is stopping");
+            control.pauseAfterCurrent();
+            redirects.addFlashAttribute("success",
+                    "Processing will pause after current work finishes; queued issues will remain queued.");
         } catch (RuntimeException e) {
-            redirects.addFlashAttribute("error", "Processing could not be paused; active work was not stopped");
+            redirects.addFlashAttribute("error",
+                    "Processing could not be set to pause after current work.");
         }
         return redirect(returnTo);
     }
 
-    @PostMapping("/resume")
-    public String resume(@RequestParam(defaultValue = "/") String returnTo, RedirectAttributes redirects) {
-        control.restart();
-        redirects.addFlashAttribute("success", "Processing resumed");
+    @PostMapping("/stop-now")
+    public String stopNow(@RequestParam(defaultValue = "/") String returnTo,
+                          RedirectAttributes redirects) {
+        try {
+            control.stopNow();
+            redirects.addFlashAttribute("success",
+                    "Processing stopped; active work is being cancelled and queued issues will remain queued.");
+        } catch (RuntimeException e) {
+            redirects.addFlashAttribute("error",
+                    "Processing could not be stopped; active work was not cancelled.");
+        }
+        return redirect(returnTo);
+    }
+
+    @PostMapping("/restart")
+    public String restart(@RequestParam(defaultValue = "/") String returnTo,
+                          RedirectAttributes redirects) {
+        try {
+            control.restart();
+            redirects.addFlashAttribute("success",
+                    "Processing restarted; queued issues can run again.");
+        } catch (RuntimeException e) {
+            redirects.addFlashAttribute("error", "Processing could not be restarted.");
+        }
         return redirect(returnTo);
     }
 

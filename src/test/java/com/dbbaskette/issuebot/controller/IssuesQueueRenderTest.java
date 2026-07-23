@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
@@ -58,7 +59,7 @@ class IssuesQueueRenderTest {
     }
 
     private String renderTableRows(List<TrackedIssue> issues) {
-        return renderTableRows(issues, null);
+        return renderTableRows(issues, (TrackedIssue) null);
     }
 
     private String renderTableRows(List<TrackedIssue> issues, TrackedIssue readyReservation) {
@@ -66,7 +67,7 @@ class IssuesQueueRenderTest {
         context.setVariable("issues", issues);
         // Mirrors what UiModelAdvice publishes on every real request.
         context.setVariable("humanize", new HumanizeHelper());
-        context.setVariable("processingPaused", false);
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         context.setVariable("nextActions", resolveNextActions(issues, readyReservation));
 
         TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
@@ -77,10 +78,14 @@ class IssuesQueueRenderTest {
     }
 
     private String renderTableRows(List<TrackedIssue> issues, boolean paused) {
+        return renderTableRows(issues, paused ? ProcessingState.STOPPED : ProcessingState.RUNNING);
+    }
+
+    private String renderTableRows(List<TrackedIssue> issues, ProcessingState mode) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issues", issues);
         context.setVariable("humanize", new HumanizeHelper());
-        context.setVariable("processingPaused", paused);
+        context.setVariable("processingMode", mode);
         context.setVariable("nextActions", resolveNextActions(issues));
         TemplateSpec spec = new TemplateSpec("issues", Set.of("table-rows"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -212,6 +217,9 @@ class IssuesQueueRenderTest {
 
         assertThat(renderTableRows(List.of(issue), false)).contains(">Start</button>");
         assertThat(renderTableRows(List.of(issue), true)).contains("disabled=\"disabled\"")
-                .contains("Processing is paused");
+                .contains("Processing is stopped and must be restarted before starting or retrying work.");
+        assertThat(renderTableRows(List.of(issue), ProcessingState.PAUSE_AFTER_CURRENT))
+                .contains("disabled=\"disabled\"")
+                .contains("Processing is waiting for current work to finish and will not start another issue.");
     }
 }

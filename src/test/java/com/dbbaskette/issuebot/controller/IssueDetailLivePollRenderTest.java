@@ -95,7 +95,7 @@ class IssueDetailLivePollRenderTest {
                 "https://github.com/acme/widgets/pull/" + issue.getPrNumber());
         context.setVariable("nextAction", new IssueNextActionResolver().resolve(issue));
         context.setVariable("showPlanGuidance", false);
-        context.setVariable("processingPaused", false);
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         context.setVariable("planningVersions", List.of());
         context.setVariable("selectedPlanningVersion", null);
         context.setVariable("currentPlanningVersion", null);

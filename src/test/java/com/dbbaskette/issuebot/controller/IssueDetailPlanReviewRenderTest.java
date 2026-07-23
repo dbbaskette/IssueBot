@@ -705,7 +705,7 @@ class IssueDetailPlanReviewRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
-        context.setVariable("processingPaused", false);
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         context.setVariable("planningVersions", versions);
         context.setVariable("selectedPlanningVersion", selected);
         context.setVariable("currentPlanningVersion", current);

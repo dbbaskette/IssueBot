@@ -8,31 +8,52 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class ProcessingControlControllerTest {
-    @Test void pauseReportsSuccess() {
-        var service = mock(ProcessingControlService.class);
-        var redirects = mock(RedirectAttributes.class);
-        assertThat(new ProcessingControlController(service).pause("/issues/7", redirects))
-                .isEqualTo("redirect:/issues/7");
+    private final ProcessingControlService service = mock(ProcessingControlService.class);
+    private final RedirectAttributes redirects = mock(RedirectAttributes.class);
+    private final ProcessingControlController controller = new ProcessingControlController(service);
+
+    @Test void pauseAfterCurrentIsExplicitAndPreservesLocalQuery() {
+        assertThat(controller.pauseAfterCurrent("/issues?status=FAILED", redirects))
+                .isEqualTo("redirect:/issues?status=FAILED");
+        verify(service).pauseAfterCurrent();
+        verify(service, never()).stopNow();
+        verify(redirects).addFlashAttribute("success",
+                "Processing will pause after current work finishes; queued issues will remain queued.");
+    }
+
+    @Test void pauseAfterCurrentFailureDoesNotClaimSuccess() {
+        doThrow(new RuntimeException("disk full")).when(service).pauseAfterCurrent();
+        controller.pauseAfterCurrent("/", redirects);
+        verify(redirects).addFlashAttribute("error",
+                "Processing could not be set to pause after current work.");
+    }
+
+    @Test void stopNowIsExplicitAndRejectsProtocolRelativeRedirect() {
+        assertThat(controller.stopNow("//evil.example", redirects)).isEqualTo("redirect:/");
         verify(service).stopNow();
-        verify(redirects).addFlashAttribute("success", "Processing paused — active work is stopping");
+        verify(service, never()).pauseAfterCurrent();
+        verify(redirects).addFlashAttribute("success",
+                "Processing stopped; active work is being cancelled and queued issues will remain queued.");
     }
 
-    @Test void pausePersistenceFailureReportsError() {
-        var service = mock(ProcessingControlService.class);
-        var redirects = mock(RedirectAttributes.class);
+    @Test void stopNowFailureDoesNotClaimCancellation() {
         doThrow(new RuntimeException("disk full")).when(service).stopNow();
-        new ProcessingControlController(service).pause("//evil.example", redirects);
-        verify(redirects).addFlashAttribute("error", "Processing could not be paused; active work was not stopped");
+        controller.stopNow("https://evil.example", redirects);
+        verify(redirects).addFlashAttribute("error",
+                "Processing could not be stopped; active work was not cancelled.");
     }
 
-    @Test void resumeRestartsProcessing() {
-        var service = mock(ProcessingControlService.class);
-        var redirects = mock(RedirectAttributes.class);
+    @Test void restartCanBeSubmittedRepeatedly() {
+        assertThat(controller.restart("/issues/7", redirects)).isEqualTo("redirect:/issues/7");
+        assertThat(controller.restart("/issues/7", redirects)).isEqualTo("redirect:/issues/7");
+        verify(service, times(2)).restart();
+        verify(redirects, times(2)).addFlashAttribute("success",
+                "Processing restarted; queued issues can run again.");
+    }
 
-        assertThat(new ProcessingControlController(service).resume("/", redirects))
-                .isEqualTo("redirect:/");
-
-        verify(service).restart();
-        verify(redirects).addFlashAttribute("success", "Processing resumed");
+    @Test void restartFailureIsModeSpecific() {
+        doThrow(new RuntimeException("disk full")).when(service).restart();
+        controller.restart(null, redirects);
+        verify(redirects).addFlashAttribute("error", "Processing could not be restarted.");
     }
 }

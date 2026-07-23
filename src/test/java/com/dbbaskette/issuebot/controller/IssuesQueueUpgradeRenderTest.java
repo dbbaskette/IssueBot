@@ -62,6 +62,7 @@ class IssuesQueueUpgradeRenderTest {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issues", issues);
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         context.setVariable("statuses", IssueStatus.values());
         context.setVariable("repos", List.of());
         context.setVariable("selectedStatus", null);

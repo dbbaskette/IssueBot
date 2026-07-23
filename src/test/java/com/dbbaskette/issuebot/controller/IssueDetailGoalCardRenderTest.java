@@ -75,6 +75,7 @@ class IssueDetailGoalCardRenderTest {
         context.setVariable("modelCatalog", List.of());
         // Mirrors what UiModelAdvice publishes on every real request (#80).
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         return context;
     }
 

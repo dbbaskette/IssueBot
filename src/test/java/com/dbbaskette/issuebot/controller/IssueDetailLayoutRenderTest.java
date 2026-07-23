@@ -74,7 +74,7 @@ class IssueDetailLayoutRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
-        context.setVariable("processingPaused", false);
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         return context;
     }
 

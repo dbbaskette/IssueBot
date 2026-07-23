@@ -82,6 +82,7 @@ class NotificationBellRenderTest {
         context.setVariable("events", List.of());
         context.setVariable("controlRoom", emptyControlRoom());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
 
         TemplateSpec spec = new TemplateSpec("layout", null,
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
