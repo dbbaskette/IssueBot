@@ -358,7 +358,7 @@ public class IssueController {
     private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
                                 String reviewModelOverride, BigDecimal budgetOverrideUsd,
                                 String planFirstOverride, boolean continueSession) {
-        if (dispatchService.isPaused()) {
+        if (!dispatchService.isRunning()) {
             return "Processing is paused";
         }
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {

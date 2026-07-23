@@ -9,6 +9,8 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -321,15 +323,16 @@ class IssueDispatchTransactionManagerTest {
                 .isEqualTo(IssueStatus.QUEUED);
     }
 
-    @Test
-    void pausedReadyReservationCannotStartButCanReleaseSlot() {
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void nonRunningReadyReservationCannotStartButCanReleaseSlot(ProcessingState mode) {
         Long issueId = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
         Long approvedVersionId = issues.findByIdWithApprovedPlanningVersion(issueId)
                 .orElseThrow().getApprovedPlanningVersion().getId();
         new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
             ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
                     .orElseThrow();
-            control.setState(ProcessingState.PAUSED);
+            control.setState(mode);
             controls.saveAndFlush(control);
         });
 

@@ -52,13 +52,13 @@ public class IssueDispatchService {
         this.legacyIterations = null;
     }
 
-    public boolean isPaused() {
-        return control.isPaused();
+    public boolean isRunning() {
+        return control.isRunning();
     }
 
     public synchronized ClaimResult claimStart(Long issueId) {
         if (transactions != null) return transactions.claimStart(issueId);
-        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findById(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
         return claimStartLoaded(issue);
@@ -66,7 +66,7 @@ public class IssueDispatchService {
 
     public synchronized ClaimResult claimStart(TrackedIssue issue) {
         if (transactions != null) return transactions.claimStart(issue.getId());
-        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");
         return claimStartLoaded(issue);
     }
 
@@ -74,7 +74,7 @@ public class IssueDispatchService {
     public synchronized ClaimResult claimStart(
             Long issueId, IssueDispatchTransactionManager.StartMutation mutation) {
         if (transactions != null) return transactions.claimStart(issueId, mutation);
-        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findById(issueId).orElse(null);
         return issue == null
                 ? ClaimResult.rejected("Issue not found")
@@ -106,7 +106,7 @@ public class IssueDispatchService {
     public synchronized ClaimResult claimReadyStart(
             Long issueId, IssueDispatchTransactionManager.StartMutation mutation) {
         if (transactions != null) return transactions.claimReadyStart(issueId, mutation);
-        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
         if (issue.getStatus() != IssueStatus.READY_TO_START) {
@@ -147,7 +147,7 @@ public class IssueDispatchService {
             return transactions.claimRetry(issueId, additionalGate,
                     IssueDispatchTransactionManager.RetryMutation.none());
         }
-        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {
@@ -188,7 +188,7 @@ public class IssueDispatchService {
         if (transactions != null) {
             return transactions.claimGuidedRetry(issueId, guidance, maxConcurrentIssues);
         }
-        if (control.isPaused()) return ClaimResult.rejected("Processing is paused");
+        if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");
         TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElse(null);
         if (issue == null) return ClaimResult.rejected("Issue not found");
         if (issue.getStatus() != IssueStatus.FAILED && issue.getStatus() != IssueStatus.COOLDOWN) {

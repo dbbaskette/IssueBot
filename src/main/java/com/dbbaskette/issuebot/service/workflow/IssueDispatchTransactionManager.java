@@ -167,7 +167,7 @@ public class IssueDispatchTransactionManager {
     private String rejectIfPaused() {
         ProcessingControl control = controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> controls.saveAndFlush(new ProcessingControl(ProcessingState.RUNNING)));
-        return control.getState() == ProcessingState.PAUSED ? "Processing is paused" : null;
+        return control.getState() != ProcessingState.RUNNING ? "Processing is paused" : null;
     }
 
     private TrackedIssue lockIssueAndRepo(Long issueId) {

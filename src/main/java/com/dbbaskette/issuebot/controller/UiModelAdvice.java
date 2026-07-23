@@ -50,7 +50,7 @@ public class UiModelAdvice {
     }
 
     @ModelAttribute("processingPaused")
-    public boolean processingPaused() { return processingControl.isPaused(); }
+    public boolean processingPaused() { return !processingControl.isRunning(); }
 
     @ModelAttribute("agentProviderName")
     public String agentProviderName() { return properties.getAgentProvider().getDisplayName(); }

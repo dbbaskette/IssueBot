@@ -47,8 +47,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class IssueControllerTest {
 
     private static IssueDispatchService dispatch(TrackedIssueRepository issues) {
+        ProcessingControlService control = mock(ProcessingControlService.class);
+        when(control.isRunning()).thenReturn(true);
         return new IssueDispatchService(
-                issues, mock(ProcessingControlService.class), mock(IterationRepository.class));
+                issues, control, mock(IterationRepository.class));
     }
 
     @Test
@@ -334,6 +336,7 @@ class IssueControllerTest {
         final RedirectAttributes redirectAttributes = mock(RedirectAttributes.class);
 
         Fixture(IssueStatus initialStatus) {
+            when(control.isRunning()).thenReturn(true);
             when(properties.getMaxConcurrentIssues()).thenReturn(5);
             when(properties.getAgentProvider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
             WatchedRepo repo = new WatchedRepo("acme", "widgets");
@@ -583,7 +586,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.READY_TO_START);
         f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 2));
         f.issue.setPlanFirstOverride(true);
-        when(f.control.isPaused()).thenReturn(true);
+        when(f.control.isRunning()).thenReturn(false);
 
         String view = f.controller.start(1L, null, null, null, "skip", f.redirectAttributes);
 
@@ -986,7 +989,7 @@ class IssueControllerTest {
         Fixture f = new Fixture(IssueStatus.FAILED);
         f.issue.setApprovedPlanningVersion(approvedVersion(f.issue, 3));
         f.issue.setPlanConformanceAttempt(2);
-        when(f.control.isPaused()).thenReturn(true);
+        when(f.control.isRunning()).thenReturn(false);
 
         f.controller.retryPlanImplementation(
                 f.issue.getId(), "Try a narrower change", f.redirectAttributes);

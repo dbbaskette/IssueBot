@@ -33,6 +33,7 @@ class IssueDispatchServiceTest {
 
     @BeforeEach
     void setUp() {
+        when(control.isRunning()).thenReturn(true);
         issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42, "Test");
         issue.setId(1L);
         issue.setStatus(IssueStatus.PENDING);
@@ -47,7 +48,7 @@ class IssueDispatchServiceTest {
 
     @Test
     void pausedClaimReturnsSpecificReasonWithoutSaving() {
-        when(control.isPaused()).thenReturn(true);
+        when(control.isRunning()).thenReturn(false);
 
         IssueDispatchService.ClaimResult result = service.claimStart(1L);
 
@@ -172,7 +173,7 @@ class IssueDispatchServiceTest {
         issue.setPlanConformanceAttempt(2);
         issue.setCurrentPhase("WAITING");
         issue.setSuspensionReason("operator hold");
-        when(control.isPaused()).thenReturn(true);
+        when(control.isRunning()).thenReturn(false);
 
         IssueDispatchService.TransitionResult result = service.releaseReadyToQueue(1L);
 
@@ -184,7 +185,7 @@ class IssueDispatchServiceTest {
         assertThat(issue.getCurrentPhase()).isNull();
         assertThat(issue.getSuspensionReason()).isNull();
         verify(issues).save(issue);
-        verify(control, never()).isPaused();
+        verify(control, never()).isRunning();
     }
 
     @Test
@@ -221,7 +222,7 @@ class IssueDispatchServiceTest {
     void guardedRetryStillRespectsPauseAndRepositorySerialization() {
         issue.setStatus(IssueStatus.FAILED);
         issue.setPlanConformanceAttempt(1);
-        when(control.isPaused()).thenReturn(true);
+        when(control.isRunning()).thenReturn(false);
 
         IssueDispatchService.ClaimResult paused = service.claimRetry(
                 1L, candidate -> true, "not eligible");
@@ -231,6 +232,7 @@ class IssueDispatchServiceTest {
         verify(issues, never()).save(any());
 
         reset(control);
+        when(control.isRunning()).thenReturn(true);
         TrackedIssue active = new TrackedIssue(issue.getRepo(), 41, "Active");
         active.setStatus(IssueStatus.IN_PROGRESS);
         when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(any(), any()))
