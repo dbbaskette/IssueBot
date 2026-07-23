@@ -14,19 +14,24 @@ import com.dbbaskette.issuebot.repository.ProcessingControlRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+
 /** Real Hibernate exercise of retry claiming with OSIV/test transaction disabled. */
 @DataJpaTest
-@Import(IssueDispatchTransactionManager.class)
+@Import({IssueDispatchTransactionManager.class, ProcessingControlService.class})
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"
@@ -54,6 +59,12 @@ class IssueDispatchServicePersistenceTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private ProcessingControlService processingControl;
+
+    @MockitoBean
+    private WorkflowCancellationService cancellationService;
 
     @Test
     void guidedRetryLoadsAndPreservesApprovedVersionOutsideRepositoryTransaction() {
@@ -90,5 +101,38 @@ class IssueDispatchServicePersistenceTest {
         Long preservedVersionId = tx.execute(status ->
                 issues.findById(ids[0]).orElseThrow().getApprovedPlanningVersion().getId());
         assertThat(preservedVersionId).isEqualTo(ids[1]);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void replacementControlServiceReloadsPersistedModeAcrossRestart(ProcessingState persistedMode) {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(status ->
+                controls.saveAndFlush(new ProcessingControl(persistedMode)));
+
+        ProcessingControlService replacement = replacementControlService();
+        replacement.initialize();
+
+        assertThat(replacement.mode()).isEqualTo(persistedMode);
+        assertThat(replacement.isRunning()).isFalse();
+
+        processingControl.initialize();
+        processingControl.restart();
+        processingControl.restart();
+
+        ProcessingState durableMode = tx.execute(status ->
+                controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow().getState());
+        assertThat(durableMode).isEqualTo(ProcessingState.RUNNING);
+
+        ProcessingControlService restarted = replacementControlService();
+        restarted.initialize();
+
+        assertThat(restarted.mode()).isEqualTo(ProcessingState.RUNNING);
+        assertThat(restarted.isRunning()).isTrue();
+    }
+
+    private ProcessingControlService replacementControlService() {
+        return new ProcessingControlService(
+                controls, issues, mock(WorkflowCancellationService.class));
     }
 }
