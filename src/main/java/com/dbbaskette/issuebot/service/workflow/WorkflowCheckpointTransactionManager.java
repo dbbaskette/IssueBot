@@ -97,11 +97,11 @@ public class WorkflowCheckpointTransactionManager {
     }
 
     /**
-     * Converts a global stop into a resumable pending checkpoint. An implementation claim that
-     * has not produced a durable result is rearmed; every post-result phase remains exact.
+     * Recovery primitive for converting interrupted work into a resumable checkpoint. This is
+     * deliberately not used by pause-after-current, which lets active workflows finish normally.
      */
     @Transactional
-    public TrackedIssue suspendForGlobalPause(Long issueId) {
+    public TrackedIssue suspendForRecovery(Long issueId) {
         TrackedIssue issue = requireIssueForUpdate(issueId);
         // Approval owns a durable human gate. A racing cancellation must not rewrite any part of
         // that checkpoint; the operator will explicitly start or release the reservation.

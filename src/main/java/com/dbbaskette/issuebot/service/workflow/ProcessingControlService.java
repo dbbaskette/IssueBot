@@ -51,7 +51,7 @@ public class ProcessingControlService {
     public synchronized void stopNow() {
         if (!transitionTo(ProcessingState.STOPPED)) return;
         issues.findByStatus(IssueStatus.IN_PROGRESS).forEach(issue ->
-                cancellationService.requestCancel(issue.getId(), CancellationReason.GLOBAL_PAUSE));
+                cancellationService.requestCancel(issue.getId(), CancellationReason.OPERATOR_STOP));
     }
 
     @Transactional

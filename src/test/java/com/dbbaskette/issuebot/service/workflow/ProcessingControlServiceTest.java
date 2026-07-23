@@ -81,7 +81,7 @@ class ProcessingControlServiceTest {
         var order = inOrder(repository, issues, cancellationService);
         order.verify(repository).save(argThat(c -> c.getState() == ProcessingState.STOPPED));
         order.verify(issues).findByStatus(IssueStatus.IN_PROGRESS);
-        order.verify(cancellationService).requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
+        order.verify(cancellationService).requestCancel(1L, CancellationReason.OPERATOR_STOP);
         verify(issues).findByStatus(IssueStatus.IN_PROGRESS);
         verifyNoMoreInteractions(cancellationService);
     }

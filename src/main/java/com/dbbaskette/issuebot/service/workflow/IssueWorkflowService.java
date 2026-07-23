@@ -902,29 +902,16 @@ public class IssueWorkflowService {
         CancellationReason reason = cancellationService.reason(trackedIssue.getId()).orElse(null);
         if (reason == null) return false;
         if (workflowCheckpoints != null) {
-            trackedIssue = reason == CancellationReason.GLOBAL_PAUSE
-                    ? workflowCheckpoints.suspendForGlobalPause(trackedIssue.getId())
-                    : workflowCheckpoints.cancelForOperator(trackedIssue.getId());
+            trackedIssue = workflowCheckpoints.cancelForOperator(trackedIssue.getId());
         } else {
             trackedIssue.setCurrentPhase(null);
-            if (reason == CancellationReason.GLOBAL_PAUSE) {
-                trackedIssue.setStatus(IssueStatus.PENDING);
-                trackedIssue.setSuspensionReason("Processing paused by operator");
-                trackedIssue.setLastFailureReason(null);
-            } else {
-                trackedIssue.setStatus(IssueStatus.FAILED);
-                trackedIssue.setSuspensionReason(null);
-                trackedIssue.setLastFailureReason("Cancelled by operator");
-            }
+            trackedIssue.setStatus(IssueStatus.FAILED);
+            trackedIssue.setSuspensionReason(null);
+            trackedIssue.setLastFailureReason("Cancelled by operator");
             issueRepository.save(trackedIssue);
         }
-        if (reason == CancellationReason.GLOBAL_PAUSE) {
-            eventService.log("WORKFLOW_SUSPENDED", "Processing paused by operator",
-                    trackedIssue.getRepo(), trackedIssue);
-        } else {
-            eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
-                    trackedIssue.getRepo(), trackedIssue);
-        }
+        eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",
+                trackedIssue.getRepo(), trackedIssue);
         cancellationService.clear(trackedIssue.getId());
         return true;
     }

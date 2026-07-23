@@ -195,21 +195,22 @@ class PlanConformanceWorkflowTest {
     }
 
     @Test
-    void globalPauseDuringFailedReviewStopsBeforeRetryBackoffCostOrVerdict() throws Exception {
+    void operatorStopDuringFailedReviewStopsBeforeRetryBackoffCostOrVerdict() throws Exception {
         TrackedIssue issue = planFirstIssue();
         arrangeWorkflow(issue);
         when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
                 anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
                 .thenAnswer(invocation -> {
-                    cancellationService.requestCancel(issue.getId(), CancellationReason.GLOBAL_PAUSE);
+                    cancellationService.requestCancel(issue.getId(), CancellationReason.OPERATOR_STOP);
                     return CodeReviewResult.failed(
                             "review process stopped for pause", 13, 5, "review-model");
                 });
 
         workflow.processIssue(issue);
 
-        assertThat(issue.getStatus()).isEqualTo(IssueStatus.PENDING);
-        assertThat(issue.getSuspensionReason()).isEqualTo("Processing paused by operator");
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.FAILED);
+        assertThat(issue.getSuspensionReason()).isNull();
+        assertThat(issue.getLastFailureReason()).isEqualTo("Cancelled by operator");
         assertThat(issue.getPlanConformanceAttempt()).isZero();
         verify(reviewer).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
                 anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any());

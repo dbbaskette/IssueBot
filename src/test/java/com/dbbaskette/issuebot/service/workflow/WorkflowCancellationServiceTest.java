@@ -54,8 +54,8 @@ class WorkflowCancellationServiceTest {
 
     @Test
     void cancellationReasonIsRetainedUntilClear() {
-        service.requestCancel(1L, CancellationReason.GLOBAL_PAUSE);
-        assertThat(service.reason(1L)).contains(CancellationReason.GLOBAL_PAUSE);
+        service.requestCancel(1L, CancellationReason.OPERATOR_STOP);
+        assertThat(service.reason(1L)).contains(CancellationReason.OPERATOR_STOP);
 
         service.clear(1L);
 

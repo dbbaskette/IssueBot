@@ -6,6 +6,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.*;
@@ -31,6 +32,8 @@ import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -424,6 +427,21 @@ class IssueControllerTest {
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getReviewModelOverride()).isNull();
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
+    void retryRejectsEveryNonRunningModeBeforeExternalCleanup(ProcessingState ignoredMode) {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        when(f.control.isRunning()).thenReturn(false);
+
+        f.controller.retry(1L, null, null, null, null, null, false, f.redirectAttributes);
+
+        verifyNoInteractions(f.gitHubApiClient);
+        verify(f.issues, never()).save(any());
+        verify(f.eventService, never()).log(anyString(), anyString(), any(), any());
+        verifyNoInteractions(f.workflowService);
+        verify(f.redirectAttributes).addFlashAttribute("error", "Processing is paused");
+    }
+
     @Test
     void retryStoresBudgetOverride() {
         Fixture f = new Fixture(IssueStatus.FAILED);
@@ -684,9 +702,12 @@ class IssueControllerTest {
                 .isEqualByComparingTo(new java.math.BigDecimal("1.00"));
     }
 
-    @Test
-    void cancelRequestsCancellationForRunningIssue() {
+    @ParameterizedTest
+    @EnumSource(ProcessingState.class)
+    void cancelRequestsCancellationForRunningIssueInEveryGlobalMode(
+            ProcessingState ignoredMode) {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        when(f.control.isRunning()).thenReturn(ignoredMode == ProcessingState.RUNNING);
 
         String view = f.controller.cancel(1L, f.redirectAttributes);
 

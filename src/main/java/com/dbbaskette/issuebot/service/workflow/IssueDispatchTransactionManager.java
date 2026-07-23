@@ -48,7 +48,7 @@ public class IssueDispatchTransactionManager {
 
     @Transactional
     public IssueDispatchService.ClaimResult claimStart(Long issueId, StartMutation mutation) {
-        String pause = rejectIfPaused();
+        String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
@@ -69,7 +69,7 @@ public class IssueDispatchTransactionManager {
 
     @Transactional
     public IssueDispatchService.ClaimResult claimReadyStart(Long issueId, StartMutation mutation) {
-        String pause = rejectIfPaused();
+        String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
@@ -90,7 +90,7 @@ public class IssueDispatchTransactionManager {
     @Transactional
     public IssueDispatchService.ClaimResult claimRetry(
             Long issueId, Function<TrackedIssue, String> additionalGate, RetryMutation mutation) {
-        String pause = rejectIfPaused();
+        String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
@@ -113,7 +113,7 @@ public class IssueDispatchTransactionManager {
     @Transactional
     public IssueDispatchService.ClaimResult claimGuidedRetry(
             Long issueId, String operatorGuidance, int maxConcurrentIssues) {
-        String pause = rejectIfPaused();
+        String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
@@ -164,7 +164,7 @@ public class IssueDispatchTransactionManager {
         return IssueDispatchService.TransitionResult.transitioned(issues.saveAndFlush(issue));
     }
 
-    private String rejectIfPaused() {
+    private String rejectIfNotRunning() {
         ProcessingControl control = controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> controls.saveAndFlush(new ProcessingControl(ProcessingState.RUNNING)));
         return control.getState() != ProcessingState.RUNNING ? "Processing is paused" : null;

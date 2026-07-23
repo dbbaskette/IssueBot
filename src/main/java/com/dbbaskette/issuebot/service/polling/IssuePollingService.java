@@ -97,6 +97,7 @@ public class IssuePollingService {
 
         for (WatchedRepo repo : repos) {
             try {
+                if (!processingControl.isRunning()) return;
                 recheckRepo(repo);
                 drainQueuedIssues(repo);
                 resumePendingIssues(repo);
@@ -198,6 +199,7 @@ public class IssuePollingService {
      * never called on them.
      */
     private void resumePendingIssues(WatchedRepo repo) {
+        if (!processingControl.isRunning()) return;
         List<TrackedIssue> pending = issueRepository.findByRepoAndStatus(repo, IssueStatus.PENDING);
         if (pending.isEmpty()) return;
 
@@ -226,6 +228,7 @@ public class IssuePollingService {
      * Uses topological sort to pick the correct next issue.
      */
     private void drainQueuedIssues(WatchedRepo repo) {
+        if (!processingControl.isRunning()) return;
         List<TrackedIssue> queued = issueRepository.findByRepoAndStatus(repo, IssueStatus.QUEUED);
         if (queued.isEmpty()) return;
 
@@ -294,6 +297,7 @@ public class IssuePollingService {
     }
 
     private void pollRepo(WatchedRepo repo, long availableSlots) {
+        if (!processingControl.isRunning()) return;
         if (availableSlots <= 0) return;
 
         log.debug("Polling {} for agent-ready issues", repo.fullName());
@@ -448,6 +452,9 @@ public class IssuePollingService {
      * @return the outcome of the evaluation, for the webhook delivery log on the setup page.
      */
     public WebhookOutcome evaluateSingleIssueFromWebhook(WatchedRepo repo, JsonNode issueNode) {
+        if (!processingControl.isRunning()) {
+            return evaluateIssue(repo, issueNode);
+        }
         long activeCount = issueRepository.countByStatus(IssueStatus.IN_PROGRESS);
         int maxConcurrent = properties.getMaxConcurrentIssues();
         if (activeCount >= maxConcurrent) {
