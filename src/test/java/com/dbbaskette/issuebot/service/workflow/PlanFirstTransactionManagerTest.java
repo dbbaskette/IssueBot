@@ -1,11 +1,16 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
+import com.dbbaskette.issuebot.model.DecompositionChild;
+import com.dbbaskette.issuebot.model.DecompositionGroup;
+import com.dbbaskette.issuebot.model.DecompositionGroupState;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
+import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
@@ -65,7 +70,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @DataJpaTest
-@Import({PlanFirstTransactionManager.class, PlanFirstService.class, PlanArtifactParser.class})
+@Import({PlanFirstTransactionManager.class, PlanFirstService.class, PlanArtifactParser.class,
+        DecompositionReservationService.class})
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"
@@ -77,6 +83,8 @@ class PlanFirstTransactionManagerTest {
     @MockitoSpyBean private TrackedIssueRepository issues;
     @MockitoSpyBean private PlanningVersionRepository versions;
     @MockitoSpyBean private WatchedRepoRepository repos;
+    @Autowired private DecompositionGroupRepository decompositionGroups;
+    @Autowired private DecompositionChildRepository decompositionChildren;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private EntityManager entityManager;
 
@@ -307,6 +315,59 @@ class PlanFirstTransactionManagerTest {
                 .singleElement()
                 .extracting(TrackedIssue::getStatus)
                 .isEqualTo(lowerStatus);
+    }
+
+    @Test
+    void waitingDecompositionAllowsPreexistingPlanApproval() {
+        Long repoId = seedRepo();
+        Long parentId = seedPlainIssue(repoId, 153, IssueStatus.DECOMPOSED);
+        Pending existing = seedPlannedIssue(
+                repoId, 154, IssueStatus.AWAITING_PLAN_APPROVAL, false);
+        Long childId = seedPlainIssue(repoId, 155, IssueStatus.QUEUED);
+        tx().executeWithoutResult(ignored -> {
+            WatchedRepo repo = repos.findById(repoId).orElseThrow();
+            DecompositionGroup group = decompositionGroups.saveAndFlush(
+                    new DecompositionGroup(repo, issues.findById(parentId).orElseThrow(),
+                            DecompositionGroupState.WAITING));
+            DecompositionChild child =
+                    new DecompositionChild(group, 1, "Part 1", "Body", "handoff:1");
+            child.link(155, issues.findById(childId).orElseThrow());
+            decompositionChildren.saveAndFlush(child);
+        });
+
+        transactions.approvePlan(existing.issueId(), existing.versionId());
+
+        assertThat(issues.findById(existing.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(issues.findById(childId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.QUEUED);
+    }
+
+    @Test
+    void waitingDecompositionWithOnlyCompletedChildrenAllowsPreexistingPlanApproval() {
+        Long repoId = seedRepo();
+        Long parentId = seedPlainIssue(repoId, 153, IssueStatus.DECOMPOSED);
+        Pending existing = seedPlannedIssue(
+                repoId, 154, IssueStatus.AWAITING_PLAN_APPROVAL, false);
+        Long childId = seedPlainIssue(repoId, 155, IssueStatus.COMPLETED);
+        tx().executeWithoutResult(ignored -> {
+            WatchedRepo repo = repos.findById(repoId).orElseThrow();
+            DecompositionGroup group = decompositionGroups.saveAndFlush(
+                    new DecompositionGroup(repo, issues.findById(parentId).orElseThrow(),
+                            DecompositionGroupState.WAITING));
+            DecompositionChild child =
+                    new DecompositionChild(
+                            group, 1, "Part 1", "Body", "handoff:completed");
+            child.link(155, issues.findById(childId).orElseThrow());
+            decompositionChildren.saveAndFlush(child);
+        });
+
+        transactions.approvePlan(existing.issueId(), existing.versionId());
+
+        assertThat(issues.findById(existing.issueId()).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(issues.findById(childId).orElseThrow().getStatus())
+                .isEqualTo(IssueStatus.COMPLETED);
     }
 
     @ParameterizedTest

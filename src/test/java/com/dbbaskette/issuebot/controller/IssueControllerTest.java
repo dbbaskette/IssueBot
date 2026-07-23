@@ -865,6 +865,22 @@ class IssueControllerTest {
     }
 
     @Test
+    void approvePlanFlashesExactDecompositionReservationError() {
+        Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
+        String message = "Decomposition #153 owns this repository. "
+                + "Complete or release child #155 before starting issue #160.";
+        doThrow(new IllegalStateException(message))
+                .when(f.planFirstService).approvePlan(1L, 13L);
+
+        String view = f.controller.approvePlan(1L, 13L, f.redirectAttributes);
+
+        verify(f.redirectAttributes).addFlashAttribute("error", message);
+        verify(f.redirectAttributes).addFlashAttribute("planError", message);
+        org.assertj.core.api.Assertions.assertThat(view)
+                .isEqualTo("redirect:/issues/1#plan-first");
+    }
+
+    @Test
     void approvePlanSanitizesUnrecognizedServiceFailures() {
         Fixture f = new Fixture(IssueStatus.AWAITING_PLAN_APPROVAL);
         doThrow(new IllegalStateException("database password exposed"))

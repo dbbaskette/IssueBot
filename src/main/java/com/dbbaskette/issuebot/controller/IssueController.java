@@ -1009,7 +1009,11 @@ public class IssueController {
         return message != null && (message.matches(
                 "Issue #\\d+ must finish before issue #\\d+ can reserve this repository\\.")
                 || message.matches("Issue #\\d+ is already running later work in this repository\\. "
-                + "Finish or stop it before approving issue #\\d+\\."));
+                + "Finish or stop it before approving issue #\\d+\\.")
+                || message.matches("Decomposition #\\d+ owns this repository\\. "
+                + "Complete or release child #\\d+ before starting issue #\\d+\\.")
+                || message.matches("Child #\\d+ is waiting for #\\d+ in decomposition #\\d+\\.")
+                || message.matches("Decomposition #\\d+ is completing and still owns this repository\\."));
     }
 
     private static boolean isStalePlanApproval(String message) {
