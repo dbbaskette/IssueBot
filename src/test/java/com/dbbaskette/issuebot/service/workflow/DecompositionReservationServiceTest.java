@@ -6,6 +6,8 @@ import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -48,6 +50,46 @@ class DecompositionReservationServiceTest {
         assertThat(service.evaluate(issue(repo, 154, 13L)).reason())
                 .contains("Decomposition #153 owns this repository");
         assertThat(service.evaluate(current).allowed()).isTrue();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = IssueStatus.class, names = {
+            "IN_PROGRESS", "AWAITING_APPROVAL", "AWAITING_PLAN_APPROVAL",
+            "READY_TO_START", "AWAITING_DECOMPOSITION"
+    })
+    void waitingGroupAllowsPreexistingUnrelatedWorkToAdvance(IssueStatus status) {
+        WatchedRepo repo = repo(1L);
+        TrackedIssue parent = issue(repo, 153, 10L);
+        DecompositionGroup group =
+                new DecompositionGroup(repo, parent, DecompositionGroupState.WAITING);
+        TrackedIssue current = issue(repo, 155, 11L);
+        TrackedIssue existing = issue(repo, 154, 13L);
+        existing.setStatus(status);
+        DecompositionChild child = child(group, 1, 155, current);
+        when(groups.findOldestUnfinishedByRepo(1L)).thenReturn(Optional.of(group));
+        when(children.findByGroupOrderBySequencePositionAsc(group))
+                .thenReturn(List.of(child));
+
+        assertThat(service.evaluate(existing).allowed()).isTrue();
+    }
+
+    @Test
+    void activeGroupStillBlocksUnrelatedPlanApproval() {
+        WatchedRepo repo = repo(1L);
+        TrackedIssue parent = issue(repo, 153, 10L);
+        DecompositionGroup group =
+                new DecompositionGroup(repo, parent, DecompositionGroupState.ACTIVE);
+        TrackedIssue current = issue(repo, 155, 11L);
+        TrackedIssue unrelated = issue(repo, 154, 13L);
+        unrelated.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        DecompositionChild child = child(group, 1, 155, current);
+        when(groups.findOldestUnfinishedByRepo(1L)).thenReturn(Optional.of(group));
+        when(children.findByGroupOrderBySequencePositionAsc(group))
+                .thenReturn(List.of(child));
+
+        assertThat(service.evaluate(unrelated).allowed()).isFalse();
+        assertThat(service.evaluate(unrelated).reason())
+                .contains("Decomposition #153 owns this repository");
     }
 
     private static WatchedRepo repo(long id) {

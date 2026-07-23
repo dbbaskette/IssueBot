@@ -2,17 +2,28 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.DecompositionChild;
 import com.dbbaskette.issuebot.model.DecompositionGroup;
+import com.dbbaskette.issuebot.model.DecompositionGroupState;
+import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
 import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 
 @Service
 public class DecompositionReservationService {
+    private static final Set<IssueStatus> PREEXISTING_ACTIVE = EnumSet.of(
+            IssueStatus.IN_PROGRESS,
+            IssueStatus.AWAITING_APPROVAL,
+            IssueStatus.AWAITING_PLAN_APPROVAL,
+            IssueStatus.READY_TO_START,
+            IssueStatus.AWAITING_DECOMPOSITION);
+
     private final DecompositionGroupRepository groups;
     private final DecompositionChildRepository children;
 
@@ -39,6 +50,11 @@ public class DecompositionReservationService {
                 .map(DecompositionChild::getTrackedIssue)
                 .filter(Objects::nonNull)
                 .anyMatch(issue -> Objects.equals(issue.getId(), candidate.getId()));
+        if (owner.group().getState() == DecompositionGroupState.WAITING
+                && !member
+                && PREEXISTING_ACTIVE.contains(candidate.getStatus())) {
+            return ReservationDecision.permitted(owner);
+        }
         String reason = member
                 ? "Child #" + candidate.getIssueNumber() + " is waiting for #"
                     + current.getIssueNumber() + " in decomposition #" + parent + "."
