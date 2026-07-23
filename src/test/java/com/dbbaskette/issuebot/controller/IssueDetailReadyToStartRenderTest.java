@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -111,15 +112,27 @@ class IssueDetailReadyToStartRenderTest {
 
         assertThat(startTrigger)
                 .contains("disabled=\"disabled\"")
-                .contains("title=\"Processing is paused\"")
-                .contains("aria-label=\"Start implementation — Processing is paused\"");
+                .contains("title=\"Processing is stopped and must be restarted before starting or retrying work.\"")
+                .contains("aria-label=\"Start implementation — processing must be restarted first\"");
         assertThat(startSubmit)
                 .contains("disabled=\"disabled\"")
-                .contains("title=\"Processing is paused\"")
-                .contains("aria-label=\"Start implementation — Processing is paused\"");
+                .contains("title=\"Processing is stopped and must be restarted before starting or retrying work.\"")
+                .contains("aria-label=\"Start implementation — processing must be restarted first\"");
         assertThat(releaseTrigger)
                 .doesNotContain("disabled=\"disabled\"")
-                .doesNotContain("Processing is paused");
+                .doesNotContain("Processing is stopped");
+    }
+
+    @Test
+    void pauseAfterCurrentUsesModeSpecificGuidanceAndKeepsReleaseEnabled() {
+        String html = renderReadyIssue(ProcessingState.PAUSE_AFTER_CURRENT);
+        String card = slice(html, "id=\"ready-to-start\"", "id=\"recovery\"");
+
+        assertThat(card)
+                .contains("disabled=\"disabled\"")
+                .contains("Processing is waiting for current work to finish and will not start another issue.");
+        assertThat(slice(card, "<button type=\"button\" class=\"btn btn-ghost\"", "</button>"))
+                .doesNotContain("disabled=\"disabled\"");
     }
 
     @Test
@@ -161,7 +174,11 @@ class IssueDetailReadyToStartRenderTest {
         return renderReadyIssue(false);
     }
 
-    private String renderReadyIssue(boolean processingPaused) {
+    private String renderReadyIssue(boolean stopped) {
+        return renderReadyIssue(stopped ? ProcessingState.STOPPED : ProcessingState.RUNNING);
+    }
+
+    private String renderReadyIssue(ProcessingState mode) {
         TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42,
                 "Ship the approved contract");
         issue.setId(42L);
@@ -183,7 +200,7 @@ class IssueDetailReadyToStartRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
-        context.setVariable("processingPaused", processingPaused);
+        context.setVariable("processingMode", mode);
         context.setVariable("planningVersions", List.of(approved));
         context.setVariable("selectedPlanningVersion", approved);
         context.setVariable("currentPlanningVersion", approved);

@@ -71,6 +71,7 @@ class IssueDetailTimelineRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         return context;
     }
 
@@ -109,6 +110,7 @@ class IssueDetailTimelineRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
 
         String html = render(context);
 

@@ -24,6 +24,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "issuebot.github.token=test-token",
+        "issuebot.auth.username=",
+        "issuebot.auth.password=",
         "ISSUEBOT_WEBHOOK_SECRET=test-webhook-secret",
         "spring.datasource.url=jdbc:h2:mem:security-csrf-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
 })
@@ -79,7 +81,7 @@ class SecurityConfigCsrfIntegrationTest {
         assertThat(html)
                 .containsPattern("<meta name=\"_csrf\" content=\"[^\"]+\">")
                 .contains("<meta name=\"_csrf_header\" content=\"X-CSRF-TOKEN\">")
-                .containsPattern("(?s)<form[^>]*action=\"/processing/pause\"[^>]*>.*?"
+                .containsPattern("(?s)<form[^>]*action=\"/processing/pause-after-current\"[^>]*>.*?"
                         + "<input type=\"hidden\" name=\"_csrf\" value=\"[^\"]+\"/?>");
     }
 

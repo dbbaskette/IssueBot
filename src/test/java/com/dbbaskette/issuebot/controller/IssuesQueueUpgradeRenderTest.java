@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
@@ -59,9 +60,17 @@ class IssuesQueueUpgradeRenderTest {
 
     private String renderContent(List<TrackedIssue> issues, String searchQuery, Integer currentPage,
                                   Integer totalPages, boolean hasPrevious, boolean hasNext) {
+        return renderContent(issues, searchQuery, currentPage, totalPages, hasPrevious, hasNext,
+                ProcessingState.RUNNING);
+    }
+
+    private String renderContent(List<TrackedIssue> issues, String searchQuery, Integer currentPage,
+                                 Integer totalPages, boolean hasPrevious, boolean hasNext,
+                                 ProcessingState processingMode) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issues", issues);
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", processingMode);
         context.setVariable("statuses", IssueStatus.values());
         context.setVariable("repos", List.of());
         context.setVariable("selectedStatus", null);
@@ -78,6 +87,41 @@ class IssuesQueueUpgradeRenderTest {
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    @Test
+    void bulkStartAndRetryControlsFollowEveryProcessingMode() {
+        String running = renderContent(List.of(), "", 0, 1, false, false,
+                ProcessingState.RUNNING);
+        assertThat(running)
+                .contains("title=\"Start selected issues\"")
+                .contains("title=\"Retry selected issues\"");
+        assertThat(button(running, "Start selected")).doesNotContain("disabled=\"disabled\"");
+        assertThat(button(running, "Retry selected")).doesNotContain("disabled=\"disabled\"");
+
+        String pausing = renderContent(List.of(), "", 0, 1, false, false,
+                ProcessingState.PAUSE_AFTER_CURRENT);
+        assertThat(button(pausing, "Start selected"))
+                .contains("disabled=\"disabled\"")
+                .contains("Processing is waiting for current work to finish and will not start another issue.");
+        assertThat(button(pausing, "Retry selected"))
+                .contains("disabled=\"disabled\"")
+                .contains("Processing is waiting for current work to finish and will not start another issue.");
+
+        String stopped = renderContent(List.of(), "", 0, 1, false, false,
+                ProcessingState.STOPPED);
+        assertThat(button(stopped, "Start selected"))
+                .contains("disabled=\"disabled\"")
+                .contains("Processing is stopped and must be restarted before starting or retrying work.");
+        assertThat(button(stopped, "Retry selected"))
+                .contains("disabled=\"disabled\"")
+                .contains("Processing is stopped and must be restarted before starting or retrying work.");
+    }
+
+    private static String button(String html, String label) {
+        int labelIndex = html.indexOf(">" + label + "</button>");
+        int start = html.lastIndexOf("<button", labelIndex);
+        return html.substring(start, labelIndex + label.length() + 10);
     }
 
     private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {

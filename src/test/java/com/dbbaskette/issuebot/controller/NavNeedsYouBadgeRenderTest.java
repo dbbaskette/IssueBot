@@ -58,6 +58,7 @@ class NavNeedsYouBadgeRenderTest {
         context.setVariable("pendingApprovals", pendingApprovals);
         context.setVariable("needsYouCount", needsYouCount);
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
         // dashboard.html's "content" fragment needs its own metric variables to render at all.
         for (String key : new String[]{"completed", "inProgress", "pending", "queued", "blocked",
                 "failed", "decomposed", "awaitingDecomposition", "awaitingPlanApproval", "repoCount"}) {

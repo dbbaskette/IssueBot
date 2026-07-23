@@ -53,15 +53,15 @@
                     <a th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
                                    and showPlanGuidance != true}"
                             href="#recovery" class="btn btn-ghost btn-sm"
-                            th:disabled="${processingPaused == true}"
-                            th:title="${processingPaused == true ? 'Processing is paused' : 'Review recovery options'}">
+                            th:disabled="${processingMode?.name() != 'RUNNING'}"
+                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Review recovery options'}">
                         <i class="ti ti-refresh" aria-hidden="true"></i>
                         <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
                     </a>
                     <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                             type="button" class="btn btn-primary btn-sm"
-                            th:disabled="${processingPaused == true}"
-                            th:title="${processingPaused == true ? 'Processing is paused' : 'Start this issue now'}"
+                            th:disabled="${processingMode?.name() != 'RUNNING'}"
+                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start this issue now'}"
                             data-modal-open="start-modal">
                         <i class="ti ti-player-play" aria-hidden="true"></i>
                         <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
@@ -110,9 +110,9 @@
                     <p>Implementation is waiting for you. This issue is holding the repository's next-work slot.</p>
                     <div class="ready-start-actions">
                         <button type="button" class="btn btn-primary"
-                                th:disabled="${processingPaused == true}"
-                                th:title="${processingPaused == true ? 'Processing is paused' : 'Start implementation'}"
-                                th:aria-label="${processingPaused == true ? 'Start implementation — Processing is paused' : null}"
+                                th:disabled="${processingMode?.name() != 'RUNNING'}"
+                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start implementation'}"
+                                th:aria-label="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start implementation — processing is waiting for current work to finish' : (processingMode?.name() == 'STOPPED' ? 'Start implementation — processing must be restarted first' : null)}"
                                 data-modal-open="start-modal">Start implementation</button>
                         <button type="button" class="btn btn-ghost"
                                 data-modal-open="release-ready-modal">Return to queue</button>
@@ -190,8 +190,8 @@
                             </p>
                         </details>
                         <div class="modal-actions">
-                            <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingPaused == true}"
-                                    th:title="${processingPaused == true ? 'Processing is paused' : (reviewerInfrastructure ? 'Retry workflow after reviewer recovery' : 'Retry with this guidance')}"
+                            <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingMode?.name() != 'RUNNING'}"
+                                    th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : (reviewerInfrastructure ? 'Retry workflow after reviewer recovery' : 'Retry with this guidance')}"
                                     th:text="${reviewerInfrastructure ? 'Retry after recovery' : 'Retry with guidance'}">Retry with guidance</button>
                         </div>
                     </form>
@@ -235,7 +235,9 @@
                         <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
                         <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
                                   placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
-                        <button type="submit" class="btn btn-primary">Retry Implementation</button>
+                        <button type="submit" class="btn btn-primary"
+                                th:disabled="${processingMode?.name() != 'RUNNING'}"
+                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                     </form>
                 </div>
             </section>
@@ -888,9 +890,9 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm"
-                            th:disabled="${processingPaused == true}"
-                            th:title="${processingPaused == true ? 'Processing is paused' : 'Start implementation'}"
-                            th:aria-label="${processingPaused == true ? 'Start implementation — Processing is paused' : null}"
+                            th:disabled="${processingMode?.name() != 'RUNNING'}"
+                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start implementation'}"
+                            th:aria-label="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start implementation — processing is waiting for current work to finish' : (processingMode?.name() == 'STOPPED' ? 'Start implementation — processing must be restarted first' : null)}"
                             th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue'}">Start Issue</button>
                 </div>
             </form>

@@ -1,11 +1,16 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Covers the dashboard-toggle gate {@link UiModelAdvice} publishes for the notification
@@ -37,5 +42,14 @@ class UiModelAdviceTest {
         request.setQueryString("tab=activity");
 
         assertThat(advice.currentPath(request)).isEqualTo("/issues/14?tab=activity");
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProcessingState.class)
+    void processingModePublishesExactCachedMode(ProcessingState mode) {
+        ProcessingControlService control = mock(ProcessingControlService.class);
+        when(control.mode()).thenReturn(mode);
+
+        assertThat(new UiModelAdvice(new IssueBotProperties(), control).processingMode()).isSameAs(mode);
     }
 }

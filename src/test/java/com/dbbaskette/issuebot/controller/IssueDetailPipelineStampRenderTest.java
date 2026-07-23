@@ -70,6 +70,7 @@ class IssueDetailPipelineStampRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
 
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);

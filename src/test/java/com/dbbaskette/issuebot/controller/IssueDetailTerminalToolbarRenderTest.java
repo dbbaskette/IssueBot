@@ -67,6 +67,7 @@ class IssueDetailTerminalToolbarRenderTest {
         context.setVariable("phaseCompleted", false);
         context.setVariable("modelCatalog", List.of());
         context.setVariable("humanize", new HumanizeHelper());
+        context.setVariable("processingMode", com.dbbaskette.issuebot.model.ProcessingState.RUNNING);
 
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("content"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);

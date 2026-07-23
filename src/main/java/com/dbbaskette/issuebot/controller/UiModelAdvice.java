@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.model.ProcessingState;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,8 +50,8 @@ public class UiModelAdvice {
         return properties.getNotifications().isDashboard();
     }
 
-    @ModelAttribute("processingPaused")
-    public boolean processingPaused() { return !processingControl.isRunning(); }
+    @ModelAttribute("processingMode")
+    public ProcessingState processingMode() { return processingControl.mode(); }
 
     @ModelAttribute("agentProviderName")
     public String agentProviderName() { return properties.getAgentProvider().getDisplayName(); }
@@ -60,7 +61,7 @@ public class UiModelAdvice {
         return properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX;
     }
 
-    /** Current local URL used to return operators to the same view after pause/resume. */
+    /** Current local URL used to return operators to the same view after processing controls. */
     @ModelAttribute("currentPath")
     public String currentPath(HttpServletRequest request) {
         String query = request.getQueryString();
