@@ -14,6 +14,14 @@ import static org.mockito.Mockito.*;
 
 class CodexCliServiceTest {
 
+    @Test
+    void managedAuthRequiresUnambiguousChatGptSubscriptionStatus() {
+        assertThat(CodexCliService.isSubscriptionAuthentication("Logged in using ChatGPT\n")).isTrue();
+        assertThat(CodexCliService.isSubscriptionAuthentication("Logged in using an API key")).isFalse();
+        assertThat(CodexCliService.isSubscriptionAuthentication("Not logged in. Run login.\n")).isFalse();
+        assertThat(CodexCliService.isSubscriptionAuthentication("Warning: previously Logged in using ChatGPT")).isFalse();
+    }
+
     private final CodexCliService service = new CodexCliService(
             new IssueBotProperties(), new CodexJsonParser(new ObjectMapper()),
             new WorkflowCancellationService());

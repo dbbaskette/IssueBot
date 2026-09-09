@@ -331,6 +331,24 @@ class IssueDetailLivePollRenderTest {
     }
 
     @Test
+    void managedStageWaitHydratesGeneratedPlanWithoutFullPageReload() {
+        TrackedIssue issue = inProgressIssue(39L, 39, "STAGE_APPROVAL_IMPLEMENTATION");
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        PlanningVersion current = PlanningVersion.pending(
+                issue, 1, "# Bound design", "# Bound implementation", "CODEX", "gpt-5.5", null);
+        String poll = render(issue, "live-status-poll", -1, false, context -> {
+            context.setVariable("planningVersions", List.of(current));
+            context.setVariable("selectedPlanningVersion", current);
+            context.setVariable("currentPlanningVersion", current);
+            context.setVariable("selectedDesignSpecHtml", "<h1>Bound design</h1>");
+            context.setVariable("selectedImplementationPlanHtml", "<h1>Bound implementation</h1>");
+        });
+        assertThat(poll).contains("id=\"plan-review\"", "id=\"plan-first\"", "<h1>Bound design</h1>",
+                "<h1>Bound implementation</h1>", "hx-swap-oob=\"true\"");
+        assertThat(occurrences(poll, "id=\"plan-review\"")).isEqualTo(1);
+    }
+
+    @Test
     void content_offFragmentRegionsRenderInPlaceWithoutOob() {
         // On the initial page (content fragment) the same regions render normally, WITHOUT the
         // OOB attribute — otherwise HTMX would try to relocate/duplicate them on load.

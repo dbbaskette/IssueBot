@@ -88,6 +88,12 @@ public class IssueWorkflowService {
     private WorkflowCheckpointTransactionManager workflowCheckpoints;
 
     @Autowired(required = false)
+    private StageWorkflowCoordinator stageWorkflow;
+
+    @Autowired(required = false)
+    private ManagedMergeGuard managedMergeGuard;
+
+    @Autowired(required = false)
     void setFailureDiagnosticService(FailureDiagnosticService failureDiagnosticService) {
         this.failureDiagnosticService = failureDiagnosticService;
     }
@@ -174,6 +180,12 @@ public class IssueWorkflowService {
     }
 
     public void processIssue(TrackedIssue trackedIssue, String additionalInstructions) {
+        if (stageWorkflow != null) {
+            // A stale/direct dispatch must never overwrite a durable waiting checkpoint.
+            TrackedIssue fresh = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
+            if (StageApprovalService.isStageWaiting(fresh)) return;
+            stageWorkflow.snapshot(trackedIssue);
+        }
         IssueBotProperties.AgentProvider executionProvider = claudeCode.provider();
         claudeCode.pinProvider(executionProvider);
         try {
@@ -198,14 +210,15 @@ public class IssueWorkflowService {
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
         IssueBotProperties.AgentProvider previousProvider = trackedIssue.getResolvedAgentProvider();
-        if (trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
+        boolean preserveStageRouting = StageWorkflowCoordinator.managed(trackedIssue);
+        if (!preserveStageRouting && trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
                 && previousProvider != executionProvider) {
             trackedIssue.setClaudeSessionId(null);
             eventService.log("SESSION_PROVIDER_CHANGED",
                     "Previous agent session was discarded because the execution provider changed",
                     repo, trackedIssue);
         }
-        trackedIssue.setResolvedAgentProvider(executionProvider);
+        if (!preserveStageRouting) trackedIssue.setResolvedAgentProvider(executionProvider);
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         // Workflow entry point for both a fresh start and a retry (IssueController.retry sets
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
@@ -216,8 +229,10 @@ public class IssueWorkflowService {
         }
         trackedIssue.setLastFailureReason(null);
         trackedIssue.setSuspensionReason(null);
-        trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
-        trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionProvider));
+        if (!preserveStageRouting) {
+            trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
+            trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionProvider));
+        }
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
                 + trackedIssue.getResolvedImplModel() + " / "
@@ -259,6 +274,8 @@ public class IssueWorkflowService {
         JsonNode issueDetails;
         if (requiresPlanning) {
             try {
+                if (stageWorkflow != null && !stageWorkflow.before(trackedIssue, WorkflowStage.PLANNING,
+                        stageWorkflow.planningAttempt(trackedIssue))) return;
                 trackedIssue.setCurrentPhase("PLANNING");
                 issueRepository.save(trackedIssue);
                 try (Git ignored = gitOps.prepareForPlanning(
@@ -270,6 +287,9 @@ public class IssueWorkflowService {
                 planFirstService.generateVersion(trackedIssue, issueDetails, repoPath);
                 if (cancellationService.isCancelled(trackedIssue.getId())) {
                     cancelled(trackedIssue);
+                } else if (stageWorkflow != null) {
+                    TrackedIssue continuation = stageWorkflow.continueAfterPlanning(trackedIssue);
+                    if (continuation != null) processIssue(continuation, additionalInstructions);
                 }
             } catch (Exception e) {
                 failSetup(trackedIssue, repo, issueNumber, e);
@@ -279,7 +299,11 @@ public class IssueWorkflowService {
 
         // === Phase 1: Full implementation setup ===
         try {
-            if (recoveryResumePhase == null) {
+            if (recoveryResumePhase == null && stageWorkflow != null
+                    && !stageWorkflow.before(trackedIssue, WorkflowStage.IMPLEMENTATION,
+                            trackedIssue.getCurrentIteration() + 1)) return;
+            if (recoveryResumePhase == null && !(StageWorkflowCoordinator.managed(trackedIssue)
+                    && trackedIssue.getCurrentIteration() > 0 && trackedIssue.getBranchName() != null)) {
                 phaseSetup(trackedIssue);
             } else {
                 phaseRecoveryResumeSetup(trackedIssue);
@@ -393,6 +417,8 @@ public class IssueWorkflowService {
             int iterationNum = resumePhase == null
                     ? trackedIssue.getCurrentIteration() + 1
                     : trackedIssue.getCurrentIteration();
+            if (resumePhase == null && stageWorkflow != null
+                    && !stageWorkflow.before(trackedIssue, WorkflowStage.IMPLEMENTATION, iterationNum)) return;
             int maxIterations = repo.getMaxIterations();
             boolean correctionClaim = resumePhase == null && trackedIssue.isPlanCorrectionPending();
             Iteration iteration = null;
@@ -541,6 +567,10 @@ public class IssueWorkflowService {
             }
 
             // === Phase 2.5: Local Verification Commands (operator-defined, before CI) ===
+            if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS) && stageWorkflow != null) {
+                iterationRepository.save(iteration);
+                if (!stageWorkflow.before(trackedIssue, WorkflowStage.VERIFICATION, iterationNum)) return;
+            }
             List<String> verificationCommands = LocalVerificationService.parseCommands(repo.getVerificationCommands());
             if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS)
                     && !verificationCommands.isEmpty()) {
@@ -700,8 +730,15 @@ public class IssueWorkflowService {
                             iteration.getReviewPassed(), iteration.getReviewJson()));
             if (runsPhase(resumePhase, RecoveryResumePhase.INDEPENDENT_REVIEW)
                     && !persistedReviewOutcome) {
+                if (stageWorkflow != null
+                        && !stageWorkflow.before(trackedIssue, WorkflowStage.REVIEW, iterationNum)) return;
                 trackedIssue.setCurrentPhase("INDEPENDENT_REVIEW");
                 issueRepository.save(trackedIssue);
+
+                if (StageWorkflowCoordinator.managed(trackedIssue)) {
+                    iteration.setReviewedCommitSha(managedMergeGuard.reviewedHead(repoPath));
+                    iterationRepository.save(iteration);
+                }
 
                 reviewResult = phaseIndependentReview(
                         trackedIssue, issueDetails, repoPath, branchName, prNumber, iteration, criteria,
@@ -790,6 +827,12 @@ public class IssueWorkflowService {
 
             // === Phase 6: Completion ===
             if (cancelled(trackedIssue)) return;
+            if (StageWorkflowCoordinator.managed(trackedIssue)
+                    && (reviewResult == null || reviewResult.invocationFailed() || !reviewResult.passed())) {
+                throw new IllegalStateException("Automatic progression requires a successful independent review");
+            }
+            if (stageWorkflow != null
+                    && !stageWorkflow.before(trackedIssue, WorkflowStage.MERGE, iterationNum)) return;
             try {
                 trackedIssue.setCurrentPhase("COMPLETION");
                 issueRepository.save(trackedIssue);
@@ -1209,7 +1252,8 @@ public class IssueWorkflowService {
 
         // Only create as draft for approval-gated repos; non-draft for auto-merge
         // so we don't need the GraphQL markPullRequestAsReady mutation
-        boolean draft = repo.getMode() == RepoMode.APPROVAL_GATED;
+        boolean draft = !StageWorkflowCoordinator.managed(trackedIssue)
+                && repo.getMode() == RepoMode.APPROVAL_GATED;
         String prTitle = "IssueBot: " + trackedIssue.getIssueTitle() + " (#" + trackedIssue.getIssueNumber() + ")";
         BigDecimal totalCost = costRepository.totalCostForIssue(trackedIssue);
         String prBody = buildPrDescription(trackedIssue, issueDetails, iterationCount, totalCost);
@@ -1256,7 +1300,9 @@ public class IssueWorkflowService {
         WatchedRepo repo = trackedIssue.getRepo();
         eventService.log("PHASE_COMPLETION", "Starting completion phase", repo, trackedIssue);
 
-        boolean isApprovalGated = repo.getMode() == RepoMode.APPROVAL_GATED;
+        boolean managedPolicy = StageWorkflowCoordinator.managed(trackedIssue);
+        boolean isApprovalGated = !managedPolicy && repo.getMode() == RepoMode.APPROVAL_GATED;
+        boolean shouldAutoMerge = managedPolicy || repo.isAutoMerge();
         boolean merged = false;
         boolean prReady = !isApprovalGated;
         if (recoveryResume) {
@@ -1308,8 +1354,9 @@ public class IssueWorkflowService {
         }
 
         // Auto-merge if enabled, not approval-gated, and PR was successfully marked ready
-        if (repo.isAutoMerge() && !isApprovalGated && !merged) {
+        if (shouldAutoMerge && !isApprovalGated && !merged) {
             if (!prReady) {
+                if (managedPolicy) throw new IllegalStateException("Managed merge blocked: pull request is still a draft");
                 log.warn("Skipping auto-merge for PR #{} — PR is still a draft", prNumber);
                 eventService.log("AUTO_MERGE_SKIPPED",
                         "Skipping auto-merge for PR #" + prNumber + " — failed to mark as ready",
@@ -1319,8 +1366,22 @@ public class IssueWorkflowService {
                         + " (#" + trackedIssue.getIssueNumber() + ") (#" + prNumber + ")";
                 for (int attempt = 1; attempt <= 3; attempt++) {
                     try {
-                        gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
-                                prNumber, prTitle, "squash");
+                        if (managedPolicy) {
+                            Iteration reviewed = iterationRepository
+                                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                                            trackedIssue.getId(), trackedIssue.getCurrentIteration())
+                                    .orElseThrow(() -> new IllegalStateException("Reviewed iteration is missing"));
+                            String expectedSha = managedMergeGuard.validateForMerge(
+                                    trackedIssue, reviewed.getReviewedCommitSha());
+                            JsonNode mergeResponse = gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
+                                    prNumber, prTitle, "squash", expectedSha);
+                            if (mergeResponse == null || !mergeResponse.path("merged").asBoolean(false)) {
+                                throw new IllegalStateException("GitHub did not confirm the merge");
+                            }
+                        } else {
+                            gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
+                                    prNumber, prTitle, "squash");
+                        }
                         merged = true;
                         eventService.log("PR_AUTO_MERGED",
                                 "Auto-merged PR #" + prNumber, repo, trackedIssue);
@@ -1338,6 +1399,7 @@ public class IssueWorkflowService {
                             eventService.log("AUTO_MERGE_FAILED",
                                     "Auto-merge failed for PR #" + prNumber + ": " + e.getMessage(),
                                     repo, trackedIssue);
+                            if (managedPolicy) throw new IllegalStateException("Managed merge failed: " + e.getMessage(), e);
                         }
                     }
                 }
@@ -1356,7 +1418,7 @@ public class IssueWorkflowService {
             notificationService.info("PR Ready for Review",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR created, awaiting approval", trackedIssue);
-        } else if (repo.isAutoMerge() && !merged) {
+        } else if (shouldAutoMerge && !merged) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
             notificationService.warn("Auto-Merge Failed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()

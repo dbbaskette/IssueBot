@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="card">
+    <section th:if="${pendingStageApproval != null}" id="stage-approval"
+             class="panel mb-3" aria-labelledby="stage-approval-title">
+        <header class="panel-header">
+            <h3 id="stage-approval-title" th:text="${'Approve ' + #strings.toLowerCase(pendingStageApproval.stage.name())}">Approve stage</h3>
+            <span class="status status-awaiting_approval">Awaiting approval</span>
+        </header>
+        <div class="panel-body">
+            <p th:text="${'Attempt ' + pendingStageApproval.attempt + ' — continues until the next required approval.'}"></p>
+            <p th:if="${issue.lastFailureReason != null}" class="text-sm" role="status" th:text="${issue.lastFailureReason}"></p>
+            <p th:if="${pendingStageApproval.artifactVersionId != null and pendingStageApproval.artifactVersionId > 0}">
+                <a href="#plan-first" th:text="${'View bound plan · artifact ' + pendingStageApproval.artifactVersionId}">View bound plan</a>
+            </p>
+            <p th:if="${pendingStageApproval.stage.name() != 'PLANNING'}"><a href="#iteration-history">Review iteration evidence</a></p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/stages/' + ${pendingStageApproval.id} + '/approve'}" method="post">
+                <div th:if="${pendingStageApproval.stage.modelDriven()}" class="form-group">
+                    <label for="stage-model">Provider and model for this stage</label>
+                    <select id="stage-model" name="selection" required>
+                        <optgroup th:each="catalog : ${stageModels}" th:label="${catalog.key}">
+                            <option th:each="model : ${catalog.value}" th:value="${catalog.key + ':' + model}"
+                                    th:selected="${catalog.key == pendingStageApproval.provider?.name() and model == pendingStageApproval.model}"
+                                    th:text="${model}">Model</option>
+                        </optgroup>
+                    </select>
+                    <small class="text-muted">Uses subscription CLI authentication. Repository defaults stay unchanged.</small>
+                </div>
+                <button type="submit" class="btn btn-primary" th:disabled="${processingMode?.name() != 'RUNNING'}">Approve and run</button>
+                <p th:if="${processingMode?.name() != 'RUNNING'}" class="text-sm text-muted">Resume processing before approving this stage.</p>
+            </form>
+        </div>
+    </section>
+    <details th:if="${stageApprovalHistory != null and not #lists.isEmpty(stageApprovalHistory)}" class="panel mb-3">
+        <summary class="panel-header">Stage decision history</summary>
+        <ul class="panel-body">
+            <li th:each="decision : ${stageApprovalHistory}">
+                <span th:text="${decision.stage + ' · run ' + (decision.runNumber + 1) + ' · attempt ' + decision.attempt + ' · ' + decision.state}"></span>
+                <span th:if="${decision.provider != null}" th:text="${' · ' + decision.provider + '/' + decision.model}"></span>
+                <span th:if="${decision.actor != null}" th:text="${' · ' + decision.actor}"></span>
+                <time th:if="${decision.approvedAt != null}" th:text="${decision.approvedAt}"></time>
+                <a th:if="${decision.artifactVersionId != null and decision.artifactVersionId > 0}" href="#plan-first" th:text="${'Plan artifact ' + decision.artifactVersionId}"></a>
+            </li>
+        </ul>
+    </details>
+</div>
+</body>
+</html>

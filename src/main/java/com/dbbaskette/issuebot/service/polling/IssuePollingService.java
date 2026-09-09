@@ -246,7 +246,7 @@ public class IssuePollingService {
         if (queued.isEmpty()) return;
 
         // Manual-start repos: don't auto-drain queued issues
-        if (!repo.isAutoStart()) {
+        if (!repo.isAutoStart() && repo.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.LEGACY) {
             log.debug("{} has auto-start OFF — {} queued issue(s) await manual start",
                     repo.fullName(), queued.size());
             return;
@@ -442,7 +442,7 @@ public class IssuePollingService {
         }
 
         // Auto-start OFF: discover and queue but don't start
-        if (!repo.isAutoStart()) {
+        if (!repo.isAutoStart() && repo.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.LEGACY) {
             tracked.setStatus(IssueStatus.QUEUED);
             issueRepository.save(tracked);
             eventService.log("ISSUE_DISCOVERED",

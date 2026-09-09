@@ -295,6 +295,7 @@ class IssueDispatchServiceTest {
         IssueDispatchService.ClaimResult result = service.claimRetry(1L);
 
         assertThat(result.claimed()).isTrue();
+        assertThat(issue.getWorkflowRun()).isEqualTo(1);
         verify(issues).save(issue);
     }
 

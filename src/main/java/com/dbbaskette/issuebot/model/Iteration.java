@@ -46,6 +46,9 @@ public class Iteration {
     @Column(name = "review_model", length = 100)
     private String reviewModel;
 
+    @Column(name = "reviewed_commit_sha", length = 64)
+    private String reviewedCommitSha;
+
     @Column(name = "impl_model")
     private String implModel;
 
@@ -115,6 +118,8 @@ public class Iteration {
     public void setReviewPassed(Boolean reviewPassed) { this.reviewPassed = reviewPassed; }
 
     public String getReviewModel() { return reviewModel; }
+    public String getReviewedCommitSha() { return reviewedCommitSha; }
+    public void setReviewedCommitSha(String reviewedCommitSha) { this.reviewedCommitSha = reviewedCommitSha; }
     public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
 
     public String getImplModel() { return implModel; }

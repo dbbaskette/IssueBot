@@ -20,6 +20,53 @@ import static org.mockito.Mockito.*;
  */
 class ClaudeCodeServiceTest {
 
+    @Test
+    void managedCommandsDisableCredentialHelpersAndClearRestoresLegacySettings() {
+        service.pinSubscriptionProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        List<String> implementation = service.buildCommand("prompt", "claude-opus-4-8", 30, null, null);
+        List<String> planning = service.buildPlanningCommand("prompt", "claude-opus-4-8", 30);
+        List<String> authentication = ClaudeCodeService.buildSubscriptionAuthCommand();
+        for (List<String> command : List.of(implementation, planning, authentication)) {
+            int sources = command.indexOf("--setting-sources");
+            assertTrue(sources >= 0);
+            assertEquals("", command.get(sources + 1));
+            assertEquals("{\"apiKeyHelper\":\"\",\"forceLoginMethod\":\"claudeai\"}",
+                    command.get(command.indexOf("--settings") + 1));
+            assertFalse(command.contains("--bare"));
+            assertFalse(command.contains("project,local"));
+        }
+        service.clearPinnedProvider();
+        assertTrue(service.buildCommand("prompt", "claude-opus-4-8", 30, null, null).contains("project,local"));
+        assertFalse(service.buildPlanningCommand("prompt", "claude-opus-4-8", 30).contains("--settings"));
+    }
+
+    @Test
+    void managedCodexNeverFallsBackToClaudeWhenRunnerMissing() {
+        service.pinSubscriptionProvider(IssueBotProperties.AgentProvider.CODEX);
+        assertThrows(IllegalStateException.class, () -> service.executeReview("prompt",
+                java.nio.file.Path.of("/tmp"), "gpt-5.6-sol", 1L, null));
+        service.clearPinnedProvider();
+    }
+
+    @Test
+    void subscriptionCheckRejectsApiKeysMalformedAndNonSubscriptionAuth() {
+        assertTrue(ClaudeCodeService.isSubscriptionAuthentication("{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"subscriptionType\":\"max\"}"));
+        assertFalse(ClaudeCodeService.isSubscriptionAuthentication("{\"loggedIn\":true,\"authMethod\":\"api_key\",\"subscriptionType\":\"max\"}"));
+        assertFalse(ClaudeCodeService.isSubscriptionAuthentication("{\"loggedIn\":false,\"authMethod\":\"claude.ai\",\"subscriptionType\":\"max\"}"));
+        assertFalse(ClaudeCodeService.isSubscriptionAuthentication("{\"loggedIn\":true}"));
+        assertFalse(ClaudeCodeService.isSubscriptionAuthentication("not json"));
+    }
+
+    @Test
+    void billingSanitizerPreservesSubscriptionAndOrdinaryEnvironment() {
+        Map<String, String> env = new HashMap<>(Map.of("ANTHROPIC_API_KEY", "secret", "OPENAI_API_KEY", "secret",
+                "CODEX_API_KEY", "secret", "ANTHROPIC_AUTH_TOKEN", "secret", "CLAUDE_CODE_USE_BEDROCK", "1",
+                "CODEX_HOME", "/tmp/codex", "PATH", "/bin", "CLAUDE_CODE_OAUTH_TOKEN", "subscription"));
+        env.put("CLAUDE_CODE_SIMPLE", "1");
+        ClaudeCodeService.sanitizeBillingEnvironment(env);
+        assertEquals(Map.of("CODEX_HOME", "/tmp/codex", "PATH", "/bin", "CLAUDE_CODE_OAUTH_TOKEN", "subscription"), env);
+    }
+
     private final ClaudeCodeService service = new ClaudeCodeService(
             new IssueBotProperties(), new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
             new WorkflowCancellationService());

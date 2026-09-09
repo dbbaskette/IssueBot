@@ -125,7 +125,8 @@ public class PlanFirstService {
 
             ClaudeCodeResult result;
             try (PlanningWorkspaceService.PlanningWorkspace workspace = planningWorkspaces.open(repoPath)) {
-                agent.pinProvider(context.provider());
+                if (StageWorkflowCoordinator.managed(trackedIssue)) agent.pinSubscriptionProvider(context.provider());
+                else agent.pinProvider(context.provider());
                 try {
                     try {
                         result = agent.executePlanning(

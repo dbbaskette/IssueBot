@@ -70,7 +70,8 @@ public class ApprovalDecisionService {
     @Transactional
     public Decision approve(Long issueId, boolean merge) {
         TrackedIssue issue = lockedIssue(issueId);
-        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL) {
+        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL
+                || com.dbbaskette.issuebot.service.workflow.StageApprovalService.isStageWaiting(issue)) {
             return Decision.of(Outcome.NOT_AWAITING_APPROVAL, issue);
         }
         if (!merge) {
@@ -126,7 +127,8 @@ public class ApprovalDecisionService {
     @Transactional
     public Decision reject(Long issueId, String feedback) {
         TrackedIssue issue = lockedIssue(issueId);
-        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL) {
+        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL
+                || com.dbbaskette.issuebot.service.workflow.StageApprovalService.isStageWaiting(issue)) {
             return Decision.of(Outcome.NOT_AWAITING_APPROVAL, issue);
         }
         if (feedback == null || feedback.isBlank()) {
