@@ -61,6 +61,9 @@
   }
 
   function load(doc, policy, csv) {
+    Array.prototype.forEach.call(doc.querySelectorAll('input[name="workflowPolicy"]'), function (input) {
+      input.checked = false;
+    });
     var selected = doc.querySelector('input[name="workflowPolicy"][value="' + (policy || 'LEGACY') + '"]');
     if (selected) { selected.checked = true; }
     var stages = (csv || '').split(',').map(function (stage) { return stage.trim(); });

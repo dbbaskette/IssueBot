@@ -410,21 +410,30 @@ class RepositoryControllerTest {
         existing.setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
         when(fixture.repos.findById(7L)).thenReturn(Optional.of(existing));
 
-        MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest()
+        var result = MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest("new-owner")
                         .param("id", "7")
-                        .param("owner", "new-owner")
                         .param("workflowPolicy", "STAGED")
                         .param("approvalStages", "NOT_A_STAGE"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andReturn();
 
         assertThat(existing.getOwner()).isEqualTo("old-owner");
         assertThat(existing.getWorkflowPolicy()).isEqualTo(WorkflowPolicy.AUTOMATED);
         verify(fixture.repos, never()).save(any());
+        String json = (String) result.getModelAndView().getModel().get("repositoryFormValues");
+        assertThat(json).contains("\"id\":7")
+                .contains("\"owner\":\"new-owner\"")
+                .contains("\"workflowPolicy\":\"STAGED\"")
+                .contains("\"approvalStages\":\"NOT_A_STAGE\"");
     }
 
     private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder baseRequest() {
+        return baseRequest("acme");
+    }
+
+    private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder baseRequest(String owner) {
         return post("/repositories")
-                .param("owner", "acme")
+                .param("owner", owner)
                 .param("name", "widgets")
                 .param("branch", "main")
                 .param("mode", "AUTONOMOUS")

@@ -40,3 +40,18 @@ An additional requested run included `UiVisualFixturesTest` with `-Dissuebot.vis
 ## Concerns
 
 - Visual styling is intentionally left to Task 3; the template exposes clean `repository-workflow-editor`, `workflow-policy-*`, `workflow-checkpoints`, `workflow-stage-row`, `workflow-existing-settings`, and `workflow-summary` hooks.
+
+## Review fix round 1
+
+- Invalid workflow policy/stage submissions now attach an HTML-escaped JSON form snapshot to the rerender. The editor stays open and restores the submitted repository settings, valid policy selection, and exact stage checks while the persisted entity remains untouched.
+- Repository workflow JavaScript tests now exercise document-shaped DOM state: exact staged restoration, Automatic/Existing settings disclosure visibility, preservation of hidden legacy control values, and the values submitted after an edit load.
+
+Command:
+
+```text
+node --test src/test/js/repository-workflow.test.js
+./mvnw -q -Dtest=RepositoryControllerTest,RepositoriesPageRenderTest test
+git diff --check
+```
+
+Result: exit 0. JavaScript: 7 tests passed. Java: 32 tests passed (26 controller and 6 render). Diff check clean.

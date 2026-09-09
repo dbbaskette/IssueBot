@@ -53,12 +53,18 @@ class RepositoriesPageRenderTest {
     }
 
     private String render(List<WatchedRepo> repos, Map<Long, Long> issueCounts, Map<Long, Long> totalIssueCounts) {
+        return render(repos, issueCounts, totalIssueCounts, null);
+    }
+
+    private String render(List<WatchedRepo> repos, Map<Long, Long> issueCounts,
+                          Map<Long, Long> totalIssueCounts, String repositoryFormValues) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("repos", repos);
         context.setVariable("issueCounts", issueCounts);
         context.setVariable("totalIssueCounts", totalIssueCounts);
         context.setVariable("lessonsByRepo", Map.of());
         context.setVariable("modelCatalog", List.of());
+        context.setVariable("repositoryFormValues", repositoryFormValues);
 
         TemplateSpec spec = new TemplateSpec("repositories", Set.of("content"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -137,5 +143,19 @@ class RepositoriesPageRenderTest {
                 .doesNotContain("autonomy-preset")
                 .doesNotContain("/repositories/7/policy")
                 .doesNotContain("Save workflow policy");
+    }
+
+    @Test
+    void validationRerenderOpensFormAndCarriesEscapedSubmittedSnapshot() {
+        String json = "{\"id\":7,\"owner\":\"new-owner\",\"workflowPolicy\":\"STAGED\"," +
+                "\"approvalStages\":\"PLANNING,NOT_A_STAGE\"}";
+
+        String html = render(List.of(), Map.of(), Map.of(), json);
+
+        assertThat(html).contains("id=\"add-repo-form\" class=\"panel mb-3\"")
+                .doesNotContain("class=\"panel mb-3\" hidden")
+                .contains("data-repository-form-values=")
+                .contains("&quot;new-owner&quot;")
+                .contains("&quot;PLANNING,NOT_A_STAGE&quot;");
     }
 }

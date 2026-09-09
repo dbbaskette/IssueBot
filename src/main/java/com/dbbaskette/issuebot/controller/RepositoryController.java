@@ -143,6 +143,12 @@ public class RepositoryController {
         try {
             workflow = parseWorkflowSettings(workflowPolicy, approvalStages);
         } catch (IllegalArgumentException ex) {
+            preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                    ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
+                    reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
+                    implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
+                    workflowPolicy, approvalStages);
             populateModel(model, null, "Choose a valid workflow policy and approval stages.");
             return ViewResolver.view("repositories", hx != null);
         }
@@ -244,6 +250,48 @@ public class RepositoryController {
                 .map(Enum::name)
                 .collect(Collectors.joining(","));
         return new WorkflowSettings(selected, selectedStages);
+    }
+
+    private static void preserveSubmittedForm(Model model, Long id, String owner, String name,
+            String branch, String mode, int maxIterations, boolean ciEnabled, int ciTimeoutMinutes,
+            boolean autoMerge, boolean securityReviewEnabled, int maxReviewIterations,
+            java.math.BigDecimal reviewPassThreshold, boolean autoStart, String allowedPaths,
+            String verificationCommands, String implementationModel, String reviewModel,
+            String followUpMode, String decompositionMode, boolean preScreenEnabled,
+            boolean planFirst, java.math.BigDecimal issueBudgetUsd, String customInstructions,
+            boolean lessonsEnabled, String workflowPolicy, List<String> approvalStages) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("id", id);
+        values.put("owner", owner);
+        values.put("name", name);
+        values.put("branch", branch);
+        values.put("mode", mode);
+        values.put("maxIterations", maxIterations);
+        values.put("ciEnabled", ciEnabled);
+        values.put("ciTimeoutMinutes", ciTimeoutMinutes);
+        values.put("autoMerge", autoMerge);
+        values.put("securityReviewEnabled", securityReviewEnabled);
+        values.put("maxReviewIterations", maxReviewIterations);
+        values.put("reviewPassThreshold", reviewPassThreshold);
+        values.put("autoStart", autoStart);
+        values.put("allowedPaths", allowedPaths);
+        values.put("verificationCommands", verificationCommands);
+        values.put("implementationModel", implementationModel);
+        values.put("reviewModel", reviewModel);
+        values.put("followUpMode", followUpMode);
+        values.put("decompositionMode", decompositionMode);
+        values.put("preScreenEnabled", preScreenEnabled);
+        values.put("planFirst", planFirst);
+        values.put("issueBudgetUsd", issueBudgetUsd);
+        values.put("customInstructions", customInstructions);
+        values.put("lessonsEnabled", lessonsEnabled);
+        values.put("workflowPolicy", workflowPolicy);
+        values.put("approvalStages", approvalStages == null ? "" : String.join(",", approvalStages));
+        try {
+            model.addAttribute("repositoryFormValues", new ObjectMapper().writeValueAsString(values));
+        } catch (JsonProcessingException impossible) {
+            throw new IllegalStateException("Could not preserve repository form values", impossible);
+        }
     }
 
     @DeleteMapping("/{id}")

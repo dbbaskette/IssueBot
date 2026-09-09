@@ -1198,7 +1198,7 @@
 
   function editRepoFromDataset(ds) {
     var title = document.getElementById('form-title');
-    if (title) { title.textContent = 'Edit Repository'; }
+    if (title) { title.textContent = ds.id ? 'Edit Repository' : 'Add Repository'; }
     setValue('edit-id', ds.id);
     setValue('owner', ds.owner);
     setValue('repo-name', ds.name);
@@ -1228,6 +1228,15 @@
     if (window.RepositoryWorkflow) {
       window.RepositoryWorkflow.load(document, ds.workflowPolicy, ds.approvalStages);
     }
+  }
+
+  function restoreSubmittedRepoForm() {
+    var form = document.querySelector('[data-repository-form-values]');
+    if (!form || !form.dataset.repositoryFormValues) { return; }
+    try {
+      editRepoFromDataset(JSON.parse(form.dataset.repositoryFormValues));
+      showRepoForm();
+    } catch (e) { /* Server-generated JSON should be valid; leave the safe defaults if not. */ }
   }
 
   // Show/hide the CI timeout field based on the CI-enabled checkbox.
@@ -1563,6 +1572,7 @@
     initSortableTables();
     initCostCharts();
     updateBulkActionBar();
+    restoreSubmittedRepoForm();
 
     // Last-updated stamps (#83): a #content swap is an SPA navigation — the
     // whole page region (and every stamp on it) was just freshly rendered by
@@ -1746,6 +1756,7 @@
     initSortableTables();
     initCostCharts();
     updateBulkActionBar();
+    restoreSubmittedRepoForm();
     UpdateStamps.markAllVisible();
     document.querySelectorAll('[data-plan-revision-guidance]').forEach(syncPlanRevisionButton);
   }
