@@ -8,6 +8,8 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -50,8 +52,10 @@ public class ProcessingControlService {
     @Transactional
     public void stopNow() {
         if (!transitionTo(ProcessingState.STOPPED)) return;
-        issues.findByStatus(IssueStatus.IN_PROGRESS).forEach(issue ->
-                cancellationService.requestCancel(issue.getId(), CancellationReason.OPERATOR_STOP));
+        var activeIds = issues.findByStatus(IssueStatus.IN_PROGRESS).stream()
+                .map(issue -> issue.getId()).toList();
+        afterCommit(() -> activeIds.forEach(id ->
+                cancellationService.requestCancel(id, CancellationReason.OPERATOR_STOP)));
     }
 
     @Transactional
@@ -65,12 +69,22 @@ public class ProcessingControlService {
         if (control.getState() == next) return false;
         control.setState(next);
         repository.save(control);
-        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                new org.springframework.transaction.support.TransactionSynchronization() {
-                    @Override public void afterCommit() { mode.set(next); }
-                });
-        } else mode.set(next);
+        afterCommit(() -> mode.set(next));
         return true;
+    }
+
+    /** External effects must not escape a transaction that can still roll back. */
+    private void afterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            // Supports direct, non-proxied callers; repository.save has already completed.
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 }
