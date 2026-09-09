@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
+import com.dbbaskette.issuebot.validation.StartupValidator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -31,6 +32,7 @@ class UiVisualFixturesTest {
     @Autowired PlanningVersionRepository versions;
     @Autowired StageApprovalRepository approvals;
     @MockitoBean IssuePollingService polling;
+    @MockitoBean StartupValidator startupValidator;
 
     @Test void rendersRepresentativeIssueAndRepositoryPages() throws Exception {
         WatchedRepo repo = new WatchedRepo("northstar", "workflow-engine");

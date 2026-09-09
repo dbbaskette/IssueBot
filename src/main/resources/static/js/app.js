@@ -1186,7 +1186,7 @@
     setChecked('ci-enabled', true);
     setValue('ci-timeout', '15');
     syncCiTimeout();
-    setValue('mode', 'AUTONOMOUS');
+    setValue('mode', 'APPROVAL_GATED');
     setChecked('auto-start', true);
     setChecked('auto-merge', false);
     setValue('decomposition-mode', 'PROPOSE');
