@@ -58,11 +58,35 @@ then
   exit 1
 fi
 
-ssh "${ssh_options[@]}" "$DEPLOY_HOST" \
-  'umask 077; mkdir -p /home/dbbaskette/.local/libexec; tmp=$(mktemp /home/dbbaskette/.local/libexec/issuebot-deploy.XXXXXX); trap '\''rm -f "$tmp"'\'' EXIT; cat >"$tmp"; chmod 0755 "$tmp"; mv -f "$tmp" /home/dbbaskette/.local/libexec/issuebot-deploy; trap - EXIT' \
-  <"$wrapper"
+# Force bash remotely instead of relying on the account's login shell, and use
+# HOME rather than a hard-coded path. This also separates directory creation
+# from the upload so a failed setup cannot produce a misleading mktemp error.
+ssh "${ssh_options[@]}" "$DEPLOY_HOST" bash -s <<'REMOTE_PREPARE_WRAPPER'
+set -Eeuo pipefail
+umask 077
+install_dir="$HOME/.local/libexec"
+mkdir -p "$install_dir"
+test -d "$install_dir" && test ! -L "$install_dir"
+REMOTE_PREPARE_WRAPPER
 
-authorized_key_line="$(printf 'restrict,command="/home/dbbaskette/.local/libexec/issuebot-deploy" ssh-ed25519 %s issuebot-deploy\n' "$key_data")"
+scp \
+  -o ForwardAgent=no \
+  -o ConnectTimeout=10 \
+  -o StrictHostKeyChecking=yes \
+  "$wrapper" "$DEPLOY_HOST:.local/libexec/issuebot-deploy.new"
+
+ssh "${ssh_options[@]}" "$DEPLOY_HOST" bash -s <<'REMOTE_INSTALL_WRAPPER'
+set -Eeuo pipefail
+umask 077
+install_dir="$HOME/.local/libexec"
+candidate="$install_dir/issuebot-deploy.new"
+target="$install_dir/issuebot-deploy"
+test -f "$candidate" && test ! -L "$candidate"
+chmod 0755 "$candidate"
+mv -f "$candidate" "$target"
+REMOTE_INSTALL_WRAPPER
+
+authorized_key_line="$(printf 'restrict,command="%s/.local/libexec/issuebot-deploy" ssh-ed25519 %s issuebot-deploy\n' '$HOME' "$key_data")"
 printf '%s\n' "$authorized_key_line" | ssh "${ssh_options[@]}" "$DEPLOY_HOST" '
 set -Eeuo pipefail
 umask 077
