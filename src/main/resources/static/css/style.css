@@ -1,8 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap');
 
 /* ============================================================
-   IssueBot — Liquid Glass Design System
-   Frosted glass surfaces over a soft aurora backdrop.
+   IssueBot — Execution Console
+   Solid surfaces with a connected workflow rail and one decision focus.
    LIGHT (default) + DARK themes via [data-theme] on <html>.
    Live terminal / code surfaces stay dark in BOTH themes.
    ============================================================ */
@@ -12,9 +12,9 @@
     --sidebar-width: 240px;
 
     --radius-md: 12px;
-    --radius-lg: 18px;
+    --radius-lg: 12px;
     --radius-pill: 999px;
-    --blur: 18px;
+    --blur: 0px;
 
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -33,12 +33,12 @@
 :root[data-theme="light"],
 :root:not([data-theme="dark"]) {
     --page-bg: #f4f5f8;
-    --aurora: radial-gradient(60% 50% at 100% 0%, rgba(37,99,235,.12), transparent 70%),
-              radial-gradient(55% 55% at 0% 100%, rgba(71,85,105,.07), transparent 72%);
-    --glass-bg: rgba(255,255,255,.72);
-    --glass-bg-strong: rgba(255,255,255,.88);
-    --glass-border: rgba(255,255,255,.95);
-    --glass-shadow: 0 8px 26px -14px rgba(71,85,105,.40);
+    --aurora: none;
+    --glass-bg: #ffffff;
+    --glass-bg-strong: #f8fafc;
+    --glass-border: #dce1e8;
+    --glass-shadow: none;
+    --decision-shadow: 0 8px 24px -14px rgba(30,41,59,.28);
     --surface: #ffffff;
     --surface-raised: #f8fafc;
     --surface-muted: #f1f5f9;
@@ -70,12 +70,12 @@
 /* --- Dark theme tokens --- */
 :root[data-theme="dark"] {
     --page-bg: #0b0f1a;
-    --aurora: radial-gradient(58% 50% at 88% 8%, rgba(37,99,235,.34), transparent 70%),
-              radial-gradient(55% 50% at 8% 100%, rgba(56,189,248,.16), transparent 72%);
-    --glass-bg: rgba(255,255,255,.06);
-    --glass-bg-strong: rgba(255,255,255,.10);
-    --glass-border: rgba(255,255,255,.12);
-    --glass-shadow: 0 10px 30px -16px rgba(0,0,0,.6);
+    --aurora: none;
+    --glass-bg: #111827;
+    --glass-bg-strong: #172033;
+    --glass-border: #334155;
+    --glass-shadow: none;
+    --decision-shadow: 0 8px 24px -14px rgba(0,0,0,.65);
     --surface: #111827;
     --surface-raised: #172033;
     --surface-muted: #1e293b;
@@ -1161,7 +1161,7 @@ select {
     color: #fff;
     transform: translateY(-1px);
 }
-:root[data-theme="dark"] .btn-primary { color: #1b1240; }
+:root[data-theme="dark"] .btn-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
 
 .btn-ghost {
     background: var(--glass-bg);
@@ -3608,4 +3608,134 @@ details summary:hover { color: var(--text-primary); }
     color: #1d4ed8;
     font-size: .72rem;
     font-weight: 700;
+}
+
+/* Decision-first hierarchy. Keep OOB regions structurally independent, but
+   render their nested panels as sections of one uninterrupted surface. */
+.issue-decision {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    border-color: var(--accent-border);
+    box-shadow: var(--decision-shadow);
+    scroll-margin-top: 8rem;
+}
+.issue-decision .panel {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    margin-bottom: 0;
+    animation: none;
+}
+.issue-decision .panel-header {
+    background: var(--surface);
+    border-top: 1px solid var(--hairline);
+    border-bottom: 0;
+    gap: .75rem;
+    flex-wrap: wrap;
+}
+.issue-decision .panel-header h3,
+.issue-decision__plan h3 { font-size: 1.2rem; line-height: 1.35; }
+.issue-decision__summary {
+    border: 0;
+    border-left: 4px solid var(--text-tertiary);
+    border-radius: 0;
+    padding: 1.2rem;
+}
+.issue-decision__summary p { font-size: 1.12rem; line-height: 1.45; max-width: 65ch; }
+.issue-decision__summary.next-action--action,
+.issue-decision__summary.next-action--waiting {
+    border-left-color: var(--warn);
+    background: color-mix(in srgb, var(--warn-soft) 40%, var(--surface));
+}
+.issue-decision:has(.recovery-card) .issue-decision__summary {
+    border-left-color: var(--danger);
+    background: color-mix(in srgb, var(--danger-soft) 40%, var(--surface));
+}
+.issue-decision__summary.next-action--active { border-left-color: var(--info); background: var(--surface-raised); }
+.issue-decision__summary.next-action--success { border-left-color: var(--ok); background: var(--surface-raised); }
+.issue-decision__plan { padding: 1.2rem; border-top: 1px solid var(--hairline); }
+.issue-decision__plan > a { display: inline-block; margin-top: .65rem; }
+#stage-approval .panel-body > p { margin-bottom: .6rem; max-width: 70ch; }
+#stage-approval form { margin-top: 1.25rem; max-width: 42rem; }
+#stage-approval .form-group { display: grid; gap: .5rem; margin-bottom: 1rem; }
+.issue-decision .btn { white-space: normal; text-align: center; }
+.issue-decision select { max-width: 100%; min-width: 0; }
+.panel-header { background: var(--surface); }
+.panel-header h2, .panel-header h3 { font-size: 1rem; }
+.eyebrow, .workflow-stage-label, .form-section-title, .field-group > label,
+.data-table th, .status { text-transform: none; letter-spacing: 0; }
+.status, .glass-pill { border-radius: 6px; }
+.status-awaiting_approval, .status-awaiting_plan_approval, .status-ready_to_start {
+    color: var(--warn);
+    background: var(--warn-soft);
+}
+.page-header h1 { overflow-wrap: anywhere; }
+.processing-rail { background: var(--surface); box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.processing-rail.is-active { border-top-color: var(--info); }
+.processing-rail.is-active .processing-rail-icon { color: var(--info); background: var(--info-soft); }
+.modal { box-shadow: var(--decision-shadow); }
+.btn-primary:hover { background: #1d4ed8; border-color: #1d4ed8; filter: none; box-shadow: none; transform: none; }
+.page-header, .metrics-grid, .panel:nth-child(n), .metric-card:nth-child(n), .data-table,
+.stage--current .workflow-stage-icon { animation: none; }
+.status-dot.running, .status-dot.paused, .sse-dot[data-state],
+.status-in_progress, .timeline-segment.outcome-running { animation: none; box-shadow: none; }
+
+/* The route is a sequence, not six disconnected status tiles. */
+.workflow-stage-list { gap: 0; }
+.workflow-stage-icon { width: 1.75rem; height: 1.75rem; background: var(--surface); border: 1px solid var(--glass-border); }
+.workflow-stage:not(:last-child)::after { top: 1.725rem; left: calc(50% + 13px); right: calc(-50% + 13px); }
+.stage--current .workflow-stage-icon { border: 2px solid var(--info); background: var(--info-soft); }
+.stage--paused .workflow-stage-icon { border-color: var(--warn); background: var(--warn-soft); }
+.stage--completed .workflow-stage-icon { border-color: var(--ok); background: var(--ok-soft); }
+.stage--failed .workflow-stage-icon { border-color: var(--danger); background: var(--danger-soft); }
+
+/* Repository policy is one editor within the repository save operation. */
+.repository-workflow-editor { margin: 1.5rem 0; padding-top: 1.25rem; border-top: 1px solid var(--hairline); min-width: 0; }
+.workflow-policy-options, .workflow-checkpoints { border: 0; min-width: 0; padding: 0; margin: 1rem 0; }
+.workflow-policy-options legend, .workflow-checkpoints legend { font-weight: 600; margin-bottom: .75rem; }
+.workflow-policy-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+.workflow-policy-option {
+    display: flex;
+    align-items: flex-start;
+    gap: .65rem;
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: .85rem;
+    cursor: pointer;
+    background: var(--surface);
+    min-width: 0;
+}
+.workflow-policy-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.repository-workflow-editor .workflow-policy-option,
+.repository-workflow-editor .workflow-stage-row { text-transform: none; letter-spacing: 0; }
+.workflow-policy-option:focus-within, .workflow-stage-row:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.workflow-policy-option input, .workflow-stage-row input { width: 1.1rem; height: 1.1rem; margin-top: .18rem; flex: 0 0 auto; accent-color: #2563eb; }
+.workflow-policy-option strong, .workflow-stage-row strong { display: block; font-size: .88rem; }
+.workflow-policy-option small, .workflow-stage-row small { display: block; margin-top: .3rem; color: var(--text-secondary); font-size: .8rem; line-height: 1.5; }
+.workflow-stage-row { position: relative; display: flex; align-items: flex-start; gap: .9rem; padding: .8rem 0; cursor: pointer; }
+.workflow-stage-row:not(:last-of-type)::after { content: ''; position: absolute; width: 2px; background: var(--glass-border); left: .48rem; top: 2.2rem; bottom: -.6rem; }
+.workflow-stage-row input { position: relative; z-index: 1; }
+.workflow-stage-row > span { min-width: 0; overflow-wrap: anywhere; }
+.workflow-checkpoints > p { margin-top: .75rem; }
+.workflow-existing-settings { border-top: 1px solid var(--hairline); padding-top: 1rem; }
+.workflow-existing-settings summary { cursor: pointer; font-weight: 600; }
+.workflow-existing-settings > p { margin: .65rem 0 1rem; max-width: 70ch; }
+.workflow-summary { margin: 1rem 0 .65rem; padding: .85rem 1rem; border-left: 3px solid var(--accent); background: var(--surface-raised); font-size: .88rem; overflow-wrap: anywhere; }
+.workflow-checkpoints[hidden], .workflow-existing-settings[hidden] { display: none; }
+
+@media (max-width: 768px) {
+    .processing-rail { flex-wrap: wrap; gap: .5rem; }
+    .processing-rail-state { flex: 1 0 100%; }
+    .processing-rail > .flex { flex-wrap: wrap; width: 100%; }
+    .processing-rail .btn { white-space: normal; }
+    .workflow-policy-options { grid-template-columns: 1fr; }
+    .workflow-stage-list { grid-template-columns: 1fr; }
+    .workflow-stage { grid-template-columns: 1.75rem minmax(0, 1fr); grid-template-rows: auto auto auto; column-gap: .8rem; padding: .65rem 0; justify-items: start; text-align: left; }
+    .workflow-stage-icon { grid-column: 1; grid-row: 1 / 4; }
+    .workflow-stage-label, .workflow-stage-state, .workflow-stage-detail { grid-column: 2; font-size: .78rem; }
+    .workflow-stage-detail { display: block; }
+    .workflow-stage:not(:last-child)::after { display: block; left: .825rem; right: auto; top: 2.3rem; bottom: -.65rem; width: 2px; height: auto; }
+    .workflow-stage.stage--current:not(:last-child)::after { background: var(--hairline); }
+    .issue-decision__summary, .issue-decision__plan { padding: 1rem; }
+    .issue-decision { scroll-margin-top: 10rem; }
 }
