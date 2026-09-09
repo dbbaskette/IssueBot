@@ -58,41 +58,6 @@ public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long
 
     long countByStatus(IssueStatus status);
 
-    /**
-     * Sum of every status that blocks on the operator (#91 Needs You inbox): PR approvals,
-     * plan approvals, ready-to-start reservations, split proposals, and needs-human (FAILED + COOLDOWN).
-     * Six cheap indexed COUNTs — mirrors the {@code pendingApprovals} single-COUNT pattern each page controller
-     * already runs, so this default method is the one place the sum is computed rather than
-     * duplicating the six-way addition across every controller.
-     */
-    default long countNeedsYou() {
-        return countUngroupedNeedsYou(List.of(
-                IssueStatus.AWAITING_APPROVAL,
-                IssueStatus.AWAITING_PLAN_APPROVAL,
-                IssueStatus.READY_TO_START,
-                IssueStatus.AWAITING_DECOMPOSITION,
-                IssueStatus.FAILED,
-                IssueStatus.COOLDOWN))
-                + countDecompositionGroupsNeedingAttention();
-    }
-
-    @Query("""
-            select count(t) from TrackedIssue t
-            where t.status in :statuses
-              and not exists (
-                select c.id from DecompositionChild c
-                where c.trackedIssue = t
-                  and c.group.state = com.dbbaskette.issuebot.model.DecompositionGroupState.NEEDS_ATTENTION
-              )
-            """)
-    long countUngroupedNeedsYou(@Param("statuses") List<IssueStatus> statuses);
-
-    @Query("""
-            select count(g) from DecompositionGroup g
-            where g.state = com.dbbaskette.issuebot.model.DecompositionGroupState.NEEDS_ATTENTION
-            """)
-    long countDecompositionGroupsNeedingAttention();
-
     List<TrackedIssue> findByRepo(WatchedRepo repo);
 
     List<TrackedIssue> findByRepoAndStatus(WatchedRepo repo, IssueStatus status);

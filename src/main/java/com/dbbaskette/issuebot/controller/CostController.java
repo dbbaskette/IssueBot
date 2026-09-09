@@ -58,7 +58,6 @@ public class CostController {
         model.addAttribute("selectedRange", range);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         // Global totals

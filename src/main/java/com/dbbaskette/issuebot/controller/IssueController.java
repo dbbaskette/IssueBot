@@ -193,7 +193,6 @@ public class IssueController {
         model.addAttribute("hasNext", issuePage.hasNext());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         return ViewResolver.view("issues", hx != null);
     }
@@ -1182,7 +1181,6 @@ public class IssueController {
         model.addAttribute("workflowStepper", workflowStepperAssembler.assemble(issue));
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         BigDecimal effectiveBudget = issue.effectiveBudgetUsd();
         model.addAttribute("issueSpent", totalCost);

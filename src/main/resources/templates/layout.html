@@ -73,7 +73,7 @@
                 <a th:classappend="${activePage == 'inbox' ? 'active' : ''}" th:attr="aria-current=${activePage == 'inbox'} ? 'page' : null" href="/inbox" hx-get="/inbox" hx-target="#content" hx-push-url="true">
                     <i class="ti ti-inbox" aria-hidden="true"></i>
                     Needs You
-                    <span th:if="${needsYouCount != null and needsYouCount > 0}" class="badge" th:text="${needsYouCount}">0</span>
+                    <span th:replace="~{fragments/needs-you :: badge}"></span>
                 </a>
             </li>
             <li>
@@ -169,6 +169,7 @@
         </div>
     </div>
     <script th:src="@{/js/app.js}" defer></script>
+    <script th:src="@{/js/needs-you.js}" defer></script>
 
     <!--
       Toast region — the SINGLE source of truth is the content fragments, each of

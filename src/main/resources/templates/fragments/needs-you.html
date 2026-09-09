@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<span th:fragment="badge" id="needs-you-badge" aria-live="polite"
+      th:hidden="${needsYouCount == null or needsYouCount == 0}"
+      th:style="${needsYouCount == null or needsYouCount == 0 ? 'display:none' : null}">
+    <span class="badge" th:text="${needsYouCount ?: 0}">0</span>
+</span>
+<th:block th:fragment="live">
+    <span th:replace="~{fragments/needs-you :: badge}"></span>
+    <th:block th:if="${includeInbox}">
+        <div th:replace="~{inbox :: content}"></div>
+    </th:block>
+</th:block>
+</body>
+</html>

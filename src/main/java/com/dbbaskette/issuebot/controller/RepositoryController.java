@@ -278,7 +278,6 @@ public class RepositoryController {
         model.addAttribute("modelCatalog", selectedModelCatalog());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
         if (error != null) model.addAttribute("error", error);

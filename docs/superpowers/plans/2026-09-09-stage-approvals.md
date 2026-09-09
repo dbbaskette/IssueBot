@@ -21,8 +21,9 @@
 
 First unit implemented and reviewed. Verification: `./mvnw -q test` passed, 1,337 tests, zero failures/errors/skips. The following foundation/workflow/UI/integration tasks are complete; the next unit follows in a separate commit.
 
-- [ ] Foundation: WorkflowPolicy and WorkflowStage enums; repository and issue policy columns; StageApproval entity/repository; V35 migration. StageApprovalService exposes snapshot(TrackedIssue), beforeStage(TrackedIssue, WorkflowStage, int), approveAndClaim(Long issueId, Long approvalId, String provider, String model, String actor), history(Long), pending(Long), and static isStageWaiting(TrackedIssue). Service enforces locking, policy snapshots, unique attempt identity, models, global stop, dependencies, and capacity.
-- [ ] Workflow: call gates before planning/implementation/verification/review/merge; pin each selected provider; use immutable automatic plan acceptance and existing recovery setup for post-implementation resumes. Block legacy PR endpoints on stage waits. Managed policy merge only after successful review and CI.
-- [ ] UI: dedicated repository policy endpoint/form and issue-stage approval endpoint/card/history. Both provider catalogs available; no model field for deterministic stages. Dispatch only a successful claimed approval. Hide legacy approval actions for stage waits.
-- [ ] Integration: migration/service/transaction/workflow/controller/render tests; check full suite, inspect diff, commit and open PR for #167.
-- [ ] Next unit: canonical Needs You snapshot, all controller count sources, coordinated event refresh and regression coverage for #154/#162–165 after #167 is complete.
+- [x] Foundation: policy snapshots, durable artifact/run-specific stage decisions, atomic claims, model validation, global stop, dependencies, and capacity.
+- [x] Workflow: all five gates, subscription provider pinning, immutable plan acceptance, durable resumes, conditional reviewed-commit merge, and legacy endpoint protection.
+- [x] UI: repository policy form, dedicated stage approvals, both provider catalogs, deterministic-stage controls, and decision history.
+- [x] Verification: migration/service/transaction/workflow/controller/render tests, full suite, independent review, and implementation commit.
+- [x] Next unit: canonical Needs You snapshot, shared counts, synchronized live refresh, and regression coverage for #154/#162–165.
+- [ ] Integration choice: PR/merge and deployment are deferred; both implementations are committed on the feature branch.
