@@ -117,4 +117,25 @@ class RepositoriesPageRenderTest {
                 .doesNotContain("superpowersMethodology")
                 .doesNotContain("superpowers-methodology");
     }
+
+    @Test
+    void mainFormContainsUnifiedWorkflowEditorAndNoSeparatePolicyFormOrPreset() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(7L);
+        repo.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        repo.setApprovalStages("PLANNING,REVIEW");
+
+        String html = render(List.of(repo), Map.of(7L, 0L), Map.of(7L, 0L));
+
+        assertThat(html).contains("class=\"repository-workflow-editor\"")
+                .contains("name=\"workflowPolicy\"")
+                .contains("name=\"approvalStages\"")
+                .contains("data-workflow-policy=\"STAGED\"")
+                .contains("data-approval-stages=\"PLANNING,REVIEW\"")
+                .contains("Changes apply to unstarted issues")
+                .contains("Model choices are overrides made when approving an AI stage")
+                .doesNotContain("autonomy-preset")
+                .doesNotContain("/repositories/7/policy")
+                .doesNotContain("Save workflow policy");
+    }
 }
