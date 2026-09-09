@@ -46,7 +46,9 @@ services:
         max-size: 10m
         max-file: "5"
     networks:
-      - frontend
+      # Shared with the home-server Cloudflare Tunnel. The dashboard remains
+      # loopback-only on the host; public traffic reaches it through the tunnel.
+      - edge
       - backend
 
   codex-cli-provider:
@@ -72,7 +74,10 @@ services:
       - egress
 
 networks:
-  frontend:
+  # Created and owned by the home-server infrastructure project. cloudflared
+  # resolves the IssueBot service by this Compose service name.
+  edge:
+    external: true
   backend:
     internal: true
   egress:

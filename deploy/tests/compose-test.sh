@@ -48,14 +48,14 @@ assert not provider.get("ports"), "provider must not publish ports"
 assert "build" not in provider, "provider must be pulled, never built by this project"
 assert "@sha256:" in provider.get("image", ""), "provider image must be immutable"
 
-assert set(issuebot.get("networks", {})) == {"frontend", "backend"}, \
-    "IssueBot must join frontend for its published port and backend for provider traffic"
+assert set(issuebot.get("networks", {})) == {"edge", "backend"}, \
+    "IssueBot must join the shared tunnel edge network plus the private provider backend"
 assert set(provider.get("networks", {})) == {"backend", "egress"}, \
     "provider needs private backend plus non-internal egress"
 
 networks = config.get("networks", {})
 assert networks.get("backend", {}).get("internal") is True, "backend must remain internal"
-assert networks.get("frontend", {}).get("internal") is not True, "frontend must permit published ports"
+assert networks.get("edge", {}).get("external") is True, "edge must be the home-server-managed external network"
 assert networks.get("egress", {}).get("internal") is not True, "provider egress must not be internal"
 
 for name, service in services.items():

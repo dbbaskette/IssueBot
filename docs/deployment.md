@@ -4,6 +4,12 @@
 
 IssueBot owns the `issuebot` image, the production Compose project, and the host bind mount containing the file-backed H2 database. The bind mount at `${ISSUEBOT_HOME}` is authoritative; this stack does not use PostgreSQL, SQLite, MinIO, or a Docker volume for application data.
 
+The dashboard is published at `https://issuebot.baskettecase.com` through the
+home-server Cloudflare Tunnel. IssueBot joins that infrastructure project's
+external Docker network, `edge`, but continues to bind host port `8090` only to
+loopback. The tunnel is the only public path; do not change
+`ISSUEBOT_BIND_ADDRESS` to expose the dashboard directly.
+
 `codex-cli-provider` is an independent product and release boundary. Its project owns its image build, credentials, authentication, state, and API. This repository only pulls an externally released image by immutable digest. Provider credentials do not belong in IssueBot's `.env`, runtime file, deploy file, image, or `~/.issuebot` tree.
 
 > **Production cutover is forbidden** until both a compatible `codex-cli-provider` image has been published and IssueBot provider-integration work has removed direct local `claude` execution. Tasks 1–6 prepare and verify deployment assets only. They do not satisfy this gate.
@@ -30,6 +36,8 @@ Before proceeding, require:
 - at least 5 GiB free and at least twice the H2 database size available for a backup and failed copy;
 - `${ISSUEBOT_HOME}`, `${ISSUEBOT_HOME}/repos`, and `${ISSUEBOT_HOME}/logs` owned and writable by the configured UID/GID;
 - a compatible provider image with an explicit non-root `Config.User`, an embedded healthcheck, label `com.issuebot.codex-provider.protocol`, and doctor label containing the exact non-billable command `codex-cli-provider doctor --json --no-billable-work`.
+- the home-server `edge` Docker network and `cloudflared` service running on the same Docker host; and
+- a Cloudflare Access application protecting `issuebot.baskettecase.com`, in addition to IssueBot's own required dashboard credentials.
 
 The provider joins the internal `backend` network for IssueBot traffic and a separate non-internal `egress` network for outbound provider calls. It publishes no host port. IssueBot is the only service that publishes `8090`.
 
@@ -40,6 +48,38 @@ ssh dbbaskette@home-services.local 'docker info --format "{{.Architecture}}"; do
 ```
 
 Expected: architecture `amd64` or `arm64`, Compose v2, and a path/version for every required command.
+
+## Public hostname
+
+The home-server project owns Cloudflare Tunnel ingress. Add this rule before
+deploying IssueBot (place it before the catch-all rule):
+
+```yaml
+- hostname: issuebot.baskettecase.com
+  service: http://issuebot:8090
+```
+
+Then recreate only the tunnel container from the home-server checkout:
+
+```bash
+docker compose up -d --force-recreate cloudflared
+```
+
+Protect the hostname with a Cloudflare Access application for the intended
+operators. Keep `ISSUEBOT_USERNAME` and `ISSUEBOT_PASSWORD` populated in
+`runtime.env`; Access is an outer gate, not a replacement for the dashboard's
+own authentication. If GitHub webhooks are enabled, create a more-specific
+Access application for `issuebot.baskettecase.com/webhooks/github` with a
+`Bypass` policy for that path only. That endpoint authenticates every delivery
+with `ISSUEBOT_WEBHOOK_SECRET`; do not bypass Access for any dashboard path.
+Use `https://issuebot.baskettecase.com/webhooks/github` as the GitHub webhook
+payload URL. After the IssueBot deployment is healthy, verify both the internal
+route and the public hostname:
+
+```bash
+docker network inspect edge --format '{{range .Containers}}{{.Name}} {{end}}'
+curl --fail --silent --show-error https://issuebot.baskettecase.com/actuator/health/readiness
+```
 
 ## Dedicated restricted key
 
