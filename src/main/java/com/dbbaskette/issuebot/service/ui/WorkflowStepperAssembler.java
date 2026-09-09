@@ -100,6 +100,15 @@ public final class WorkflowStepperAssembler {
     }
 
     private Selection selection(TrackedIssue issue) {
+        if (com.dbbaskette.issuebot.service.workflow.StageApprovalService.isStageWaiting(issue)) {
+            String stage = issue.getCurrentPhase().substring("STAGE_APPROVAL_".length());
+            StageKey key = switch (stage) {
+                case "PLANNING" -> StageKey.PLAN;
+                case "IMPLEMENTATION" -> StageKey.WORK;
+                default -> StageKey.REVIEW;
+            };
+            return paused(key, "Waiting for " + stage.toLowerCase() + " approval");
+        }
         IssueStatus status = issue.getStatus() == null ? IssueStatus.PENDING : issue.getStatus();
         return switch (status) {
             case PENDING -> current(StageKey.INTAKE, "Waiting to enter the queue");

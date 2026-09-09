@@ -1,16 +1,15 @@
 package com.dbbaskette.issuebot.controller;
 
-import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
-import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.DecompositionProposalParser;
-import com.dbbaskette.issuebot.service.ui.DecompositionGroupViewAssembler;
+import com.dbbaskette.issuebot.service.ui.NeedsYouService;
+import com.dbbaskette.issuebot.service.ui.NeedsYouSnapshot;
 import com.dbbaskette.issuebot.util.ElapsedFormatter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Controller;
@@ -22,8 +21,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * The "Needs You" inbox (#91) — every checkpoint that blocks on the operator, grouped by type,
@@ -36,22 +33,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 @Controller
 public class InboxController {
 
-    private final TrackedIssueRepository issueRepository;
+    private final NeedsYouService needsYou;
     private final PlanningVersionRepository planningVersionRepository;
     private final IssuePollingService pollingService;
     private final NotificationRepository notificationRepository;
     private final ApprovalCardAssembler cardAssembler;
     private final ObjectMapper objectMapper;
-    @Autowired(required = false)
-    private DecompositionGroupViewAssembler decompositionGroupViews;
 
-    public InboxController(TrackedIssueRepository issueRepository,
+    public InboxController(NeedsYouService needsYou,
                             PlanningVersionRepository planningVersionRepository,
                             IssuePollingService pollingService,
                             NotificationRepository notificationRepository,
                             ApprovalCardAssembler cardAssembler,
                             ObjectMapper objectMapper) {
-        this.issueRepository = issueRepository;
+        this.needsYou = needsYou;
         this.planningVersionRepository = planningVersionRepository;
         this.pollingService = pollingService;
         this.notificationRepository = notificationRepository;
@@ -62,19 +57,17 @@ public class InboxController {
     @GetMapping("/inbox")
     public String inbox(Model model,
                         @RequestHeader(value = "HX-Request", required = false) String hx) {
-        List<DecompositionGroupViewAssembler.GroupView> groupAttention =
-                decompositionGroupViews == null ? List.of() : decompositionGroupViews.attentionGroups();
-        Set<Long> groupedIssueIds = decompositionGroupViews == null
-                ? Set.of() : decompositionGroupViews.memberIssueIds(groupAttention);
-        List<TrackedIssue> approvals = withoutGrouped(
-                issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL), groupedIssueIds);
-        List<TrackedIssue> planApprovals = withoutGrouped(
-                issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL), groupedIssueIds);
-        List<TrackedIssue> readyToStart = withoutGrouped(
-                issueRepository.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START), groupedIssueIds);
-        List<TrackedIssue> splitProposals = issueRepository.findByStatusOrderByIdDesc(IssueStatus.AWAITING_DECOMPOSITION);
-        List<TrackedIssue> needsHuman = withoutGrouped(issueRepository.findByStatusInOrderByIdDesc(
-                List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)), groupedIssueIds);
+        populate(model, needsYou.snapshot());
+        return ViewResolver.view("inbox", hx != null);
+    }
+
+    /** Enrich an already-loaded snapshot without making another inbox read. */
+    public void populate(Model model, NeedsYouSnapshot snapshot) {
+        List<TrackedIssue> approvals = snapshot.approvals();
+        List<TrackedIssue> planApprovals = snapshot.planApprovals();
+        List<TrackedIssue> readyToStart = snapshot.readyToStart();
+        List<TrackedIssue> splitProposals = snapshot.splitProposals();
+        List<TrackedIssue> needsHuman = snapshot.needsHuman();
 
         ApprovalCardAssembler.Cards cards = cardAssembler.assemble(approvals);
 
@@ -99,9 +92,7 @@ public class InboxController {
                     objectMapper, issue.getDecompositionProposal(), issue.getId()));
         }
 
-        int totalCount = approvals.size() + planApprovals.size() + readyToStart.size()
-                + splitProposals.size() + needsHuman.size() + groupAttention.size();
-
+        model.addAttribute("needsYouSnapshot", snapshot);
         model.addAttribute("activePage", "inbox");
         model.addAttribute("contentTemplate", "inbox");
 
@@ -120,26 +111,20 @@ public class InboxController {
         model.addAttribute("proposalTitles", proposalTitles);
 
         model.addAttribute("needsHuman", needsHuman);
-        model.addAttribute("decompositionAttention", groupAttention);
+        model.addAttribute("decompositionAttention", snapshot.decompositionAttention());
 
-        model.addAttribute("totalCount", totalCount);
+        model.addAttribute("totalCount", snapshot.totalCount());
         // Empty-state copy ("Nothing needs you — the loop is running itself.") also surfaces
         // how much work IS in flight, so an idle operator can see the loop isn't just stuck.
-        model.addAttribute("activeCount", issueRepository.countByStatus(IssueStatus.IN_PROGRESS));
-        model.addAttribute("queuedCount", issueRepository.countByStatus(IssueStatus.QUEUED));
+        model.addAttribute("activeCount", snapshot.activeCount());
+        model.addAttribute("queuedCount", snapshot.queuedCount());
 
         model.addAttribute("agentRunning", pollingService.isEnabled());
         // Reuses the already-fetched list rather than a redundant COUNT — mirrors
         // ApprovalController#populateModel, which does the same for its own approvals list.
         model.addAttribute("pendingApprovals", (long) approvals.size());
-        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
+        model.addAttribute("needsYouCount", snapshot.totalCount());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
-        return ViewResolver.view("inbox", hx != null);
-    }
-
-    private static List<TrackedIssue> withoutGrouped(List<TrackedIssue> issues, Set<Long> groupedIds) {
-        if (groupedIds.isEmpty()) return issues;
-        return issues.stream().filter(issue -> !groupedIds.contains(issue.getId())).toList();
     }
 }

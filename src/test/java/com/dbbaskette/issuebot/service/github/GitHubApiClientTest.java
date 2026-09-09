@@ -23,6 +23,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitHubApiClientTest {
 
     @Test
+    void conditionalMergeSendsReviewedSha() {
+        AtomicReference<ClientRequest> sent = new AtomicReference<>();
+        GitHubApiClient client = client(request -> {
+            sent.set(request);
+            return jsonResponse(HttpStatus.OK, "{\"merged\":true}");
+        });
+        client.mergePullRequest("acme", "widgets", 55, "IssueBot: fix", "squash", "a".repeat(40));
+        assertThat(requestBody(sent.get())).contains("\"sha\":\"" + "a".repeat(40) + "\"")
+                .contains("\"merge_method\":\"squash\"");
+    }
+
+    @Test
     void markPrReadyUsesGitHubsReadyForReviewMutation() {
         AtomicReference<ClientRequest> graphQlRequest = new AtomicReference<>();
         GitHubApiClient client = client(request -> {

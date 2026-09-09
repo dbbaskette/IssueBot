@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="content">
+<div th:fragment="content" id="needs-you-content">
     <div th:replace="~{layout :: toasts}"></div>
 
     <div class="page-header">
@@ -56,7 +56,14 @@
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(approvals)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${approvals}" class="glass-card mb-2" style="padding:1rem">
+                <div th:each="issue : ${approvals}" class="glass-card mb-2" style="padding:1rem"
+                     th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
+                    <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
+                    <p>Workflow stage approval required.</p>
+                    <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
+                </div>
+                <div th:each="issue : ${approvals}" class="glass-card mb-2" style="padding:1rem"
+                     th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
                     <div class="flex-between mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
@@ -280,6 +287,7 @@
 
     <!-- Approve (PR) confirmation modals -->
     <div th:each="issue : ${approvals}"
+         th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}"
          th:id="${'approve-modal-' + issue.id}" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true"
              th:attr="aria-labelledby=${'approve-modal-' + issue.id + '-title'}">

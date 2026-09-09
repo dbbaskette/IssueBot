@@ -3,6 +3,8 @@ package com.dbbaskette.issuebot.service.claude;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class ClaudeCodeService {
     private final WorkflowCancellationService cancellationService;
     private final CodexCliService codexCliService;
     private final ThreadLocal<IssueBotProperties.AgentProvider> pinnedProvider = new ThreadLocal<>();
+    private final ThreadLocal<Boolean> subscriptionOnly = new ThreadLocal<>();
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
@@ -149,6 +152,7 @@ public class ClaudeCodeService {
             pb.directory(workingDirectory.toFile());
             pb.redirectErrorStream(false);
             stripNestedSessionEnv(pb);
+            sanitizeBillingEnvironment(pb.environment());
             if (planningMode) {
                 sanitizePlanningEnvironment(pb.environment());
             }
@@ -282,6 +286,7 @@ public class ClaudeCodeService {
         command.add("Read,Glob,Grep");
         command.add("--safe-mode");
         command.add("--no-session-persistence");
+        if (Boolean.TRUE.equals(subscriptionOnly.get())) addSubscriptionSettings(command);
         return command;
     }
 
@@ -329,8 +334,12 @@ public class ClaudeCodeService {
         // headless invocation and derail the coding agent into brainstorming/spec-writing
         // instead of editing files — producing empty commits. OAuth/keychain auth is
         // unaffected by setting-source selection. See buildCommand tests.
-        command.add("--setting-sources");
-        command.add("project,local");
+        if (Boolean.TRUE.equals(subscriptionOnly.get())) {
+            addSubscriptionSettings(command);
+        } else {
+            command.add("--setting-sources");
+            command.add("project,local");
+        }
 
         if (systemPrompt != null && !systemPrompt.isBlank()) {
             command.add("--append-system-prompt");
@@ -397,6 +406,80 @@ public class ClaudeCodeService {
      */
     private static void stripNestedSessionEnv(ProcessBuilder pb) {
         pb.environment().remove("CLAUDECODE");
+    }
+
+    /** Keep subscription credentials, but never inherit API billing or third-party routing. */
+    public static void sanitizeBillingEnvironment(Map<String, String> environment) {
+        for (String key : List.of("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
+                "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID",
+                "OPENAI_PROJECT_ID", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "CLAUDE_CODE_SIMPLE")) {
+            environment.remove(key);
+        }
+    }
+
+    /** Explicit selection check without disturbing an enclosing workflow's provider pin. */
+    public boolean checkCliAvailable(IssueBotProperties.AgentProvider provider) {
+        if (provider == IssueBotProperties.AgentProvider.CODEX) {
+            return codexCliService != null && codexCliService.checkCliAvailable();
+        }
+        IssueBotProperties.AgentProvider previous = pinnedProvider.get();
+        pinnedProvider.set(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        try {
+            return checkCliAvailable();
+        } finally {
+            pinProvider(previous);
+        }
+    }
+
+    /** Fresh, fail-closed check used only by managed stages; never logs account details. */
+    public boolean checkSubscriptionAuthentication(IssueBotProperties.AgentProvider provider) {
+        if (provider == IssueBotProperties.AgentProvider.CODEX) {
+            return codexCliService != null && codexCliService.checkSubscriptionAuthentication();
+        }
+        try {
+            ProcessBuilder builder = new ProcessBuilder(buildSubscriptionAuthCommand()).redirectErrorStream(true);
+            stripNestedSessionEnv(builder);
+            sanitizeBillingEnvironment(builder.environment());
+            Process process = builder.start();
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            return process.exitValue() == 0 && isSubscriptionAuthentication(output);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            log.debug("Claude subscription authentication check failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    static boolean isSubscriptionAuthentication(String output) {
+        try {
+            JsonNode status = new ObjectMapper().readTree(output);
+            return status.path("loggedIn").isBoolean() && status.path("loggedIn").booleanValue()
+                    && "claude.ai".equals(status.path("authMethod").asText())
+                    && List.of("pro", "max", "team", "enterprise")
+                    .contains(status.path("subscriptionType").asText().toLowerCase(java.util.Locale.ROOT));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    static List<String> buildSubscriptionAuthCommand() {
+        List<String> command = new ArrayList<>(List.of("claude"));
+        addSubscriptionSettings(command);
+        command.addAll(List.of("auth", "status"));
+        return command;
+    }
+
+    /** Identical effective settings for managed auth checks and actual invocations. */
+    private static void addSubscriptionSettings(List<String> command) {
+        command.addAll(List.of("--setting-sources", "", "--settings",
+                "{\"apiKeyHelper\":\"\",\"forceLoginMethod\":\"claudeai\"}"));
     }
 
     /**
@@ -496,8 +579,16 @@ public class ClaudeCodeService {
         else pinnedProvider.set(provider);
     }
 
+    /** Managed stage invocations must not load repository or user API credential helpers. */
+    public void pinSubscriptionProvider(IssueBotProperties.AgentProvider provider) {
+        if (provider == null) throw new IllegalArgumentException("Managed stages require a provider");
+        pinProvider(provider);
+        subscriptionOnly.set(true);
+    }
+
     public void clearPinnedProvider() {
         pinnedProvider.remove();
+        subscriptionOnly.remove();
     }
 
     private IssueBotProperties.AgentProvider effectiveProvider() {
@@ -506,6 +597,10 @@ public class ClaudeCodeService {
     }
 
     private boolean useCodex() {
+        if (Boolean.TRUE.equals(subscriptionOnly.get())
+                && effectiveProvider() == IssueBotProperties.AgentProvider.CODEX && codexCliService == null) {
+            throw new IllegalStateException("Codex CLI runner is unavailable; provider fallback is not permitted");
+        }
         return effectiveProvider() == IssueBotProperties.AgentProvider.CODEX
                 && codexCliService != null;
     }

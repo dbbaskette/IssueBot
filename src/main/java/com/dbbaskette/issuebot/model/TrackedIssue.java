@@ -12,6 +12,24 @@ import java.util.List;
 @Table(name = "tracked_issues", uniqueConstraints = @UniqueConstraint(columnNames = {"repo_id", "issue_number"}))
 public class TrackedIssue {
 
+    @Column(name = "workflow_run", nullable = false)
+    private int workflowRun;
+
+    public int getWorkflowRun() { return workflowRun; }
+    public void setWorkflowRun(int value) { workflowRun = value; }
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "workflow_policy")
+    private WorkflowPolicy workflowPolicy;
+
+    @Column(name = "approval_stages")
+    private String approvalStages;
+
+    public WorkflowPolicy getWorkflowPolicy() { return workflowPolicy; }
+    public void setWorkflowPolicy(WorkflowPolicy value) { workflowPolicy = value; }
+    public String getApprovalStages() { return approvalStages; }
+    public void setApprovalStages(String value) { approvalStages = value; }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -287,6 +305,7 @@ public class TrackedIssue {
      * over the repo default, mirroring {@link #effectiveBudgetUsd()}'s precedence.
      */
     public boolean effectivePlanFirst() {
+        if (workflowPolicy != null && workflowPolicy != WorkflowPolicy.LEGACY) return true;
         return planFirstOverride != null ? planFirstOverride : repo.isPlanFirst();
     }
 

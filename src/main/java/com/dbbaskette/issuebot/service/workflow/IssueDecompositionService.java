@@ -136,7 +136,13 @@ public class IssueDecompositionService {
             return false;
         }
 
-        if (repo.getDecompositionMode() == DecompositionMode.PROPOSE) {
+        boolean managed = StageWorkflowCoordinator.managed(trackedIssue);
+        boolean needsSplitApproval = managed
+                ? trackedIssue.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED
+                    && java.util.Arrays.asList(java.util.Optional.ofNullable(trackedIssue.getApprovalStages())
+                            .orElse(com.dbbaskette.issuebot.model.WorkflowStage.ALL).split(",")).contains("PLANNING")
+                : repo.getDecompositionMode() == DecompositionMode.PROPOSE;
+        if (needsSplitApproval) {
             try {
                 trackedIssue.setDecompositionProposal(objectMapper.writeValueAsString(subIssues));
             } catch (Exception e) {

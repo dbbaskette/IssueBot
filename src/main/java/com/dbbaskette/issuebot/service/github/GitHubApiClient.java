@@ -238,9 +238,19 @@ public class GitHubApiClient {
 
     public JsonNode mergePullRequest(String owner, String repo, int prNumber,
                                       String commitTitle, String mergeMethod) {
+        return mergePullRequest(owner, repo, prNumber, commitTitle, mergeMethod, null);
+    }
+
+    /** Expected head SHA makes the GitHub merge conditional on the reviewed commit. */
+    public JsonNode mergePullRequest(String owner, String repo, int prNumber,
+                                      String commitTitle, String mergeMethod, String expectedSha) {
         log.info("Merging PR #{} in {}/{} via {}", prNumber, owner, repo, mergeMethod);
         Map<String, Object> payload = new HashMap<>();
         payload.put("merge_method", mergeMethod);
+        if (expectedSha != null) {
+            if (expectedSha.isBlank()) throw new IllegalArgumentException("Expected merge SHA cannot be blank");
+            payload.put("sha", expectedSha);
+        }
         if (commitTitle != null) {
             payload.put("commit_title", commitTitle);
         }

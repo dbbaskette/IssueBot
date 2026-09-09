@@ -14,7 +14,14 @@
         </div>
     </div>
 
-    <div th:each="issue : ${approvals}" class="glass-card mb-3">
+    <div th:each="issue : ${approvals}" class="glass-card mb-3"
+         th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
+        <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
+        <p>Workflow stage approval required. Choose the next stage's model on the issue page.</p>
+        <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
+    </div>
+    <div th:each="issue : ${approvals}" class="glass-card mb-3"
+         th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
         <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
             <div>
                 <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>

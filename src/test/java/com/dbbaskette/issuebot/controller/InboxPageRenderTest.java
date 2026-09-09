@@ -12,6 +12,8 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
+import com.dbbaskette.issuebot.service.ui.NeedsYouService;
+import com.dbbaskette.issuebot.service.ui.NeedsYouSnapshot;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,9 +89,45 @@ class InboxPageRenderTest {
     }
 
     private InboxController controller(TrackedIssueRepository issues, PlanningVersionRepository versions) {
-        return new InboxController(issues, versions, mock(IssuePollingService.class), mock(NotificationRepository.class),
+        return new InboxController(snapshotFixture(issues), versions, mock(IssuePollingService.class), mock(NotificationRepository.class),
                 new ApprovalCardAssembler(mock(IterationRepository.class), mock(GitHubApiClient.class)),
                 new ObjectMapper());
+    }
+
+    private NeedsYouService snapshotFixture(TrackedIssueRepository issues) {
+        // Existing fixtures describe each card collection; production obtains all of them in one snapshot.
+        NeedsYouService needsYou = mock(NeedsYouService.class);
+        when(needsYou.snapshot()).thenAnswer(invocation -> new NeedsYouSnapshot(
+                issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL),
+                issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_PLAN_APPROVAL),
+                issues.findByStatusOrderByIdDesc(IssueStatus.READY_TO_START),
+                issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_DECOMPOSITION),
+                issues.findByStatusInOrderByIdDesc(List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN)),
+                List.of(), issues.countByStatus(IssueStatus.IN_PROGRESS), issues.countByStatus(IssueStatus.QUEUED)));
+        return needsYou;
+    }
+
+    @Test
+    void groupedSnapshotRendersOneCardAndOneCanonicalCount() {
+        var group = new com.dbbaskette.issuebot.service.ui.DecompositionGroupViewAssembler.GroupView(
+                7L, 70L, 100, com.dbbaskette.issuebot.model.DecompositionGroupState.NEEDS_ATTENTION,
+                true, 0, 2, "A child needs attention", null, List.of());
+        NeedsYouSnapshot snapshot = new NeedsYouSnapshot(List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(group), 0, 0);
+        NeedsYouService needsYou = mock(NeedsYouService.class);
+        when(needsYou.snapshot()).thenReturn(snapshot);
+        InboxController controller = new InboxController(needsYou, mock(PlanningVersionRepository.class),
+                mock(IssuePollingService.class), mock(NotificationRepository.class),
+                new ApprovalCardAssembler(mock(IterationRepository.class), mock(GitHubApiClient.class)), new ObjectMapper());
+        Model model = new ExtendedModelMap();
+        controller.inbox(model, null);
+        String html = render(model);
+        assertThat(model.getAttribute("needsYouCount")).isEqualTo(1L);
+        assertThat(model.getAttribute("totalCount")).isEqualTo(1L);
+        assertThat(html).contains("Parent #100", "href=\"/issues/70#decomposition-group\"");
+        assertThat(java.util.regex.Pattern.compile("class=\"glass-card mb-2 decomposition-inbox-card\"")
+                .matcher(html).results().count()).isEqualTo(snapshot.totalCount());
+        assertThat(html).doesNotContain("class=\"glass-card mb-2\"");
     }
 
     @Test
@@ -104,6 +142,10 @@ class InboxPageRenderTest {
         controller(issues).inbox(model, null);
 
         String html = render(model);
+
+        assertThat(model.getAttribute("needsYouSnapshot")).isInstanceOf(NeedsYouSnapshot.class);
+        assertThat(model.getAttribute("needsYouCount"))
+                .isEqualTo(((NeedsYouSnapshot) model.getAttribute("needsYouSnapshot")).totalCount());
 
         assertThat(html).contains("Nothing needs you — the loop is running itself.");
         assertThat(html).contains("2 active");
@@ -159,6 +201,12 @@ class InboxPageRenderTest {
 
         // Empty state must NOT render when there's real content.
         assertThat(html).doesNotContain("Nothing needs you — the loop is running itself.");
+        NeedsYouSnapshot snapshot = (NeedsYouSnapshot) model.getAttribute("needsYouSnapshot");
+        assertThat(snapshot.totalCount()).isEqualTo(5);
+        assertThat(model.getAttribute("needsYouCount")).isEqualTo(snapshot.totalCount());
+        assertThat(model.getAttribute("totalCount")).isEqualTo(snapshot.totalCount());
+        assertThat(java.util.regex.Pattern.compile("class=\"glass-card mb-2\"")
+                .matcher(html).results().count()).isEqualTo(snapshot.totalCount());
 
         // Four sections, each with its own stable anchor id for dashboard deep-links (#91).
         assertThat(html).contains("id=\"approvals\"");
@@ -273,7 +321,7 @@ class InboxPageRenderTest {
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL))
                 .thenReturn(List.of(approval));
         when(iterations.findByIssueOrderByIterationNumAsc(approval)).thenReturn(List.of(review));
-        InboxController controller = new InboxController(issues, mock(PlanningVersionRepository.class),
+        InboxController controller = new InboxController(snapshotFixture(issues), mock(PlanningVersionRepository.class),
                 mock(IssuePollingService.class), mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)), new ObjectMapper());
         Model model = new ExtendedModelMap();
@@ -300,7 +348,7 @@ class InboxPageRenderTest {
         when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL))
                 .thenReturn(List.of(approval));
         when(iterations.findByIssueOrderByIterationNumAsc(approval)).thenReturn(List.of(review));
-        InboxController controller = new InboxController(issues, mock(PlanningVersionRepository.class),
+        InboxController controller = new InboxController(snapshotFixture(issues), mock(PlanningVersionRepository.class),
                 mock(IssuePollingService.class), mock(NotificationRepository.class),
                 new ApprovalCardAssembler(iterations, mock(GitHubApiClient.class)), new ObjectMapper());
         Model model = new ExtendedModelMap();

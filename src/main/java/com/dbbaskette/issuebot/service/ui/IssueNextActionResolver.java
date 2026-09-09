@@ -28,6 +28,11 @@ public class IssueNextActionResolver {
                     anchored(readyReservation, "ready-to-start"),
                     IssueNextAction.Tone.WAITING, false);
         }
+        if (com.dbbaskette.issuebot.service.workflow.StageApprovalService.isStageWaiting(issue)) {
+            String stage = issue.getCurrentPhase().substring("STAGE_APPROVAL_".length()).toLowerCase();
+            return action("Choose the model where applicable and approve " + stage + " to continue.",
+                    "Review stage", anchored(issue, "stage-approval"), IssueNextAction.Tone.ACTION, true);
+        }
         return switch (issue.getStatus()) {
             case AWAITING_APPROVAL -> action(
                     issue.getPrNumber() == null ? "Review and decide the pull request."

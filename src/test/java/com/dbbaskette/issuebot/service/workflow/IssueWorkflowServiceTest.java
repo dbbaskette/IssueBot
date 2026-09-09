@@ -298,6 +298,97 @@ class IssueWorkflowServiceTest {
     // === Plan-first mode (#64) ===
 
     @Test
+    void managedPlanningWaitDoesNotTouchCheckoutOrInvokePlanning() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        StageWorkflowCoordinator stages = mock(StageWorkflowCoordinator.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", stages);
+        when(stages.planningAttempt(issue)).thenReturn(1);
+
+        workflowService.processIssue(issue);
+
+        verify(stages).before(issue, com.dbbaskette.issuebot.model.WorkflowStage.PLANNING, 1);
+        verifyNoInteractions(gitOps);
+        verify(planFirstService, never()).generateVersion(any(), any(), any());
+    }
+
+    @Test
+    void staleDispatchCannotOverwriteStageWait() {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setCurrentPhase("STAGE_APPROVAL_REVIEW");
+        when(issueRepository.findById(issue.getId())).thenReturn(Optional.of(issue));
+        StageWorkflowCoordinator stages = mock(StageWorkflowCoordinator.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", stages);
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
+        verifyNoInteractions(stages, claudeCode, gitOps);
+        verify(issueRepository, never()).save(any());
+    }
+
+    @Test
+    void managedResumePreservesImplementationProviderModelAndSession() {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        issue.setResolvedImplModel("chosen-model");
+        issue.setClaudeSessionId("existing-codex-session");
+        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        StageWorkflowCoordinator stages = mock(StageWorkflowCoordinator.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", stages);
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueBotProperties.AgentProvider.CODEX, issue.getResolvedAgentProvider());
+        assertEquals("chosen-model", issue.getResolvedImplModel());
+        assertEquals("existing-codex-session", issue.getClaudeSessionId());
+    }
+
+    @Test
+    void managedImplementationWaitStopsBeforeBranchSetup() throws Exception {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(14L, 1, "spec", "plan")));
+        StageWorkflowCoordinator stages = mock(StageWorkflowCoordinator.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", stages);
+
+        workflowService.processIssue(issue);
+
+        verify(stages).before(issue, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION, 1);
+        verifyNoInteractions(gitOps);
+        verify(claudeCode, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
+    void managedCompletionUsesConditionalMergeOfPersistedReviewedCommit() {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.AUTOMATED);
+        issue.setCurrentIteration(1);
+        issue.setPrNumber(27);
+        Iteration iteration = new Iteration(issue, 1);
+        String sha = "a".repeat(40);
+        iteration.setReviewedCommitSha(sha);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(iteration));
+        when(gitHubApi.getPullRequest("owner", "repo", 27))
+                .thenReturn(objectMapper.createObjectNode().put("merged", false).put("draft", false));
+        ManagedMergeGuard guard = mock(ManagedMergeGuard.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "managedMergeGuard", guard);
+        when(guard.validateForMerge(issue, sha)).thenReturn(sha);
+        when(gitHubApi.mergePullRequest(eq("owner"), eq("repo"), eq(27), anyString(), eq("squash"), eq(sha)))
+                .thenReturn(objectMapper.createObjectNode().put("merged", true));
+
+        workflowService.phaseRecoveryCompletion(issue, objectMapper.createObjectNode(), "branch", 1, "diff", 27, null);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        verify(guard).validateForMerge(issue, sha);
+        verify(gitHubApi, never()).mergePullRequest(anyString(), anyString(), anyInt(), anyString(), anyString());
+    }
+
+    @Test
     void planFirstGenerationFailureStopsBeforeImplementation() throws Exception {
         TrackedIssue issue = planFirstWorkflowIssue();
         IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);

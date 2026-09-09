@@ -13,8 +13,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Real H2/Hibernate exercise of the Needs You inbox's (#91) newest-first finders and the
- * {@code countNeedsYou} default method — mirrors {@link TrackedIssueRepositorySearchTest}'s
+ * Real H2/Hibernate exercise of the Needs You inbox's newest-first finders — mirrors
+ * {@link TrackedIssueRepositorySearchTest}'s
  * @DataJpaTest convention.
  */
 @DataJpaTest
@@ -65,7 +65,7 @@ class TrackedIssueRepositoryInboxQueriesTest {
     }
 
     @Test
-    void countNeedsYou_sumsAllSixBlockingStatuses() {
+    void singleStatusQueryReturnsEveryBlockingSection() {
         WatchedRepo r = repo();
         issue(r, 1, IssueStatus.AWAITING_APPROVAL);
         issue(r, 2, IssueStatus.AWAITING_PLAN_APPROVAL);
@@ -75,15 +75,22 @@ class TrackedIssueRepositoryInboxQueriesTest {
         issue(r, 6, IssueStatus.COOLDOWN);
         issue(r, 7, IssueStatus.QUEUED); // does not count
 
-        assertThat(issueRepository.countNeedsYou()).isEqualTo(6L);
+        assertThat(issueRepository.findByStatusInOrderByIdDesc(List.of(
+                IssueStatus.AWAITING_APPROVAL, IssueStatus.AWAITING_PLAN_APPROVAL,
+                IssueStatus.READY_TO_START, IssueStatus.AWAITING_DECOMPOSITION,
+                IssueStatus.FAILED, IssueStatus.COOLDOWN)))
+                .extracting(TrackedIssue::getIssueNumber).containsExactly(6, 5, 4, 3, 2, 1);
     }
 
     @Test
-    void countNeedsYou_zeroWhenNothingPending() {
+    void attentionQueryIsEmptyWhenNothingPending() {
         WatchedRepo r = repo();
         issue(r, 1, IssueStatus.QUEUED);
         issue(r, 2, IssueStatus.COMPLETED);
 
-        assertThat(issueRepository.countNeedsYou()).isEqualTo(0L);
+        assertThat(issueRepository.findByStatusInOrderByIdDesc(List.of(
+                IssueStatus.AWAITING_APPROVAL, IssueStatus.AWAITING_PLAN_APPROVAL,
+                IssueStatus.READY_TO_START, IssueStatus.AWAITING_DECOMPOSITION,
+                IssueStatus.FAILED, IssueStatus.COOLDOWN))).isEmpty();
     }
 }

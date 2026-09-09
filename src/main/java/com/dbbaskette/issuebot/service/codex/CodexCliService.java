@@ -76,6 +76,7 @@ public class CodexCliService {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(directory.toFile());
             builder.redirectErrorStream(false);
+            com.dbbaskette.issuebot.service.claude.ClaudeCodeService.sanitizeBillingEnvironment(builder.environment());
             if (planningMode) {
                 sanitizePlanningEnvironment(builder.environment());
             }
@@ -204,11 +205,22 @@ public class CodexCliService {
     }
 
     public void clearAuthCache() { cliAuthenticated = null; }
+    /** Do not trust the startup cache when approving a managed stage. */
+    public boolean checkSubscriptionAuthentication() {
+        CommandCheck check = runCheck(List.of("codex", "login", "status"));
+        return check.exitCode == 0 && isSubscriptionAuthentication(check.output);
+    }
+
+    static boolean isSubscriptionAuthentication(String output) {
+        return output != null && output.trim().equals("Logged in using ChatGPT");
+    }
     public boolean isCliAvailable() { return cliAvailable; }
 
     private CommandCheck runCheck(List<String> command) {
         try {
-            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+            com.dbbaskette.issuebot.service.claude.ClaudeCodeService.sanitizeBillingEnvironment(builder.environment());
+            Process process = builder.start();
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {
                 terminateTimedOutProcess(process);

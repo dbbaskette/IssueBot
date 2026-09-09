@@ -285,6 +285,27 @@
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>
                             <details class="lessons-details">
+                                <summary>Workflow policy</summary>
+                                <form th:action="@{'/repositories/' + ${repo.id} + '/policy'}" method="post">
+                                    <label th:for="${'workflow-policy-' + repo.id}">Workflow policy</label>
+                                    <select th:id="${'workflow-policy-' + repo.id}" name="policy">
+                                        <option value="LEGACY" th:selected="${repo.workflowPolicy.name() == 'LEGACY'}">Legacy — preserve existing controls</option>
+                                        <option value="AUTOMATED" th:selected="${repo.workflowPolicy.name() == 'AUTOMATED'}">Fully automated</option>
+                                        <option value="STAGED" th:selected="${repo.workflowPolicy.name() == 'STAGED'}">Stage approvals</option>
+                                    </select>
+                                    <fieldset>
+                                        <legend>Require approval before these stages (Stage approvals only)</legend>
+                                        <label th:each="stage : ${ {'PLANNING', 'IMPLEMENTATION', 'VERIFICATION', 'REVIEW', 'MERGE'} }" style="display:block">
+                                            <input type="checkbox" name="stages" th:value="${stage}"
+                                                   th:checked="${repo.approvalStages == null or (repo.approvalStages == '' and repo.workflowPolicy.name() == 'LEGACY') or #lists.contains(#strings.listSplit(repo.approvalStages, ','), stage)}">
+                                            <span th:text="${#strings.capitalize(#strings.toLowerCase(stage))}"></span>
+                                        </label>
+                                    </fieldset>
+                                    <p class="text-sm text-muted">Select all five for approval at every stage. Changes apply only to new runs and never approve existing waits.</p>
+                                    <button type="submit" class="btn btn-outline btn-sm">Save workflow policy</button>
+                                </form>
+                            </details>
+                            <details class="lessons-details">
                                 <summary th:text="'Lessons (' + ${lessonsByRepo.containsKey(repo.id) ? #lists.size(lessonsByRepo.get(repo.id)) : 0} + ')'">Lessons (0)</summary>
                                 <ul class="lessons-list">
                                     <li th:each="lesson : ${lessonsByRepo.get(repo.id)}">

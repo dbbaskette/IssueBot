@@ -129,6 +129,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         return claim(issue);
     }
 
@@ -156,6 +157,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
 
+        issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
         issue.setPlanConformanceAttempt(0);

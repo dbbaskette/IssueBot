@@ -164,6 +164,7 @@ public class IssueDispatchService {
         }
         String serialized = repositoryGate(issue);
         if (serialized != null) return ClaimResult.rejected(serialized);
+        issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setSuspensionReason(null);
         issues.save(issue);
@@ -204,6 +205,7 @@ public class IssueDispatchService {
         }
         String serialized = repositoryGate(issue);
         if (serialized != null) return ClaimResult.rejected(serialized);
+        issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
         issue.setPlanConformanceAttempt(0);

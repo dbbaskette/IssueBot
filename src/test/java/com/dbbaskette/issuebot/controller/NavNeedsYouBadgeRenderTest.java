@@ -99,15 +99,19 @@ class NavNeedsYouBadgeRenderTest {
         assertThat(needsYouItem).contains("Needs You");
         assertThat(needsYouItem).contains("class=\"badge\"");
         assertThat(needsYouItem).contains(">9<");
+        assertThat(needsYouItem).contains("id=\"needs-you-badge\"")
+                .doesNotContain("hidden=\"hidden\"", "display:none");
     }
 
     @Test
-    void needsYouBadge_absentWhenZeroOrNull() {
+    void needsYouBadge_remainsAddressableButHiddenWhenZeroOrNull() {
         String htmlZero = renderNav(0L, 0L);
         String htmlNull = renderNav(null, null);
 
-        assertThat(navItemFor(htmlZero, "/inbox")).doesNotContain("class=\"badge\"");
-        assertThat(navItemFor(htmlNull, "/inbox")).doesNotContain("class=\"badge\"");
+        for (String html : java.util.List.of(htmlZero, htmlNull)) {
+            assertThat(navItemFor(html, "/inbox"))
+                    .contains("id=\"needs-you-badge\"", "hidden=\"hidden\"", "display:none", ">0<");
+        }
     }
 
     @Test

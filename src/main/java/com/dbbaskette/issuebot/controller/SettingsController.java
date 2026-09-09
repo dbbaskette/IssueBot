@@ -279,7 +279,6 @@ public class SettingsController {
         model.addAttribute("config", properties);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("needsYouCount", issueRepository.countNeedsYou());
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         IssueBotProperties.AgentProvider provider = properties.getAgentProvider();

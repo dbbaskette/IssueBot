@@ -8,6 +8,18 @@ import java.time.LocalDateTime;
 @Table(name = "watched_repos", uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "name"}))
 public class WatchedRepo {
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "workflow_policy", nullable = false)
+    private WorkflowPolicy workflowPolicy = WorkflowPolicy.LEGACY;
+
+    @Column(name = "approval_stages", nullable = false)
+    private String approvalStages = WorkflowStage.ALL;
+
+    public WorkflowPolicy getWorkflowPolicy() { return workflowPolicy; }
+    public void setWorkflowPolicy(WorkflowPolicy value) { workflowPolicy = value; }
+    public String getApprovalStages() { return approvalStages; }
+    public void setApprovalStages(String value) { approvalStages = value; }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

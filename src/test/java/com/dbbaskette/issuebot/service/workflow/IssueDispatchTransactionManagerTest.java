@@ -665,6 +665,7 @@ class IssueDispatchTransactionManagerTest {
                 IssueDispatchTransactionManager.RetryMutation.none());
 
         assertThat(result.claimed()).isTrue();
+        assertThat(result.issue().getWorkflowRun()).isEqualTo(1);
         assertThat(issues.findById(issueId).orElseThrow().getStatus())
                 .isEqualTo(IssueStatus.IN_PROGRESS);
     }
@@ -696,6 +697,7 @@ class IssueDispatchTransactionManagerTest {
         TrackedIssue persisted = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
         assertThat(persisted.getStatus()).isEqualTo(IssueStatus.FAILED);
         assertThat(persisted.getPlanConformanceAttempt()).isEqualTo(2);
+        assertThat(persisted.getWorkflowRun()).isZero();
         assertThat(persisted.getCurrentIteration()).isEqualTo(0);
         assertThat(guidance.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(issueId)).isEmpty();
     }
@@ -709,6 +711,7 @@ class IssueDispatchTransactionManagerTest {
                 dispatch.claimGuidedRetry(issueId, "keep the public API", 10);
 
         assertThat(result.claimed()).isTrue();
+        assertThat(result.issue().getWorkflowRun()).isEqualTo(1);
         assertThat(result.issue().getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
         assertThat(result.issue().getPlanConformanceAttempt()).isZero();
         assertThat(result.issue().getApprovedPlanningVersion().getState())

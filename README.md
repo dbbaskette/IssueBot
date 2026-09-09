@@ -225,6 +225,16 @@ Autonomy is spread across six settings (mode, auto-start, auto-merge, decomposit
 
 ### Repository Settings
 
+The repository's **Workflow policy** provides explicit stage control:
+
+- **Legacy** preserves the existing autonomy settings and approval behavior.
+- **Staged** lets you require approval before planning, implementation, verification, independent review, and/or merge. The issue page provides **Approve and run** and provider/model selection for AI-driven stages. Verification and merge are deterministic and have no model picker.
+- **Automated** progresses end to end with an immutable plan, successful independent review, and merge checks. Authentication or verification problems still stop for attention; automation never bypasses safety checks.
+
+Policy is captured when an issue first enters the workflow; changing the repository does not rewrite active approvals. Stage decisions retain their model, actor, plan artifact, and execution-run history. Fresh retries require fresh approvals. Managed stages use Claude Code or Codex CLI subscription authentication without API-key fallback. Merges are conditional on the exact reviewed commit and current CI results.
+
+These policies are separate from the older autonomy presets above; use Legacy when you want the preset's original behavior.
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `mode` | `autonomous` | `autonomous` (auto-merge) or `approval-gated` (draft PR, human review) |
@@ -258,6 +268,8 @@ IssueBot respects dependency chains. There are two ways to declare blockers:
 Either way, IssueBot will wait until the blocking issues are completed before processing the blocked issue. Native GitHub dependencies are checked first; body text is used as a fallback.
 
 ### Dashboard
+
+**Needs You** uses one shared snapshot for its cards and navigation badge. Decomposition groups count once rather than duplicating their parent and child items. Live events and periodic refresh keep both surfaces synchronized, including transitions to and from an empty inbox. Refresh waits while you are editing an inbox field or using a dialog so your input is preserved.
 
 The web dashboard at `http://localhost:8090` provides:
 
