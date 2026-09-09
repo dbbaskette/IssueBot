@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.FollowUpMode;
 import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.model.WorkflowPolicy;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.junit.jupiter.api.Test;
@@ -368,5 +369,116 @@ class RepositoryControllerTest {
         ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
         verify(fixture.repos).save(captor.capture());
         assertThat(captor.getValue().isPlanFirst()).isTrue();
+    }
+
+    @Test
+    void oldClientWithoutWorkflowFieldsPreservesExistingPolicy() throws Exception {
+        Fixture fixture = new Fixture();
+        WatchedRepo existing = new WatchedRepo("acme", "widgets");
+        existing.setId(7L);
+        existing.setWorkflowPolicy(WorkflowPolicy.STAGED);
+        existing.setApprovalStages("PLANNING,REVIEW");
+        when(fixture.repos.findById(7L)).thenReturn(Optional.of(existing));
+
+        MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest().param("id", "7"))
+                .andExpect(status().isOk());
+
+        assertThat(existing.getWorkflowPolicy()).isEqualTo(WorkflowPolicy.STAGED);
+        assertThat(existing.getApprovalStages()).isEqualTo("PLANNING,REVIEW");
+    }
+
+    @Test
+    void mainSaveStoresValidatedPolicyAndCanonicalStages() throws Exception {
+        Fixture fixture = new Fixture();
+
+        MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest()
+                        .param("workflowPolicy", "STAGED")
+                        .param("approvalStages", "MERGE", "PLANNING", "MERGE"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<WatchedRepo> captor = ArgumentCaptor.forClass(WatchedRepo.class);
+        verify(fixture.repos).save(captor.capture());
+        assertThat(captor.getValue().getWorkflowPolicy()).isEqualTo(WorkflowPolicy.STAGED);
+        assertThat(captor.getValue().getApprovalStages()).isEqualTo("PLANNING,MERGE");
+    }
+
+    @Test
+    void invalidWorkflowInputDoesNotMutateExistingRepository() throws Exception {
+        Fixture fixture = new Fixture();
+        WatchedRepo existing = new WatchedRepo("old-owner", "old-name");
+        existing.setId(7L);
+        existing.setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
+        when(fixture.repos.findById(7L)).thenReturn(Optional.of(existing));
+
+        var result = MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest("new-owner")
+                        .param("id", "7")
+                        .param("workflowPolicy", "STAGED")
+                        .param("approvalStages", "NOT_A_STAGE"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        assertThat(existing.getOwner()).isEqualTo("old-owner");
+        assertThat(existing.getWorkflowPolicy()).isEqualTo(WorkflowPolicy.AUTOMATED);
+        verify(fixture.repos, never()).save(any());
+        String json = (String) result.getModelAndView().getModel().get("repositoryFormValues");
+        assertThat(json).contains("\"id\":7")
+                .contains("\"owner\":\"new-owner\"")
+                .contains("\"workflowPolicy\":\"STAGED\"")
+                .contains("\"approvalStages\":\"NOT_A_STAGE\"");
+    }
+
+    @Test
+    void invalidPolicyRerenderUsesPersistedEditPolicyAndRetainsOtherFields() throws Exception {
+        Fixture fixture = new Fixture();
+        WatchedRepo existing = new WatchedRepo("old-owner", "old-name");
+        existing.setId(7L);
+        existing.setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
+        when(fixture.repos.findById(7L)).thenReturn(Optional.of(existing));
+
+        var result = MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest("new-owner")
+                        .param("id", "7")
+                        .param("branch", "release")
+                        .param("workflowPolicy", "NOT_A_POLICY")
+                        .param("approvalStages", "REVIEW"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String json = (String) result.getModelAndView().getModel().get("repositoryFormValues");
+        assertThat(json).contains("\"owner\":\"new-owner\"")
+                .contains("\"workflowPolicy\":\"AUTOMATED\"")
+                .contains("\"approvalStages\":\"REVIEW\"");
+        assertThat(existing.getOwner()).isEqualTo("old-owner");
+        verify(fixture.repos, never()).save(any());
+    }
+
+    @Test
+    void invalidPolicyForNewRepositoryFallsBackToLegacy() throws Exception {
+        Fixture fixture = new Fixture();
+
+        var result = MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest()
+                        .param("workflowPolicy", "NOT_A_POLICY"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String json = (String) result.getModelAndView().getModel().get("repositoryFormValues");
+        assertThat(json).contains("\"workflowPolicy\":\"LEGACY\"");
+        verify(fixture.repos, never()).save(any());
+    }
+
+    private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder baseRequest() {
+        return baseRequest("acme");
+    }
+
+    private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder baseRequest(String owner) {
+        return post("/repositories")
+                .param("owner", owner)
+                .param("name", "widgets")
+                .param("branch", "main")
+                .param("mode", "AUTONOMOUS")
+                .param("maxIterations", "5")
+                .param("ciTimeoutMinutes", "15")
+                .param("maxReviewIterations", "2")
+                .param("followUpMode", "ROLLING_BACKLOG")
+                .param("decompositionMode", "PROPOSE");
     }
 }

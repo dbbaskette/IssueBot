@@ -53,12 +53,18 @@ class RepositoriesPageRenderTest {
     }
 
     private String render(List<WatchedRepo> repos, Map<Long, Long> issueCounts, Map<Long, Long> totalIssueCounts) {
+        return render(repos, issueCounts, totalIssueCounts, null);
+    }
+
+    private String render(List<WatchedRepo> repos, Map<Long, Long> issueCounts,
+                          Map<Long, Long> totalIssueCounts, String repositoryFormValues) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("repos", repos);
         context.setVariable("issueCounts", issueCounts);
         context.setVariable("totalIssueCounts", totalIssueCounts);
         context.setVariable("lessonsByRepo", Map.of());
         context.setVariable("modelCatalog", List.of());
+        context.setVariable("repositoryFormValues", repositoryFormValues);
 
         TemplateSpec spec = new TemplateSpec("repositories", Set.of("content"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -116,5 +122,40 @@ class RepositoriesPageRenderTest {
                 .doesNotContain("Superpowers methodology — auto design")
                 .doesNotContain("superpowersMethodology")
                 .doesNotContain("superpowers-methodology");
+    }
+
+    @Test
+    void mainFormContainsUnifiedWorkflowEditorAndNoSeparatePolicyFormOrPreset() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(7L);
+        repo.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        repo.setApprovalStages("PLANNING,REVIEW");
+
+        String html = render(List.of(repo), Map.of(7L, 0L), Map.of(7L, 0L));
+
+        assertThat(html).contains("class=\"repository-workflow-editor\"")
+                .contains("name=\"workflowPolicy\"")
+                .contains("name=\"approvalStages\"")
+                .contains("data-workflow-policy=\"STAGED\"")
+                .contains("data-approval-stages=\"PLANNING,REVIEW\"")
+                .contains("Changes apply to unstarted issues")
+                .contains("Model choices are overrides made when approving an AI stage")
+                .doesNotContain("autonomy-preset")
+                .doesNotContain("/repositories/7/policy")
+                .doesNotContain("Save workflow policy");
+    }
+
+    @Test
+    void validationRerenderOpensFormAndCarriesEscapedSubmittedSnapshot() {
+        String json = "{\"id\":7,\"owner\":\"new-owner\",\"workflowPolicy\":\"STAGED\"," +
+                "\"approvalStages\":\"PLANNING,NOT_A_STAGE\"}";
+
+        String html = render(List.of(), Map.of(), Map.of(), json);
+
+        assertThat(html).contains("id=\"add-repo-form\" class=\"panel mb-3\"")
+                .doesNotContain("class=\"panel mb-3\" hidden")
+                .contains("data-repository-form-values=")
+                .contains("&quot;new-owner&quot;")
+                .contains("&quot;PLANNING,NOT_A_STAGE&quot;");
     }
 }

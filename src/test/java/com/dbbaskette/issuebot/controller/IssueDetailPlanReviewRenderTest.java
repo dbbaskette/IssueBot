@@ -38,6 +38,51 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class IssueDetailPlanReviewRenderTest {
 
+    @Test
+    void oneDecisionOwnsEachLegacyActionBeforeHistory() {
+        for (IssueStatus status : List.of(IssueStatus.QUEUED, IssueStatus.PENDING,
+                IssueStatus.READY_TO_START, IssueStatus.AWAITING_PLAN_APPROVAL,
+                IssueStatus.AWAITING_APPROVAL, IssueStatus.FAILED, IssueStatus.COOLDOWN,
+                IssueStatus.IN_PROGRESS, IssueStatus.COMPLETED)) {
+            TrackedIssue issue = issueReadyForApproval();
+            issue.setStatus(status);
+            PlanningVersion plan = pending(issue, 3, "# Design", "# Plan", null);
+            ReflectionTestUtils.setField(plan, "id", 9003L);
+            WebContext context = context(issue, List.of(plan), plan, plan, List.of());
+            context.setVariable("nextAction", new com.dbbaskette.issuebot.service.ui.IssueNextActionResolver().resolve(issue));
+            String html = render(context);
+
+            assertThat(occurrences(html, "id=\"issue-decision\"" )).as(status + " decision surface").isEqualTo(1);
+            assertThat(html.indexOf("id=\"issue-decision\""))
+                    .isLessThan(html.indexOf("id=\"plan-review\""));
+            assertThat(html).doesNotContain("next-action-cta");
+            assertThat(occurrences(html, "data-modal-open=\"start-modal\""))
+                    .as(status + " start action").isEqualTo(
+                            status == IssueStatus.QUEUED || status == IssueStatus.PENDING || status == IssueStatus.READY_TO_START ? 1 : 0);
+            assertThat(occurrences(html, "action=\"/issues/42/retry\""))
+                    .as(status + " retry action").isEqualTo(status == IssueStatus.FAILED || status == IssueStatus.COOLDOWN ? 1 : 0);
+            assertThat(occurrences(html, "action=\"/issues/42/plan/approve\""))
+                    .as(status + " plan action").isEqualTo(status == IssueStatus.AWAITING_PLAN_APPROVAL ? 1 : 0);
+            assertThat(occurrences(html, "data-modal-open=\"issue-approve-modal\""))
+                    .as(status + " PR action").isEqualTo(status == IssueStatus.AWAITING_APPROVAL ? 1 : 0);
+            if (status == IssueStatus.AWAITING_PLAN_APPROVAL) {
+                assertThat(html).contains("id=\"plan-revision-form-9003\" hx-preserve=\"true\"",
+                        "Implementation will not start.");
+                assertThat(occurrences(html, "name=\"versionId\" value=\"9003\"" )).isEqualTo(2);
+                assertThat(html.indexOf("action=\"/issues/42/plan/approve\""))
+                        .isLessThan(html.indexOf("id=\"plan-review\""));
+            }
+            assertUniqueIds(html);
+            assertUniqueIds(render(context, "live-status-poll"));
+        }
+    }
+
+    private static void assertUniqueIds(String html) {
+        var ids = java.util.regex.Pattern.compile("\\bid=\"([^\"]+)\"").matcher(html)
+                .results().map(match -> match.group(1)).toList();
+        assertThat(ids).doesNotHaveDuplicates();
+    }
+
     private SpringTemplateEngine templateEngine;
     private IServletWebExchange webExchange;
     private MarkdownRenderer markdownRenderer;

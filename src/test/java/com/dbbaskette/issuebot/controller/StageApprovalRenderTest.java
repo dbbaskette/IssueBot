@@ -16,19 +16,32 @@ class StageApprovalRenderTest {
     @Test
     void modelDrivenStageRendersSingleApprovalActionAndSelectedModel() {
         String html = render(WorkflowStage.IMPLEMENTATION);
-        assertThat(html).contains("name=\"selection\"", "CODEX:gpt-5.5", "selected=\"selected\"", "Approve and run", "#plan-first");
-        assertThat(html.split("Approve and run", -1)).hasSize(2);
+        assertThat(html).contains("name=\"selection\"", "CODEX:gpt-5.5", "selected=\"selected\"", "Approve implementation", "#plan-first");
+        assertThat(html.split("Approve implementation", -1)).hasSize(2);
+        assertThat(html).contains("Starts implementation.", "approval is required for verification.",
+                "action=\"/issues/1/stages/2/approve\"", "id=\"stage-approval-form-2\" hx-preserve=\"true\"");
     }
 
     @Test
     void deterministicStageDoesNotRenderModelSelector() {
-        assertThat(render(WorkflowStage.MERGE)).contains("Approve and run", "#iteration-history")
+        assertThat(render(WorkflowStage.MERGE)).contains("Approve merge", "#iteration-history",
+                        "No further approval checkpoints; continues automatically to completion.")
                 .doesNotContain("name=\"selection\"");
     }
 
     @Test
+    void everyStageHasOnePreciselyNamedSubmitAction() {
+        for (WorkflowStage stage : WorkflowStage.values()) {
+            String html = render(stage, true);
+            assertThat(html.split("type=\"submit\"", -1)).hasSize(2);
+            assertThat(html).contains("Approve " + stage.name().toLowerCase(java.util.Locale.ROOT))
+                    .doesNotContain("Approve and run", "Stage decision history");
+        }
+    }
+
+    @Test
     void stageWaitUsesDedicatedCardAndSuppressesLegacyApprovalInPollRegion() {
-        assertThat(render(WorkflowStage.REVIEW, true)).contains("id=\"stage-approval\"", "Approve and run")
+        assertThat(render(WorkflowStage.REVIEW, true)).contains("id=\"stage-approval\"", "Approve review")
                 .doesNotContain("id=\"approval-decision\"", "data-modal-open=\"approve-modal\"");
     }
 

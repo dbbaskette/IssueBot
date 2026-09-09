@@ -210,30 +210,17 @@ issuebot:
         - test/
 ```
 
-### Autonomy Presets
-
-Autonomy is spread across six settings (mode, auto-start, auto-merge, decomposition mode, follow-up mode, plan-first) — configuring a new repo from scratch means understanding all of them. The dashboard's repo add/edit form offers an **Autonomy preset** selector at the top instead: **Observe**, **Assist** (default), or **Autonomous**. Picking a preset fills in the six settings below it (which live in a collapsible "Advanced settings" section); editing any of them afterward flips the selector to **Custom**. This is pure UI sugar — nothing new is persisted, and `config.yml` still only has the six underlying settings.
-
-| Setting | Observe | Assist | Autonomous |
-|---------|---------|--------|------------|
-| `mode` | `approval-gated` | `approval-gated` | `autonomous` |
-| `auto-start` | off | on | on |
-| `auto-merge` | off | off | on |
-| `decomposition-mode` | `PROPOSE` | `PROPOSE` | `AUTO` |
-| `follow-up-mode` | `COMMENT_ONLY` | `ROLLING_BACKLOG` | `ROLLING_BACKLOG` |
-| `plan-first` | on | on | on |
-
 ### Repository Settings
 
-The repository's **Workflow policy** provides explicit stage control:
+The Add/Edit Repository form contains one workflow editor and one save action for repository settings and approval policy:
 
-- **Legacy** preserves the existing autonomy settings and approval behavior.
-- **Staged** lets you require approval before planning, implementation, verification, independent review, and/or merge. The issue page provides **Approve and run** and provider/model selection for AI-driven stages. Verification and merge are deterministic and have no model picker.
-- **Automated** progresses end to end with an immutable plan, successful independent review, and merge checks. Authentication or verification problems still stop for attention; automation never bypasses safety checks.
+- **Existing settings** (`LEGACY`) preserves the existing autonomy settings and approval behavior, with the older controls available in advanced settings.
+- **Approval checkpoints** (`STAGED`) lets you require approval before planning, implementation, verification, independent review, and/or merge. On the issue page, one current-decision panel names the stage being approved, explains what starts and where execution next pauses, and offers provider/model selection for AI-driven stages. Verification and merge are deterministic and have no model picker.
+- **Automatic** (`AUTOMATED`) progresses end to end with an immutable plan, successful independent review, and merge checks. Authentication or verification problems still stop for attention; automation never bypasses safety checks.
 
 Policy is captured when an issue first enters the workflow; changing the repository does not rewrite active approvals. Stage decisions retain their model, actor, plan artifact, and execution-run history. Fresh retries require fresh approvals. Managed stages use Claude Code or Codex CLI subscription authentication without API-key fallback. Merges are conditional on the exact reviewed commit and current CI results.
 
-These policies are separate from the older autonomy presets above; use Legacy when you want the preset's original behavior.
+The editor replaces the older autonomy presets and separate policy form. Existing repositories keep their saved policy and underlying settings until you explicitly change them. Model selections made at an approval apply to that stage, not to repository defaults. Legacy plan approval remains plan-only; the issue's current-decision panel then offers the next appropriate action.
 
 | Setting | Default | Description |
 |---------|---------|-------------|

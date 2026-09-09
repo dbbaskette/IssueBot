@@ -7,12 +7,15 @@ import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.RepoMode;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.model.WorkflowPolicy;
+import com.dbbaskette.issuebot.model.WorkflowStage;
 import com.dbbaskette.issuebot.repository.*;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.RepositoryDeletionTransactionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
@@ -27,6 +30,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Controller
 @RequestMapping("/repositories")
@@ -100,6 +104,7 @@ public class RepositoryController {
     }
 
     @PostMapping
+    @Transactional
     public String addOrUpdate(Model model,
                                @RequestParam(required = false) Long id,
                                @RequestParam String owner,
@@ -126,10 +131,26 @@ public class RepositoryController {
                                @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
                                @RequestParam(required = false) String customInstructions,
                                @RequestParam(required = false, defaultValue = "false") boolean lessonsEnabled,
+                               @RequestParam(required = false) String workflowPolicy,
+                               @RequestParam(required = false) List<String> approvalStages,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
                     "Invalid repository owner/name. Use letters, numbers, '.', '_', '-' only.");
+            return ViewResolver.view("repositories", hx != null);
+        }
+        WorkflowSettings workflow;
+        try {
+            workflow = parseWorkflowSettings(workflowPolicy, approvalStages);
+        } catch (IllegalArgumentException ex) {
+            String safeWorkflowPolicy = safeWorkflowPolicy(id, workflowPolicy);
+            preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                    ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
+                    reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
+                    implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
+                    safeWorkflowPolicy, approvalStages);
+            populateModel(model, null, "Choose a valid workflow policy and approval stages.");
             return ViewResolver.view("repositories", hx != null);
         }
         WatchedRepo repo;
@@ -179,6 +200,10 @@ public class RepositoryController {
         repo.setIssueBudgetUsd(normalizeBudget(issueBudgetUsd));
         repo.setCustomInstructions(normalize(customInstructions));
         repo.setLessonsEnabled(lessonsEnabled);
+        if (workflow != null) {
+            repo.setWorkflowPolicy(workflow.policy());
+            repo.setApprovalStages(workflow.approvalStages());
+        }
         if (allowedPaths != null && !allowedPaths.isBlank()) {
             try {
                 List<String> paths = Arrays.stream(allowedPaths.split("\\s*,\\s*"))
@@ -193,6 +218,93 @@ public class RepositoryController {
         repoRepository.save(repo);
         populateModel(model, "Repository " + repo.fullName() + " saved.", null);
         return ViewResolver.view("repositories", hx != null);
+    }
+
+    /** Compatibility overload for focused fixtures and clients predating workflow fields. */
+    public String addOrUpdate(Model model, Long id, String owner, String name, String branch,
+                              String mode, int maxIterations, boolean ciEnabled, int ciTimeoutMinutes,
+                              boolean autoMerge, boolean securityReviewEnabled, int maxReviewIterations,
+                              java.math.BigDecimal reviewPassThreshold, boolean autoStart,
+                              boolean followUpEnabled, String allowedPaths, String verificationCommands,
+                              String implementationModel, String reviewModel, String followUpMode,
+                              String decompositionMode, boolean preScreenEnabled, boolean planFirst,
+                              java.math.BigDecimal issueBudgetUsd, String customInstructions,
+                              boolean lessonsEnabled, String hx) {
+        return addOrUpdate(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
+                reviewPassThreshold, autoStart, followUpEnabled, allowedPaths, verificationCommands,
+                implementationModel, reviewModel, followUpMode, decompositionMode, preScreenEnabled,
+                planFirst, issueBudgetUsd, customInstructions, lessonsEnabled, null, null, hx);
+    }
+
+    private record WorkflowSettings(WorkflowPolicy policy, String approvalStages) {}
+
+    private static WorkflowSettings parseWorkflowSettings(String policy, List<String> stages) {
+        if (policy == null) return null;
+        WorkflowPolicy selected = WorkflowPolicy.valueOf(policy);
+        String selectedStages = stages == null ? "" : stages.stream()
+                .flatMap(value -> Arrays.stream(value.split(",")))
+                .map(String::trim)
+                .map(WorkflowStage::valueOf)
+                .distinct()
+                .sorted()
+                .map(Enum::name)
+                .collect(Collectors.joining(","));
+        return new WorkflowSettings(selected, selectedStages);
+    }
+
+    private String safeWorkflowPolicy(Long id, String submittedPolicy) {
+        try {
+            return WorkflowPolicy.valueOf(submittedPolicy).name();
+        } catch (IllegalArgumentException | NullPointerException invalidPolicy) {
+            if (id == null) return WorkflowPolicy.LEGACY.name();
+            return repoRepository.findById(id)
+                    .map(WatchedRepo::getWorkflowPolicy)
+                    .map(Enum::name)
+                    .orElse(WorkflowPolicy.LEGACY.name());
+        }
+    }
+
+    private static void preserveSubmittedForm(Model model, Long id, String owner, String name,
+            String branch, String mode, int maxIterations, boolean ciEnabled, int ciTimeoutMinutes,
+            boolean autoMerge, boolean securityReviewEnabled, int maxReviewIterations,
+            java.math.BigDecimal reviewPassThreshold, boolean autoStart, String allowedPaths,
+            String verificationCommands, String implementationModel, String reviewModel,
+            String followUpMode, String decompositionMode, boolean preScreenEnabled,
+            boolean planFirst, java.math.BigDecimal issueBudgetUsd, String customInstructions,
+            boolean lessonsEnabled, String workflowPolicy, List<String> approvalStages) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("id", id);
+        values.put("owner", owner);
+        values.put("name", name);
+        values.put("branch", branch);
+        values.put("mode", mode);
+        values.put("maxIterations", maxIterations);
+        values.put("ciEnabled", ciEnabled);
+        values.put("ciTimeoutMinutes", ciTimeoutMinutes);
+        values.put("autoMerge", autoMerge);
+        values.put("securityReviewEnabled", securityReviewEnabled);
+        values.put("maxReviewIterations", maxReviewIterations);
+        values.put("reviewPassThreshold", reviewPassThreshold);
+        values.put("autoStart", autoStart);
+        values.put("allowedPaths", allowedPaths);
+        values.put("verificationCommands", verificationCommands);
+        values.put("implementationModel", implementationModel);
+        values.put("reviewModel", reviewModel);
+        values.put("followUpMode", followUpMode);
+        values.put("decompositionMode", decompositionMode);
+        values.put("preScreenEnabled", preScreenEnabled);
+        values.put("planFirst", planFirst);
+        values.put("issueBudgetUsd", issueBudgetUsd);
+        values.put("customInstructions", customInstructions);
+        values.put("lessonsEnabled", lessonsEnabled);
+        values.put("workflowPolicy", workflowPolicy);
+        values.put("approvalStages", approvalStages == null ? "" : String.join(",", approvalStages));
+        try {
+            model.addAttribute("repositoryFormValues", new ObjectMapper().writeValueAsString(values));
+        } catch (JsonProcessingException impossible) {
+            throw new IllegalStateException("Could not preserve repository form values", impossible);
+        }
     }
 
     @DeleteMapping("/{id}")

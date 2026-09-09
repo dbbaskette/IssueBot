@@ -330,7 +330,8 @@ class IssueDetailLayoutRenderTest {
         String html = renderContent(failed, List.of());
 
         assertThat(html).contains("id=\"recovery\"", "class=\"panel mb-3 failure-recovery recovery-card\"");
-        assertThat(html).contains("href=\"#recovery\"");
+        assertThat(html).contains("id=\"issue-decision\"")
+                .doesNotContain("href=\"#recovery\"", "next-action-cta");
         assertThat(html).doesNotContain("id=\"retry-modal\"");
     }
 

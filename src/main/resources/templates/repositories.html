@@ -12,7 +12,7 @@
     </div>
 
     <!-- Add/Edit Form -->
-    <div id="add-repo-form" class="panel mb-3" hidden>
+    <div id="add-repo-form" class="panel mb-3" th:hidden="${repositoryFormValues == null}">
         <div class="panel-header">
             <h3 id="form-title">Add Repository</h3>
             <button class="btn btn-outline btn-sm" type="button" data-cancel-form>
@@ -21,23 +21,9 @@
         </div>
         <div class="panel-body">
             <form hx-post="/repositories" hx-target="#content" hx-swap="innerHTML"
+                  th:attr="data-repository-form-values=${repositoryFormValues}"
                   hx-disabled-elt="find button[type='submit']">
                 <input type="hidden" id="edit-id" name="id" value="">
-
-                <!-- Autonomy preset -->
-                <h4 class="form-section-title"><i class="ti ti-gauge" aria-hidden="true"></i> Autonomy</h4>
-                <div class="form-grid">
-                    <div class="field-group full-width">
-                        <label for="autonomy-preset">Autonomy preset</label>
-                        <select id="autonomy-preset">
-                            <option value="OBSERVE">Observe</option>
-                            <option value="ASSIST" selected>Assist</option>
-                            <option value="AUTONOMOUS">Autonomous</option>
-                            <option value="CUSTOM">Custom</option>
-                        </select>
-                        <p class="text-muted" id="preset-description">IssueBot plans first and works automatically after approval, but PRs wait for you.</p>
-                    </div>
-                </div>
 
                 <!-- Identity -->
                 <h4 class="form-section-title"><i class="ti ti-brand-github" aria-hidden="true"></i> Repository</h4>
@@ -56,19 +42,87 @@
                     </div>
                 </div>
 
+                <section class="repository-workflow-editor" aria-labelledby="repository-workflow-title">
+                    <h4 id="repository-workflow-title" class="form-section-title"><i class="ti ti-route" aria-hidden="true"></i> Workflow</h4>
+                    <fieldset class="workflow-policy-options">
+                        <legend>How should work proceed?</legend>
+                        <label class="workflow-policy-option">
+                            <input type="radio" name="workflowPolicy" value="AUTOMATED">
+                            <span><strong>Automatic</strong><small>Run every stage without routine approval checkpoints.</small></span>
+                        </label>
+                        <label class="workflow-policy-option">
+                            <input type="radio" name="workflowPolicy" value="STAGED">
+                            <span><strong>Approval checkpoints</strong><small>Pause before the stages you select below.</small></span>
+                        </label>
+                        <label class="workflow-policy-option">
+                            <input type="radio" name="workflowPolicy" value="LEGACY" checked>
+                            <span><strong>Existing settings</strong><small>Use the older mode, start, merge and plan controls unchanged.</small></span>
+                        </label>
+                    </fieldset>
+
+                    <fieldset class="workflow-checkpoints" data-workflow-checkpoints>
+                        <legend>Require approval before these stages</legend>
+                        <label class="workflow-stage-row">
+                            <input type="checkbox" name="approvalStages" value="PLANNING" checked>
+                            <span><strong>Planning</strong><small>Choose the provider and model when approving this AI stage.</small></span>
+                        </label>
+                        <label class="workflow-stage-row">
+                            <input type="checkbox" name="approvalStages" value="IMPLEMENTATION" checked>
+                            <span><strong>Implementation</strong><small>Choose the provider and model at approval. Repository default: <span data-implementation-model-summary>global default</span>.</small></span>
+                        </label>
+                        <label class="workflow-stage-row">
+                            <input type="checkbox" name="approvalStages" value="VERIFICATION" checked>
+                            <span><strong>Verification</strong><small>Review local checks before the workflow continues.</small></span>
+                        </label>
+                        <label class="workflow-stage-row">
+                            <input type="checkbox" name="approvalStages" value="REVIEW" checked>
+                            <span><strong>Review</strong><small>Choose the provider and model at approval. Repository default: <span data-review-model-summary>global default</span>.</small></span>
+                        </label>
+                        <label class="workflow-stage-row">
+                            <input type="checkbox" name="approvalStages" value="MERGE" checked>
+                            <span><strong>Merge</strong><small>Review the completed pull request before merging.</small></span>
+                        </label>
+                        <p class="text-sm text-muted">Model choices are overrides made when approving an AI stage; this form does not save models per stage.</p>
+                    </fieldset>
+
+                    <details class="workflow-existing-settings" data-workflow-existing-settings open>
+                        <summary>Existing workflow settings</summary>
+                        <p class="text-sm text-muted">These controls apply only when Existing settings is selected. Choosing a managed workflow hides them without changing their saved values.</p>
+                        <div class="form-grid">
+                            <div class="field-group">
+                                <label for="mode">Mode</label>
+                                <select id="mode" name="mode">
+                                    <option value="AUTONOMOUS">Autonomous</option>
+                                    <option value="APPROVAL_GATED">Approval Gated</option>
+                                </select>
+                            </div>
+                            <div class="checkbox-field">
+                                <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
+                                <label for="auto-start">Auto-start issues</label>
+                            </div>
+                            <div class="checkbox-field">
+                                <input type="checkbox" id="auto-merge" name="autoMerge" value="true">
+                                <label for="auto-merge">Auto-merge PRs (squash)</label>
+                            </div>
+                            <div class="field-group full-width">
+                                <div class="checkbox-field">
+                                    <input type="checkbox" id="plan-first" name="planFirst" value="true" checked>
+                                    <label for="plan-first">Plan First (recommended)</label>
+                                </div>
+                                <input type="hidden" id="plan-first-opt-out" name="planFirst" value="false" disabled>
+                            </div>
+                        </div>
+                    </details>
+                    <p class="workflow-summary" data-workflow-summary aria-live="polite">Existing settings control when IssueBot pauses, starts work and merges.</p>
+                    <p class="text-sm text-muted">Changes apply to unstarted issues. Active issues keep the workflow snapshot they already started with.</p>
+                </section>
+
                 <details id="advanced-settings">
                     <summary>Advanced settings</summary>
 
                     <!-- Workflow -->
                     <h4 class="form-section-title"><i class="ti ti-route" aria-hidden="true"></i> Workflow</h4>
                     <div class="form-grid">
-                        <div class="field-group">
-                            <label for="mode">Mode</label>
-                            <select id="mode" name="mode">
-                                <option value="AUTONOMOUS">Autonomous</option>
-                                <option value="APPROVAL_GATED">Approval Gated</option>
-                            </select>
-                        </div>
                         <div class="field-group">
                             <label for="max-iterations">Max Iterations</label>
                             <input type="number" id="max-iterations" name="maxIterations" value="5" min="1" max="20">
@@ -101,10 +155,6 @@
                                 <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                             </select>
                         </div>
-                        <div class="checkbox-field">
-                            <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
-                            <label for="auto-start">Auto-start issues</label>
-                        </div>
                         <div class="field-group">
                             <label for="follow-up-mode">Review findings handling</label>
                             <select id="follow-up-mode" name="followUpMode">
@@ -126,23 +176,11 @@
                             <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
                             <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
                         </div>
-                        <div class="field-group full-width">
-                            <div class="checkbox-field" style="padding-bottom:0">
-                                <input type="checkbox" id="plan-first" name="planFirst" value="true" checked>
-                                <label for="plan-first">Plan First (recommended)</label>
-                            </div>
-                            <input type="hidden" id="plan-first-opt-out" name="planFirst" value="false" disabled>
-                            <p class="text-sm text-muted">Creates a design spec and implementation plan for approval before code changes. Turn this off to skip that approval contract.</p>
-                        </div>
                     </div>
 
                     <!-- Safety -->
                     <h4 class="form-section-title"><i class="ti ti-shield-lock" aria-hidden="true"></i> Safety</h4>
                     <div class="form-grid">
-                        <div class="checkbox-field">
-                            <input type="checkbox" id="auto-merge" name="autoMerge" value="true">
-                            <label for="auto-merge">Auto-merge PRs (squash)</label>
-                        </div>
                         <div class="checkbox-field">
                             <input type="checkbox" id="security-review" name="securityReviewEnabled" value="true">
                             <label for="security-review">Security review (OWASP)</label>
@@ -273,7 +311,9 @@
                                              data-implementation-model=${repo.implementationModel},
                                              data-review-model=${repo.reviewModel},
                                              data-custom-instructions=${repo.customInstructions},
-                                             data-lessons-enabled=${repo.lessonsEnabled}">
+                                             data-lessons-enabled=${repo.lessonsEnabled},
+                                             data-workflow-policy=${repo.workflowPolicy.name()},
+                                             data-approval-stages=${repo.approvalStages}">
                                 <i class="ti ti-edit" aria-hidden="true"></i> Edit
                             </button>
                             <button class="btn btn-danger btn-sm" type="button"
@@ -284,27 +324,6 @@
                                              data-delete-url=@{'/repositories/' + ${repo.id}}">
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>
-                            <details class="lessons-details">
-                                <summary>Workflow policy</summary>
-                                <form th:action="@{'/repositories/' + ${repo.id} + '/policy'}" method="post">
-                                    <label th:for="${'workflow-policy-' + repo.id}">Workflow policy</label>
-                                    <select th:id="${'workflow-policy-' + repo.id}" name="policy">
-                                        <option value="LEGACY" th:selected="${repo.workflowPolicy.name() == 'LEGACY'}">Legacy — preserve existing controls</option>
-                                        <option value="AUTOMATED" th:selected="${repo.workflowPolicy.name() == 'AUTOMATED'}">Fully automated</option>
-                                        <option value="STAGED" th:selected="${repo.workflowPolicy.name() == 'STAGED'}">Stage approvals</option>
-                                    </select>
-                                    <fieldset>
-                                        <legend>Require approval before these stages (Stage approvals only)</legend>
-                                        <label th:each="stage : ${ {'PLANNING', 'IMPLEMENTATION', 'VERIFICATION', 'REVIEW', 'MERGE'} }" style="display:block">
-                                            <input type="checkbox" name="stages" th:value="${stage}"
-                                                   th:checked="${repo.approvalStages == null or (repo.approvalStages == '' and repo.workflowPolicy.name() == 'LEGACY') or #lists.contains(#strings.listSplit(repo.approvalStages, ','), stage)}">
-                                            <span th:text="${#strings.capitalize(#strings.toLowerCase(stage))}"></span>
-                                        </label>
-                                    </fieldset>
-                                    <p class="text-sm text-muted">Select all five for approval at every stage. Changes apply only to new runs and never approve existing waits.</p>
-                                    <button type="submit" class="btn btn-outline btn-sm">Save workflow policy</button>
-                                </form>
-                            </details>
                             <details class="lessons-details">
                                 <summary th:text="'Lessons (' + ${lessonsByRepo.containsKey(repo.id) ? #lists.size(lessonsByRepo.get(repo.id)) : 0} + ')'">Lessons (0)</summary>
                                 <ul class="lessons-list">
