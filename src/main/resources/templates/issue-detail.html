@@ -50,22 +50,6 @@
                 <div th:fragment="status-actions(oob)" id="status-actions" class="flex gap-1" style="align-items:center"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                     <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${humanize.status(issue.status)}">Status</span>
-                    <a th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
-                                   and showPlanGuidance != true}"
-                            href="#recovery" class="btn btn-ghost btn-sm"
-                            th:disabled="${processingMode?.name() != 'RUNNING'}"
-                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Review recovery options'}">
-                        <i class="ti ti-refresh" aria-hidden="true"></i>
-                        <span th:text="${issue.status.name() == 'COOLDOWN' ? 'Retry now' : 'Retry'}">Retry</span>
-                    </a>
-                    <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
-                            type="button" class="btn btn-primary btn-sm"
-                            th:disabled="${processingMode?.name() != 'RUNNING'}"
-                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start this issue now'}"
-                            data-modal-open="start-modal">
-                        <i class="ti ti-player-play" aria-hidden="true"></i>
-                        <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
-                    </button>
                     <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL' and issue.status.name() != 'READY_TO_START'
                                        and not (decompositionGroup != null and decompositionGroup.parent() and decompositionGroup.releasable())}"
                             type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
@@ -78,88 +62,29 @@
                 </div>
             </div>
 
+            <!-- One decision surface; independently refreshed children preserve poll/dialog boundaries. -->
+            <section id="issue-decision" class="issue-decision panel mb-3" aria-label="Current issue decision">
             <section th:fragment="next-action-callout(oob)" id="next-action-callout"
-                     th:if="${nextAction != null}"
-                     class="next-action-callout mb-3"
-                     th:classappend="${' next-action--' + nextAction.tone().name().toLowerCase()}"
+                     class="next-action-callout issue-decision__summary"
+                     th:classappend="${nextAction != null ? ' next-action--' + nextAction.tone().name().toLowerCase() : ''}"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}"
                      aria-labelledby="next-action-heading">
                 <div>
-                    <span class="eyebrow">Next action</span>
-                    <p id="next-action-heading" th:text="${nextAction.summary()}">Review the current issue state.</p>
+                    <span class="eyebrow">Current decision</span>
+                    <p id="next-action-heading" th:text="${nextAction != null ? nextAction.summary() : humanize.status(issue.status)}">Review the current issue state.</p>
+                    <a th:if="${nextAction != null and nextAction.hasAction() and not nextAction.actionRequired() and nextAction.href().contains('#')}"
+                       class="text-sm issue-decision__evidence" th:href="${nextAction.href()}"
+                       th:text="${nextAction.ctaLabel()}">View evidence</a>
                 </div>
-                <a th:if="${nextAction.hasAction()}" class="btn btn-outline btn-sm next-action-cta"
-                   th:href="${nextAction.href()}" th:text="${nextAction.ctaLabel()}">View issue</a>
+                    <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
+                            type="button" class="btn btn-primary btn-sm"
+                            th:disabled="${processingMode?.name() != 'RUNNING'}"
+                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start this issue now'}"
+                            data-modal-open="start-modal">
+                        <i class="ti ti-player-play" aria-hidden="true"></i>
+                        <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
+                    </button>
             </section>
-
-            <section th:if="${decompositionGroup != null}" id="decomposition-group"
-                     class="panel mb-3 decomposition-progress"
-                     aria-labelledby="decomposition-title">
-                <header class="panel-header decomposition-progress__header">
-                    <div>
-                        <span class="eyebrow">Ordered decomposition</span>
-                        <h3 id="decomposition-title"
-                            th:text="${'Parent #' + decompositionGroup.parentNumber()
-                                + ' · ' + decompositionGroup.completedCount()
-                                + ' of ' + decompositionGroup.totalCount() + ' complete'}">
-                            Parent #153 · 1 of 4 complete
-                        </h3>
-                    </div>
-                    <span class="status"
-                          th:classappend="${decompositionGroup.state().name() == 'NEEDS_ATTENTION'
-                              ? 'status-failed' : (decompositionGroup.state().name() == 'COMPLETED'
-                              ? 'status-completed' : 'status-in_progress')}"
-                          th:text="${humanize.status(decompositionGroup.state().name())}">Active</span>
-                </header>
-                <div class="panel-body">
-                    <div class="decomposition-progress__bar" role="progressbar"
-                         th:aria-valuenow="${decompositionGroup.progressPercent()}"
-                         aria-valuemin="0" aria-valuemax="100">
-                        <span th:style="'width:' + ${decompositionGroup.progressPercent()} + '%'"></span>
-                    </div>
-                    <p th:if="${decompositionGroup.attentionReason() != null}"
-                       class="alert alert-warning" th:text="${decompositionGroup.attentionReason()}"></p>
-                    <ol class="decomposition-steps">
-                        <li th:each="child : ${decompositionGroup.children()}"
-                            th:classappend="${child.current() ? ' is-current' : ''}
-                                + ${child.status() != null and child.status().name() == 'COMPLETED' ? ' is-complete' : ''}">
-                            <span class="decomposition-step__number">
-                                <i th:if="${child.status() != null and child.status().name() == 'COMPLETED'}"
-                                   class="ti ti-check" aria-hidden="true"></i>
-                                <span th:unless="${child.status() != null and child.status().name() == 'COMPLETED'}"
-                                      th:text="${child.position()}">1</span>
-                            </span>
-                            <div>
-                                <a th:if="${child.trackedIssueId() != null}"
-                                   th:href="@{'/issues/' + ${child.trackedIssueId()}}"
-                                   th:text="${'#' + child.issueNumber() + ' · ' + child.title()}">#155 · First</a>
-                                <strong th:unless="${child.trackedIssueId() != null}"
-                                        th:text="${child.title()}">Creating child</strong>
-                                <small th:text="${child.current() ? 'Current — repository reserved'
-                                    : (child.status() == null ? 'Creating'
-                                    : humanize.status(child.status()))}">Queued</small>
-                            </div>
-                        </li>
-                    </ol>
-                    <details th:if="${decompositionGroup.parent() and decompositionGroup.releasable()}"
-                             class="decomposition-release">
-                        <summary>Release repository control</summary>
-                        <p class="text-sm text-muted">Stops active work safely, cancels unfinished children, and leaves the parent open for follow-up.</p>
-                        <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/release'}" method="post">
-                            <label for="decomposition-release-reason">Reason for releasing</label>
-                            <textarea id="decomposition-release-reason" name="reason" rows="3"
-                                      maxlength="2000" required
-                                      placeholder="Why should this ordered decomposition stop?"></textarea>
-                            <button type="submit" class="btn btn-danger btn-sm">Release control</button>
-                        </form>
-                    </details>
-                </div>
-            </section>
-
-            <div th:if="${issue.status.name() == 'PENDING' and issue.suspensionReason != null}"
-                 class="alert alert-info" role="status">
-                <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
-            </div>
 
             <section th:if="${issue.status.name() == 'READY_TO_START'}"
                      id="ready-to-start" class="panel mb-3 ready-start-card"
@@ -210,6 +135,7 @@
                     <p th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}" class="text-sm text-muted"
                        th:text="'Cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></p>
                     <form th:action="@{'/issues/' + ${issue.id} + '/retry'}" method="post"
+                          th:id="${'recovery-form-' + issue.id + '-' + issue.currentIteration}" hx-preserve="true"
                           th:with="reviewerInfrastructure=${latestFailureDiagnostic != null
                                 and latestFailureDiagnostic.category.name() == 'REVIEW_INFRASTRUCTURE'}">
                         <label for="recoveryInstructions"
@@ -296,7 +222,8 @@
                             </div>
                         </li>
                     </ol>
-                    <form class="plan-guidance-form" th:action="@{'/issues/' + ${issue.id} + '/plan/retry-implementation'}" method="post">
+                    <form class="plan-guidance-form" th:action="@{'/issues/' + ${issue.id} + '/plan/retry-implementation'}" method="post"
+                          th:id="${'plan-guidance-form-' + issue.id + '-' + issue.currentIteration}" hx-preserve="true">
                         <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
                         <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
                                   placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
@@ -306,6 +233,208 @@
                     </form>
                 </div>
             </section>
+            </div>
+
+            <!-- === INLINE APPROVAL DECISION: the wrapper is always present so the live poll can
+                   hydrate this previously-empty region out of band when a running issue reaches
+                   AWAITING_APPROVAL. It remains outside #live-status, so ordinary morph polling
+                   never replaces an already-rendered decision card. === -->
+            <div th:fragment="approval-decision-region(oob)" id="approval-decision-region"
+                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+            <div th:replace="~{fragments/stage-approval :: card}"></div>
+            <section class="issue-decision__plan"
+                     th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' and currentPlanningVersion != null}">
+                <h3>Review the current plan</h3>
+                <p th:if="${selectedPlanIsHistorical}">You are viewing historical evidence. Return to the current version before deciding.</p>
+                <a th:href="@{'/issues/' + ${issue.id} + '#plan-review'}"
+                   th:text="${'Review current plan · version ' + currentPlanningVersion.versionNumber}">Review current plan</a>
+                <div class="plan-review-actions"
+                     th:if="${not selectedPlanIsHistorical
+                              and currentPlanningVersion != null
+                              and currentPlanningVersion.state.name() == 'PENDING'
+                              and issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
+                    <form class="plan-revision-form" th:action="@{'/issues/' + ${issue.id} + '/plan/revise'}" method="post"
+                          th:id="${'plan-revision-form-' + currentPlanningVersion.id}" hx-preserve="true">
+                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
+                        <label for="plan-revision-feedback">What should change?</label>
+                        <textarea id="plan-revision-feedback" name="feedback" rows="3" required maxlength="4000"
+                                  data-plan-revision-guidance
+                                  placeholder="Describe the missing requirement or incorrect approach."></textarea>
+                        <button type="submit" class="btn btn-ghost" data-plan-revise disabled>Revise Spec &amp; Plan</button>
+                    </form>
+                    <form class="plan-approval-form" th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
+                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
+                        <p>Approves this specification and plan. Implementation will not start.</p>
+                        <button type="submit" class="btn btn-primary"
+                                th:text="${'Approve Version ' + currentPlanningVersion.versionNumber}">Approve Version 3</button>
+                    </form>
+                </div>
+            </section>
+
+            <section th:if="${issue.status.name() == 'AWAITING_APPROVAL' and (issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_'))}"
+                     id="approval-decision" class="panel mb-3 approval-decision-card"
+                     aria-labelledby="approval-decision-title">
+                <header class="panel-header">
+                    <div>
+                        <span class="eyebrow">Ready for your decision</span>
+                        <h3 id="approval-decision-title">Approval decision</h3>
+                    </div>
+                    <span class="status status-awaiting_approval">Awaiting approval</span>
+                </header>
+                <div class="panel-body">
+                    <div class="approval-decision-evidence" aria-label="Approval evidence">
+                        <span class="status" th:classappend="${'ci-' + (approvalCiStatus != null ? approvalCiStatus : 'unknown')}">
+                            <i class="ti" aria-hidden="true"
+                               th:classappend="${approvalCiStatus == 'passed' ? 'ti-circle-check' : (approvalCiStatus == 'failed' ? 'ti-circle-x' : (approvalCiStatus == 'pending' ? 'ti-clock' : 'ti-help-circle'))}"></i>
+                            <span th:text="${approvalCiStatus == 'passed' ? 'CI passed' : (approvalCiStatus == 'failed' ? 'CI failed' : (approvalCiStatus == 'pending' ? 'CI pending' : 'CI unknown'))}">CI unknown</span>
+                        </span>
+                        <span class="status"
+                              th:classappend="${approvalReviewScore == null or approvalReviewScore.passed == null ? 'status-pending' : (approvalReviewScore.passed ? 'status-completed' : 'status-failed')}">
+                            <i class="ti" aria-hidden="true"
+                               th:classappend="${approvalReviewScore != null and approvalReviewScore.passed == true ? 'ti-circle-check' : (approvalReviewScore != null and approvalReviewScore.passed == false ? 'ti-circle-x' : 'ti-help-circle')}"></i>
+                            <span th:text="${approvalReviewScore == null or approvalReviewScore.passed == null ? 'Review unavailable' : (approvalReviewScore.passed ? 'Review passed' : 'Review failed')}">Review unavailable</span>
+                        </span>
+                        <span class="badge approval-decision-score"
+                              th:if="${approvalReviewScore != null and approvalReviewScore.overall != null}"
+                              th:text="${approvalReviewScore.overallPercent + '%'}">90%</span>
+                    </div>
+
+                    <p>Approve this pull request to continue the configured completion workflow, or reject it with feedback.</p>
+                    <div class="approval-decision-actions">
+                        <button type="button" class="btn btn-primary"
+                                data-modal-open="issue-approve-modal">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve
+                        </button>
+                        <button type="button" class="btn btn-danger"
+                                aria-expanded="false"
+                                th:attr="data-reject-toggle=${issue.id},aria-controls=${'reject-form-' + issue.id}">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject
+                        </button>
+                        <a th:if="${approvalPrUrl != null and issue.prNumber != null and issue.prNumber > 0}"
+                           th:href="${approvalPrUrl}" target="_blank" rel="noopener"
+                           class="btn btn-ghost">
+                            <i class="ti ti-external-link" aria-hidden="true"></i>
+                            <span th:text="${'View PR #' + issue.prNumber}">View PR</span>
+                        </a>
+                    </div>
+
+                    <div id="issue-reject-form" class="approval-reject-region">
+                        <div th:id="${'reject-form-' + issue.id}" hx-preserve="true" hidden class="mt-2 glass-card"
+                             style="padding:1rem">
+                            <form th:action="@{'/approvals/' + ${issue.id} + '/reject'}" method="post">
+                                <input type="hidden" name="returnTo" value="issue">
+                                <label class="text-sm" style="font-weight:600;display:block;margin-bottom:0.4rem"
+                                       th:for="${'issue-rejection-feedback-' + issue.id}">Rejection feedback</label>
+                                <textarea th:id="${'issue-rejection-feedback-' + issue.id}" name="feedback" rows="3"
+                                          th:attr="data-reject-textarea=${issue.id}"
+                                          class="modal-textarea"
+                                          placeholder="Describe what needs to change…" required></textarea>
+                                <div class="modal-actions">
+                                    <button type="button" class="btn btn-ghost btn-sm"
+                                            th:attr="data-reject-cancel=${issue.id}">Cancel</button>
+                                    <button type="submit" class="btn btn-danger btn-sm">Submit rejection</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            </div>
+
+            <!-- === DECOMPOSITION PROPOSAL CARD === -->
+            <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}" class="panel mb-3">
+                <div class="panel-header">
+                    <h3>Proposed Split</h3>
+                    <div class="flex gap-1">
+                        <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-decomposition-modal">
+                            <i class="ti ti-check" aria-hidden="true"></i> Approve split
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-decomposition-modal">
+                            <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <ol class="decomposition-proposal-list">
+                        <li th:each="sub : ${decompositionProposal}">
+                            <strong th:text="${sub['title']}">Sub-issue title</strong>
+                            <div class="text-sm text-muted" th:text="${sub['description']}">Sub-issue description</div>
+                        </li>
+                    </ol>
+                </div>
+            </div>
+
+            </section>
+
+            <div th:replace="~{fragments/stage-approval :: history(false)}"></div>
+
+            <section th:if="${decompositionGroup != null}" id="decomposition-group"
+                     class="panel mb-3 decomposition-progress"
+                     aria-labelledby="decomposition-title">
+                <header class="panel-header decomposition-progress__header">
+                    <div>
+                        <span class="eyebrow">Ordered decomposition</span>
+                        <h3 id="decomposition-title"
+                            th:text="${'Parent #' + decompositionGroup.parentNumber()
+                                + ' · ' + decompositionGroup.completedCount()
+                                + ' of ' + decompositionGroup.totalCount() + ' complete'}">
+                            Parent #153 · 1 of 4 complete
+                        </h3>
+                    </div>
+                    <span class="status"
+                          th:classappend="${decompositionGroup.state().name() == 'NEEDS_ATTENTION'
+                              ? 'status-failed' : (decompositionGroup.state().name() == 'COMPLETED'
+                              ? 'status-completed' : 'status-in_progress')}"
+                          th:text="${humanize.status(decompositionGroup.state().name())}">Active</span>
+                </header>
+                <div class="panel-body">
+                    <div class="decomposition-progress__bar" role="progressbar"
+                         th:aria-valuenow="${decompositionGroup.progressPercent()}"
+                         aria-valuemin="0" aria-valuemax="100">
+                        <span th:style="'width:' + ${decompositionGroup.progressPercent()} + '%'"></span>
+                    </div>
+                    <p th:if="${decompositionGroup.attentionReason() != null}"
+                       class="alert alert-warning" th:text="${decompositionGroup.attentionReason()}"></p>
+                    <ol class="decomposition-steps">
+                        <li th:each="child : ${decompositionGroup.children()}"
+                            th:classappend="${child.current() ? ' is-current' : ''}
+                                + ${child.status() != null and child.status().name() == 'COMPLETED' ? ' is-complete' : ''}">
+                            <span class="decomposition-step__number">
+                                <i th:if="${child.status() != null and child.status().name() == 'COMPLETED'}"
+                                   class="ti ti-check" aria-hidden="true"></i>
+                                <span th:unless="${child.status() != null and child.status().name() == 'COMPLETED'}"
+                                      th:text="${child.position()}">1</span>
+                            </span>
+                            <div>
+                                <a th:if="${child.trackedIssueId() != null}"
+                                   th:href="@{'/issues/' + ${child.trackedIssueId()}}"
+                                   th:text="${'#' + child.issueNumber() + ' · ' + child.title()}">#155 · First</a>
+                                <strong th:unless="${child.trackedIssueId() != null}"
+                                        th:text="${child.title()}">Creating child</strong>
+                                <small th:text="${child.current() ? 'Current — repository reserved'
+                                    : (child.status() == null ? 'Creating'
+                                    : humanize.status(child.status()))}">Queued</small>
+                            </div>
+                        </li>
+                    </ol>
+                    <details th:if="${decompositionGroup.parent() and decompositionGroup.releasable()}"
+                             class="decomposition-release">
+                        <summary>Release repository control</summary>
+                        <p class="text-sm text-muted">Stops active work safely, cancels unfinished children, and leaves the parent open for follow-up.</p>
+                        <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/release'}" method="post">
+                            <label for="decomposition-release-reason">Reason for releasing</label>
+                            <textarea id="decomposition-release-reason" name="reason" rows="3"
+                                      maxlength="2000" required
+                                      placeholder="Why should this ordered decomposition stop?"></textarea>
+                            <button type="submit" class="btn btn-danger btn-sm">Release control</button>
+                        </form>
+                    </details>
+                </div>
+            </section>
+
+            <div th:if="${issue.status.name() == 'PENDING' and issue.suspensionReason != null}"
+                 class="alert alert-info" role="status">
+                <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
             </div>
 
             <!-- === REVIEW SCORE TRAJECTORY: selected attempt against its nearest scored baseline === -->
@@ -403,82 +532,6 @@
                 </div>
             </section>
 
-            <!-- === INLINE APPROVAL DECISION: the wrapper is always present so the live poll can
-                   hydrate this previously-empty region out of band when a running issue reaches
-                   AWAITING_APPROVAL. It remains outside #live-status, so ordinary morph polling
-                   never replaces an already-rendered decision card. === -->
-            <div th:fragment="approval-decision-region(oob)" id="approval-decision-region"
-                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-            <div th:replace="~{fragments/stage-approval :: card}"></div>
-            <section th:if="${issue.status.name() == 'AWAITING_APPROVAL' and (issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_'))}"
-                     id="approval-decision" class="panel mb-3 approval-decision-card"
-                     aria-labelledby="approval-decision-title">
-                <header class="panel-header">
-                    <div>
-                        <span class="eyebrow">Ready for your decision</span>
-                        <h3 id="approval-decision-title">Approval decision</h3>
-                    </div>
-                    <span class="status status-awaiting_approval">Awaiting approval</span>
-                </header>
-                <div class="panel-body">
-                    <div class="approval-decision-evidence" aria-label="Approval evidence">
-                        <span class="status" th:classappend="${'ci-' + (approvalCiStatus != null ? approvalCiStatus : 'unknown')}">
-                            <i class="ti" aria-hidden="true"
-                               th:classappend="${approvalCiStatus == 'passed' ? 'ti-circle-check' : (approvalCiStatus == 'failed' ? 'ti-circle-x' : (approvalCiStatus == 'pending' ? 'ti-clock' : 'ti-help-circle'))}"></i>
-                            <span th:text="${approvalCiStatus == 'passed' ? 'CI passed' : (approvalCiStatus == 'failed' ? 'CI failed' : (approvalCiStatus == 'pending' ? 'CI pending' : 'CI unknown'))}">CI unknown</span>
-                        </span>
-                        <span class="status"
-                              th:classappend="${approvalReviewScore == null or approvalReviewScore.passed == null ? 'status-pending' : (approvalReviewScore.passed ? 'status-completed' : 'status-failed')}">
-                            <i class="ti" aria-hidden="true"
-                               th:classappend="${approvalReviewScore != null and approvalReviewScore.passed == true ? 'ti-circle-check' : (approvalReviewScore != null and approvalReviewScore.passed == false ? 'ti-circle-x' : 'ti-help-circle')}"></i>
-                            <span th:text="${approvalReviewScore == null or approvalReviewScore.passed == null ? 'Review unavailable' : (approvalReviewScore.passed ? 'Review passed' : 'Review failed')}">Review unavailable</span>
-                        </span>
-                        <span class="badge approval-decision-score"
-                              th:if="${approvalReviewScore != null and approvalReviewScore.overall != null}"
-                              th:text="${approvalReviewScore.overallPercent + '%'}">90%</span>
-                    </div>
-
-                    <div class="approval-decision-actions">
-                        <button type="button" class="btn btn-primary"
-                                data-modal-open="issue-approve-modal">
-                            <i class="ti ti-check" aria-hidden="true"></i> Approve
-                        </button>
-                        <button type="button" class="btn btn-danger"
-                                aria-expanded="false"
-                                th:attr="data-reject-toggle=${issue.id},aria-controls=${'reject-form-' + issue.id}">
-                            <i class="ti ti-x" aria-hidden="true"></i> Reject
-                        </button>
-                        <a th:if="${approvalPrUrl != null and issue.prNumber != null and issue.prNumber > 0}"
-                           th:href="${approvalPrUrl}" target="_blank" rel="noopener"
-                           class="btn btn-ghost">
-                            <i class="ti ti-external-link" aria-hidden="true"></i>
-                            <span th:text="${'View PR #' + issue.prNumber}">View PR</span>
-                        </a>
-                    </div>
-
-                    <div id="issue-reject-form" class="approval-reject-region">
-                        <div th:id="${'reject-form-' + issue.id}" hidden class="mt-2 glass-card"
-                             style="padding:1rem">
-                            <form th:action="@{'/approvals/' + ${issue.id} + '/reject'}" method="post">
-                                <input type="hidden" name="returnTo" value="issue">
-                                <label class="text-sm" style="font-weight:600;display:block;margin-bottom:0.4rem"
-                                       th:for="${'issue-rejection-feedback-' + issue.id}">Rejection feedback</label>
-                                <textarea th:id="${'issue-rejection-feedback-' + issue.id}" name="feedback" rows="3"
-                                          th:attr="data-reject-textarea=${issue.id}"
-                                          class="modal-textarea"
-                                          placeholder="Describe what needs to change…" required></textarea>
-                                <div class="modal-actions">
-                                    <button type="button" class="btn btn-ghost btn-sm"
-                                            th:attr="data-reject-cancel=${issue.id}">Cancel</button>
-                                    <button type="submit" class="btn btn-danger btn-sm">Submit rejection</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            </div>
-
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
                 <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
@@ -494,29 +547,6 @@
                        th:text="${'#' + num}">
                         #5
                     </a>
-                </div>
-            </div>
-
-            <!-- === DECOMPOSITION PROPOSAL CARD === -->
-            <div th:if="${issue.status.name() == 'AWAITING_DECOMPOSITION' and decompositionProposal != null}" class="panel mb-3">
-                <div class="panel-header">
-                    <h3>Proposed Split</h3>
-                    <div class="flex gap-1">
-                        <button type="button" class="btn btn-primary btn-sm" data-modal-open="approve-decomposition-modal">
-                            <i class="ti ti-check" aria-hidden="true"></i> Approve split
-                        </button>
-                        <button type="button" class="btn btn-danger btn-sm" data-modal-open="reject-decomposition-modal">
-                            <i class="ti ti-x" aria-hidden="true"></i> Reject &amp; escalate
-                        </button>
-                    </div>
-                </div>
-                <div class="panel-body">
-                    <ol class="decomposition-proposal-list">
-                        <li th:each="sub : ${decompositionProposal}">
-                            <strong th:text="${sub['title']}">Sub-issue title</strong>
-                            <div class="text-sm text-muted" th:text="${sub['description']}">Sub-issue description</div>
-                        </li>
-                    </ol>
                 </div>
             </div>
 
@@ -623,26 +653,6 @@
                     </div>
                 </div>
 
-                <div class="plan-review-actions"
-                     th:if="${not selectedPlanIsHistorical
-                              and currentPlanningVersion != null
-                              and currentPlanningVersion.state.name() == 'PENDING'
-                              and issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
-                    <form class="plan-revision-form" th:action="@{'/issues/' + ${issue.id} + '/plan/revise'}" method="post">
-                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
-                        <label for="plan-revision-feedback">What should change?</label>
-                        <textarea id="plan-revision-feedback" name="feedback" rows="3" required maxlength="4000"
-                                  data-plan-revision-guidance
-                                  placeholder="Describe the missing requirement or incorrect approach."></textarea>
-                        <button type="submit" class="btn btn-ghost" data-plan-revise disabled>Revise Spec &amp; Plan</button>
-                    </form>
-                    <form class="plan-approval-form" th:action="@{'/issues/' + ${issue.id} + '/plan/approve'}" method="post">
-                        <input type="hidden" name="versionId" th:value="${currentPlanningVersion.id}">
-                        <p>Approves this specification and plan. Implementation will not start.</p>
-                        <button type="submit" class="btn btn-primary"
-                                th:text="${'Approve Version ' + currentPlanningVersion.versionNumber}">Approve Version 3</button>
-                    </form>
-                </div>
             </section>
             </div>
 
@@ -1261,6 +1271,7 @@
     <div th:replace="~{issue-detail :: goal-budget(true)}"></div>
     <div th:replace="~{issue-detail :: timeline-panel(true)}"></div>
     <div th:replace="~{issue-detail :: approval-decision-region(true)}"></div>
+    <div th:replace="~{fragments/stage-approval :: history(true)}"></div>
     <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
     <div th:replace="~{issue-detail :: next-action-callout(true)}"></div>
     <div th:replace="~{issue-detail :: recovery-region(true)}"></div>

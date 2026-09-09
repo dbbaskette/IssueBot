@@ -264,7 +264,7 @@ class IssueDetailLivePollRenderTest {
                     .doesNotContain("action=\"/issues/36/retry\"");
             assertThat(terminalPoll)
                     .contains("id=\"next-action-callout\"")
-                    .contains("href=\"/issues/36#recovery\"")
+                    .doesNotContain("next-action-cta", "href=\"/issues/36#recovery\"")
                     .contains("id=\"recovery\" hx-swap-oob=\"true\"")
                     .contains("action=\"/issues/36/retry\" method=\"post\"")
                     .contains("Guidance for the next attempt")

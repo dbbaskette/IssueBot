@@ -48,6 +48,9 @@ class IssueNextActionRenderTest {
     private String render(IssueNextAction nextAction) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("nextAction", nextAction);
+        TrackedIssue issue = new TrackedIssue();
+        issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
+        context.setVariable("issue", issue);
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("next-action-callout"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
@@ -71,10 +74,9 @@ class IssueNextActionRenderTest {
         String activeHtml = render(actionFor(IssueStatus.IN_PROGRESS));
         String completedHtml = render(actionFor(IssueStatus.COMPLETED));
 
-        assertThat(planHtml).contains("Next action", "Review and approve the current plan.",
-                        "href=\"/issues/7#plan-review\"")
-                .contains("next-action--action");
-        assertThat(activeHtml).contains("IssueBot is Implementation.", "View progress")
+        assertThat(planHtml).contains("Current decision", "Review and approve the current plan.")
+                .contains("next-action--action").doesNotContain("next-action-cta");
+        assertThat(activeHtml).contains("IssueBot is Implementation.")
                 .contains("next-action--active");
         assertThat(completedHtml).contains("No action needed — completed.")
                 .doesNotContain("next-action-cta");
