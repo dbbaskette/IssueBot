@@ -55,3 +55,18 @@ git diff --check
 ```
 
 Result: exit 0. JavaScript: 7 tests passed. Java: 32 tests passed (26 controller and 6 render). Diff check clean.
+
+## Review fix round 2
+
+- A rejected invalid policy now restores a valid, submit-safe choice: the persisted repository policy for an edit, or Existing settings for a new repository. Other submitted fields and stage selections remain in the backing snapshot.
+- The browser loader independently falls back to Existing settings if an unknown policy reaches it, so a subsequent save never silently omits `workflowPolicy`.
+
+Command:
+
+```text
+node --test src/test/js/repository-workflow.test.js
+./mvnw -q -Dtest=RepositoryControllerTest,RepositoriesPageRenderTest test
+git diff --check
+```
+
+Result: exit 0. JavaScript: 8 tests passed. Java: 34 tests passed (28 controller and 6 render). Diff check clean.

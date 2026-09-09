@@ -143,12 +143,13 @@ public class RepositoryController {
         try {
             workflow = parseWorkflowSettings(workflowPolicy, approvalStages);
         } catch (IllegalArgumentException ex) {
+            String safeWorkflowPolicy = safeWorkflowPolicy(id, workflowPolicy);
             preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
                     ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
                     reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
                     implementationModel, reviewModel, followUpMode, decompositionMode,
                     preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
-                    workflowPolicy, approvalStages);
+                    safeWorkflowPolicy, approvalStages);
             populateModel(model, null, "Choose a valid workflow policy and approval stages.");
             return ViewResolver.view("repositories", hx != null);
         }
@@ -250,6 +251,18 @@ public class RepositoryController {
                 .map(Enum::name)
                 .collect(Collectors.joining(","));
         return new WorkflowSettings(selected, selectedStages);
+    }
+
+    private String safeWorkflowPolicy(Long id, String submittedPolicy) {
+        try {
+            return WorkflowPolicy.valueOf(submittedPolicy).name();
+        } catch (IllegalArgumentException | NullPointerException invalidPolicy) {
+            if (id == null) return WorkflowPolicy.LEGACY.name();
+            return repoRepository.findById(id)
+                    .map(WatchedRepo::getWorkflowPolicy)
+                    .map(Enum::name)
+                    .orElse(WorkflowPolicy.LEGACY.name());
+        }
     }
 
     private static void preserveSubmittedForm(Model model, Long id, String owner, String name,

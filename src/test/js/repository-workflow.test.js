@@ -106,3 +106,14 @@ test('edit load leaves the staged values that the form will submit on save', () 
   assert.equal(submittedPolicy, 'STAGED');
   assert.deepEqual(submittedStages, ['IMPLEMENTATION', 'VERIFICATION', 'MERGE']);
 });
+
+test('unknown policy load explicitly falls back to a submit-safe legacy choice', () => {
+  const doc = domFixture();
+
+  workflow.load(doc, 'NOT_A_POLICY', 'PLANNING');
+
+  assert.equal(doc.policies.find(input => input.checked).value, 'LEGACY');
+  assert.equal(doc.elements.existing.hidden, false);
+  assert.equal(doc.elements.summary.textContent,
+    'Existing settings control when IssueBot pauses, starts work and merges.');
+});

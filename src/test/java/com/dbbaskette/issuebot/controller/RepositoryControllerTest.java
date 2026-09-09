@@ -427,6 +427,44 @@ class RepositoryControllerTest {
                 .contains("\"approvalStages\":\"NOT_A_STAGE\"");
     }
 
+    @Test
+    void invalidPolicyRerenderUsesPersistedEditPolicyAndRetainsOtherFields() throws Exception {
+        Fixture fixture = new Fixture();
+        WatchedRepo existing = new WatchedRepo("old-owner", "old-name");
+        existing.setId(7L);
+        existing.setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
+        when(fixture.repos.findById(7L)).thenReturn(Optional.of(existing));
+
+        var result = MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest("new-owner")
+                        .param("id", "7")
+                        .param("branch", "release")
+                        .param("workflowPolicy", "NOT_A_POLICY")
+                        .param("approvalStages", "REVIEW"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String json = (String) result.getModelAndView().getModel().get("repositoryFormValues");
+        assertThat(json).contains("\"owner\":\"new-owner\"")
+                .contains("\"workflowPolicy\":\"AUTOMATED\"")
+                .contains("\"approvalStages\":\"REVIEW\"");
+        assertThat(existing.getOwner()).isEqualTo("old-owner");
+        verify(fixture.repos, never()).save(any());
+    }
+
+    @Test
+    void invalidPolicyForNewRepositoryFallsBackToLegacy() throws Exception {
+        Fixture fixture = new Fixture();
+
+        var result = MockMvcBuilders.standaloneSetup(fixture.controller).build().perform(baseRequest()
+                        .param("workflowPolicy", "NOT_A_POLICY"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String json = (String) result.getModelAndView().getModel().get("repositoryFormValues");
+        assertThat(json).contains("\"workflowPolicy\":\"LEGACY\"");
+        verify(fixture.repos, never()).save(any());
+    }
+
     private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder baseRequest() {
         return baseRequest("acme");
     }
