@@ -249,6 +249,9 @@ code {
 }
 
 .sidebar h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--font-sans);
     font-size: 1.15rem;
     font-weight: 600;
@@ -257,16 +260,11 @@ code {
     margin: 0;
 }
 
-.sidebar h1::before {
-    content: '';
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    margin-right: 0.55rem;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 10px var(--accent-border);
-    vertical-align: middle;
+.sidebar .brand-icon {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    object-fit: contain;
 }
 
 .sidebar ul {

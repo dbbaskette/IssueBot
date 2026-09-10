@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/branding/issuebot-wordmark.png" alt="IssueBot" width="420">
+</p>
+
 # IssueBot
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)

@@ -34,6 +34,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class LayoutSseAndAgentStatusRenderTest {
 
+    @Test
+    void rendersBrandIconAndFaviconWithoutReplacingAccessibleName() throws Exception {
+        String html = renderFullDashboardPage(false);
+        assertThat(html).contains("class=\"brand-icon\"", "src=\"/images/issuebot-icon.png\"",
+                "width=\"28\" height=\"28\" alt=\"\">IssueBot</h1>",
+                "rel=\"icon\" type=\"image/png\" href=\"/images/issuebot-icon.png\"");
+        try (var stream = getClass().getResourceAsStream("/static/images/issuebot-icon.png")) {
+            assertThat(stream).isNotNull();
+            var icon = javax.imageio.ImageIO.read(stream);
+            assertThat(icon).isNotNull();
+            assertThat(icon.getWidth()).isEqualTo(icon.getHeight());
+            assertThat(icon.getColorModel().hasAlpha()).isTrue();
+        }
+        try (var stream = getClass().getResourceAsStream("/static/css/style.css")) {
+            assertThat(stream).isNotNull();
+            String css = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(css).contains(".sidebar .brand-icon {").doesNotContain(".sidebar h1::before");
+        }
+    }
+
     private SpringTemplateEngine templateEngine;
     private IServletWebExchange webExchange;
 
