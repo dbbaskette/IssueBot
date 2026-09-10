@@ -129,8 +129,9 @@ class IssueDetailReadyToStartRenderTest {
         String card = slice(html, "id=\"ready-to-start\"", "id=\"recovery\"");
 
         assertThat(card)
-                .contains("disabled=\"disabled\"")
-                .contains("Processing is waiting for current work to finish and will not start another issue.");
+                .doesNotContain("disabled=\"disabled\"")
+                .contains("Start manually while paused");
+        assertThat(html).contains("action=\"/issues/42/start-manual\"", "name=\"implementationReasoningEffort\"", "name=\"reviewReasoningEffort\"");
         assertThat(slice(card, "<button type=\"button\" class=\"btn btn-ghost\"", "</button>"))
                 .doesNotContain("disabled=\"disabled\"");
     }
@@ -148,7 +149,7 @@ class IssueDetailReadyToStartRenderTest {
                 .contains("action=\"/issues/42/start\" method=\"post\"")
                 .contains("action=\"/issues/42/ready/release\" method=\"post\"");
         assertThat(template)
-                .contains("th:action=\"@{'/issues/' + ${issue.id} + '/start'}\" method=\"post\"")
+                .contains("th:action=\"@{'/issues/' + ${issue.id} + ${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? '/start-manual' : '/start'}}\"")
                 .contains("th:action=\"@{'/issues/' + ${issue.id} + '/ready/release'}\" method=\"post\"");
     }
 

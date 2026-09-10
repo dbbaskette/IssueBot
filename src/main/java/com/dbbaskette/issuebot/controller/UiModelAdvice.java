@@ -25,6 +25,12 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 @ControllerAdvice
 public class UiModelAdvice {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.boot.info.BuildProperties build;
+
+    @ModelAttribute("applicationVersion")
+    public String applicationVersion() { return build == null ? "development" : build.getVersion(); }
+
     private final IssueBotProperties properties;
     private final ProcessingControlService processingControl;
 

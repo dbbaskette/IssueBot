@@ -56,11 +56,18 @@ cd "$ISSUEBOT_CHECKOUT"
 if [[ "$skip_build" == false ]]; then
   ./mvnw --batch-mode clean verify
 else
-  [[ -f "$ISSUEBOT_CHECKOUT/target/issuebot-0.1.0-SNAPSHOT.jar" ]] || {
+  [[ -f "$ISSUEBOT_CHECKOUT/target/issuebot.jar" ]] || {
     printf 'ERROR: --skip-build requires an existing application jar\n' >&2
     exit 1
   }
 fi
+
+# Immutable, content-addressed jars protect the running JVM from later Maven builds.
+mkdir -p "$ISSUEBOT_STATE_DIR/releases"
+release_digest="$(shasum -a 256 target/issuebot.jar | awk '{print $1}')"
+release_jar="$ISSUEBOT_STATE_DIR/releases/issuebot-$release_digest.jar"
+[[ -f "$release_jar" ]] || install -m 0600 target/issuebot.jar "$release_jar"
+ln -sfn "$release_jar" "$ISSUEBOT_STATE_DIR/releases/current.jar"
 
 rendered_plist="$(mktemp "${TMPDIR:-/tmp}/issuebot-launchd.XXXXXX")"
 trap 'rm -f "$rendered_plist"' EXIT

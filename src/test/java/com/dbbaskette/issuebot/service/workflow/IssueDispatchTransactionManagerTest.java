@@ -36,7 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @DataJpaTest
-@Import({IssueDispatchTransactionManager.class, PlanFirstTransactionManager.class})
+@Import({IssueDispatchTransactionManager.class, PlanFirstTransactionManager.class, ProcessingControlService.class, WorkflowCancellationService.class})
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"
@@ -64,6 +64,65 @@ class IssueDispatchTransactionManagerTest {
             control.setState(ProcessingState.RUNNING);
             controls.saveAndFlush(control);
         });
+    }
+
+    @Test
+    void resetPausesAndPreservesPlanAndHistory() {
+        Long id = seedApprovedIssue(IssueStatus.FAILED, 0);
+        var result = dispatch.resetAndPause(id);
+        assertThat(result.transitioned()).isTrue();
+        var saved = issues.findByIdWithApprovedPlanningVersion(id).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(saved.getApprovedPlanningVersion()).isNotNull();
+        assertThat(saved.getWorkflowRun()).isEqualTo(1);
+        assertThat(controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow().getState())
+                .isEqualTo(ProcessingState.PAUSE_AFTER_CURRENT);
+        assertThat(dispatch.claimStart(id).claimed()).isFalse();
+        assertThat(dispatch.claimManualStart(id, 100, issue -> null,
+                IssueDispatchTransactionManager.StartMutation.none()).claimed()).isTrue();
+        finishTestIssue(id);
+        assertThat(controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow().getState())
+                .isEqualTo(ProcessingState.PAUSE_AFTER_CURRENT);
+    }
+
+    @Test
+    void resetRejectsActiveWorkWithoutPausing() {
+        Long id = seedIssue(IssueStatus.IN_PROGRESS, 901, null);
+        assertThat(dispatch.resetAndPause(id).transitioned()).isFalse();
+        assertThat(issues.findById(id).orElseThrow().getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        finishTestIssue(id);
+        assertThat(controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow().getState())
+                .isEqualTo(ProcessingState.RUNNING);
+    }
+
+    private void finishTestIssue(Long id) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(id).orElseThrow();
+            issue.setStatus(IssueStatus.COMPLETED);
+            issues.saveAndFlush(issue);
+        });
+    }
+
+    @Test
+    void manualDispatchStillChecksDependenciesAndStop() {
+        Long id = seedIssue(IssueStatus.FAILED, 902, null);
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(id).orElseThrow();
+            issue.setBlockedByIssues("388");
+            issues.saveAndFlush(issue);
+        });
+        dispatch.resetAndPause(id);
+        var result = dispatch.claimManualStart(id, 100, issue -> null,
+                IssueDispatchTransactionManager.StartMutation.none());
+        assertThat(result.claimed()).isFalse();
+        assertThat(result.reason()).contains("#388");
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var control = controls.findById(ProcessingControl.SINGLETON_ID).orElseThrow();
+            control.setState(ProcessingState.STOPPED);
+            controls.saveAndFlush(control);
+        });
+        assertThat(dispatch.claimManualStart(id, 100, issue -> null,
+                IssueDispatchTransactionManager.StartMutation.none()).claimed()).isFalse();
     }
 
     @Test

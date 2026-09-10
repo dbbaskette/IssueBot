@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="picker(modelId, fieldName, selected)" class="field-group"
+     data-reasoning-picker th:attr="data-reasoning-catalog=${reasoningCatalogJson},data-codex-active=${codexProvider}">
+    <label th:for="${modelId + '-reasoning'}">Reasoning level</label>
+    <select th:id="${modelId + '-reasoning'}" th:name="${fieldName}" th:attr="data-for-model=${modelId}">
+        <option value="">Use inherited reasoning</option>
+        <option th:each="level : ${#strings.arraySplit('low,medium,high,xhigh,max,ultra', ',')}"
+                th:value="${level}" th:text="${level}" th:selected="${level == selected}"></option>
+    </select>
+    <small class="text-muted">Codex only. Choices follow the selected model; blank inherits the configured effort.</small>
+</div>
+</body>
+</html>

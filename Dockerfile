@@ -20,7 +20,7 @@ RUN groupadd --non-unique --gid "${APP_GID}" issuebot \
     && useradd --non-unique --uid "${APP_UID}" --gid issuebot --create-home --shell /usr/sbin/nologin issuebot \
     && install --directory --owner issuebot --group issuebot /home/issuebot/.issuebot /app
 
-COPY --from=build --chown=issuebot:issuebot /workspace/target/issuebot-*.jar /app/issuebot.jar
+COPY --from=build --chown=issuebot:issuebot /workspace/target/issuebot.jar /app/issuebot.jar
 
 USER issuebot
 WORKDIR /home/issuebot

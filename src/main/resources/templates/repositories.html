@@ -147,6 +147,7 @@
                                 <option value="">Inherit global</option>
                                 <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                             </select>
+                            <div th:replace="~{fragments/reasoning :: picker('implementation-model', 'implementationReasoningEffort', null)}"></div>
                         </div>
                         <div class="field-group">
                             <label for="review-model">Review model (blank = inherit global)</label>
@@ -156,6 +157,7 @@
                             </select>
                         </div>
                         <div class="field-group">
+                            <div th:replace="~{fragments/reasoning :: picker('review-model', 'reviewReasoningEffort', null)}"></div>
                             <label for="follow-up-mode">Review findings handling</label>
                             <select id="follow-up-mode" name="followUpMode">
                                 <option value="ROLLING_BACKLOG">Rolling backlog issue (recommended)</option>
@@ -308,6 +310,8 @@
                                              data-plan-first=${repo.planFirst},
                                              data-allowed-paths=${repo.allowedPaths},
                                              data-verification-commands=${repo.verificationCommands},
+                                             data-implementation-reasoning-effort=${repo.implementationReasoningEffort},
+                                             data-review-reasoning-effort=${repo.reviewReasoningEffort},
                                              data-implementation-model=${repo.implementationModel},
                                              data-review-model=${repo.reviewModel},
                                              data-custom-instructions=${repo.customInstructions},

@@ -7,6 +7,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "stage_approvals", uniqueConstraints = @UniqueConstraint(columnNames = {"issue_id", "run_number", "stage", "attempt", "artifact_version_id"}))
 public class StageApproval {
+    private String reasoningEffort;
+    public String getReasoningEffort() { return reasoningEffort; }
+    public void setReasoningEffort(String value) { reasoningEffort = value; }
+
     @Column(name = "run_number", nullable = false)
     private int runNumber;
 

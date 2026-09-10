@@ -78,11 +78,10 @@
                 </div>
                     <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                             type="button" class="btn btn-primary btn-sm"
-                            th:disabled="${processingMode?.name() != 'RUNNING'}"
-                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start this issue now'}"
+                            th:disabled="${processingMode?.name() == 'STOPPED'}" title="Start this issue; when paused, the automatic queue stays paused"
                             data-modal-open="start-modal">
                         <i class="ti ti-player-play" aria-hidden="true"></i>
-                        <span th:text="${issue.status.name() == 'PENDING' ? 'Start now' : 'Start'}">Start</span>
+                        <span th:text="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start manually while paused' : (issue.status.name() == 'PENDING' ? 'Start now' : 'Start')}">Start</span>
                     </button>
             </section>
 
@@ -100,9 +99,9 @@
                     <p>Implementation is waiting for you. This issue is holding the repository's next-work slot.</p>
                     <div class="ready-start-actions">
                         <button type="button" class="btn btn-primary"
-                                th:disabled="${processingMode?.name() != 'RUNNING'}"
-                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start implementation'}"
-                                th:aria-label="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start implementation — processing is waiting for current work to finish' : (processingMode?.name() == 'STOPPED' ? 'Start implementation — processing must be restarted first' : null)}"
+                                th:disabled="${processingMode?.name() == 'STOPPED'}"
+                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start only this issue; automatic processing remains paused.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start implementation'}"
+                                th:aria-label="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start manually while paused — automatic processing stays paused' : (processingMode?.name() == 'STOPPED' ? 'Start implementation — processing must be restarted first' : null)}"
                                 data-modal-open="start-modal">Start implementation</button>
                         <button type="button" class="btn btn-ghost"
                                 data-modal-open="release-ready-modal">Return to queue</button>
@@ -115,6 +114,16 @@
                    recovery are mutually exclusive contents of this one stable target. === -->
             <div th:fragment="recovery-region(oob)" id="recovery"
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+    <section th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN' or issue.status.name() == 'BLOCKED'}" class="panel mb-3">
+        <div class="panel-body">
+            <h3>Recover blocked work</h3>
+            <p>Return this issue to the queue and pause automatic processing. History, approved plans, and dependencies stay intact; other active work can finish. Then open the prerequisite issue and start it manually while paused.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/reset-and-pause'}" method="post">
+                <button class="btn btn-warning" type="submit">Reset and pause</button>
+            </form>
+        </div>
+    </section>
+
             <section class="panel mb-3 failure-recovery recovery-card"
                      th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
                                   and showPlanGuidance != true}">
@@ -150,6 +159,7 @@
                                     <option value="" selected>Use repo/global setting</option>
                                     <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                                 </select>
+                    <div th:replace="~{fragments/reasoning :: picker('recoveryImplModel', 'implementationReasoningEffort', ${issue.implementationReasoningEffort})}"></div>
                             </div>
                             <div class="field-group">
                                 <label for="recoveryReviewModel">Review model</label>
@@ -157,6 +167,7 @@
                                     <option value="" selected>Use repo/global setting</option>
                                     <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                                 </select>
+                    <div th:replace="~{fragments/reasoning :: picker('recoveryReviewModel', 'reviewReasoningEffort', ${issue.reviewReasoningEffort})}"></div>
                             </div>
                             <div class="field-group">
                                 <label for="recoveryBudget">Budget override (USD)</label>
@@ -935,13 +946,14 @@
                 th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue'}">Start Issue</h3>
             <p class="text-sm text-muted" style="margin:0 0 1rem"
                th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation from the approved specification and plan?' : 'Start processing this issue now?'}">Start processing this issue now?</p>
-            <form th:action="@{'/issues/' + ${issue.id} + '/start'}" method="post">
+            <form th:action="@{'/issues/' + ${issue.id} + ${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? '/start-manual' : '/start'}}" method="post">
                 <div class="field-group">
                     <label for="startImplModel">Implementation model for this run (optional)</label>
                     <select id="startImplModel" name="implModelOverride" data-modal-autofocus>
                         <option value="" selected>Use repo/global setting</option>
                         <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                     </select>
+                    <div th:replace="~{fragments/reasoning :: picker('startImplModel', 'implementationReasoningEffort', ${issue.implementationReasoningEffort})}"></div>
                 </div>
                 <div class="field-group">
                     <label for="startReviewModel">Review model for this run (optional)</label>
@@ -949,6 +961,7 @@
                         <option value="" selected>Use repo/global setting</option>
                         <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                     </select>
+                    <div th:replace="~{fragments/reasoning :: picker('startReviewModel', 'reviewReasoningEffort', ${issue.reviewReasoningEffort})}"></div>
                 </div>
                 <div class="field-group">
                     <label for="startBudgetOverride">Budget for this issue (USD, blank = use repo setting)</label>
@@ -966,10 +979,10 @@
                 <div class="modal-actions">
                     <button type="button" class="btn btn-ghost btn-sm" data-modal-close>Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm"
-                            th:disabled="${processingMode?.name() != 'RUNNING'}"
-                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start implementation'}"
-                            th:aria-label="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start implementation — processing is waiting for current work to finish' : (processingMode?.name() == 'STOPPED' ? 'Start implementation — processing must be restarted first' : null)}"
-                            th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue'}">Start Issue</button>
+                            th:disabled="${processingMode?.name() == 'STOPPED'}"
+                            th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start only this issue; automatic processing remains paused.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start implementation'}"
+                            th:aria-label="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start manually while paused — automatic processing stays paused' : (processingMode?.name() == 'STOPPED' ? 'Start implementation — processing must be restarted first' : null)}"
+                            th:text="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Start manually while paused' : (issue.status.name() == 'READY_TO_START' ? 'Start implementation' : 'Start Issue')}">Start Issue</button>
                 </div>
             </form>
         </div>

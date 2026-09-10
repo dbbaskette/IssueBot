@@ -43,19 +43,19 @@ public class ProcessingControlService {
     }
 
     @Transactional
-    public synchronized void pauseAfterCurrent() {
+    public void pauseAfterCurrent() {
         transitionTo(ProcessingState.PAUSE_AFTER_CURRENT);
     }
 
     @Transactional
-    public synchronized void stopNow() {
+    public void stopNow() {
         if (!transitionTo(ProcessingState.STOPPED)) return;
         issues.findByStatus(IssueStatus.IN_PROGRESS).forEach(issue ->
                 cancellationService.requestCancel(issue.getId(), CancellationReason.OPERATOR_STOP));
     }
 
     @Transactional
-    public synchronized void restart() {
+    public void restart() {
         transitionTo(ProcessingState.RUNNING);
     }
 
@@ -65,7 +65,12 @@ public class ProcessingControlService {
         if (control.getState() == next) return false;
         control.setState(next);
         repository.save(control);
-        mode.set(next);
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { mode.set(next); }
+                });
+        } else mode.set(next);
         return true;
     }
 }

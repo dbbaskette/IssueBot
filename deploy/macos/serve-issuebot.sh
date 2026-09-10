@@ -12,7 +12,12 @@ readonly DEPLOY_CONFIG="${ISSUEBOT_DEPLOY_CONFIG:-$SCRIPT_DIR/home-server.env}"
 # shellcheck disable=SC1090
 source "$DEPLOY_CONFIG"
 
-readonly ISSUEBOT_JAR="$ISSUEBOT_CHECKOUT/target/issuebot-0.1.0-SNAPSHOT.jar"
+# Resolve the release link once: subsequent builds/deploys must never replace a running JVM's jar.
+readonly ISSUEBOT_JAR="$(readlink "$ISSUEBOT_STATE_DIR/releases/current.jar")"
+[[ "$ISSUEBOT_JAR" == "$ISSUEBOT_STATE_DIR/releases/issuebot-"*.jar ]] || {
+  printf 'ERROR: install a release with deploy/macos/install-service.sh first\n' >&2
+  exit 1
+}
 
 [[ -f "$ISSUEBOT_RUNTIME_ENV" && ! -L "$ISSUEBOT_RUNTIME_ENV" ]] || {
   printf 'ERROR: protected runtime environment is missing or unsafe: %s\n' "$ISSUEBOT_RUNTIME_ENV" >&2

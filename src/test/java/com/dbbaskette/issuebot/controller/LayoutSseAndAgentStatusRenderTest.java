@@ -109,7 +109,7 @@ class LayoutSseAndAgentStatusRenderTest {
 
         String pausing = renderFullDashboardPage(true, ProcessingState.PAUSE_AFTER_CURRENT);
         assertThat(pausing).contains("Pausing after current",
-                "Current work will finish; no queued issue will start.",
+                "Current work will finish; automatic starts are paused. You can start one issue manually.",
                 "Stop now", "Restart processing", "action=\"/processing/restart\"",
                 "action=\"/processing/stop-now\"");
         assertThat(pausing).doesNotContain("pause-after-current-modal");

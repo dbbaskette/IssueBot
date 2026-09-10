@@ -7,6 +7,14 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "watched_repos", uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "name"}))
 public class WatchedRepo {
+    private String implementationReasoningEffort;
+    public String getImplementationReasoningEffort() { return implementationReasoningEffort; }
+    public void setImplementationReasoningEffort(String value) { implementationReasoningEffort = value; }
+
+    private String reviewReasoningEffort;
+    public String getReviewReasoningEffort() { return reviewReasoningEffort; }
+    public void setReviewReasoningEffort(String value) { reviewReasoningEffort = value; }
+
 
     @Enumerated(EnumType.STRING)
     @Column(name = "workflow_policy", nullable = false)

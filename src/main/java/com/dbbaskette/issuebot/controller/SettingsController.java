@@ -120,6 +120,16 @@ public class SettingsController {
             return "redirect:/settings";
         }
 
+        if (reasoning != null && agentProvider == IssueBotProperties.AgentProvider.CODEX) {
+            try {
+                reasoning.validate(implementationModel, implementationReasoningEffort);
+                reasoning.validate(reviewModel, reviewReasoningEffort);
+                reasoning.validate(utilityModel, utilityReasoningEffort);
+            } catch (IllegalArgumentException ex) {
+                redirectAttributes.addFlashAttribute("error", ex.getMessage());
+                return "redirect:/settings";
+            }
+        }
         if (!writeModelsToConfig(agentProvider, implementationModel, reviewModel, utilityModel,
                 implementationReasoningEffort, reviewReasoningEffort, utilityReasoningEffort)) {
             redirectAttributes.addFlashAttribute("error",
@@ -165,6 +175,9 @@ public class SettingsController {
                 properties.getCodexCli().getReviewReasoningEffort(),
                 properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
     }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
 
     private static String normalizeReasoningEffort(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim().toLowerCase(Locale.ROOT);

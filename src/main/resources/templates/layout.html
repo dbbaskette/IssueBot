@@ -30,7 +30,7 @@
     <div class="sidebar-overlay"></div>
     <nav class="sidebar" id="sidebar" aria-label="Main navigation">
         <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
-            <h1>IssueBot</h1>
+            <div><h1>IssueBot</h1><small class="text-muted" th:text="${'v' + applicationVersion}" aria-label="Application version">development</small></div>
             <div style="display:flex;align-items:center;gap:0.6rem">
                 <span id="sse-status" class="sse-dot" data-state="none" title="No live stream on this page"></span>
                 <!--
@@ -101,7 +101,7 @@
                 </span>
                 <div>
                     <strong th:text="${processingMode?.name() == 'RUNNING' ? 'Processing active' : (processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Pausing after current' : 'Processing stopped')}">Processing active</strong>
-                    <span th:text="${processingMode?.name() == 'RUNNING' ? 'Queued issues can start and current work can continue.' : (processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Current work will finish; no queued issue will start.' : 'Active work is being cancelled; queued issues will not start.')}">Queued issues can start and current work can continue.</span>
+                    <span th:text="${processingMode?.name() == 'RUNNING' ? 'Queued issues can start and current work can continue.' : (processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Current work will finish; automatic starts are paused. You can start one issue manually.' : 'Active work is being cancelled; queued issues will not start.')}">Queued issues can start and current work can continue.</span>
                 </div>
             </div>
             <div class="flex gap-1" th:if="${processingMode?.name() == 'RUNNING'}">
@@ -145,7 +145,7 @@
     <div th:if="${processingMode?.name() == 'RUNNING'}" id="pause-after-current-modal" class="modal-backdrop" data-modal hidden>
         <div class="modal glass-card" role="dialog" aria-modal="true" aria-labelledby="pause-after-current-title">
             <h3 id="pause-after-current-title" style="margin:0 0 0.5rem">Pause after current work?</h3>
-            <p class="text-sm text-muted">Current work will finish normally. Queued issues will remain queued and no new work will start until processing is restarted.</p>
+            <p class="text-sm text-muted">Current work will finish normally. Automatic starts remain paused until processing is restarted. You can still start one chosen issue manually from its detail page.</p>
             <form th:action="@{/processing/pause-after-current}" method="post">
                 <input type="hidden" name="returnTo" th:value="${currentPath != null ? currentPath : '/'}">
                 <div class="modal-actions">

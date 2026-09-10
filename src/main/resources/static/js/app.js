@@ -1177,6 +1177,9 @@
     setValue('issue-budget-usd', '');
     setValue('implementation-model', '');
     setValue('review-model', '');
+    setValue('implementation-model-reasoning', '');
+    setValue('review-model-reasoning', '');
+    syncReasoningPickers();
     setChecked('pre-screen-enabled', true);
     setChecked('security-review', false);
     setValue('allowed-paths', '');
@@ -1210,6 +1213,9 @@
     setValue('issue-budget-usd', ds.issueBudgetUsd);
     setValue('implementation-model', ds.implementationModel);
     setValue('review-model', ds.reviewModel);
+    setValue('implementation-model-reasoning', ds.implementationReasoningEffort);
+    setValue('review-model-reasoning', ds.reviewReasoningEffort);
+    syncReasoningPickers();
     setChecked('auto-start', ds.autoStart);
     setValue('follow-up-mode', ds.followUpMode);
     setValue('decomposition-mode', ds.decompositionMode);
@@ -1296,6 +1302,34 @@
     var group = select.closest('.field-group');
     return group ? group.querySelector('.custom-model-input') : null;
   }
+
+  function syncReasoningPickers() {
+    document.querySelectorAll('[data-reasoning-picker]').forEach(function (group) {
+      var select = group.querySelector('select');
+      var modelSelect = document.getElementById(select.dataset.forModel);
+      if (!modelSelect) return;
+      var model = modelSelect.value;
+      var active = model.indexOf('CODEX:') === 0 ||
+        (model.indexOf(':') < 0 && group.dataset.codexActive === 'true');
+      group.hidden = !active;
+      select.disabled = !active;
+      if (!active) return;
+      model = model.replace(/^CODEX:/, '');
+      var catalog = [];
+      try { catalog = JSON.parse(group.dataset.reasoningCatalog || '[]'); } catch (e) {}
+      var info = catalog.find(function (item) { return item.id === model; });
+      Array.from(select.options).forEach(function (option) {
+        option.disabled = !!option.value && !!info &&
+          info.supportedReasoningLevels.indexOf(option.value) < 0;
+      });
+      if (select.selectedOptions.length && select.selectedOptions[0].disabled) select.value = '';
+    });
+  }
+  document.addEventListener('DOMContentLoaded', syncReasoningPickers);
+  document.addEventListener('htmx:afterSwap', syncReasoningPickers);
+  document.addEventListener('change', function (event) {
+    if (event.target.tagName === 'SELECT') syncReasoningPickers();
+  });
 
   function syncProviderModelOptions(form, resetSelection) {
     if (!form) { return; }
