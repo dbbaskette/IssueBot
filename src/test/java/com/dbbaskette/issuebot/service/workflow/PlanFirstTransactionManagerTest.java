@@ -273,6 +273,31 @@ class PlanFirstTransactionManagerTest {
         });
     }
 
+    @Test
+    void manualApprovalIgnoresNumericQueueOrderButKeepsRealDependencies() {
+        Long repoId = seedRepo();
+        seedPlainIssue(repoId, 141, IssueStatus.QUEUED);
+        Pending candidate = seedPlannedIssue(repoId, 143, IssueStatus.AWAITING_PLAN_APPROVAL, false);
+        Pending later = seedPlannedIssue(repoId, 145, IssueStatus.FAILED, false);
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(candidate.issueId()).orElseThrow();
+            issue.setManualDispatch(true);
+            issue.setBlockedByIssues("141");
+            issues.saveAndFlush(issue);
+        });
+        assertThatThrownBy(() -> transactions.approvePlan(candidate.issueId(), candidate.versionId()))
+                .hasMessage("Issue #141 must complete first");
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(candidate.issueId()).orElseThrow();
+            issue.setBlockedByIssues(null);
+            issues.saveAndFlush(issue);
+        });
+        transactions.approvePlan(candidate.issueId(), candidate.versionId());
+        assertThat(issues.findById(candidate.issueId()).orElseThrow().getStatus()).isEqualTo(IssueStatus.READY_TO_START);
+        assertThat(versions.findById(later.versionId())).isPresent();
+        assertThat(issues.findById(later.issueId()).orElseThrow().getStatus()).isEqualTo(IssueStatus.FAILED);
+    }
+
     @ParameterizedTest
     @EnumSource(value = IssueStatus.class, names = {
             "PENDING", "QUEUED", "IN_PROGRESS", "AWAITING_APPROVAL",

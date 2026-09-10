@@ -422,12 +422,16 @@
                                    th:text="${'#' + child.issueNumber() + ' · ' + child.title()}">#155 · First</a>
                                 <strong th:unless="${child.trackedIssueId() != null}"
                                         th:text="${child.title()}">Creating child</strong>
-                                <small th:text="${child.current() ? 'Current — repository reserved'
+                                <small th:text="${child.current() ? (decompositionGroup.suspended() ? 'Current — reservation suspended' : 'Current — repository reserved')
                                     : (child.status() == null ? 'Creating'
                                     : humanize.status(child.status()))}">Queued</small>
                             </div>
                         </li>
                     </ol>
+                    <p th:if="${decompositionGroup.suspended()}" class="alert alert-warning">
+                        This group's reservation is suspended for manual recovery. Child progress and order are preserved.
+                        <a href="/issues#dependency-map">Choose the next task or resume the group in the dependency map.</a>
+                    </p>
                     <details th:if="${decompositionGroup.parent() and decompositionGroup.releasable()}"
                              class="decomposition-release">
                         <summary>Release repository control</summary>

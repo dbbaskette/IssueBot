@@ -34,6 +34,19 @@ public class DecompositionReservationService {
     }
 
     public ReservationDecision evaluate(TrackedIssue candidate) {
+        // Suspending exclusivity does not erase the ordered-child dependency chain.
+        var membership = children.findByTrackedIssue(candidate);
+        if (membership.isPresent() && membership.get().getGroup().isDispatchSuspended()) {
+            var group = membership.get().getGroup();
+            var ordered = children.findByGroupOrderBySequencePositionAsc(group);
+            var current = group.currentChild(ordered).orElse(null);
+            if (current == null || current.getTrackedIssue() == null
+                    || !Objects.equals(current.getTrackedIssue().getId(), candidate.getId())) {
+                return ReservationDecision.rejected("Earlier children in decomposition #"
+                        + group.getParentIssue().getIssueNumber() + " must complete first",
+                        new Reservation(group, current));
+            }
+        }
         Optional<ReservationContext> reservation = reservationContextFor(candidate.getRepo());
         if (reservation.isEmpty()) return ReservationDecision.permitted();
         ReservationContext context = reservation.orElseThrow();

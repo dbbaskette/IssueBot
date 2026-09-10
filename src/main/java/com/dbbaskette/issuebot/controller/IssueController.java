@@ -194,6 +194,7 @@ public class IssueController {
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
+        populateDependencies(model, repoId);
         return ViewResolver.view("issues", hx != null);
     }
 
@@ -213,6 +214,7 @@ public class IssueController {
         model.addAttribute("nextActions", resolveNextActions(pageIssues));
         model.addAttribute("decompositionMemberships", decompositionGroupViews == null
                 ? Map.of() : decompositionGroupViews.memberships(pageIssues));
+        populateDependencies(model, repoId);
         return "issues :: table-rows";
     }
 
@@ -1103,7 +1105,9 @@ public class IssueController {
     }
 
     private static boolean isReservationOrderingFailure(String message) {
-        return message != null && (message.matches(
+        return message != null && (message.matches("Issue #\\d+ must complete first")
+                || message.matches("Issue #\\d+ is already holding a repository checkpoint\\. Finish or release it first\\.")
+                || message.matches(
                 "Issue #\\d+ must finish before issue #\\d+ can reserve this repository\\.")
                 || message.matches("Issue #\\d+ is already running later work in this repository\\. "
                 + "Finish or stop it before approving issue #\\d+\\.")
@@ -1301,6 +1305,19 @@ public class IssueController {
                 model.addAttribute("decompositionProposal", proposal);
             }
         }
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.dbbaskette.issuebot.service.ui.QueueDependencyService queueDependencies;
+
+    private void populateDependencies(Model model, Long repoId) {
+        if (queueDependencies == null) return;
+        var graphs = queueDependencies.graphs(repoId);
+        model.addAttribute("dependencyGraphs", graphs);
+        model.addAttribute("dependencyReasons", graphs.stream().flatMap(g -> g.nodes().stream())
+                .collect(java.util.stream.Collectors.toMap(
+                        com.dbbaskette.issuebot.service.ui.QueueDependencyService.Node::id,
+                        com.dbbaskette.issuebot.service.ui.QueueDependencyService.Node::reason)));
     }
 
     private Map<Long, IssueNextAction> resolveNextActions(List<TrackedIssue> issues) {

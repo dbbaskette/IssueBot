@@ -8,6 +8,10 @@ import java.util.Optional;
 @Entity
 @Table(name = "decomposition_groups")
 public class DecompositionGroup {
+    private boolean dispatchSuspended;
+    public boolean isDispatchSuspended() { return dispatchSuspended; }
+    public void setDispatchSuspended(boolean value) { dispatchSuspended = value; }
+
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     @ManyToOne(fetch = FetchType.EAGER) @JoinColumn(name = "repo_id", nullable = false)
