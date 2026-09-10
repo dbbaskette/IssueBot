@@ -42,6 +42,7 @@ public class DecompositionGroupService {
 
     public void createOrResume(Long groupId) {
         DecompositionGroup group = groups.findById(groupId).orElseThrow();
+        if (group.isDispatchSuspended()) return;
         WatchedRepo repo = group.getRepo();
         try {
             List<JsonNode> remote = safe(github.listIssues(
@@ -110,6 +111,7 @@ public class DecompositionGroupService {
 
     public void reconcileGroup(Long groupId) {
         DecompositionGroup group = groups.findById(groupId).orElseThrow();
+        if (group.isDispatchSuspended()) return;
         if (group.getState() == DecompositionGroupState.CREATING) {
             createOrResume(groupId);
             group = groups.findById(groupId).orElseThrow();

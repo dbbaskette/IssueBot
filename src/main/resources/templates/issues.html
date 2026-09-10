@@ -52,6 +52,23 @@
         <a class="view-chip" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">All issues</a>
     </nav>
 
+    <section class="panel mb-3" aria-label="Queue recovery controls">
+        <div class="panel-body">
+            <h3>Take control of the queue</h3>
+            <p><strong>1.</strong> Stop everything if work is running, then wait for its safe checkpoint.
+               <strong>2.</strong> Enter manual recovery to pause automatic starts and suspend decomposition reservations.
+               <strong>3.</strong> Select a task from the map. Nothing is marked complete or deleted.</p>
+            <div class="flex gap-1">
+                <button type="button" class="btn btn-danger" data-modal-open="stop-now-modal">Stop everything</button>
+                <form th:action="@{/issues/recovery/manual}" method="post">
+                    <button type="submit" class="btn btn-warning">Enter manual recovery — release group reservations</button>
+                </form>
+            </div>
+            <p class="text-muted">Existing approval checkpoints and open PRs still need explicit resolution. Resume a suspended group below when you are ready to continue its ordered children.</p>
+        </div>
+    </section>
+    <div th:replace="~{fragments/dependency-map :: map}"></div>
+
     <!-- Bulk action bar (#87) — hidden until ≥1 row is checked (app.js toggles this).
          Start/Retry submit the shared #bulk-form directly (each guards eligibility
          server-side and reports a "started N, skipped M" summary); Close goes through
@@ -185,7 +202,7 @@
                   th:text="${membership.member()
                     ? 'Decomposition #' + membership.parentNumber() + ' · '
                       + membership.position() + '/' + membership.total() + ' · '
-                      + (membership.current() ? 'Current — repository reserved'
+                      + (membership.current() ? (membership.suspended() ? 'Current — reservation suspended' : 'Current — repository reserved')
                         : 'Waiting for #' + membership.currentIssueNumber())
                     : 'Repository reserved by decomposition #' + membership.parentNumber()
                       + (membership.currentIssueNumber() != null
@@ -194,7 +211,7 @@
             </span>
             <span class="queue-next-action" th:if="${nextActions != null and nextActions[issue.id] != null}">
                 <strong>Next:</strong>
-                <span th:text="${nextActions[issue.id].summary()}">Review the issue.</span>
+                <span th:text="${dependencyReasons != null and dependencyReasons[issue.id] != null ? dependencyReasons[issue.id] : nextActions[issue.id].summary()}">Review the issue.</span>
             </span>
         </td>
         <td class="issue-status-cell">

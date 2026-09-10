@@ -136,12 +136,26 @@ public class PlanFirstTransactionManager {
             if (!reservation.allowed()) throw new IllegalStateException(reservation.reason());
         }
 
+        if (issue.isManualDispatch()) {
+            // An explicit operator start chooses ordering, never dependency satisfaction.
+            for (Integer number : issue.getBlockerNumbers()) {
+                if (ordered.stream().noneMatch(i -> i.getIssueNumber() == number
+                        && i.getStatus() == IssueStatus.COMPLETED))
+                    throw new IllegalStateException("Issue #" + number + " must complete first");
+            }
+            TrackedIssue active = RepositoryDispatchGate.blocker(issue, ordered.stream()
+                    .filter(i -> List.of(IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
+                            IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START,
+                            IssueStatus.AWAITING_DECOMPOSITION).contains(i.getStatus())).toList());
+            if (active != null) throw new IllegalStateException("Issue #" + active.getIssueNumber()
+                    + " is already holding a repository checkpoint. Finish or release it first.");
+        }
         int candidateIndex = ordered.indexOf(issue);
         TrackedIssue earlierBlocker = ordered.subList(0, candidateIndex).stream()
                 .filter(candidate -> EARLIER_ORDERING_BLOCKERS.contains(candidate.getStatus()))
                 .findFirst()
                 .orElse(null);
-        if (earlierBlocker != null) {
+        if (earlierBlocker != null && !issue.isManualDispatch()) {
             throw new IllegalStateException("Issue #" + earlierBlocker.getIssueNumber()
                     + " must finish before issue #" + issue.getIssueNumber()
                     + " can reserve this repository.");
@@ -157,7 +171,7 @@ public class PlanFirstTransactionManager {
                     + " is already running later work in this repository. Finish or stop it "
                     + "before approving issue #" + issue.getIssueNumber() + ".");
         }
-        List<TrackedIssue> invalidatedIssues = later.stream()
+        List<TrackedIssue> invalidatedIssues = (issue.isManualDispatch() ? java.util.stream.Stream.<TrackedIssue>empty() : later.stream())
                 .filter(candidate -> PLANNING_RESETTABLE.contains(candidate.getStatus()))
                 .toList();
 

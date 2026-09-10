@@ -36,7 +36,8 @@ public interface DecompositionGroupRepository extends JpaRepository<Decompositio
     List<DecompositionGroup> findByStateInOrderByIdAsc(Collection<DecompositionGroupState> states);
 
     default Optional<DecompositionGroup> findOldestUnfinishedByRepo(Long repoId) {
-        return findByRepoIdAndStateIn(repoId, UNFINISHED_STATES).stream().findFirst();
+        return findByRepoIdAndStateIn(repoId, UNFINISHED_STATES).stream()
+                .filter(group -> !group.isDispatchSuspended()).findFirst();
     }
 
     default Optional<DecompositionGroup> findOwningByRepo(Long repoId) {

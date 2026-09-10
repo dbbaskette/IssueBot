@@ -43,7 +43,7 @@ public class DecompositionGroupViewAssembler {
         return Optional.of(new GroupView(value.getId(), value.getParentIssue().getId(),
                 value.getParentIssue().getIssueNumber(), value.getState(), parent,
                 completed, ordered.size(), value.getAttentionReason(), value.getLastError(),
-                childViews));
+                childViews, value.isDispatchSuspended()));
     }
 
     public List<GroupView> attentionGroups() {
@@ -71,7 +71,7 @@ public class DecompositionGroupViewAssembler {
                         group.getParentIssue().getIssueNumber(),
                         child.getSequencePosition(), ordered.size(),
                         current != null && current.getId().equals(child.getId()),
-                        currentNumber, group.getState(), true));
+                        currentNumber, group.getState(), true, group.isDispatchSuspended()));
             });
         }
         for (TrackedIssue issue : issueRows) {
@@ -87,7 +87,7 @@ public class DecompositionGroupViewAssembler {
             result.put(issue.getId(), new MembershipView(
                     group.getParentIssue().getIssueNumber(), 0, ordered.size(), false,
                     current == null ? null : current.getGithubIssueNumber(),
-                    group.getState(), false));
+                    group.getState(), false, false));
         }
         return result;
     }
@@ -96,7 +96,13 @@ public class DecompositionGroupViewAssembler {
                             DecompositionGroupState state, boolean parent,
                             int completedCount, int totalCount,
                             String attentionReason, String lastError,
-                            List<ChildView> children) {
+                            List<ChildView> children, boolean suspended) {
+        public GroupView(Long id, Long parentId, int parentNumber, DecompositionGroupState state,
+                boolean parent, int completedCount, int totalCount, String attentionReason,
+                String lastError, List<ChildView> children) {
+            this(id, parentId, parentNumber, state, parent, completedCount, totalCount,
+                    attentionReason, lastError, children, false);
+        }
         public int progressPercent() {
             return totalCount == 0 ? 0 : completedCount * 100 / totalCount;
         }
@@ -106,5 +112,10 @@ public class DecompositionGroupViewAssembler {
                             Long trackedIssueId, IssueStatus status, boolean current) {}
     public record MembershipView(int parentNumber, int position, int total,
                                  boolean current, Integer currentIssueNumber,
-                                 DecompositionGroupState groupState, boolean member) {}
+                                 DecompositionGroupState groupState, boolean member, boolean suspended) {
+        public MembershipView(int parentNumber, int position, int total, boolean current,
+                Integer currentIssueNumber, DecompositionGroupState groupState, boolean member) {
+            this(parentNumber, position, total, current, currentIssueNumber, groupState, member, false);
+        }
+    }
 }

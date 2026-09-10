@@ -78,7 +78,7 @@ public class DecompositionGroupTransactionManager {
         repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
         group = groups.findByIdForUpdate(groupId).orElseThrow();
         final DecompositionGroup lockedGroup = group;
-        if (lockedGroup.getState() == DecompositionGroupState.ABANDONING
+        if (lockedGroup.isDispatchSuspended() || lockedGroup.getState() == DecompositionGroupState.ABANDONING
                 || !lockedGroup.getState().unfinished()) {
             return lockedGroup;
         }
@@ -89,7 +89,7 @@ public class DecompositionGroupTransactionManager {
         }
         boolean olderUnfinishedGroup = groups.findByRepoIdAndStateInForUpdate(
                         lockedGroup.getRepo().getId(), DecompositionGroupRepository.UNFINISHED_STATES)
-                .stream().findFirst()
+                .stream().filter(g -> !g.isDispatchSuspended()).findFirst()
                 .filter(oldest -> !Objects.equals(oldest.getId(), lockedGroup.getId()))
                 .isPresent();
         var memberIds = members.stream().map(DecompositionChild::getTrackedIssue)
@@ -137,7 +137,7 @@ public class DecompositionGroupTransactionManager {
         DecompositionGroup group = groups.findById(groupId).orElseThrow();
         repos.findByIdForUpdate(group.getRepo().getId()).orElseThrow();
         group = groups.findByIdForUpdate(groupId).orElseThrow();
-        if (!group.getState().unfinished()
+        if (group.isDispatchSuspended() || !group.getState().unfinished()
                 || group.getState() == DecompositionGroupState.ABANDONING) {
             return false;
         }
@@ -190,7 +190,8 @@ public class DecompositionGroupTransactionManager {
         if (groups.findOwningByRepo(repo.getId()).isPresent()) return;
         if (!issues.findByRepoAndStatusIn(repo, ACTIVE).isEmpty()) return;
         groups.findByRepoIdAndStateInForUpdate(repo.getId(),
-                        EnumSet.of(DecompositionGroupState.WAITING)).stream().findFirst()
+                        EnumSet.of(DecompositionGroupState.WAITING)).stream()
+                .filter(g -> !g.isDispatchSuspended()).findFirst()
                 .ifPresent(next -> {
                     next.transitionTo(DecompositionGroupState.ACTIVE);
                     groups.save(next);
