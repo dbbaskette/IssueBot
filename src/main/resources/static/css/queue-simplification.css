@@ -1,0 +1,39 @@
+/* Queue-first layout: one task list, a compact control bar, details on demand. */
+.processing-controls { display:flex; align-items:center; gap:.65rem; flex-shrink:0; }
+.processing-controls form { margin:0; }
+.queue-control-menu { position:relative; }
+.queue-control-menu > summary { list-style:none; cursor:pointer; }
+.queue-control-menu > summary::-webkit-details-marker { display:none; }
+.queue-control-menu > summary::after { content:"⌄"; margin-left:.4rem; }
+.queue-control-menu__body {
+    position:absolute; right:0; top:calc(100% + .6rem); z-index:100;
+    width:310px; max-width:calc(100vw - 2rem); padding:1rem;
+    background:var(--surface); color:var(--text-primary);
+    border:1px solid var(--glass-border); border-radius:var(--radius-md);
+    box-shadow:0 12px 32px rgba(0,0,0,.16);
+}
+.queue-control-menu__body > * + * { margin-top:1rem; padding-top:1rem; border-top:1px solid var(--glass-border); }
+.queue-control-menu__body small { display:block; margin-top:.5rem; color:var(--text-secondary); line-height:1.5; }
+.queue-intro { margin:.35rem 0 0; }
+.queue-table-panel .queue-phase-cell,
+.queue-table-panel .queue-iteration-cell,
+.queue-table-panel .queue-updated-cell { display:none; }
+.queue-table-panel .queue-title-cell { width:58%; }
+.queue-table-panel .failure-inline { max-width:24rem; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.queue-table-panel .queue-group-context { font-size:.75rem; color:var(--text-tertiary); }
+.queue-table-panel .queue-next-action { margin-top:.3rem; font-size:.8rem; }
+.queue-dependencies { margin-top:1.5rem; }
+.queue-dependencies > summary { cursor:pointer; gap:1rem; justify-content:flex-start; list-style:revert; }
+.queue-dependencies > summary small { margin-left:auto; font-weight:400; }
+.queue-dependencies #dependency-map { border:0; margin:0; }
+.queue-dependencies #dependency-map > .panel-header { display:none; }
+.queue-dependencies .data-table td { vertical-align:top; }
+.queue-dependencies .data-table p { margin:0 0 .5rem; font-size:.85rem; }
+.queue-dependencies .data-table ul { margin:.5rem 0 0; padding-left:1rem; font-size:.8rem; }
+@media (max-width:768px) {
+    .processing-rail { flex-wrap:wrap; gap:.6rem; }
+    .processing-controls { margin-left:auto; }
+    .queue-dependencies > summary { flex-wrap:wrap; }
+    .queue-dependencies > summary small { margin-left:0; }
+    .queue-table-panel .queue-title-cell { min-width:220px; }
+}

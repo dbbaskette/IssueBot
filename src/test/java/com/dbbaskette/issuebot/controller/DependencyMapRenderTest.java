@@ -28,9 +28,9 @@ class DependencyMapRenderTest {
                         new Edge(999, null, "Dependency", false)), "Waiting", false, false)),
                 List.of(new Group(1L, 383, true)))));
         String html = engine.process("fragments/dependency-map", context);
-        assertThat(html).contains("Dependencies and scheduling map", "reservation suspended", "progress preserved",
-                "/issues/100", "#388", "#999 (not tracked)", "Select task / configure start",
-                "Resume group reservation", "/issues/recovery/groups/1/resume", "repoId=7",
-                "Numeric issue order is not enforced", "every 15s");
+        assertThat(html).contains("Dependencies &amp; task order", "paused", "progress saved",
+                "/issues/100", "#388", "#999 (not tracked)", "Open issue",
+                "Restore group order", "/issues/recovery/groups/1/resume", "repoId=7",
+                "The queue is paused", "every 15s");
     }
 }

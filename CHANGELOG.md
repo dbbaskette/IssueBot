@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Make the issue queue the primary view; move the duplicate dependency table into an expandable section below it.
+- Use consistent task-versus-queue language: Start issue, Pause queue, Resume queue. Put stop and recovery actions under More controls with explicit consequences.
+- Replace competing one-click row actions with one Open/Review action, keeping model and reasoning choices on the issue detail page.
+- Reduce queue columns and explanatory text while retaining dependency, scheduling, and recovery details.
+
 ## 0.3.0
 
 - Add a persistent, full-repository dependency and scheduling map to the issue queue, with cycle detection, missing-dependency visibility, explicit reservation edges, and task selection.

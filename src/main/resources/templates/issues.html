@@ -4,7 +4,7 @@
 <div th:fragment="content">
     <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
-        <h2>Issue Queue</h2>
+        <div><h2>Issues</h2><p class="text-sm text-muted queue-intro">Open an issue to review it or choose how to run it.</p></div>
         <div style="display:flex;align-items:center;gap:0.6rem">
             <span id="issue-refresh-indicator" class="glass-pill htmx-indicator" aria-hidden="true">
                 <i class="ti ti-loader spin-icon"></i> Updating…
@@ -52,23 +52,6 @@
         <a class="view-chip" href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true">All issues</a>
     </nav>
 
-    <section class="panel mb-3" aria-label="Queue recovery controls">
-        <div class="panel-body">
-            <h3>Take control of the queue</h3>
-            <p><strong>1.</strong> Stop everything if work is running, then wait for its safe checkpoint.
-               <strong>2.</strong> Enter manual recovery to pause automatic starts and suspend decomposition reservations.
-               <strong>3.</strong> Select a task from the map. Nothing is marked complete or deleted.</p>
-            <div class="flex gap-1">
-                <button type="button" class="btn btn-danger" data-modal-open="stop-now-modal">Stop everything</button>
-                <form th:action="@{/issues/recovery/manual}" method="post">
-                    <button type="submit" class="btn btn-warning">Enter manual recovery — release group reservations</button>
-                </form>
-            </div>
-            <p class="text-muted">Existing approval checkpoints and open PRs still need explicit resolution. Resume a suspended group below when you are ready to continue its ordered children.</p>
-        </div>
-    </section>
-    <div th:replace="~{fragments/dependency-map :: map}"></div>
-
     <!-- Bulk action bar (#87) — hidden until ≥1 row is checked (app.js toggles this).
          Start/Retry submit the shared #bulk-form directly (each guards eligibility
          server-side and reports a "started N, skipped M" summary); Close goes through
@@ -108,9 +91,9 @@
                         <th>#</th>
                         <th>Title</th>
                         <th>Status</th>
-                        <th>Phase</th>
-                        <th>Iteration</th>
-                        <th>Updated</th>
+                        <th class="queue-phase-cell">Phase</th>
+                        <th class="queue-iteration-cell">Iteration</th>
+                        <th class="queue-updated-cell">Updated</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -127,6 +110,14 @@
             </table>
         </div>
     </form>
+
+    <details class="queue-dependencies panel mb-3" id="queue-dependencies">
+        <summary class="panel-header">
+            <span>Dependencies &amp; task order</span>
+            <small class="text-muted">See what is blocking an issue</small>
+        </summary>
+        <div th:replace="~{fragments/dependency-map :: map}"></div>
+    </details>
 
     <!-- Pager (#87) — server-side, 25 rows/page. Links carry the active filters/search so
          paging never loses them; omitted entirely (rather than disabled) when there's nowhere
@@ -235,55 +226,12 @@
         </td>
         <td class="queue-iteration-cell" th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</td>
         <td class="text-sm text-muted queue-updated-cell" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
-        <td class="queue-actions-cell"
-            th:with="nextAction=${nextActions != null ? nextActions[issue.id] : null}">
-            <a th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
-                       and nextAction != null and nextAction.href() != null
-                       and #strings.endsWith(nextAction.href(), '#ready-to-start')}"
-               class="btn btn-primary btn-sm"
-               th:href="${nextAction.href()}"
-               th:text="${nextAction.ctaLabel()}"
-               onclick="event.stopPropagation()">Open reservation</a>
-            <button type="button"
-                    th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
-                             and (decompositionMemberships == null
-                                  or decompositionMemberships[issue.id] == null
-                                  or decompositionMemberships[issue.id].current())
-                             and (nextAction == null or nextAction.href() == null
-                                  or not #strings.endsWith(nextAction.href(), '#ready-to-start'))}"
-                    class="btn btn-primary btn-sm"
-                    th:disabled="${processingMode?.name() != 'RUNNING'}"
-                    th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Start this issue now'}"
-                    th:attr="hx-post='/issues/' + ${issue.id} + '/start',
-                             aria-label='Start issue #' + ${issue.issueNumber}"
-                    hx-target="#content"
-                    hx-disabled-elt="this"
-                    onclick="event.stopPropagation()">Start</button>
-            <span class="text-sm text-muted"
-                  th:if="${(issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING')
-                    and decompositionMemberships != null
-                    and decompositionMemberships[issue.id] != null
-                    and not decompositionMemberships[issue.id].current()}"
-                  th:text="${decompositionMemberships[issue.id].member()
-                    ? 'Reserved for child #' + decompositionMemberships[issue.id].currentIssueNumber()
-                    : 'Reserved by decomposition #' + decompositionMemberships[issue.id].parentNumber()}">
-                Reserved for current child
-            </span>
-            <!-- hx-include carries the filter bar's status/repoId/q/page along with the POST
-                 purely so the endpoint's redirect can land back on this exact view (#87
-                 review). app.js's page-reset configRequest hook only fires for triggers
-                 INSIDE #filter-form, so this button's included page value is untouched. -->
-            <button type="button"
-                    th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                    class="btn btn-outline btn-sm"
-                    th:disabled="${processingMode?.name() != 'RUNNING'}"
-                    th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry with defaults — open the issue for model/budget options'}"
-                    th:attr="hx-post='/issues/' + ${issue.id} + '/retry-quick',
-                             aria-label='Retry issue #' + ${issue.issueNumber} + ' with defaults'"
-                    hx-target="#content"
-                    hx-include="#filter-form"
-                    hx-disabled-elt="this"
-                    onclick="event.stopPropagation()">Retry</button>
+        <td class="queue-actions-cell">
+            <a class="btn btn-outline btn-sm" th:href="@{'/issues/' + ${issue.id}}"
+               onclick="event.stopPropagation()"
+               th:text="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'
+                    or #strings.startsWith(issue.status.name(), 'AWAITING') ? 'Review' : 'Open'}"
+               th:aria-label="${'Open issue #' + issue.issueNumber}">Open</a>
         </td>
     </tr>
     <tr th:if="${#lists.isEmpty(issues)}">

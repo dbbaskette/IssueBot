@@ -3,27 +3,27 @@
 <section th:fragment="map" id="dependency-map" class="panel mb-3"
          hx-get="/issues/recovery/map" th:attr="hx-get=@{/issues/recovery/map(repoId=${selectedRepoId})}"
          hx-trigger="every 15s" hx-swap="outerHTML">
-    <header class="panel-header"><h3>Dependencies and scheduling map</h3></header>
+    <header class="panel-header"><h3>Dependencies &amp; task order</h3></header>
     <div class="panel-body">
-        <p>Each issue points to what it is waiting for. Dependency = recorded prerequisite; child order = decomposition sequence; reservation = scheduling ownership, not a code dependency. Covers every unfinished issue in the selected repositories, regardless of queue filters or page.</p>
-        <p th:if="${processingMode?.name() == 'PAUSE_AFTER_CURRENT'}">Manual mode: select an issue to choose models and start it. Numeric issue order is not enforced for manual starts. Actual dependencies and active-work protection still apply.</p>
-        <p class="text-muted">Readiness is based on tracked state; start rechecks dependencies, open pull requests, and capacity. Missing dependencies are not treated as completed.</p>
+        <p>Arrows show what each issue is waiting for. This view includes all unfinished issues in the selected repositories.</p>
+        <p th:if="${processingMode?.name() == 'PAUSE_AFTER_CURRENT'}">The queue is paused. Open an issue to run it on its own; dependencies still apply.</p>
+        <p class="text-muted">Dependencies must finish first. Group order and scheduling holds are shown separately. Availability is checked again when you start.</p>
         <div th:each="graph : ${dependencyGraphs}" class="mb-3">
             <h4 th:text="${graph.repo()}"></h4>
             <div th:each="group : ${graph.groups()}" class="flex gap-1 mb-2">
-                <span th:text="${'Decomposition #' + group.parentNumber() + (group.suspended() ? ' — reservation suspended; progress preserved' : ' — reservation enabled')}"></span>
+                <span th:text="${'Decomposition #' + group.parentNumber() + (group.suspended() ? ' — paused; progress saved' : ' — ordered group')}"></span>
                 <form th:if="${group.suspended()}" th:action="@{'/issues/recovery/groups/' + ${group.id()} + '/resume'}" method="post">
-                    <button type="submit" class="btn btn-outline btn-sm">Resume group reservation</button>
+                    <button type="submit" class="btn btn-outline btn-sm">Restore group order</button>
                 </form>
             </div>
             <div style="overflow-x:auto">
             <table class="data-table">
-                <thead><tr><th>Issue → waits for</th><th>Readiness / action</th></tr></thead>
+                <thead><tr><th>Issue → waits for</th><th>What’s next</th></tr></thead>
                 <tbody>
                 <tr th:each="node : ${graph.nodes()}">
                     <td>
                         <a th:href="@{'/issues/' + ${node.id()}}" th:text="${'#' + node.number() + ' · ' + node.title()}"></a>
-                        <small th:text="${' · ' + node.status()}"></small>
+                        <small th:text="${' · ' + (humanize != null ? humanize.status(node.status()) : node.status())}"></small>
                         <ul th:if="${not #lists.isEmpty(node.edges())}">
                             <li th:each="edge : ${node.edges()}">
                                 <span th:text="${'→ ' + edge.kind() + ': '}"></span>
@@ -37,7 +37,7 @@
                         <p th:text="${node.reason()}" th:classappend="${node.cycle() ? 'alert alert-warning' : ''}"></p>
                         <a class="btn btn-sm" th:classappend="${node.selectable() ? 'btn-success' : 'btn-outline'}"
                            th:href="@{'/issues/' + ${node.id()}}"
-                           th:text="${node.selectable() ? 'Select task / configure start' : 'Inspect blockers / recover'}"></a>
+                           th:text="${node.selectable() ? 'Open issue' : 'View details'}"></a>
                     </td>
                 </tr>
                 </tbody>

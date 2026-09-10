@@ -100,24 +100,24 @@ class LayoutSseAndAgentStatusRenderTest {
     @Test
     void fullPageRendersExplicitControlsAndConsequencesForEveryMode() {
         String running = renderFullDashboardPage(true);
-        assertThat(running).contains("class=\"processing-rail", "Processing active",
-                "Queued issues can start and current work can continue.",
-                "Pause after current", "Stop now", "pause-after-current-modal", "stop-now-modal",
+        assertThat(running).contains("class=\"processing-rail", "Queue running",
+                "Ready issues start automatically.",
+                "Pause queue", "Stop current work", "pause-after-current-modal", "stop-now-modal",
                 "action=\"/processing/pause-after-current\"", "action=\"/processing/stop-now\"");
         assertThat(running).contains("name=\"returnTo\" value=\"/issues?status=FAILED\"");
         assertThat(running.indexOf("class=\"processing-rail")).isLessThan(running.indexOf("id=\"content\""));
 
         String pausing = renderFullDashboardPage(true, ProcessingState.PAUSE_AFTER_CURRENT);
-        assertThat(pausing).contains("Pausing after current",
-                "Current work will finish; automatic starts are paused. You can start one issue manually.",
-                "Stop now", "Restart processing", "action=\"/processing/restart\"",
+        assertThat(pausing).contains("Queue paused",
+                "Automatic starts are paused. You can still start an issue yourself.",
+                "Stop current work", "Resume queue", "action=\"/processing/restart\"",
                 "action=\"/processing/stop-now\"");
         assertThat(pausing).doesNotContain("pause-after-current-modal");
 
         String stopped = renderFullDashboardPage(true, ProcessingState.STOPPED);
-        assertThat(stopped).contains("Processing stopped",
-                "Active work is being cancelled; queued issues will not start.",
-                "Restart processing", "action=\"/processing/restart\"");
+        assertThat(stopped).contains("Work stopped",
+                "No new work will start. Resume the queue or choose a different task.",
+                "Resume queue", "action=\"/processing/restart\"");
         assertThat(stopped).doesNotContain("pause-after-current-modal", "stop-now-modal");
     }
 
@@ -135,7 +135,7 @@ class LayoutSseAndAgentStatusRenderTest {
         String html = renderFullDashboardPage(true);
 
         assertThat(html).doesNotContain("id=\"agent-status-chip\"", "Agent Running", "Agent Paused");
-        assertThat(html).contains("Processing active", "Pause after current", "Stop now");
+        assertThat(html).contains("Queue running", "Pause queue", "Stop current work");
         // Dashboard's own last-updated stamp + the id the JS afterSwap listener keys off.
         assertThat(html).contains("data-updated-stamp=\"dashboard\"");
         assertThat(html).contains("id=\"dashboard-live\"");

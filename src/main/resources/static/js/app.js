@@ -1303,6 +1303,23 @@
     return group ? group.querySelector('.custom-model-input') : null;
   }
 
+  function revealQueueDependencies() {
+    if (window.location.hash !== '#dependency-map') return;
+    var section = document.getElementById('queue-dependencies');
+    if (section) section.open = true;
+  }
+  document.addEventListener('DOMContentLoaded', revealQueueDependencies);
+  document.addEventListener('htmx:afterSwap', revealQueueDependencies);
+  window.addEventListener('hashchange', revealQueueDependencies);
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    var menu = document.getElementById('queue-control-menu');
+    if (menu && menu.open) {
+      menu.open = false;
+      menu.querySelector('summary').focus();
+    }
+  });
+
   function syncReasoningPickers() {
     document.querySelectorAll('[data-reasoning-picker]').forEach(function (group) {
       var select = group.querySelector('select');

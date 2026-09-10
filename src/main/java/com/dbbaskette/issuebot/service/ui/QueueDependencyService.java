@@ -97,11 +97,11 @@ public class QueueDependencyService {
             boolean blocked = links.stream().anyMatch(e -> !e.satisfied());
             boolean cycle = reaches(issue.getId(), issue.getId(), edges, new HashSet<>());
             boolean startStatus = List.of(IssueStatus.PENDING, IssueStatus.QUEUED, IssueStatus.READY_TO_START).contains(issue.getStatus());
-            String reason = reasons.getOrDefault(issue.getId(), blocked ? "Waiting for prerequisites / ordering shown here"
-                    : parents.contains(issue.getId()) ? "Tracking parent — run its children"
-                    : startStatus ? "No known dependency or reservation blockers — select to review and start"
-                    : "Open issue to resolve its " + issue.getStatus().name().toLowerCase() + " checkpoint");
-            if (cycle) reason = "Scheduling cycle — enter manual recovery; actual dependency cycles still require correction";
+            String reason = reasons.getOrDefault(issue.getId(), blocked ? "Waiting for the issues listed here"
+                    : parents.contains(issue.getId()) ? "Group overview — work happens in its children"
+                    : startStatus ? "Ready to start"
+                    : "Open issue to review the next step");
+            if (cycle) reason = "Circular wait — review the links below. More controls → Choose a different task can free scheduling holds.";
             nodes.add(new Node(issue.getId(), issue.getIssueNumber(), issue.getIssueTitle(), issue.getStatus(),
                     List.copyOf(links), reason, startStatus && !blocked && !parents.contains(issue.getId()), cycle));
         }
