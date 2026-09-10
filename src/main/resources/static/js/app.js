@@ -647,6 +647,12 @@
     document.querySelectorAll('[data-diff-viewer]').forEach(initDiffViewer);
   }
 
+  function setDiffFilesOpen(container, open) {
+    if (!container) { return; }
+    container.querySelectorAll('.diff-file').forEach(function (details) { details.open = open; });
+    if (window.IssueBotUiState) { window.IssueBotUiState.capture(container); }
+  }
+
   // --- Live terminal controller ------------------------------------------
   // Hardened singleton: closes any existing EventSource before opening a new
   // one so a partial HTMX swap re-running the inline init script cannot leak
@@ -1081,20 +1087,14 @@
     if (diffExpandAll) {
       e.preventDefault();
       var expandContainer = diffExpandAll.closest('[data-diff-viewer]');
-      if (expandContainer) {
-        expandContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = true; });
-        if (window.IssueBotUiState) { window.IssueBotUiState.capture(expandContainer); }
-      }
+      setDiffFilesOpen(expandContainer, true);
       return;
     }
     var diffCollapseAll = e.target.closest('[data-diff-collapse-all]');
     if (diffCollapseAll) {
       e.preventDefault();
       var collapseContainer = diffCollapseAll.closest('[data-diff-viewer]');
-      if (collapseContainer) {
-        collapseContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = false; });
-        if (window.IssueBotUiState) { window.IssueBotUiState.capture(collapseContainer); }
-      }
+      setDiffFilesOpen(collapseContainer, false);
       return;
     }
   });

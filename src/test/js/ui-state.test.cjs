@@ -8,13 +8,15 @@ const createUiState = require('../../main/resources/static/js/ui-state.js');
 
 class EventTarget {
   constructor() { this.listeners = Object.create(null); }
-  addEventListener(name, listener) { (this.listeners[name] ||= []).push(listener); }
+  addEventListener(name, listener, options) {
+    (this.listeners[name] ||= []).push({ listener, capture: options === true || !!(options && options.capture) });
+  }
   emit(name, detail = {}, target = this) {
     const event = {
       type: name, detail, target, relatedTarget: detail.relatedTarget || null,
       preventDefault() {}, stopPropagation() {}
     };
-    (this.listeners[name] || []).forEach(listener => listener(event));
+    (this.listeners[name] || []).forEach(entry => entry.listener(event));
     return event;
   }
 }
@@ -44,6 +46,7 @@ class Element extends EventTarget {
     this.open = false;
     this.removed = false;
     this.scrollCalls = 0;
+    this.hovered = false;
     this.classList = new ClassList(attrs.class || '');
     Object.entries(attrs).forEach(([key, value]) => this.setAttribute(key, value));
   }
@@ -85,6 +88,7 @@ class Element extends EventTarget {
       return this.tagName === 'DETAILS' && this.hasAttribute('data-ui-state-key');
     }
     if (selector === '.toast') return this.classList.contains('toast');
+    if (selector === ':hover') return this.hovered;
     if (selector === 'summary') return this.tagName === 'SUMMARY';
     if (selector === 'details[data-ui-state-key]') return this.tagName === 'DETAILS' && this.hasAttribute('data-ui-state-key');
     return false;
@@ -130,6 +134,7 @@ class Document extends Element {
   constructor() {
     super('#document');
     this.readyState = 'complete';
+    this.activeElement = null;
     this.documentElement = this.appendChild(new Element('html'));
     this.body = this.documentElement.appendChild(new Element('body'));
   }
@@ -236,6 +241,17 @@ test('summary activation records the resulting state through the delegated liste
   assert.deepEqual(entries.at(-1), { key: '/issues/142:issue:142:goal', open: true });
 });
 
+test('summary capture is registered in the capture phase so inline stopPropagation cannot suppress it', () => {
+  const h = harness({ pathname: '/' });
+  const disclosure = h.document.body.appendChild(detail('event:91:technical', true));
+  const captureListener = h.document.listeners.click.find(entry => entry.capture);
+  assert.ok(captureListener, 'delegated summary listener must run before target/bubble handlers');
+  captureListener.listener({ target: disclosure.children[0] });
+  h.advance(0);
+  const entries = JSON.parse(h.sessionStorage.value('issuebot.ui-state.v1')).entries;
+  assert.deepEqual(entries.at(-1), { key: '/:event:91:technical', open: true });
+});
+
 test('malformed or denied storage degrades to memory and storage remains bounded to 500 choices', () => {
   const malformed = harness({ pathname: '/issues/1', stored: '{not json' });
   const retained = malformed.document.body.appendChild(detail('retained', true));
@@ -267,9 +283,11 @@ test('HTMX replacement, morph settle, OOB, and history hooks restore state witho
   h.api.capture(original);
 
   const replacement = detail('issue:142:activity', false, 'new server content');
+  original.setAttribute('id', 'activity-log');
+  replacement.setAttribute('id', 'activity-log');
   h.document.body.removeChild(original);
   h.document.body.appendChild(replacement);
-  h.emit('htmx:afterSwap', { target: replacement }, replacement);
+  h.emit('htmx:afterSwap', { target: original }, original);
   assert.equal(replacement.open, true);
   assert.equal(replacement.textContent, 'new server content');
 
@@ -277,8 +295,11 @@ test('HTMX replacement, morph settle, OOB, and history hooks restore state witho
   h.emit('htmx:afterSettle', { target: replacement }, replacement);
   assert.equal(replacement.open, true, 'morph defaults cannot replace the explicit choice');
 
+  const detachedOob = detail('issue:142:activity', false, 'old OOB content');
+  detachedOob.setAttribute('id', 'timeline-panel');
   const oob = h.document.body.appendChild(detail('issue:142:activity', false, 'OOB content'));
-  h.emit('htmx:oobAfterSwap', { target: oob }, oob);
+  oob.setAttribute('id', 'timeline-panel');
+  h.emit('htmx:oobAfterSwap', { target: detachedOob }, detachedOob);
   assert.equal(oob.open, true);
   assert.equal(oob.textContent, 'OOB content');
 
@@ -306,8 +327,19 @@ test('generated diff files receive stable semantic keys and expand/collapse-all 
     false, 'issue:142:iteration:3:diff');
   assert.equal(first.getAttribute('data-ui-state-key'), again.getAttribute('data-ui-state-key'));
   assert.notEqual(first.getAttribute('data-ui-state-key'), other.getAttribute('data-ui-state-key'));
-  assert.match(source, /IssueBotUiState\.capture\(expandContainer\)/);
-  assert.match(source, /IssueBotUiState\.capture\(collapseContainer\)/);
+  const helperCode = source.slice(source.indexOf('  function setDiffFilesOpen(container, open) {'),
+    source.indexOf('  // --- Live terminal controller'));
+  const files = [detail('file:a', false), detail('file:b', false)];
+  let captured = null;
+  const container = { querySelectorAll: () => files };
+  const helperContext = { window: { IssueBotUiState: { capture: value => { captured = value; } } } };
+  vm.createContext(helperContext);
+  vm.runInContext(helperCode, helperContext);
+  helperContext.setDiffFilesOpen(container, true);
+  assert.deepEqual(files.map(file => file.open), [true, true]);
+  assert.equal(captured, container);
+  helperContext.setDiffFilesOpen(container, false);
+  assert.deepEqual(files.map(file => file.open), [false, false]);
 });
 
 test('successful navigation updates sidebar and scrolls, while polls and history preserve scroll', () => {
@@ -356,17 +388,21 @@ test('errors and warnings persist while success dismissal pauses on hover/focus 
 
   h.advance(2000);
   success.emit('mouseenter');
+  success.emit('focusin');
+  success.emit('mouseleave');
   h.advance(10000);
   assert.equal(success.removed, false);
   assert.equal(error.removed, false);
   assert.equal(warning.removed, false);
 
-  success.emit('mouseleave');
+  success.emit('focusout', { relatedTarget: null });
   h.advance(1000);
+  success.emit('mouseenter');
   success.emit('focusin');
+  success.emit('focusout', { relatedTarget: null });
   h.advance(10000);
   assert.equal(success.removed, false);
-  success.emit('focusout', { relatedTarget: null });
+  success.emit('mouseleave');
 
   const duplicate = document.body.appendChild(new Element('div', { class: 'toast toast-ok' }, 'Saved'));
   h.api.initToasts(duplicate);
@@ -382,7 +418,7 @@ test('errors and warnings persist while success dismissal pauses on hover/focus 
   assert.equal(warning.removed, false);
 });
 
-test('a swapped success toast keeps its elapsed timeout instead of restarting six seconds', () => {
+test('a swapped success toast keeps elapsed time and recomputes stale pause reasons', () => {
   const document = new Document();
   const original = document.body.appendChild(new Element('div', { class: 'toast toast-ok' }, 'Updated'));
   const h = harness();
@@ -391,6 +427,8 @@ test('a swapped success toast keeps its elapsed timeout instead of restarting si
   h.api = createUiState(h.root);
 
   h.advance(2000);
+  original.hovered = true;
+  original.emit('mouseenter');
   document.body.removeChild(original);
   const replacement = document.body.appendChild(new Element('div', { class: 'toast toast-ok' }, 'Updated'));
   h.api.initToasts(replacement);

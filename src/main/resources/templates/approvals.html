@@ -112,12 +112,12 @@
         <!-- Diff + self-assessment -->
         <div th:if="${lastIterations.containsKey(issue.id)}" th:with="iter=${lastIterations.get(issue.id)}">
             <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}"
-                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum + ':diff'}">
+                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':diff' : null}">
                 <summary class="text-sm">View Diff</summary>
                 <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff</div>
             </details>
             <details th:if="${iter.selfAssessment != null}" class="mt-1"
-                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum + ':self-assessment'}">
+                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':self-assessment' : null}">
                 <summary class="text-sm">Self-Assessment</summary>
                 <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
             </details>

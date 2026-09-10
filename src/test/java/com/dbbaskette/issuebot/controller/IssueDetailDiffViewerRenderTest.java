@@ -89,11 +89,38 @@ class IssueDetailDiffViewerRenderTest {
     void diffViewerAttribute_present_whenIterationHasDiff() {
         TrackedIssue issue = issueWithStatus(20L, 20, IssueStatus.COMPLETED);
         Iteration iter = new Iteration(issue, 1);
+        iter.setId(100L);
         iter.setDiff("diff --git a/Foo.java b/Foo.java\n--- a/Foo.java\n+++ b/Foo.java\n@@ -1 +1 @@\n-old\n+new\n");
 
         String html = render(issue, List.of(iter));
 
         assertThat(html).contains("data-diff-viewer");
+    }
+
+    @Test
+    void disclosureKeys_useDurableRunIds_whenRetainedRunsShareIterationNumber() {
+        TrackedIssue issue = issueWithStatus(22L, 22, IssueStatus.FAILED);
+        Iteration firstRun = new Iteration(issue, 1);
+        firstRun.setId(101L);
+        firstRun.setSelfAssessment("first assessment");
+        firstRun.setDiff("diff --git a/First.java b/First.java\n--- a/First.java\n+++ b/First.java\n");
+        firstRun.setClaudeOutput("first output");
+        firstRun.setReviewJson("{\"passed\":false}");
+        Iteration retryRun = new Iteration(issue, 1);
+        retryRun.setId(202L);
+        retryRun.setDiff("diff --git a/Retry.java b/Retry.java\n--- a/Retry.java\n+++ b/Retry.java\n");
+
+        String html = render(issue, List.of(firstRun, retryRun));
+
+        assertThat(html)
+                .contains("data-ui-state-key=\"issue:22:iteration:101\"")
+                .contains("data-ui-state-key=\"issue:22:iteration:101:self-assessment\"")
+                .contains("data-ui-state-key=\"issue:22:iteration:101:diff\"")
+                .contains("data-ui-state-key=\"issue:22:iteration:101:agent-output\"")
+                .contains("data-ui-state-key=\"issue:22:iteration:101:review-json\"")
+                .contains("data-ui-state-key=\"issue:22:iteration:202\"")
+                .contains("data-ui-state-key=\"issue:22:iteration:202:diff\"")
+                .contains("data-ui-state-key=\"issue:22:recovery:run:202:diagnostic:legacy:advanced\"");
     }
 
     @Test

@@ -92,6 +92,8 @@ class ApprovalsDiffViewerRenderTest {
         issue.setBranchName("issuebot/9");
 
         Iteration iter = new Iteration(issue, 1);
+        iter.setId(77L);
+        iter.setSelfAssessment("assessment");
         iter.setDiff("diff --git a/Foo.java b/Foo.java\n--- a/Foo.java\n+++ b/Foo.java\n@@ -1 +1 @@\n-old\n+new\n");
 
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
@@ -107,7 +109,10 @@ class ApprovalsDiffViewerRenderTest {
 
         String html = render(model);
 
-        assertThat(html).contains("data-diff-viewer");
+        assertThat(html)
+                .contains("data-diff-viewer")
+                .contains("data-ui-state-key=\"issue:2:iteration:77:diff\"")
+                .contains("data-ui-state-key=\"issue:2:iteration:77:self-assessment\"");
     }
 
     @Test

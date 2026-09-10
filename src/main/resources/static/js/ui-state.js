@@ -131,6 +131,16 @@
     return (detail && (detail.target || detail.elt)) || (event && event.target) || document;
   }
 
+  // outerHTML and OOB swaps may report the removed target in event.detail.
+  // Resolve its replacement by stable id; without one, restoring the document
+  // is the safe bounded fallback and also covers newly inserted siblings.
+  function connectedEventRoot(event) {
+    var candidate = eventRoot(event);
+    if (connected(candidate)) { return candidate; }
+    var replacement = candidate && candidate.id && document.getElementById(candidate.id);
+    return connected(replacement) ? replacement : document;
+  }
+
   function contentTarget(target) {
     return !!target && target.id === 'content';
   }
@@ -234,8 +244,12 @@
     }, 400);
   }
 
+  function toastPaused(controller) {
+    return controller.hovered || controller.focused;
+  }
+
   function scheduleToast(controller) {
-    if (controller.severity !== 'success' || controller.timer != null || controller.paused) { return; }
+    if (controller.severity !== 'success' || controller.timer != null || toastPaused(controller)) { return; }
     controller.startedAt = now();
     controller.timer = root.setTimeout(function () {
       controller.timer = null;
@@ -244,16 +258,19 @@
     }, Math.max(0, controller.remaining));
   }
 
-  function pauseToast(controller) {
-    if (controller.severity !== 'success' || controller.timer == null) { return; }
-    controller.remaining = Math.max(0, controller.remaining - (now() - controller.startedAt));
-    clearControllerTimer(controller);
-    controller.paused = true;
+  function pauseToast(controller, reason) {
+    if (controller.severity !== 'success') { return; }
+    controller[reason] = true;
+    if (controller.timer != null) {
+      controller.remaining = Math.max(0, controller.remaining - (now() - controller.startedAt));
+      clearControllerTimer(controller);
+    }
   }
 
-  function resumeToast(controller) {
+  function resumeToast(controller, reason) {
     if (controller.severity !== 'success') { return; }
-    controller.paused = false;
+    controller[reason] = false;
+    if (toastPaused(controller)) { return; }
     if (controller.remaining <= 0) { removeToast(controller); }
     else { scheduleToast(controller); }
   }
@@ -277,11 +294,11 @@
     });
     toast.appendChild(dismiss);
 
-    toast.addEventListener('mouseenter', function () { pauseToast(controller); });
-    toast.addEventListener('mouseleave', function () { resumeToast(controller); });
-    toast.addEventListener('focusin', function () { pauseToast(controller); });
+    toast.addEventListener('mouseenter', function () { pauseToast(controller, 'hovered'); });
+    toast.addEventListener('mouseleave', function () { resumeToast(controller, 'hovered'); });
+    toast.addEventListener('focusin', function () { pauseToast(controller, 'focused'); });
     toast.addEventListener('focusout', function (event) {
-      if (!toast.contains || !toast.contains(event.relatedTarget)) { resumeToast(controller); }
+      if (!toast.contains || !toast.contains(event.relatedTarget)) { resumeToast(controller, 'focused'); }
     });
   }
 
@@ -300,7 +317,7 @@
       if (!controller) {
         controller = {
           key: key, message: message, severity: severity, element: toast,
-          remaining: 6000, startedAt: 0, timer: null, paused: false
+          remaining: 6000, startedAt: 0, timer: null, hovered: false, focused: false
         };
         toastControllers[key] = controller;
       } else {
@@ -309,6 +326,8 @@
         }
         clearControllerTimer(controller);
         controller.element = toast;
+        controller.hovered = !!(toast.matches && toast.matches(':hover'));
+        controller.focused = !!(document.activeElement && toast.contains && toast.contains(document.activeElement));
       }
       wireToast(controller, toast);
       scheduleToast(controller);
@@ -328,7 +347,7 @@
     var details = summary && summary.parentElement;
     if (!details || details.tagName !== 'DETAILS' || !details.hasAttribute('data-ui-state-key')) { return; }
     root.setTimeout(function () { remember(details); }, 0);
-  });
+  }, true);
 
   document.addEventListener('htmx:beforeRequest', function (event) {
     var detail = event.detail || {};
@@ -344,7 +363,7 @@
   document.addEventListener('htmx:beforeHistorySave', function () { captureKnown(document); });
 
   function afterSwap(event) {
-    var target = eventRoot(event);
+    var target = connectedEventRoot(event);
     restore(target);
     initToasts(target);
     if (contentTarget(target)) {
@@ -358,8 +377,9 @@
   document.addEventListener('htmx:afterSwap', afterSwap);
   document.addEventListener('htmx:oobAfterSwap', afterSwap);
   document.addEventListener('htmx:afterSettle', function (event) {
-    restore(eventRoot(event));
-    initToasts(eventRoot(event));
+    var target = connectedEventRoot(event);
+    restore(target);
+    initToasts(target);
   });
   document.addEventListener('htmx:historyRestore', function () {
     pendingNavigation = null;

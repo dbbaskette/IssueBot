@@ -138,7 +138,7 @@
                     <h4>Suggested next step</h4>
                     <p th:text="${latestFailureDiagnostic != null and latestFailureDiagnostic.suggestedAction != null ? latestFailureDiagnostic.suggestedAction : 'Review the failure details, add guidance for the next attempt, then retry.'}"></p>
                     <details th:if="${latestFailureDiagnostic != null and latestFailureDiagnostic.technicalDetails != null}" class="mb-2"
-                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:' + issue.currentIteration + ':technical'}">
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + latestFailureDiagnostic.occurredAt + ':technical'}">
                         <summary>Technical details</summary>
                         <pre class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
                     </details>
@@ -153,7 +153,7 @@
                         <textarea id="recoveryInstructions" name="instructions" rows="4" class="modal-textarea"
                                   th:placeholder="${reviewerInfrastructure ? 'Optional note after restoring the reviewer provider or CLI' : 'What should the agent do differently this time?'}"></textarea>
                         <details class="mt-1"
-                                 th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:' + issue.currentIteration + ':advanced'}">
+                                 th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + (latestFailureDiagnostic != null ? latestFailureDiagnostic.occurredAt : 'legacy') + ':advanced'}">
                             <summary>Advanced retry options</summary>
                             <div class="field-group">
                                 <label for="recoveryImplModel">Implementation model</label>
@@ -1100,7 +1100,7 @@
                 <li th:each="iter : ${iterationsNewestFirst}"
                     th:classappend="${iter.ciResult == 'PASSED' ? 'passed' : (iter.completedAt != null ? 'failed' : 'active')}">
                     <details class="iteration-entry"
-                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum}">
+                             th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id : null}">
                         <summary class="iteration-entry-summary">
                             <span class="iteration-entry-num" th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</span>
 
@@ -1134,19 +1134,19 @@
 
                         <div class="iteration-entry-body">
                             <details th:if="${iter.selfAssessment != null}"
-                                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum + ':self-assessment'}">
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':self-assessment' : null}">
                                 <summary class="text-sm">Self-Assessment</summary>
                                 <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
                             </details>
 
                             <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}"
-                                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum + ':diff'}">
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':diff' : null}">
                                 <summary class="text-sm">Diff</summary>
                                 <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff content</div>
                             </details>
 
                             <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}"
-                                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum + ':agent-output'}">
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':agent-output' : null}">
                                 <summary class="text-sm">Agent Output</summary>
                                 <pre class="code-output" th:text="${iter.claudeOutput}">output</pre>
                             </details>
@@ -1163,7 +1163,7 @@
                                 <div th:if="${iter.reviewModel != null}" class="text-sm text-muted mb-1"
                                      th:text="'Model: ' + ${iter.reviewModel}">model</div>
                                 <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}"
-                                         th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration:' + iter.iterationNum + ':review-json'}">
+                                         th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':review-json' : null}">
                                     <summary class="text-sm">Raw JSON</summary>
                                     <pre class="code-output" th:text="${iter.reviewJson}">review json</pre>
                                 </details>
