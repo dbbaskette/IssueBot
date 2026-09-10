@@ -112,7 +112,8 @@
                     <input type="hidden" name="returnTo" th:value="${currentPath != null ? currentPath : '/'}">
                     <button type="submit" class="btn btn-primary btn-sm">Resume queue</button>
                 </form>
-                <details class="queue-control-menu" id="queue-control-menu">
+                <details class="queue-control-menu" id="queue-control-menu"
+                         data-ui-state-key="shell:queue-controls">
                     <summary class="btn btn-ghost btn-sm">More controls</summary>
                     <div class="queue-control-menu__body">
                         <form th:action="@{/issues/recovery/manual}" method="post">
@@ -165,6 +166,7 @@
         </div>
     </div>
     <script th:src="@{/js/repository-workflow.js}" defer></script>
+    <script th:src="@{/js/ui-state.js}" defer></script>
     <script th:src="@{/js/app.js}" defer></script>
     <script th:src="@{/js/needs-you.js}" defer></script>
 
@@ -179,9 +181,9 @@
     -->
     <th:block th:if="${false}">
         <div th:fragment="toasts" id="toast-region" aria-live="polite">
-            <div th:if="${success}" class="toast toast-ok" th:text="${success}"></div>
-            <div th:if="${message}" class="toast toast-ok" th:text="${message}"></div>
-            <div th:if="${error}" class="toast toast-danger" th:text="${error}"></div>
+            <div th:if="${success}" class="toast toast-ok" data-toast-severity="success" th:text="${success}"></div>
+            <div th:if="${message}" class="toast toast-ok" data-toast-severity="success" th:text="${message}"></div>
+            <div th:if="${error}" class="toast toast-danger" data-toast-severity="error" th:text="${error}"></div>
         </div>
     </th:block>
 </body>

@@ -108,7 +108,7 @@
                         <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 2)}">$0.00</div>
                     </a>
                 </div>
-                <details class="metric-secondary">
+                <details class="metric-secondary" data-ui-state-key="overview:workflow-counts">
                     <summary>More workflow counts</summary>
                     <div class="metric-strip">
                         <a class="metric-tile is-link" href="/issues?status=PENDING"
@@ -173,7 +173,8 @@
                               th:text="${event.issue.repo.fullName() + ' #' + event.issue.issueNumber}">owner/repo #1</span>
                         <span class="event-context" th:if="${event.issue == null and event.repo != null}"
                               th:text="${event.repo.fullName()}">owner/repo</span>
-                        <details class="event-technical" onclick="event.stopPropagation()">
+                        <details class="event-technical" onclick="event.stopPropagation()"
+                                 th:attr="data-ui-state-key=${event.id != null ? 'event:' + event.id + ':technical' : null}">
                             <summary>Technical details</summary>
                             <pre th:text="${event.message}">Event message</pre>
                         </details>
@@ -221,7 +222,8 @@
                    th:href="${card.nextAction().href()}" th:text="${card.nextAction().ctaLabel()}">View issue</a>
             </div>
 
-            <details class="control-room-run-details" th:if="${card.runDetails() != null}">
+            <details class="control-room-run-details" th:if="${card.runDetails() != null}"
+                     th:attr="data-ui-state-key=${card.issue().id != null ? 'issue:' + card.issue().id + ':run-details' : null}">
                 <summary>Run details</summary>
                 <div class="control-room-run-body">
                     <div class="running-meta text-sm text-muted">

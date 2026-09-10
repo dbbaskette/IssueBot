@@ -139,23 +139,6 @@
   }
   window.copyText = copyText;
 
-  // --- Toast auto-dismiss -------------------------------------------------
-  function dismissToasts() {
-    var toasts = document.querySelectorAll('.toast');
-    toasts.forEach(function (toast) {
-      if (toast.__dismissScheduled) { return; }
-      toast.__dismissScheduled = true;
-      setTimeout(function () {
-        toast.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-6px)';
-        setTimeout(function () {
-          if (toast.parentNode) { toast.parentNode.removeChild(toast); }
-        }, 400);
-      }, 4000);
-    });
-  }
-
   // --- SSE health indicator (#83) ------------------------------------------
   // A single header dot (#sse-status, in layout.html) reflects whether live
   // updates are actually flowing on the current page. Multiple independent
@@ -547,10 +530,22 @@
     return files.length ? files : null;
   }
 
-  function renderDiffFile(file, defaultOpen) {
+  function stableDiffIdentity(path) {
+    var hash = 2166136261;
+    for (var i = 0; i < path.length; i++) {
+      hash ^= path.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36) + '-' + path.length;
+  }
+
+  function renderDiffFile(file, defaultOpen, statePrefix) {
     var details = document.createElement('details');
     details.className = 'diff-file';
     details.open = defaultOpen;
+    if (statePrefix) {
+      details.setAttribute('data-ui-state-key', statePrefix + ':file:' + stableDiffIdentity(file.path));
+    }
 
     var summary = document.createElement('summary');
     summary.className = 'diff-file-summary';
@@ -626,8 +621,10 @@
 
     var list = document.createElement('div');
     list.className = 'diff-file-list';
+    var owner = el.closest && el.closest('details[data-ui-state-key]');
+    var statePrefix = owner && owner.getAttribute('data-ui-state-key');
     files.forEach(function (file) {
-      list.appendChild(renderDiffFile(file, defaultOpen));
+      list.appendChild(renderDiffFile(file, defaultOpen, statePrefix));
     });
     el.appendChild(list);
   }
@@ -639,6 +636,7 @@
     if (!raw) { return; }
     try {
       renderDiffViewer(el, raw);
+      if (window.IssueBotUiState) { window.IssueBotUiState.restore(el); }
     } catch (e) {
       // Degrade to today's whole-blob rendering on any parse/render surprise.
       try { renderFlatDiff(el, raw); } catch (e2) { /* leave raw text as-is */ }
@@ -1085,6 +1083,7 @@
       var expandContainer = diffExpandAll.closest('[data-diff-viewer]');
       if (expandContainer) {
         expandContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = true; });
+        if (window.IssueBotUiState) { window.IssueBotUiState.capture(expandContainer); }
       }
       return;
     }
@@ -1094,6 +1093,7 @@
       var collapseContainer = diffCollapseAll.closest('[data-diff-viewer]');
       if (collapseContainer) {
         collapseContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = false; });
+        if (window.IssueBotUiState) { window.IssueBotUiState.capture(collapseContainer); }
       }
       return;
     }
@@ -1165,6 +1165,7 @@
   }
 
   function resetRepoForm() {
+    configureRepositoryDisclosureKeys('new');
     var title = document.getElementById('form-title');
     if (title) { title.textContent = 'Add Repository'; }
     setValue('edit-id', '');
@@ -1200,6 +1201,7 @@
   }
 
   function editRepoFromDataset(ds) {
+    configureRepositoryDisclosureKeys(ds.id || 'new');
     var title = document.getElementById('form-title');
     if (title) { title.textContent = ds.id ? 'Edit Repository' : 'Add Repository'; }
     setValue('edit-id', ds.id);
@@ -1243,6 +1245,20 @@
       editRepoFromDataset(JSON.parse(form.dataset.repositoryFormValues));
       showRepoForm();
     } catch (e) { /* Server-generated JSON should be valid; leave the safe defaults if not. */ }
+  }
+
+  function configureRepositoryDisclosureKeys(repoId) {
+    var form = document.getElementById('add-repo-form');
+    if (!form) { return; }
+    if (form.getAttribute('data-repository-editor-active') === 'true' && window.IssueBotUiState) {
+      window.IssueBotUiState.capture(form);
+    }
+    Array.prototype.forEach.call(form.querySelectorAll('[data-repository-disclosure]'), function (details) {
+      details.setAttribute('data-ui-state-key', 'editor:' + repoId + ':' + details.getAttribute('data-repository-disclosure'));
+      details.open = details.getAttribute('data-ui-state-default-open') === 'true';
+    });
+    form.setAttribute('data-repository-editor-active', 'true');
+    if (window.IssueBotUiState) { window.IssueBotUiState.restore(form); }
   }
 
   // Show/hide the CI timeout field based on the CI-enabled checkbox.
@@ -1306,10 +1322,13 @@
   function revealQueueDependencies() {
     if (window.location.hash !== '#dependency-map') return;
     var section = document.getElementById('queue-dependencies');
-    if (section) section.open = true;
+    if (section) {
+      section.open = true;
+      if (window.IssueBotUiState) { window.IssueBotUiState.capture(section); }
+    }
   }
   document.addEventListener('DOMContentLoaded', revealQueueDependencies);
-  document.addEventListener('htmx:afterSwap', revealQueueDependencies);
+  document.addEventListener('htmx:pushedIntoHistory', revealQueueDependencies);
   window.addEventListener('hashchange', revealQueueDependencies);
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
@@ -1651,9 +1670,9 @@
     });
   }
 
-  // Re-run toast handling + diff viewers after HTMX swaps in new content.
+  // Re-run enhanced widgets after HTMX swaps in new content. ui-state.js owns
+  // disclosure restoration, navigation scroll, and toast lifetimes.
   document.body.addEventListener('htmx:afterSwap', function (evt) {
-    dismissToasts();
     initDiffViewers();
     initSortableTables();
     initCostCharts();
@@ -1682,14 +1701,6 @@
       // safe no-op everywhere else.
       if (window.htmx && typeof window.htmx.process === 'function') { window.htmx.process(target); }
       UpdateStamps.markAllVisible();
-      // Deep-link anchors (e.g. the dashboard's "awaiting X" tiles linking to
-      // /inbox#split-proposals, #91) — an htmx swap is a pushState navigation, not a
-      // real page load, so the browser never auto-scrolls to the URL's #fragment on
-      // its own. Do it ourselves once the freshly-swapped content is in the DOM.
-      if (location.hash) {
-        var hashTarget = document.getElementById(location.hash.slice(1));
-        if (hashTarget) hashTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
     } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
       markUpdated(SWAP_TARGET_STAMPS[target.id]);
     }
@@ -1837,7 +1848,6 @@
   // --- Init ---------------------------------------------------------------
   function init() {
     syncThemeIcon();
-    dismissToasts();
     initDiffViewers();
     initSortableTables();
     initCostCharts();

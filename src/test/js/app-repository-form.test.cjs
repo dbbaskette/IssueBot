@@ -34,7 +34,14 @@ function repositoryFormHarness() {
   elements['plan-first-opt-out'] = { disabled: false };
   elements['ci-timeout-group'] = { style: {} };
   elements['form-title'] = { textContent: 'Edit Repository' };
-  elements['add-repo-form'] = { hidden: true, scrollIntoView() {} };
+  elements['add-repo-form'] = {
+    hidden: true,
+    attributes: {},
+    scrollIntoView() {},
+    getAttribute(name) { return this.attributes[name] || null; },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    querySelectorAll() { return []; }
+  };
   elements.owner.focus = () => {};
 
   const policies = ['AUTOMATED', 'STAGED', 'LEGACY'].map(value => ({

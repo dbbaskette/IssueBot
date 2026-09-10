@@ -85,7 +85,9 @@
                         <p class="text-sm text-muted">Model choices are overrides made when approving an AI stage; this form does not save models per stage.</p>
                     </fieldset>
 
-                    <details class="workflow-existing-settings" data-workflow-existing-settings open>
+                    <details class="workflow-existing-settings" data-workflow-existing-settings open
+                             data-repository-disclosure="existing-workflow" data-ui-state-key="editor:new:existing-workflow"
+                             data-ui-state-default-open="true">
                         <summary>Existing workflow settings</summary>
                         <p class="text-sm text-muted">These controls apply only when Existing settings is selected. Choosing a managed workflow hides them without changing their saved values.</p>
                         <div class="form-grid">
@@ -127,7 +129,8 @@
                     <p id="splitting-help" class="text-sm text-muted">Off prevents new split proposals and automatic splits. When enabled, only high-complexity work with at least 20 substantive file changes and 2 independently deliverable capabilities qualifies. Existing split tasks and progress are kept; pending proposals still require your decision.</p>
                 </div>
 
-                <details id="advanced-settings">
+                <details id="advanced-settings" data-repository-disclosure="advanced"
+                         data-ui-state-key="editor:new:advanced" data-ui-state-default-open="false">
                     <summary>Advanced settings</summary>
 
                     <!-- Workflow -->
@@ -331,7 +334,8 @@
                                              data-delete-url=@{'/repositories/' + ${repo.id}}">
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>
-                            <details class="lessons-details">
+                            <details class="lessons-details"
+                                     th:attr="data-ui-state-key=${'repo:' + repo.id + ':lessons'}">
                                 <summary th:text="'Lessons (' + ${lessonsByRepo.containsKey(repo.id) ? #lists.size(lessonsByRepo.get(repo.id)) : 0} + ')'">Lessons (0)</summary>
                                 <ul class="lessons-list">
                                     <li th:each="lesson : ${lessonsByRepo.get(repo.id)}">

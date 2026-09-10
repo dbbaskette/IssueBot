@@ -41,7 +41,8 @@
 </div>
 <div th:fragment="history(oob)" id="stage-decision-history"
      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-    <details th:if="${stageApprovalHistory != null and not #lists.isEmpty(stageApprovalHistory)}" class="panel mb-3 secondary-section">
+    <details th:if="${stageApprovalHistory != null and not #lists.isEmpty(stageApprovalHistory)}" class="panel mb-3 secondary-section"
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':stage-decision-history'}">
         <summary class="panel-header">Stage decision history</summary>
         <ul class="panel-body">
             <li th:each="decision : ${stageApprovalHistory}">
