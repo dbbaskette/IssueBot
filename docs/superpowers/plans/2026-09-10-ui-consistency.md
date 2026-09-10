@@ -56,8 +56,8 @@ assert.equal(errorToast.removed, false);
 - [ ] Consolidate panel/header/control/alert/empty-state primitives in existing CSS, remove conflicting declarations in touched areas, use the spec spacing scale and 40px/44px control floors. Apply meaningful severity colors and accessible contrast in both themes; constrain long text and code.
 
 ```css
-:root { --control-height: 2.5rem; --panel-radius: .75rem; --panel-gap: 1.5rem; }
-@media (max-width: 640px) { :root { --control-height: 2.75rem; } }
+:root { --control-height: 40px; --panel-radius: 12px; --panel-gap: 24px; }
+@media (max-width: 640px) { :root { --control-height: 44px; } }
 ```
 
 - [ ] Dashboard: remove duplicate attention/active summaries, retain canonical counts, align metrics and show event messages with technical details as disclosure. Repositories: replace overlapping legacy columns with effective workflow/checkpoints and visible actions, preserve edit behavior. Issues: align toolbar/rows/dependencies and empty states without undoing recent queue simplification.
