@@ -9,25 +9,28 @@
     </div>
 
     <div th:if="${#lists.isEmpty(approvals)}">
-        <div class="glass-card text-muted" style="text-align:center;padding:3rem">
-            No pending approvals. Issues in approval-gated repos will appear here when ready for review.
+        <div class="glass-card empty-state">
+            <p class="empty-state-title">No actions need your attention</p>
+            <p>Workflow stage and pull request approvals appear here when a decision is ready.</p>
         </div>
     </div>
 
-    <div th:each="issue : ${approvals}" class="glass-card mb-3"
+    <div th:each="issue : ${approvals}" class="glass-card inset-panel decision-card mb-3"
          th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
         <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
-        <p>Workflow stage approval required. Choose the next stage's model on the issue page.</p>
+        <h3 class="decision-card-title" th:text="${issue.issueTitle}">Issue title</h3>
+        <p class="decision-stage" th:text="${humanize.eventType(issue.currentPhase)}">Stage approval</p>
+        <p class="field-hint">Review the stage and any available model choices on the issue page.</p>
         <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
     </div>
-    <div th:each="issue : ${approvals}" class="glass-card mb-3"
+    <div th:each="issue : ${approvals}" class="glass-card inset-panel decision-card mb-3"
          th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+        <div class="panel-header">
             <div>
                 <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
             </div>
-            <span class="status status-awaiting_approval">AWAITING APPROVAL</span>
+            <span class="status status-awaiting_approval">Awaiting approval</span>
         </div>
 
         <!-- Metrics + PR link -->

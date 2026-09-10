@@ -13,6 +13,10 @@ public interface CostTrackingRepository extends JpaRepository<CostTracking, Long
 
     List<CostTracking> findByIssue(TrackedIssue issue);
 
+    boolean existsByIssue(TrackedIssue issue);
+
+    boolean existsByIssueRepo(WatchedRepo repo);
+
     @Query("SELECT COALESCE(SUM(c.estimatedCost), 0) FROM CostTracking c WHERE c.issue = :issue")
     BigDecimal totalCostForIssue(TrackedIssue issue);
 

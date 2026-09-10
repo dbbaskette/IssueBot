@@ -30,9 +30,9 @@
     </button>
     <div class="sidebar-overlay"></div>
     <nav class="sidebar" id="sidebar" aria-label="Main navigation">
-        <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
+        <header class="shell-brand-header">
             <div><h1>IssueBot</h1><small class="text-muted" th:text="${'v' + applicationVersion}" aria-label="Application version">development</small></div>
-            <div style="display:flex;align-items:center;gap:0.6rem">
+            <div class="shell-status-actions">
                 <span id="sse-status" class="sse-dot" data-state="none" title="No live stream on this page"></span>
                 <!--
                   Notification bell (#89) — gated by the same "Dashboard Notifications" toggle

@@ -76,7 +76,7 @@ class SetupPageRenderTest {
     void secretNotConfigured_showsNotSetBadge() {
         String html = render(baseContext(false, List.of()));
 
-        assertThat(html).contains("Webhooks");
+        assertThat(html).contains("Optional: webhooks and delivery diagnostics");
         assertThat(html).contains("NOT SET");
         assertThat(html).doesNotContain("ISSUEBOT_WEBHOOK_SECRET=");
         assertThat(html).contains("No repositories watched yet.");
@@ -88,6 +88,14 @@ class SetupPageRenderTest {
 
         assertThat(html).contains("SET");
         assertThat(html).doesNotContain("NOT SET");
+    }
+
+    @Test
+    void optionalDiagnosticsAreDisclosuresAndQuickStartRespectsWorkflow() {
+        String html = render(baseContext(false, List.of()));
+        assertThat(html).contains("data-ui-state-key=\"setup:webhooks\"", "data-ui-state-key=\"setup:configuration\"",
+                "Your repository workflow determines when work starts and which stages require approval.");
+        assertThat(html).doesNotContain("begin implementation automatically");
     }
 
     @Test

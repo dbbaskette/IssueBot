@@ -147,7 +147,7 @@ class InboxPageRenderTest {
         assertThat(model.getAttribute("needsYouCount"))
                 .isEqualTo(((NeedsYouSnapshot) model.getAttribute("needsYouSnapshot")).totalCount());
 
-        assertThat(html).contains("Nothing needs you — the loop is running itself.");
+        assertThat(html).contains("No actions need your attention");
         assertThat(html).contains("2 active");
         assertThat(html).contains("5 queued");
         // The five grouped sections must not render at all when nothing pends.
@@ -200,12 +200,12 @@ class InboxPageRenderTest {
         String html = render(model);
 
         // Empty state must NOT render when there's real content.
-        assertThat(html).doesNotContain("Nothing needs you — the loop is running itself.");
+        assertThat(html).doesNotContain("No actions need your attention");
         NeedsYouSnapshot snapshot = (NeedsYouSnapshot) model.getAttribute("needsYouSnapshot");
         assertThat(snapshot.totalCount()).isEqualTo(5);
         assertThat(model.getAttribute("needsYouCount")).isEqualTo(snapshot.totalCount());
         assertThat(model.getAttribute("totalCount")).isEqualTo(snapshot.totalCount());
-        assertThat(java.util.regex.Pattern.compile("class=\"glass-card mb-2\"")
+        assertThat(java.util.regex.Pattern.compile("class=\"glass-card decision-card mb-2\"")
                 .matcher(html).results().count()).isEqualTo(snapshot.totalCount());
 
         // Four sections, each with its own stable anchor id for dashboard deep-links (#91).
@@ -216,7 +216,7 @@ class InboxPageRenderTest {
         assertThat(html).contains("id=\"needs-human\"");
 
         // Section headers with content.
-        assertThat(html).contains("PR Approvals");
+        assertThat(html).contains("Approvals");
         assertThat(html).contains("Plan Approvals");
         assertThat(html).contains("Ready to Start");
         assertThat(html).contains("Split Proposals");

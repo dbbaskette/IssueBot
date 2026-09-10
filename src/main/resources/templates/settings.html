@@ -9,9 +9,9 @@
     </div>
 
     <!-- Models -->
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Models</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Provider and models</h3>
         </div>
 
         <div class="alert alert-info" style="margin-bottom:1rem">
@@ -21,9 +21,9 @@
         </div>
 
         <form th:action="@{/settings/models}" method="post" data-provider-model-form>
-            <div class="form-grid">
-                <div class="field-group">
-                    <label for="agent-provider">Execution Provider</label>
+            <div class="form-grid model-settings-grid">
+                <div class="field-group provider-setting full-width">
+                    <label for="agent-provider">Execution provider</label>
                     <select id="agent-provider" name="agentProvider">
                         <option value="CLAUDE_CODE" th:selected="${agentProvider.name() == 'CLAUDE_CODE'}">
                             Claude Code (Claude subscription)
@@ -35,7 +35,7 @@
                     <span class="field-hint">The selected CLI must be logged in on this host.</span>
                 </div>
                 <div class="field-group">
-                    <label for="implementation-model">Implementation Model</label>
+                    <label for="implementation-model">Implementation model</label>
                     <select id="implementation-model" name="implementationModel" class="model-select provider-model-select"
                             th:attr="data-claude-default=${claudeImplementationModel},data-codex-default=${codexImplementationModel}">
                         <option th:each="m : ${claudeModelCatalog}" th:value="${m.id}" data-provider="CLAUDE_CODE"
@@ -55,7 +55,7 @@
                 </div>
                 <div class="field-group" data-codex-reasoning-group
                      th:hidden="${agentProvider.name() != 'CODEX'}">
-                    <label for="implementation-reasoning-effort">Implementation Reasoning</label>
+                    <label for="implementation-reasoning-effort">Implementation reasoning</label>
                     <select id="implementation-reasoning-effort" name="implementationReasoningEffort"
                             class="codex-reasoning-select" data-model-select-id="implementation-model">
                         <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
@@ -64,7 +64,7 @@
                     <span class="field-hint">Also used for planning.</span>
                 </div>
                 <div class="field-group">
-                    <label for="review-model">Review Model</label>
+                    <label for="review-model">Review model</label>
                     <select id="review-model" name="reviewModel" class="model-select provider-model-select"
                             th:attr="data-claude-default=${claudeReviewModel},data-codex-default=${codexReviewModel}">
                         <option th:each="m : ${claudeModelCatalog}" th:value="${m.id}" data-provider="CLAUDE_CODE"
@@ -84,7 +84,7 @@
                 </div>
                 <div class="field-group" data-codex-reasoning-group
                      th:hidden="${agentProvider.name() != 'CODEX'}">
-                    <label for="review-reasoning-effort">Review Reasoning</label>
+                    <label for="review-reasoning-effort">Review reasoning</label>
                     <select id="review-reasoning-effort" name="reviewReasoningEffort"
                             class="codex-reasoning-select" data-model-select-id="review-model">
                         <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
@@ -92,7 +92,7 @@
                     </select>
                 </div>
                 <div class="field-group">
-                    <label for="utility-model">Utility Model</label>
+                    <label for="utility-model">Utility model</label>
                     <select id="utility-model" name="utilityModel" class="provider-model-select"
                             th:attr="data-claude-default=${claudeUtilityModel},data-codex-default=${codexUtilityModel}">
                         <!-- Preserve a configured value that isn't in the catalog rather than
@@ -110,7 +110,7 @@
                 </div>
                 <div class="field-group" data-codex-reasoning-group
                      th:hidden="${agentProvider.name() != 'CODEX'}">
-                    <label for="utility-reasoning-effort">Utility Reasoning</label>
+                    <label for="utility-reasoning-effort">Utility reasoning</label>
                     <select id="utility-reasoning-effort" name="utilityReasoningEffort"
                             class="codex-reasoning-select" data-model-select-id="utility-model">
                         <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
@@ -120,7 +120,7 @@
             </div>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary">
-                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Models
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save provider and models
                 </button>
             </div>
             <div class="text-sm text-muted" style="margin-top:0.5rem">
@@ -132,9 +132,9 @@
     </div>
 
     <!-- Quick Settings -->
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Quick Settings</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Quick settings</h3>
         </div>
 
         <div class="alert alert-info" style="margin-bottom:1rem">
@@ -171,15 +171,15 @@
                 </div>
             </div>
             <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="submit" class="btn btn-primary">Save quick settings</button>
             </div>
         </form>
     </div>
 
     <!-- YAML Config Editor -->
-    <div class="glass-card">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Configuration File</h3>
+    <div class="glass-card inset-panel">
+        <div class="panel-header">
+            <h3>Configuration file</h3>
             <span class="text-sm text-muted" th:text="${configPath}">~/.issuebot/config.yml</span>
         </div>
         <div class="alert alert-info" style="margin-bottom:1rem">
@@ -193,7 +193,7 @@
                       spellcheck="false" aria-label="Configuration file (YAML)"></textarea>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary">
-                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save (restart required)
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save configuration (restart required)
                 </button>
                 <button type="button" class="btn btn-outline"
                         data-modal-open="discard-config-modal">

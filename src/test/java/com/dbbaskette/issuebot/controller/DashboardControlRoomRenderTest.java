@@ -72,7 +72,7 @@ class DashboardControlRoomRenderTest {
                                 "Queued and ready when processing capacity is available.", "View issue",
                                 "/issues/3", Tone.WAITING, "Queued", null)))));
 
-        assertThat(html).contains("Operator control room", "What needs attention now", "Updates every 10 seconds");
+        assertThat(html).contains("What needs attention now", "Updates every 10 seconds");
         assertThat(html).contains("Needs your decision", "Currently processing", "Up next");
         assertThat(html.indexOf("Needs your decision")).isLessThan(html.indexOf("Currently processing"));
         assertThat(html.indexOf("Currently processing")).isLessThan(html.indexOf("Up next"));

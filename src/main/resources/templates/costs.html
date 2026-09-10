@@ -4,8 +4,8 @@
 <div th:fragment="content">
     <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
-        <h2>Cost Report</h2>
-        <div class="cost-range" role="group" aria-label="Date range">
+        <h2>Costs</h2>
+        <div class="cost-range" role="group" aria-label="Cost-over-time chart date range">
             <button type="button" class="glass-pill" th:classappend="${selectedRange == '7d'} ? 'is-active' : ''"
                     th:attr="aria-pressed=${selectedRange == '7d'}"
                     hx-get="/costs?range=7d" hx-target="#content" hx-push-url="true">7d</button>
@@ -18,29 +18,31 @@
         </div>
     </div>
 
+    <p class="field-hint mb-2">Totals and breakdowns are all time. The date range changes only the cost-over-time chart.</p>
+    <p class="alert alert-info" th:unless="${hasCostData}"><i class="ti ti-info-circle" aria-hidden="true"></i> No cost records yet. An em dash means no recorded estimate; $0.0000 means a recorded zero estimate.</p>
     <div class="metrics-grid">
         <div class="metric-tile accent">
-            <div class="label"><i class="ti ti-coin"></i> Total Cost</div>
-            <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 4)}">$0.0000</div>
+            <div class="label"><i class="ti ti-coin"></i> Estimated cost (all time)</div>
+            <div class="value small" th:text="${hasCostData ? '$' + #numbers.formatDecimal(totalCost, 1, 4) : '—'}">$0.0000</div>
         </div>
         <div class="metric-tile">
             <div class="label"><i class="ti ti-arrow-down-circle"></i> Input Tokens</div>
-            <div class="value" th:text="${#numbers.formatInteger(totalInputTokens, 1, 'COMMA')}">0</div>
+            <div class="value" th:text="${hasCostData ? #numbers.formatInteger(totalInputTokens, 1, 'COMMA') : '—'}">0</div>
         </div>
         <div class="metric-tile">
             <div class="label"><i class="ti ti-arrow-up-circle"></i> Output Tokens</div>
-            <div class="value" th:text="${#numbers.formatInteger(totalOutputTokens, 1, 'COMMA')}">0</div>
+            <div class="value" th:text="${hasCostData ? #numbers.formatInteger(totalOutputTokens, 1, 'COMMA') : '—'}">0</div>
         </div>
         <div class="metric-tile">
             <div class="label"><i class="ti ti-sum"></i> Total Tokens</div>
-            <div class="value" th:text="${#numbers.formatInteger(totalTokens, 1, 'COMMA')}">0</div>
+            <div class="value" th:text="${hasCostData ? #numbers.formatInteger(totalTokens, 1, 'COMMA') : '—'}">0</div>
         </div>
     </div>
 
     <!-- Cost-over-time line chart -->
     <div class="panel glass-card mb-3" th:if="${not #lists.isEmpty(costSeries)}">
         <div class="panel-header">
-            <h3>Cost Over Time</h3>
+            <h3>Estimated cost over time</h3>
         </div>
         <div class="panel-body">
             <div class="chart-wrap">
@@ -50,9 +52,9 @@
     </div>
 
     <!-- Cost-by-repo bar chart -->
-    <div class="panel glass-card mb-3" th:if="${not #lists.isEmpty(repoBreakdowns)}">
+    <div class="panel glass-card mb-3" th:if="${hasCostData and not #lists.isEmpty(repoBreakdowns)}">
         <div class="panel-header">
-            <h3>Cost by Repository</h3>
+            <h3>Estimated cost by repository (all time)</h3>
         </div>
         <div class="panel-body">
             <div class="chart-wrap">
@@ -68,7 +70,7 @@
     <!-- Per-repo breakdown table -->
     <div class="panel glass-card mb-3">
         <div class="panel-header">
-            <h3>Cost by Repository</h3>
+            <h3>Estimated cost by repository (all time)</h3>
         </div>
         <div class="panel-body">
             <table class="data-table" data-sortable th:if="${not #lists.isEmpty(repoBreakdowns)}">
@@ -76,18 +78,18 @@
                     <tr>
                         <th data-sort="text">Repository</th>
                         <th data-sort="number">Issues Processed</th>
-                        <th data-sort="number" data-sort-default="desc">Total Cost</th>
-                        <th data-sort="number">Avg Cost / Issue</th>
+                        <th data-sort="number" data-sort-default="desc">Estimated cost</th>
+                        <th data-sort="number">Average per processed issue</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr th:each="rb : ${repoBreakdowns}">
                         <td th:text="${rb.repoName()}">owner/repo</td>
                         <td th:text="${rb.issueCount()}" th:attr="data-value=${rb.issueCount()}">0</td>
-                        <td th:text="'$' + ${#numbers.formatDecimal(rb.totalCost(), 1, 4)}"
-                            th:attr="data-value=${rb.totalCost()}">$0.0000</td>
-                        <td th:text="'$' + ${#numbers.formatDecimal(rb.avgCostPerIssue(), 1, 4)}"
-                            th:attr="data-value=${rb.avgCostPerIssue()}">$0.0000</td>
+                        <td th:text="${rb.hasCostData() ? '$' + #numbers.formatDecimal(rb.totalCost(), 1, 4) : '—'}"
+                            th:attr="data-value=${rb.hasCostData() ? rb.totalCost() : null},title=${rb.hasCostData() ? null : 'No recorded estimate'}">$0.0000</td>
+                        <td th:text="${rb.hasCostData() and rb.issueCount() > 0 ? '$' + #numbers.formatDecimal(rb.avgCostPerIssue(), 1, 4) : '—'}"
+                            th:attr="data-value=${rb.hasCostData() ? rb.avgCostPerIssue() : null},title=${rb.hasCostData() ? null : 'No recorded estimate'}">$0.0000</td>
                     </tr>
                 </tbody>
             </table>
@@ -98,7 +100,7 @@
     <!-- Per-issue breakdown table -->
     <div class="panel glass-card">
         <div class="panel-header">
-            <h3>Cost by Issue</h3>
+            <h3>Estimated cost by issue (all time)</h3>
         </div>
         <div class="panel-body">
             <table class="data-table" data-sortable th:if="${not #lists.isEmpty(issueBreakdowns)}">
@@ -108,7 +110,7 @@
                         <th data-sort="text">Issue</th>
                         <th data-sort="text">Status</th>
                         <th data-sort="number">Iterations</th>
-                        <th data-sort="number" data-sort-default="desc">Cost</th>
+                        <th data-sort="number" data-sort-default="desc">Estimated cost</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -126,8 +128,8 @@
                                   th:text="${ib.status()}">STATUS</span>
                         </td>
                         <td th:text="${ib.iterations()}" th:attr="data-value=${ib.iterations()}">0</td>
-                        <td th:text="'$' + ${#numbers.formatDecimal(ib.cost(), 1, 4)}"
-                            th:attr="data-value=${ib.cost()}">$0.0000</td>
+                        <td th:text="${ib.hasCostData() ? '$' + #numbers.formatDecimal(ib.cost(), 1, 4) : '—'}"
+                            th:attr="data-value=${ib.hasCostData() ? ib.cost() : null},title=${ib.hasCostData() ? null : 'No recorded estimate'}">$0.0000</td>
                     </tr>
                 </tbody>
             </table>

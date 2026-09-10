@@ -125,4 +125,13 @@ class SettingsPageRenderTest {
 
         assertThat(html).doesNotContain("Pause Agent", "Resume Agent", "Polling is", "Agent paused");
     }
+
+    @Test
+    void providerIsSeparateAndSaveActionsAreExplicit() {
+        String html = render();
+        assertThat(html).contains("model-settings-grid", "provider-setting full-width",
+                "Save provider and models", "Save quick settings", "Save configuration (restart required)");
+        assertThat(html).containsSubsequence("id=\"implementation-model\"", "id=\"implementation-reasoning-effort\"",
+                "id=\"review-model\"", "id=\"review-reasoning-effort\"", "id=\"utility-model\"", "id=\"utility-reasoning-effort\"");
+    }
 }

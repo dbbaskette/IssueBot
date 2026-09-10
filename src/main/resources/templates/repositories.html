@@ -168,9 +168,9 @@
                                 <option value="">Inherit global</option>
                                 <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
                             </select>
+                            <div th:replace="~{fragments/reasoning :: picker('review-model', 'reviewReasoningEffort', null)}"></div>
                         </div>
                         <div class="field-group">
-                            <div th:replace="~{fragments/reasoning :: picker('review-model', 'reviewReasoningEffort', null)}"></div>
                             <label for="follow-up-mode">Review findings handling</label>
                             <select id="follow-up-mode" name="followUpMode">
                                 <option value="ROLLING_BACKLOG">Rolling backlog issue (recommended)</option>
@@ -245,19 +245,14 @@
                     <tr>
                         <th scope="col">Repository</th>
                         <th scope="col">Branch</th>
-                        <th scope="col">Mode</th>
-                        <th scope="col" title="Max iterations"><i class="ti ti-repeat" aria-hidden="true"></i> Iter</th>
-                        <th scope="col" title="CI / GitHub Actions"><i class="ti ti-rocket" aria-hidden="true"></i> CI</th>
-                        <th scope="col" title="Security review"><i class="ti ti-shield-lock" aria-hidden="true"></i> Review</th>
-                        <th scope="col" title="Auto-merge PRs"><i class="ti ti-git-merge" aria-hidden="true"></i> Merge</th>
-                        <th scope="col" title="Auto-start issues"><i class="ti ti-player-play" aria-hidden="true"></i> Auto</th>
-                        <th scope="col" title="Review findings handling"><i class="ti ti-arrow-forward-up" aria-hidden="true"></i> Follow-Up</th>
+                        <th scope="col">Workflow and checkpoints</th>
                         <th scope="col" title="Open issues"><i class="ti ti-bug" aria-hidden="true"></i> Issues</th>
                         <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr th:each="repo : ${repos}">
+                    <th:block th:each="repo : ${repos}">
+                    <tr>
                         <td data-label="Repository">
                             <a class="repo-link" target="_blank" rel="noopener"
                                th:href="${'https://github.com/' + repo.owner + '/' + repo.name}"
@@ -268,29 +263,14 @@
                             </a>
                         </td>
                         <td data-label="Branch" th:text="${repo.branch}">main</td>
-                        <td data-label="Mode">
-                            <span class="status" th:classappend="${repo.mode.name() == 'AUTONOMOUS' ? 'status-completed' : 'status-awaiting_approval'}" th:text="${repo.mode}">AUTONOMOUS</span>
-                        </td>
-                        <td data-label="Iter" th:text="${repo.maxIterations}">5</td>
-                        <td data-label="CI">
-                            <span th:if="${repo.ciEnabled}" class="status status-completed">ON</span>
-                            <span th:unless="${repo.ciEnabled}" class="status status-pending">OFF</span>
-                        </td>
-                        <td data-label="Review">
-                            <span th:if="${repo.securityReviewEnabled}" class="status status-awaiting_approval" title="Security review enabled">SEC</span>
-                            <span th:text="${repo.maxReviewIterations}" class="text-sm text-muted" th:title="'Max ' + ${repo.maxReviewIterations} + ' review iterations'"></span>
-                        </td>
-                        <td data-label="Merge">
-                            <span th:if="${repo.autoMerge}" class="status status-completed">AUTO</span>
-                            <span th:unless="${repo.autoMerge}" class="status status-pending">MANUAL</span>
-                        </td>
-                        <td data-label="Auto">
-                            <span th:if="${repo.autoStart}" class="status status-completed">ON</span>
-                            <span th:unless="${repo.autoStart}" class="status status-pending">OFF</span>
-                        </td>
-                        <td data-label="Follow-Up">
-                            <span class="status" th:classappend="${repo.followUpMode.name() == 'OFF' ? 'status-pending' : 'status-completed'}"
-                                  th:text="${repo.followUpMode}" th:title="${repo.followUpMode}">ROLLING_BACKLOG</span>
+                        <td data-label="Workflow and checkpoints" class="repo-workflow-summary">
+                            <strong th:text="${repo.workflowPolicy.name() == 'AUTOMATED' ? 'Automatic' : (repo.workflowPolicy.name() == 'STAGED' ? 'Approval checkpoints' : 'Existing settings')}">Workflow</strong>
+                            <p th:if="${repo.workflowPolicy.name() == 'AUTOMATED'}">No routine approval checkpoints.</p>
+                            <p th:if="${repo.workflowPolicy.name() == 'STAGED'}" th:text="${#strings.isEmpty(repo.approvalStages) ? 'No stages require approval.' : 'Approve before: ' + #strings.toLowerCase(#strings.replace(repo.approvalStages, ',', ', '))}">Checkpoints</p>
+                            <div th:if="${repo.workflowPolicy.name() == 'LEGACY'}">
+                                <p th:text="${repo.mode.name() == 'APPROVAL_GATED' ? 'Approval-gated mode' : 'Autonomous mode'}">Mode</p>
+                                <p th:text="${(repo.autoStart ? 'Automatic start' : 'Manual start') + '; ' + (repo.planFirst ? 'plan first' : 'no planning stage') + '; ' + (repo.autoMerge ? 'automatic merge' : 'manual merge')}">Existing workflow controls</p>
+                            </div>
                         </td>
                         <td data-label="Issues" th:text="${issueCounts.containsKey(repo.id) ? issueCounts.get(repo.id) : 0}">0</td>
                         <td data-label="Actions" class="repo-actions">
@@ -334,6 +314,10 @@
                                              data-delete-url=@{'/repositories/' + ${repo.id}}">
                                 <i class="ti ti-trash" aria-hidden="true"></i> Remove
                             </button>
+                        </td>
+                    </tr>
+                    <tr class="repo-lessons-row">
+                        <td colspan="5">
                             <details class="lessons-details"
                                      th:attr="data-ui-state-key=${'repo:' + repo.id + ':lessons'}">
                                 <summary th:text="'Lessons (' + ${lessonsByRepo.containsKey(repo.id) ? #lists.size(lessonsByRepo.get(repo.id)) : 0} + ')'">Lessons (0)</summary>
@@ -354,8 +338,9 @@
                             </details>
                         </td>
                     </tr>
+                    </th:block>
                     <tr th:if="${#lists.isEmpty(repos)}">
-                        <td colspan="11" class="text-muted" style="text-align:center;padding:2rem">No repositories configured. Click "Add Repository" to get started.</td>
+                        <td colspan="5" class="empty-state"><p class="empty-state-title">No repositories configured</p><p>Add a repository to choose its workflow and begin tracking issues.</p></td>
                     </tr>
                 </tbody>
             </table>

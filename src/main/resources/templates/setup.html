@@ -5,12 +5,12 @@
     <div th:replace="~{layout :: toasts}"></div>
 
     <div class="page-header">
-        <h2>Setup Wizard</h2>
+        <h2>Setup</h2>
     </div>
 
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Prerequisites Check</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Prerequisites</h3>
             <button type="button" class="btn btn-outline btn-sm"
                     hx-get="/setup/prereqs" hx-target="#prereqs-table" hx-swap="innerHTML">
                 <i class="ti ti-refresh" aria-hidden="true"></i> Re-check
@@ -52,10 +52,8 @@
         </div>
     </div>
 
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Webhooks</h3>
-        </div>
+    <details class="glass-card inset-panel mb-3 optional-setup" data-ui-state-key="setup:webhooks">
+        <summary class="panel-header">Optional: webhooks and delivery diagnostics</summary>
         <p class="text-sm text-muted mb-2">
             GitHub webhooks give near-instant issue pickup instead of waiting for the next poll.
             Polling keeps running as a fallback, so webhooks are optional but recommended.
@@ -152,24 +150,24 @@
             <a href="https://github.com/dbbaskette/IssueBot#github-webhooks-instant-pickup" target="_blank" rel="noopener">webhook tunnel guide</a>
             (smee.io, cloudflared, etc.).
         </p>
-    </div>
+    </details>
 
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Quick Start</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Quick start</h3>
         </div>
-        <h4>Next Steps</h4>
+        <h4>Next steps</h4>
         <ol>
             <li>Go to <a href="/repositories">Repositories</a> and add a GitHub repository to watch.</li>
             <li>On your GitHub repo, add the label <code>agent-ready</code> to an issue you want IssueBot to work on.</li>
-            <li>IssueBot will detect the issue and begin implementation automatically.</li>
+            <li>IssueBot detects the issue while processing is enabled. Your repository workflow determines when work starts and which stages require approval.</li>
             <li>Monitor progress on the <a href="/">Dashboard</a>.</li>
         </ol>
     </div>
 
-    <div class="glass-card">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Configuration File</h3>
+    <details class="glass-card inset-panel optional-setup" data-ui-state-key="setup:configuration">
+        <summary class="panel-header">Optional: example configuration</summary>
+        <div class="form-actions mb-2">
             <button type="button" class="btn btn-outline btn-sm" data-copy-target="#example-config">
                 <i class="ti ti-copy" aria-hidden="true"></i> Copy
             </button>
@@ -213,7 +211,7 @@
       ci-timeout-minutes: 15
       security-review-enabled: false
       auto-merge: false</pre>
-    </div>
+    </details>
 </div>
 
 <!-- HTMX fragment: prerequisite check results (loaded async) -->

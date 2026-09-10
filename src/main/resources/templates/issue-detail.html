@@ -285,7 +285,7 @@
             </section>
 
             <section th:if="${issue.status.name() == 'AWAITING_APPROVAL' and (issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_'))}"
-                     id="approval-decision" class="panel mb-3 approval-decision-card"
+                     id="approval-decision" class="panel mb-3 decision-card approval-decision-card"
                      aria-labelledby="approval-decision-title">
                 <header class="panel-header">
                     <div>
@@ -553,8 +553,8 @@
 
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
-                <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-                    <h3>Blocked By</h3>
+                <div class="panel-header inset-heading">
+                    <h3>Dependencies</h3>
                     <span class="status status-blocked">WAITING</span>
                 </div>
                 <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
@@ -1084,7 +1084,7 @@
              th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
                       data-ui-state-key=${'issue:' + issue.id + ':iteration-history'}">
         <summary class="panel-header">
-            <h3>Iteration History</h3>
+            <h3>Iteration history</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(iterationsNewestFirst) + ' attempts'}">0 attempts</span>
         </summary>
         <div class="panel-body">
@@ -1181,7 +1181,7 @@
              th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
                       data-ui-state-key=${'issue:' + issue.id + ':activity'}">
         <summary class="panel-header">
-            <h3>Activity Log</h3>
+            <h3>Activity log</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(events) + ' events'}">0 events</span>
         </summary>
         <div class="panel-body">
