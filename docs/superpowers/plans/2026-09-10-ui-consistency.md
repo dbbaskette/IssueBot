@@ -49,7 +49,7 @@ assert.equal(errorToast.removed, false);
 
 ### Task 2: Shared visual system and screen-by-screen simplification
 
-**Files:** Modify `src/main/resources/static/css/style.css`, `queue-simplification.css` only if necessary, and templates `dashboard.html`, `repositories.html`, `issues.html`, `issue-detail.html`, `inbox.html`, `approvals.html`, `settings.html`, `setup.html`, `costs.html`, `error.html`, `notifications.html`, `layout.html` and relevant shared fragments. Extend existing controller/template tests for changed rendered contracts.
+**Files:** Modify `src/main/resources/static/css/style.css`, `queue-simplification.css` only if necessary, and templates `dashboard.html`, `repositories.html`, `issues.html`, `issue-detail.html`, `inbox.html`, `approvals.html`, `settings.html`, `setup.html`, `costs.html`, `error.html`, `notifications.html`, `layout.html` and relevant shared fragments. Extend existing controller/template tests for changed rendered contracts. `CostController.java` and `CostTrackingRepository.java` may expose read-only existence/count metadata to distinguish missing estimates from measured zero, because existing totals coalesce both cases to zero; preserve aggregate semantics.
 
 **Interfaces:** Consumes Task 1 semantic disclosure attributes and toast behavior; preserves them when moving markup. Existing controller model attributes, field names, ids, form actions and HTMX endpoints remain compatible. Shared CSS primitives own dimensions and spacing rather than per-page inline styling.
 
@@ -68,7 +68,7 @@ assert.equal(errorToast.removed, false);
 
 ### Task 3: Full-screen fixtures and integration verification
 
-**Files:** Extend `src/test/java/com/dbbaskette/issuebot/controller/UiVisualFixturesTest.java`, `src/test/js/ui-state.test.cjs` if required, and add `docs/superpowers/specs/2026-09-10-ui-consistency-verification.md`.
+**Files:** Extend `src/test/java/com/dbbaskette/issuebot/controller/UiVisualFixturesTest.java`, `src/test/js/ui-state.test.cjs` if required, add a read-only `scripts/ui-fixture-server.cjs` to serve exported full/HTMX fragments without workers, and add `docs/superpowers/specs/2026-09-10-ui-consistency-verification.md`.
 
 **Interfaces:** Consumes all final templates and Task 1 state module. Fixture export uses existing `issuebot.visualOutput` property, synthetic data, and disabled polling/startup services. No live production data or workers.
 
