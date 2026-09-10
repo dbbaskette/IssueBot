@@ -26,7 +26,7 @@
 
 **Interfaces:** Consumes HTMX lifecycle events and semantic `data-ui-state-key` attributes on details. Produces `window.IssueBotUiState.restore(root)` for newly constructed content and `window.IssueBotUiState.capture(root)` for explicit programmatic disclosure changes. Keys must compose pathname with stable item/version context; no text/index-only identity for dynamic entities. Load module before app.js and keep startup idempotent.
 
-- [ ] Inspect current HTMX swap hooks, disclosure generation, toast initialization, and nav routing. Add a bounded map of explicit open/closed choices with safe sessionStorage fallback. Use stable ids as keys only where identity is genuinely fixed; annotate entity-specific disclosures in templates with semantic keys.
+- [x] Inspect current HTMX swap hooks, disclosure generation, toast initialization, and nav routing. Add a bounded map of explicit open/closed choices with safe sessionStorage fallback. Use stable ids as keys only where identity is genuinely fixed; annotate entity-specific disclosures in templates with semantic keys.
 
 ```js
 // Persist choices, not content. A closed choice is just as explicit as open.
@@ -34,10 +34,10 @@ const record = { key: '/issues/142:plan:3:evidence', open: false };
 // The same semantic key restores on replacement; plan:4 uses its server default.
 ```
 
-- [ ] Integrate capture/restore around actual morph, replacement, OOB, history, and diff creation hooks. Prevent programmatic defaults/restoration from replacing user choices; keep nested disclosures independent. Wire diff expand/collapse-all into capture.
-- [ ] Synchronize sidebar active/aria-current after successful navigation and history restoration. Scroll only intentional navigation to top/anchor; preserve poll/history scroll.
-- [ ] Replace unconditional four-second toast removal with severity-aware behavior. Attach accessible dismiss controls; errors/warnings persist, successes pause/resume their six-second timeout on hover/focus. Avoid repeated initialization and duplicate visible messages.
-- [ ] Add tests asserting actual state values, stored keys, listener behavior and resulting DOM properties: both states, independent issue/version/nested keys, malformed/denied storage, bounded storage, updates keep new content, nav versus polls/history, persistent errors, paused success dismissal.
+- [x] Integrate capture/restore around actual morph, replacement, OOB, history, and diff creation hooks. Prevent programmatic defaults/restoration from replacing user choices; keep nested disclosures independent. Wire diff expand/collapse-all into capture.
+- [x] Synchronize sidebar active/aria-current after successful navigation and history restoration. Scroll only intentional navigation to top/anchor; preserve poll/history scroll.
+- [x] Replace unconditional four-second toast removal with severity-aware behavior. Attach accessible dismiss controls; errors/warnings persist, successes pause/resume their six-second timeout on hover/focus. Avoid repeated initialization and duplicate visible messages.
+- [x] Add tests asserting actual state values, stored keys, listener behavior and resulting DOM properties: both states, independent issue/version/nested keys, malformed/denied storage, bounded storage, updates keep new content, nav versus polls/history, persistent errors, paused success dismissal.
 
 ```js
 assert.equal(replacedDetails.open, true);
@@ -45,7 +45,7 @@ assert.equal(newVersionDetails.open, false);
 assert.equal(errorToast.removed, false);
 ```
 
-- [ ] Run `node --test src/test/js/*.cjs src/test/js/*.js`, self-review and commit the slice.
+- [x] Run `node --test src/test/js/*.cjs src/test/js/*.js`, self-review and commit the slice.
 
 ### Task 2: Shared visual system and screen-by-screen simplification
 
@@ -53,18 +53,18 @@ assert.equal(errorToast.removed, false);
 
 **Interfaces:** Consumes Task 1 semantic disclosure attributes and toast behavior; preserves them when moving markup. Existing controller model attributes, field names, ids, form actions and HTMX endpoints remain compatible. Shared CSS primitives own dimensions and spacing rather than per-page inline styling.
 
-- [ ] Consolidate panel/header/control/alert/empty-state primitives in existing CSS, remove conflicting declarations in touched areas, use the spec spacing scale and 40px/44px control floors. Apply meaningful severity colors and accessible contrast in both themes; constrain long text and code.
+- [x] Consolidate panel/header/control/alert/empty-state primitives in existing CSS, remove conflicting declarations in touched areas, use the spec spacing scale and 40px/44px control floors. Apply meaningful severity colors and accessible contrast in both themes; constrain long text and code.
 
 ```css
 :root { --control-height: 40px; --panel-radius: 12px; --panel-gap: 24px; }
 @media (max-width: 640px) { :root { --control-height: 44px; } }
 ```
 
-- [ ] Dashboard: remove duplicate attention/active summaries, retain canonical counts, align metrics and show event messages with technical details as disclosure. Repositories: replace overlapping legacy columns with effective workflow/checkpoints and visible actions, preserve edit behavior. Issues: align toolbar/rows/dependencies and empty states without undoing recent queue simplification.
-- [ ] Issue detail/Needs You/Approvals: use coherent section headers, decision cards, stage and issue title text, evidence/history/recovery sizing; share card presentation where practical; replace misleading empty-state copy with `No actions need your attention` and accurate queue context. Keep all action endpoints and existing ids.
-- [ ] Settings: group provider separately and pair each model/reasoning setting by stage; explicit save labels and concise hints. Setup: compact prerequisites, optional details disclosures, correct processing/approval copy. Costs: use consistent monetary precision and `Estimated cost`; render an em dash with explanation when no recorded data, while measured zero remains numeric.
-- [ ] Standardize error screen and notification panel, severity icons, dismiss affordances, mobile widths, page heading spacing and shell. No changes to notification read-state semantics.
-- [ ] Update rendered-contract assertions to reflect intentional copy/layout changes; run focused relevant controller tests and all JS tests, self-review, commit.
+- [x] Dashboard: remove duplicate attention/active summaries, retain canonical counts, align metrics and show event messages with technical details as disclosure. Repositories: replace overlapping legacy columns with effective workflow/checkpoints and visible actions, preserve edit behavior. Issues: align toolbar/rows/dependencies and empty states without undoing recent queue simplification.
+- [x] Issue detail/Needs You/Approvals: use coherent section headers, decision cards, stage and issue title text, evidence/history/recovery sizing; share card presentation where practical; replace misleading empty-state copy with `No actions need your attention` and accurate queue context. Keep all action endpoints and existing ids.
+- [x] Settings: group provider separately and pair each model/reasoning setting by stage; explicit save labels and concise hints. Setup: compact prerequisites, optional details disclosures, correct processing/approval copy. Costs: use consistent monetary precision and `Estimated cost`; render an em dash with explanation when no recorded data, while measured zero remains numeric.
+- [x] Standardize error screen and notification panel, severity icons, dismiss affordances, mobile widths, page heading spacing and shell. No changes to notification read-state semantics.
+- [x] Update rendered-contract assertions to reflect intentional copy/layout changes; run focused relevant controller tests and all JS tests, self-review, commit.
 
 ### Task 3: Full-screen fixtures and integration verification
 
@@ -72,7 +72,7 @@ assert.equal(errorToast.removed, false);
 
 **Interfaces:** Consumes all final templates and Task 1 state module. Fixture export uses existing `issuebot.visualOutput` property, synthetic data, and disabled polling/startup services. No live production data or workers.
 
-- [ ] Export representative rendered pages for every route in the screen requirements, including populated issue/approval, empty/paused, settings/setup/costs, notifications, and error. Keep real MVC rendering assertions for headings, labels, semantic identities and expected controls.
+- [x] Export representative rendered pages for every route in the screen requirements, including populated issue/approval, empty/paused, settings/setup/costs, notifications, and error. Keep real MVC rendering assertions for headings, labels, semantic identities and expected controls.
 
 ```java
 mockMvc.perform(get("/settings")).andExpect(status().isOk());
@@ -80,6 +80,6 @@ mockMvc.perform(get("/settings")).andExpect(status().isOk());
 // keeping IssuePollingService and StartupValidator mocked.
 ```
 
-- [ ] Run focused fixture test with `-Dissuebot.visualOutput=/tmp/issuebot-ui-consistency`, serve the static directory locally, inspect desktop and mobile light/dark through the browser. Verify expansion retention with actual HTMX-compatible swaps/morphs in an isolated fixture harness, plus new content and closed-state preservation. Use no production mutation endpoints.
-- [ ] Record each screen reviewed and any environment limitations, fix implementation gaps through the owning agent, and run final `./mvnw -q test` plus `node --test src/test/js/*.cjs src/test/js/*.js`.
-- [ ] Commit verification artifacts and summarize tested outcomes without claiming deployment.
+- [x] Run focused fixture test with `-Dissuebot.visualOutput=/tmp/issuebot-ui-consistency`, serve the static directory locally, inspect desktop and mobile light/dark through the browser. Verify expansion retention with actual HTMX-compatible swaps/morphs in an isolated fixture harness, plus new content and closed-state preservation. Use no production mutation endpoints.
+- [x] Record each screen reviewed and any environment limitations, fix implementation gaps through the owning agent, and run final `./mvnw -q test` plus `node --test src/test/js/*.cjs src/test/js/*.js`.
+- [x] Commit verification artifacts and summarize tested outcomes without claiming deployment.
