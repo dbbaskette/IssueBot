@@ -99,6 +99,10 @@ function createFixtureServer({ root = '/tmp/issuebot-ui-consistency', host = '12
       send(res, req, 400, 'Invalid path.\n');
       return;
     }
+    if (pathname.split('/').some(segment => segment === '.' || segment === '..')) {
+      send(res, req, 400, 'Invalid path.\n');
+      return;
+    }
 
     const route = manifest.routes[`${pathname}${rawSearch}`];
     let relative;

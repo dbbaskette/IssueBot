@@ -106,6 +106,11 @@ test('rejects mutation methods, traversal attempts, and routes absent from the m
   assert.equal(missing.status, 404);
 });
 
+test('rejects literal dot segments before resolving allowlisted static paths', async () => {
+  const traversal = await rawRequest('/css/../fixture-manifest.json');
+  assert.equal(traversal.statusCode, 400);
+});
+
 test('HEAD returns the GET metadata without a response body', async () => {
   const response = await fetch(`${baseUrl}/dashboard/live`, { method: 'HEAD' });
   assert.equal(response.status, 200);
