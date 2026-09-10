@@ -180,8 +180,11 @@ issuebot:
 
   codex-cli:
     implementation-model: gpt-5.6-sol
+    implementation-reasoning-effort: low  # also used for planning
     review-model: gpt-5.6-terra
+    review-reasoning-effort: medium
     utility-model: gpt-5.6-luna
+    utility-reasoning-effort: medium
     timeout-minutes: 45
     review-timeout-minutes: 20
 

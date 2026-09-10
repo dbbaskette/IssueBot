@@ -74,15 +74,20 @@ class SettingsControllerTest {
 
         RedirectAttributesModelMap redirectAttributes = new RedirectAttributesModelMap();
         String view = controller.saveModels(IssueBotProperties.AgentProvider.CODEX,
-                "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", redirectAttributes);
+                "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna",
+                "ultra", "high", "low", redirectAttributes);
 
         assertThat(view).isEqualTo("redirect:/settings");
         assertThat(properties.getAgentProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
-        assertThat(properties.getCodexCli().getImplementationModel()).isEqualTo("gpt-5.6-sol");
+        assertThat(properties.getCodexCli().getImplementationModel()).isEqualTo("gpt-6-astra");
+        assertThat(properties.getCodexCli().getImplementationReasoningEffort()).isEqualTo("ultra");
         String written = Files.readString(configFile);
         assertThat(written).contains("agent-provider: codex");
         assertThat(written).contains("codex-cli:");
         assertThat(written).contains("review-model: gpt-5.6-terra");
+        assertThat(written).contains("implementation-reasoning-effort: ultra");
+        assertThat(written).contains("review-reasoning-effort: high");
+        assertThat(written).contains("utility-reasoning-effort: low");
         assertThat(written).contains("implementation-model: claude-opus-4-8");
     }
 

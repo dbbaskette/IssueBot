@@ -60,7 +60,8 @@ class SettingsPageRenderTest {
         context.setVariable("claudeModelCatalog", List.of());
         context.setVariable("codexModelCatalog", List.of(
                 new com.dbbaskette.issuebot.service.codex.CodexModelCatalog.ModelInfo(
-                        "gpt-5.6-sol", "GPT-5.6-Sol", "Frontier")));
+                        "gpt-6-astra", "GPT-6-Astra", "Frontier", "medium",
+                        List.of("low", "medium", "high", "xhigh", "max", "ultra"))));
         context.setVariable("agentProvider", IssueBotProperties.AgentProvider.CLAUDE_CODE);
         context.setVariable("claudeImplementationModel", "claude-sonnet-5");
         context.setVariable("claudeReviewModel", "claude-sonnet-5");
@@ -68,6 +69,10 @@ class SettingsPageRenderTest {
         context.setVariable("codexImplementationModel", "gpt-5.6-sol");
         context.setVariable("codexReviewModel", "gpt-5.6-terra");
         context.setVariable("codexUtilityModel", "gpt-5.6-luna");
+        context.setVariable("implementationReasoningEffort", "low");
+        context.setVariable("reviewReasoningEffort", "medium");
+        context.setVariable("utilityReasoningEffort", "medium");
+        context.setVariable("codexReasoningLevels", List.of("low", "medium", "high", "xhigh", "max", "ultra"));
         context.setVariable("implementationModel", "claude-sonnet-5");
         context.setVariable("reviewModel", "claude-sonnet-5");
         context.setVariable("utilityModel", "claude-haiku-4-5");
@@ -108,7 +113,9 @@ class SettingsPageRenderTest {
 
         assertThat(html).contains("name=\"agentProvider\"");
         assertThat(html).contains("Codex CLI (ChatGPT subscription)");
-        assertThat(html).contains("value=\"gpt-5.6-sol\"");
+        assertThat(html).contains("value=\"gpt-6-astra\"");
+        assertThat(html).contains("name=\"implementationReasoningEffort\"");
+        assertThat(html).contains("data-reasoning-levels=\"low,medium,high,xhigh,max,ultra\"");
         assertThat(html).doesNotContain("OPENAI_API_KEY");
     }
 

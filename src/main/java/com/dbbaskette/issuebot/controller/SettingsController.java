@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 @Controller
@@ -91,10 +92,19 @@ public class SettingsController {
                               @RequestParam String implementationModel,
                               @RequestParam String reviewModel,
                               @RequestParam String utilityModel,
+                              @RequestParam(required = false) String implementationReasoningEffort,
+                              @RequestParam(required = false) String reviewReasoningEffort,
+                              @RequestParam(required = false) String utilityReasoningEffort,
                               RedirectAttributes redirectAttributes) {
         implementationModel = implementationModel == null ? null : implementationModel.trim();
         reviewModel = reviewModel == null ? null : reviewModel.trim();
         utilityModel = utilityModel == null ? null : utilityModel.trim();
+        implementationReasoningEffort = normalizeReasoningEffort(implementationReasoningEffort,
+                properties.getCodexCli().getImplementationReasoningEffort());
+        reviewReasoningEffort = normalizeReasoningEffort(reviewReasoningEffort,
+                properties.getCodexCli().getReviewReasoningEffort());
+        utilityReasoningEffort = normalizeReasoningEffort(utilityReasoningEffort,
+                properties.getCodexCli().getUtilityReasoningEffort());
 
         if (isInvalidModelId(implementationModel) || isInvalidModelId(reviewModel)
                 || isInvalidModelId(utilityModel)) {
@@ -102,7 +112,16 @@ public class SettingsController {
             return "redirect:/settings";
         }
 
-        if (!writeModelsToConfig(agentProvider, implementationModel, reviewModel, utilityModel)) {
+        if (agentProvider == IssueBotProperties.AgentProvider.CODEX
+                && (!CodexModelCatalog.REASONING_LEVELS.contains(implementationReasoningEffort)
+                || !CodexModelCatalog.REASONING_LEVELS.contains(reviewReasoningEffort)
+                || !CodexModelCatalog.REASONING_LEVELS.contains(utilityReasoningEffort))) {
+            redirectAttributes.addFlashAttribute("error", "Choose a valid Codex reasoning level.");
+            return "redirect:/settings";
+        }
+
+        if (!writeModelsToConfig(agentProvider, implementationModel, reviewModel, utilityModel,
+                implementationReasoningEffort, reviewReasoningEffort, utilityReasoningEffort)) {
             redirectAttributes.addFlashAttribute("error",
                     "Could not parse " + configPath + " — fix the YAML in the editor below, then try again.");
             return "redirect:/settings";
@@ -113,6 +132,9 @@ public class SettingsController {
             properties.getCodexCli().setImplementationModel(implementationModel);
             properties.getCodexCli().setReviewModel(reviewModel);
             properties.getCodexCli().setUtilityModel(utilityModel);
+            properties.getCodexCli().setImplementationReasoningEffort(implementationReasoningEffort);
+            properties.getCodexCli().setReviewReasoningEffort(reviewReasoningEffort);
+            properties.getCodexCli().setUtilityReasoningEffort(utilityReasoningEffort);
         } else {
             properties.getClaudeCode().setImplementationModel(implementationModel);
             properties.getClaudeCode().setReviewModel(reviewModel);
@@ -125,10 +147,27 @@ public class SettingsController {
     }
 
     /** Backward-compatible direct-call overload retained for controller unit tests and callers. */
+    String saveModels(IssueBotProperties.AgentProvider agentProvider,
+                      String implementationModel, String reviewModel, String utilityModel,
+                      RedirectAttributes redirectAttributes) {
+        return saveModels(agentProvider, implementationModel, reviewModel, utilityModel,
+                properties.getCodexCli().getImplementationReasoningEffort(),
+                properties.getCodexCli().getReviewReasoningEffort(),
+                properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
+    }
+
+    /** Backward-compatible direct-call overload retained for controller unit tests and callers. */
     String saveModels(String implementationModel, String reviewModel, String utilityModel,
                       RedirectAttributes redirectAttributes) {
         return saveModels(properties.getAgentProvider(), implementationModel, reviewModel,
-                utilityModel, redirectAttributes);
+                utilityModel,
+                properties.getCodexCli().getImplementationReasoningEffort(),
+                properties.getCodexCli().getReviewReasoningEffort(),
+                properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
+    }
+
+    private static String normalizeReasoningEffort(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private static boolean isInvalidModelId(String modelId) {
@@ -142,14 +181,21 @@ public class SettingsController {
      */
     private boolean writeModelsToConfig(IssueBotProperties.AgentProvider provider,
                                         String implementationModel, String reviewModel,
-                                        String utilityModel) {
+                                        String utilityModel, String implementationReasoningEffort,
+                                        String reviewReasoningEffort, String utilityReasoningEffort) {
         String section = provider == IssueBotProperties.AgentProvider.CODEX ? "codex-cli" : "claude-code";
+        Map<String, Object> providerSettings = new LinkedHashMap<>();
+        providerSettings.put("implementation-model", implementationModel);
+        providerSettings.put("review-model", reviewModel);
+        providerSettings.put("utility-model", utilityModel);
+        if (provider == IssueBotProperties.AgentProvider.CODEX) {
+            providerSettings.put("implementation-reasoning-effort", implementationReasoningEffort);
+            providerSettings.put("review-reasoning-effort", reviewReasoningEffort);
+            providerSettings.put("utility-reasoning-effort", utilityReasoningEffort);
+        }
         return writeConfigValues(Map.of(
                 "agent-provider", provider.getConfigValue(),
-                section, Map.of(
-                        "implementation-model", implementationModel,
-                        "review-model", reviewModel,
-                        "utility-model", utilityModel)));
+                section, providerSettings));
     }
 
     /**
@@ -300,6 +346,11 @@ public class SettingsController {
         model.addAttribute("codexImplementationModel", properties.getCodexCli().getImplementationModel());
         model.addAttribute("codexReviewModel", properties.getCodexCli().getReviewModel());
         model.addAttribute("codexUtilityModel", properties.getCodexCli().getUtilityModel());
+        model.addAttribute("implementationReasoningEffort",
+                properties.getCodexCli().getImplementationReasoningEffort());
+        model.addAttribute("reviewReasoningEffort", properties.getCodexCli().getReviewReasoningEffort());
+        model.addAttribute("utilityReasoningEffort", properties.getCodexCli().getUtilityReasoningEffort());
+        model.addAttribute("codexReasoningLevels", CodexModelCatalog.REASONING_LEVELS);
         model.addAttribute("implementationModel", implementationModel);
         model.addAttribute("reviewModel", reviewModel);
         model.addAttribute("utilityModel", utilityModel);

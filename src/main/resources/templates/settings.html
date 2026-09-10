@@ -43,6 +43,7 @@
                                 th:selected="${m.id == implementationModel}">Model</option>
                         <option th:each="m : ${codexModelCatalog}" th:value="${m.id}" data-provider="CODEX"
                                 th:text="${m.displayName + ' — ' + m.description}"
+                                th:attr="data-reasoning-levels=${m.reasoningLevelsCsv},data-default-reasoning=${m.defaultReasoningLevel}"
                                 th:selected="${m.id == implementationModel}">Codex model</option>
                         <option value="__custom__" th:selected="${implementationModelCustom}">Custom&hellip;</option>
                     </select>
@@ -51,6 +52,16 @@
                            th:value="${implementationModelCustom ? implementationModel : ''}"
                            th:hidden="${!implementationModelCustom}"
                            th:required="${implementationModelCustom}">
+                </div>
+                <div class="field-group" data-codex-reasoning-group
+                     th:hidden="${agentProvider.name() != 'CODEX'}">
+                    <label for="implementation-reasoning-effort">Implementation Reasoning</label>
+                    <select id="implementation-reasoning-effort" name="implementationReasoningEffort"
+                            class="codex-reasoning-select" data-model-select-id="implementation-model">
+                        <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
+                                th:text="${level}" th:selected="${level == implementationReasoningEffort}">medium</option>
+                    </select>
+                    <span class="field-hint">Also used for planning.</span>
                 </div>
                 <div class="field-group">
                     <label for="review-model">Review Model</label>
@@ -61,6 +72,7 @@
                                 th:selected="${m.id == reviewModel}">Model</option>
                         <option th:each="m : ${codexModelCatalog}" th:value="${m.id}" data-provider="CODEX"
                                 th:text="${m.displayName + ' — ' + m.description}"
+                                th:attr="data-reasoning-levels=${m.reasoningLevelsCsv},data-default-reasoning=${m.defaultReasoningLevel}"
                                 th:selected="${m.id == reviewModel}">Codex model</option>
                         <option value="__custom__" th:selected="${reviewModelCustom}">Custom&hellip;</option>
                     </select>
@@ -69,6 +81,15 @@
                            th:value="${reviewModelCustom ? reviewModel : ''}"
                            th:hidden="${!reviewModelCustom}"
                            th:required="${reviewModelCustom}">
+                </div>
+                <div class="field-group" data-codex-reasoning-group
+                     th:hidden="${agentProvider.name() != 'CODEX'}">
+                    <label for="review-reasoning-effort">Review Reasoning</label>
+                    <select id="review-reasoning-effort" name="reviewReasoningEffort"
+                            class="codex-reasoning-select" data-model-select-id="review-model">
+                        <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
+                                th:text="${level}" th:selected="${level == reviewReasoningEffort}">medium</option>
+                    </select>
                 </div>
                 <div class="field-group">
                     <label for="utility-model">Utility Model</label>
@@ -83,7 +104,17 @@
                                 th:selected="${m.id == utilityModel}">Model</option>
                         <option th:each="m : ${codexModelCatalog}" th:value="${m.id}" data-provider="CODEX"
                                 th:text="${m.displayName + ' — ' + m.description}"
+                                th:attr="data-reasoning-levels=${m.reasoningLevelsCsv},data-default-reasoning=${m.defaultReasoningLevel}"
                                 th:selected="${m.id == utilityModel}">Codex model</option>
+                    </select>
+                </div>
+                <div class="field-group" data-codex-reasoning-group
+                     th:hidden="${agentProvider.name() != 'CODEX'}">
+                    <label for="utility-reasoning-effort">Utility Reasoning</label>
+                    <select id="utility-reasoning-effort" name="utilityReasoningEffort"
+                            class="codex-reasoning-select" data-model-select-id="utility-model">
+                        <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
+                                th:text="${level}" th:selected="${level == utilityReasoningEffort}">medium</option>
                     </select>
                 </div>
             </div>
@@ -93,7 +124,8 @@
                 </button>
             </div>
             <div class="text-sm text-muted" style="margin-top:0.5rem">
-                Model choices are discovered from the installed Codex CLI. Saving rewrites config.yml
+                Model choices and supported reasoning levels are discovered from the installed Codex CLI.
+                GPT-6-Astra is always available as an explicit choice. Saving rewrites config.yml
                 (comments are not preserved). Per-repo and per-issue overrides still take precedence when compatible.
             </div>
         </form>

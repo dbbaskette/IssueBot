@@ -1325,6 +1325,38 @@
         select.dispatchEvent(new Event('change', { bubbles: true }));
       }
     });
+    syncCodexReasoningControls(form);
+  }
+
+  function syncCodexReasoningControls(form) {
+    if (!form) { return; }
+    var providerSelect = form.querySelector('#agent-provider');
+    var codexActive = providerSelect && providerSelect.value === 'CODEX';
+    Array.prototype.forEach.call(form.querySelectorAll('[data-codex-reasoning-group]'), function (group) {
+      group.hidden = !codexActive;
+      var reasoningSelect = group.querySelector('.codex-reasoning-select');
+      if (!reasoningSelect) { return; }
+      reasoningSelect.disabled = !codexActive;
+      if (!codexActive) { return; }
+
+      var modelSelect = form.querySelector('#' + reasoningSelect.dataset.modelSelectId);
+      var modelOption = modelSelect && modelSelect.selectedIndex >= 0
+        ? modelSelect.options[modelSelect.selectedIndex] : null;
+      var supportedValue = modelOption ? modelOption.getAttribute('data-reasoning-levels') : null;
+      var supported = supportedValue ? supportedValue.split(',') : null;
+      Array.prototype.forEach.call(reasoningSelect.options, function (option) {
+        option.disabled = !!supported && supported.indexOf(option.value) < 0;
+      });
+      if (reasoningSelect.selectedOptions.length && reasoningSelect.selectedOptions[0].disabled) {
+        var preferred = modelOption ? modelOption.getAttribute('data-default-reasoning') : null;
+        var replacement = Array.prototype.find.call(reasoningSelect.options, function (option) {
+          return !option.disabled && option.value === preferred;
+        }) || Array.prototype.find.call(reasoningSelect.options, function (option) {
+          return !option.disabled;
+        });
+        if (replacement) reasoningSelect.value = replacement.value;
+      }
+    });
   }
 
   function initializeProviderModelForms(root) {
@@ -1345,6 +1377,9 @@
   document.addEventListener('change', function (e) {
     if (e.target && e.target.id === 'agent-provider') {
       syncProviderModelOptions(e.target.closest('[data-provider-model-form]'), true);
+    } else if (e.target && e.target.classList
+        && e.target.classList.contains('provider-model-select')) {
+      syncCodexReasoningControls(e.target.closest('[data-provider-model-form]'));
     }
   });
 

@@ -19,13 +19,23 @@ public class CodexModelCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(CodexModelCatalog.class);
     private static final Duration CACHE_TTL = Duration.ofMinutes(5);
+    public static final List<String> REASONING_LEVELS = List.of(
+            "low", "medium", "high", "xhigh", "max", "ultra");
+    private static final ModelInfo ASTRA = new ModelInfo(
+            "gpt-6-astra", "GPT-6-Astra", "Most capable Codex model for complex, demanding work.",
+            "medium", List.of("low", "medium", "high", "xhigh", "max", "ultra"));
     private static final List<ModelInfo> FALLBACK = List.of(
-            new ModelInfo("gpt-5.6-sol", "GPT-5.6-Sol", "Latest frontier agentic coding model."),
-            new ModelInfo("gpt-5.6-terra", "GPT-5.6-Terra", "Balanced agentic coding model for everyday work."),
-            new ModelInfo("gpt-5.6-luna", "GPT-5.6-Luna", "Fast agentic coding model."),
-            new ModelInfo("gpt-5.5", "GPT-5.5", "Frontier model for complex coding and research."),
-            new ModelInfo("gpt-5.4", "GPT-5.4", "Strong model for everyday coding."),
-            new ModelInfo("gpt-5.4-mini", "GPT-5.4-Mini", "Small model for simpler coding tasks."));
+            ASTRA,
+            new ModelInfo("gpt-5.6-sol", "GPT-5.6-Sol", "Most capable model for complex, demanding work.",
+                    "low", List.of("low", "medium", "high", "xhigh", "max", "ultra")),
+            new ModelInfo("gpt-5.6-terra", "GPT-5.6-Terra", "Balanced agentic coding model for everyday work.",
+                    "medium", List.of("low", "medium", "high", "xhigh", "max", "ultra")),
+            new ModelInfo("gpt-5.6-luna", "GPT-5.6-Luna", "Fast and affordable agentic coding model.",
+                    "medium", List.of("low", "medium", "high", "xhigh", "max")),
+            new ModelInfo("gpt-5.5", "GPT-5.5", "Proven previous-generation coding model.",
+                    "medium", List.of("low", "medium", "high", "xhigh")),
+            new ModelInfo("gpt-5.3-codex-spark", "GPT-5.3-Codex-Spark", "Ultra-fast coding model.",
+                    "high", List.of("low", "medium", "high", "xhigh")));
 
     private final ObjectMapper objectMapper;
     private volatile List<ModelInfo> cached;
@@ -41,35 +51,64 @@ public class CodexModelCatalog {
                 && cachedAt.plus(CACHE_TTL).isAfter(Instant.now())) return current;
 
         try {
-            Process process = new ProcessBuilder("codex", "debug", "models").start();
-            String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-            if (!finished) process.destroyForcibly();
-            if (finished && process.exitValue() == 0) {
-                List<ModelInfo> discovered = parseCatalog(objectMapper, stdout);
-                if (!discovered.isEmpty()) {
-                    cached = discovered;
-                    cachedAt = Instant.now();
-                    return discovered;
-                }
+            List<ModelInfo> discovered = discover(List.of("codex", "debug", "models"));
+            // Current Codex builds require a TTY for this debug command. macOS `script`
+            // supplies one for a background launchd service while keeping discovery read-only.
+            if (discovered.isEmpty() && java.nio.file.Files.isExecutable(java.nio.file.Path.of("/usr/bin/script"))) {
+                discovered = discover(List.of("/usr/bin/script", "-q", "/dev/null",
+                        "codex", "debug", "models"));
             }
-            log.debug("Codex model discovery unavailable: {}", stderr.trim());
+            if (!discovered.isEmpty()) {
+                if (discovered.stream().noneMatch(model -> ASTRA.id().equals(model.id()))) {
+                    List<ModelInfo> withAstra = new ArrayList<>();
+                    withAstra.add(ASTRA);
+                    withAstra.addAll(discovered);
+                    discovered = List.copyOf(withAstra);
+                }
+                cached = discovered;
+                cachedAt = Instant.now();
+                return discovered;
+            }
         } catch (Exception e) {
             log.debug("Codex model discovery failed: {}", e.getMessage());
         }
         return FALLBACK;
     }
 
+    private List<ModelInfo> discover(List<String> command) throws Exception {
+        Process process = new ProcessBuilder(command).start();
+        process.getOutputStream().close();
+        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+        if (!finished) process.destroyForcibly();
+        if (!finished || process.exitValue() != 0) {
+            log.debug("Codex model discovery unavailable: {}", stderr.trim());
+            return List.of();
+        }
+        return parseCatalog(objectMapper, stdout);
+    }
+
     static List<ModelInfo> parseCatalog(ObjectMapper objectMapper, String json) throws Exception {
-        JsonNode root = objectMapper.readTree(json);
+        int start = json.indexOf("{\"models\"");
+        int end = json.lastIndexOf('}');
+        if (start < 0 || end < start) return List.of();
+        JsonNode root = objectMapper.readTree(json.substring(start, end + 1));
         List<ModelInfo> models = new ArrayList<>();
         for (JsonNode model : root.path("models")) {
             if (!"list".equals(model.path("visibility").asText())) continue;
             String id = model.path("slug").asText("");
             if (id.isBlank()) continue;
+            List<String> levels = new ArrayList<>();
+            for (JsonNode level : model.path("supported_reasoning_levels")) {
+                String effort = level.path("effort").asText("");
+                if (!effort.isBlank()) levels.add(effort);
+            }
+            String defaultLevel = model.path("default_reasoning_level").asText("");
+            if (levels.isEmpty()) levels.addAll(REASONING_LEVELS);
+            if (defaultLevel.isBlank()) defaultLevel = levels.getFirst();
             models.add(new ModelInfo(id, model.path("display_name").asText(id),
-                    model.path("description").asText("")));
+                    model.path("description").asText(""), defaultLevel, List.copyOf(levels)));
         }
         return List.copyOf(models);
     }
@@ -80,5 +119,14 @@ public class CodexModelCatalog {
 
     public static List<ModelInfo> fallbackModels() { return FALLBACK; }
 
-    public record ModelInfo(String id, String displayName, String description) { }
+    public record ModelInfo(String id, String displayName, String description,
+                            String defaultReasoningLevel, List<String> supportedReasoningLevels) {
+        public ModelInfo(String id, String displayName, String description) {
+            this(id, displayName, description, "medium", REASONING_LEVELS);
+        }
+
+        public String reasoningLevelsCsv() {
+            return String.join(",", supportedReasoningLevels);
+        }
+    }
 }

@@ -73,6 +73,14 @@ public class ConfigInitializer implements ApplicationRunner {
                     max-turns-per-invocation: 30
                     timeout-minutes: 10
 
+                  codex-cli:
+                    implementation-model: gpt-5.6-sol
+                    implementation-reasoning-effort: low
+                    review-model: gpt-5.6-terra
+                    review-reasoning-effort: medium
+                    utility-model: gpt-5.6-luna
+                    utility-reasoning-effort: medium
+
                   github:
                     token: ${GITHUB_TOKEN}
 

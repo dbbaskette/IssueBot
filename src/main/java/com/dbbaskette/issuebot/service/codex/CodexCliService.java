@@ -41,36 +41,45 @@ public class CodexCliService {
                                                    String sessionId, Long issueId,
                                                    Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId,
-                properties.getCodexCli().getTimeoutMinutes(), issueId, callback);
+                properties.getCodexCli().getImplementationReasoningEffort(),
+                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false);
     }
 
     public ClaudeCodeResult executeReview(String prompt, Path directory, String model,
                                            Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
-                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback);
+                properties.getCodexCli().getReviewReasoningEffort(),
+                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, false);
     }
 
     public ClaudeCodeResult executeUtility(String prompt, Path directory, Consumer<String> callback) {
         return executeTask(prompt, directory, properties.getCodexCli().getUtilityModel(), null,
-                properties.getCodexCli().getReviewTimeoutMinutes(), null, callback);
+                properties.getCodexCli().getUtilityReasoningEffort(),
+                properties.getCodexCli().getReviewTimeoutMinutes(), null, callback, false);
     }
 
     public ClaudeCodeResult executePlanning(String prompt, Path directory, String model,
                                              Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
+                properties.getCodexCli().getImplementationReasoningEffort(),
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, true);
     }
 
     public ClaudeCodeResult executeTask(String prompt, Path directory, String model,
                                          String sessionId, int timeoutMinutes, Long issueId,
                                          Consumer<String> callback) {
-        return executeTask(prompt, directory, model, sessionId, timeoutMinutes, issueId, callback, false);
+        return executeTask(prompt, directory, model, sessionId,
+                properties.getCodexCli().getImplementationReasoningEffort(),
+                timeoutMinutes, issueId, callback, false);
     }
 
     private ClaudeCodeResult executeTask(String prompt, Path directory, String model,
-                                          String sessionId, int timeoutMinutes, Long issueId,
+                                          String sessionId, String reasoningEffort,
+                                          int timeoutMinutes, Long issueId,
                                           Consumer<String> callback, boolean planningMode) {
-        List<String> command = planningMode ? buildPlanningCommand(model) : buildCommand(model, sessionId);
+        List<String> command = planningMode
+                ? buildPlanningCommand(model, reasoningEffort)
+                : buildCommand(model, sessionId, reasoningEffort);
         long started = System.currentTimeMillis();
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -127,8 +136,14 @@ public class CodexCliService {
     }
 
     List<String> buildCommand(String model, String sessionId) {
+        return buildCommand(model, sessionId, properties.getCodexCli().getImplementationReasoningEffort());
+    }
+
+    List<String> buildCommand(String model, String sessionId, String reasoningEffort) {
         List<String> command = new ArrayList<>(List.of(
-                "codex", "--ask-for-approval", "never", "--sandbox", "workspace-write", "exec"));
+                "codex", "--ask-for-approval", "never", "--sandbox", "workspace-write"));
+        addReasoningEffort(command, reasoningEffort);
+        command.add("exec");
         if (sessionId != null && !sessionId.isBlank()) command.add("resume");
         command.add("--json");
         command.add("--ignore-user-config");
@@ -142,8 +157,14 @@ public class CodexCliService {
 
     /** Read-only, non-persistent planning mode; ChatGPT subscription auth still comes from CODEX_HOME. */
     List<String> buildPlanningCommand(String model) {
+        return buildPlanningCommand(model, properties.getCodexCli().getImplementationReasoningEffort());
+    }
+
+    List<String> buildPlanningCommand(String model, String reasoningEffort) {
         List<String> command = new ArrayList<>(List.of(
-                "codex", "--ask-for-approval", "never", "--sandbox", "read-only", "exec"));
+                "codex", "--ask-for-approval", "never", "--sandbox", "read-only"));
+        addReasoningEffort(command, reasoningEffort);
+        command.add("exec");
         command.add("--skip-git-repo-check");
         command.add("--ephemeral");
         command.add("--json");
@@ -153,6 +174,12 @@ public class CodexCliService {
         command.add(model);
         command.add("-");
         return command;
+    }
+
+    private static void addReasoningEffort(List<String> command, String reasoningEffort) {
+        if (reasoningEffort == null || reasoningEffort.isBlank()) return;
+        command.add("--config");
+        command.add("model_reasoning_effort=\"" + reasoningEffort + "\"");
     }
 
     static void sanitizePlanningEnvironment(Map<String, String> environment) {

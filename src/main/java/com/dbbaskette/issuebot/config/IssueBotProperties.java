@@ -143,6 +143,9 @@ public class IssueBotProperties {
         private String implementationModel = "gpt-5.6-sol";
         private String reviewModel = "gpt-5.6-terra";
         private String utilityModel = "gpt-5.6-luna";
+        private String implementationReasoningEffort = "low";
+        private String reviewReasoningEffort = "medium";
+        private String utilityReasoningEffort = "medium";
         @Min(1)
         private int timeoutMinutes = 45;
         @Min(1)
@@ -154,6 +157,12 @@ public class IssueBotProperties {
         public void setReviewModel(String value) { this.reviewModel = value; }
         public String getUtilityModel() { return utilityModel; }
         public void setUtilityModel(String value) { this.utilityModel = value; }
+        public String getImplementationReasoningEffort() { return implementationReasoningEffort; }
+        public void setImplementationReasoningEffort(String value) { this.implementationReasoningEffort = value; }
+        public String getReviewReasoningEffort() { return reviewReasoningEffort; }
+        public void setReviewReasoningEffort(String value) { this.reviewReasoningEffort = value; }
+        public String getUtilityReasoningEffort() { return utilityReasoningEffort; }
+        public void setUtilityReasoningEffort(String value) { this.utilityReasoningEffort = value; }
         public int getTimeoutMinutes() { return timeoutMinutes; }
         public void setTimeoutMinutes(int value) { this.timeoutMinutes = value; }
         public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
