@@ -308,6 +308,16 @@ public class IssueController {
         return "issue-detail :: live-status-poll";
     }
 
+    @Autowired(required = false)
+    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+
+    public String retry(Long id, String instructions, String implModelOverride, String reviewModelOverride,
+            BigDecimal budgetOverrideUsd, String planFirstOverride, boolean continueSession,
+            RedirectAttributes redirectAttributes) {
+        return retry(id, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, continueSession, null, null, redirectAttributes);
+    }
+
     @PostMapping("/{id}/retry")
     public String retry(@PathVariable Long id,
                         @RequestParam(required = false) String instructions,
@@ -316,10 +326,16 @@ public class IssueController {
                         @RequestParam(required = false) BigDecimal budgetOverrideUsd,
                         @RequestParam(required = false) String planFirstOverride,
                         @RequestParam(required = false, defaultValue = "false") boolean continueSession,
+                        @RequestParam(required = false) String implementationReasoningEffort,
+                        @RequestParam(required = false) String reviewReasoningEffort,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
-        String error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
-                budgetOverrideUsd, planFirstOverride, continueSession);
+        String error;
+        try {
+            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
+                    budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort);
+        } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
         } else {
@@ -371,6 +387,13 @@ public class IssueController {
     private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
                                 String reviewModelOverride, BigDecimal budgetOverrideUsd,
                                 String planFirstOverride, boolean continueSession) {
+        return performRetry(issue, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, continueSession, null, null);
+    }
+
+    private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
+            String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
+            boolean continueSession, String implementationReasoningEffort, String reviewReasoningEffort) {
         if (!dispatchService.isRunning()) {
             return "Processing is paused";
         }
@@ -412,6 +435,8 @@ public class IssueController {
                     candidate.setCurrentReviewIteration(0);
                     candidate.setCurrentPhase(null);
                     candidate.setCooldownUntil(null);
+                    candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
+                    candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
                     candidate.setImplModelOverride(normalize(implModelOverride));
                     candidate.setReviewModelOverride(normalize(reviewModelOverride));
                     candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
@@ -458,18 +483,36 @@ public class IssueController {
         return null;
     }
 
+    private void validateReasoning(String implementationModel, String reviewModel, String implementationEffort, String reviewEffort) {
+        if (reasoning != null) {
+            reasoning.validate(implementationModel, implementationEffort);
+            reasoning.validate(reviewModel, reviewEffort);
+        }
+    }
+
+    public String start(Long id, String implModelOverride, String reviewModelOverride,
+            BigDecimal budgetOverrideUsd, String planFirstOverride, RedirectAttributes redirectAttributes) {
+        return start(id, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride,
+                null, null, redirectAttributes);
+    }
+
     @PostMapping("/{id}/start")
     public String start(@PathVariable Long id,
                         @RequestParam(required = false) String implModelOverride,
                         @RequestParam(required = false) String reviewModelOverride,
                         @RequestParam(required = false) BigDecimal budgetOverrideUsd,
                         @RequestParam(required = false) String planFirstOverride,
+                        @RequestParam(required = false) String implementationReasoningEffort,
+                        @RequestParam(required = false) String reviewReasoningEffort,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
-        String error = readyStart
-                ? performReadyStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd)
-                : performStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride);
+        String error;
+        try {
+            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            error = claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
+                    budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort);
+        } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
         } else {
@@ -507,6 +550,13 @@ public class IssueController {
                                          String reviewModelOverride, BigDecimal budgetOverrideUsd,
                                          String planFirstOverride, boolean readyStart) {
 
+        return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, readyStart, null, null);
+    }
+
+    private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
+            String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
+            boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort) {
         // Enforce the same gating as the polling service
         String gateReason = checkGate(issue, null);
         if (gateReason != null) {
@@ -515,6 +565,8 @@ public class IssueController {
 
         IssueDispatchTransactionManager.StartMutation mutation = candidate -> {
             candidate.setCurrentPhase(null);
+            candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
+            candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
             candidate.setImplModelOverride(normalize(implModelOverride));
             candidate.setReviewModelOverride(normalize(reviewModelOverride));
             candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
@@ -542,6 +594,52 @@ public class IssueController {
 
         workflowService.processIssueAsync(issue);
         return null;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private IssueDispatchTransactionManager recoveryDispatch;
+
+    @PostMapping("/{id}/reset-and-pause")
+    public String resetAndPause(@PathVariable Long id, RedirectAttributes redirect) {
+        var result = recoveryDispatch.resetAndPause(id);
+        if (result.transitioned()) {
+            eventService.log("RESET_AND_PAUSE", "Returned issue to queue and paused automatic processing; history and dependencies preserved",
+                    result.issue().getRepo(), result.issue());
+            redirect.addFlashAttribute("success", "Reset to queued; automatic processing is paused. Open the prerequisite issue and choose Start manually while paused. Existing active work is allowed to finish.");
+        } else redirect.addFlashAttribute("error", result.reason());
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/start-manual")
+    public String startManual(@PathVariable Long id,
+            @RequestParam(required = false) String implModelOverride,
+            @RequestParam(required = false) String reviewModelOverride,
+            @RequestParam(required = false) String implementationReasoningEffort,
+            @RequestParam(required = false) String reviewReasoningEffort,
+            @RequestParam(required = false) BigDecimal budgetOverrideUsd,
+            @RequestParam(required = false) String planFirstOverride, RedirectAttributes redirect) {
+        try {
+            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
+                    candidate -> checkGate(candidate, null), candidate -> {
+                        candidate.setImplModelOverride(normalize(implModelOverride));
+                        candidate.setReviewModelOverride(normalize(reviewModelOverride));
+                        candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
+                        candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
+                        candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
+                        if (candidate.getApprovedPlanningVersion() == null)
+                            candidate.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
+                        candidate.setCurrentPhase(null);
+                    });
+            if (!result.claimed()) redirect.addFlashAttribute("error", result.reason());
+            else {
+                eventService.log("MANUAL_START", "Started only this issue while automatic processing remains paused",
+                        result.issue().getRepo(), result.issue());
+                workflowService.processIssueAsync(result.issue());
+                redirect.addFlashAttribute("success", "Issue started manually. Automatic processing remains paused.");
+            }
+        } catch (IllegalArgumentException ex) { redirect.addFlashAttribute("error", ex.getMessage()); }
+        return "redirect:/issues/" + id;
     }
 
     @PostMapping("/{id}/ready/release")

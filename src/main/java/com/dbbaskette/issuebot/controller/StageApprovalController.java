@@ -26,9 +26,15 @@ public class StageApprovalController {
         this.cancellation = cancellation;
     }
 
+    public String approve(Long id, Long approvalId, String selection,
+            Principal principal, RedirectAttributes redirect) {
+        return approve(id, approvalId, selection, null, principal, redirect);
+    }
+
     @PostMapping("/issues/{id}/stages/{approvalId}/approve")
     public String approve(@PathVariable Long id, @PathVariable Long approvalId,
                           @RequestParam(required = false) String selection,
+                          @RequestParam(required = false) String reasoningEffort,
                           Principal principal, RedirectAttributes redirect) {
         String provider = null;
         String model = null;
@@ -42,8 +48,10 @@ public class StageApprovalController {
             model = pair[1];
         }
         try {
-            var issue = approvals.approveAndClaim(id, approvalId, provider, model,
-                    principal == null ? "operator" : principal.getName());
+            String actor = principal == null ? "operator" : principal.getName();
+            var issue = reasoningEffort == null
+                    ? approvals.approveAndClaim(id, approvalId, provider, model, actor)
+                    : approvals.approveAndClaim(id, approvalId, provider, model, actor, reasoningEffort);
             cancellation.clear(id);
             workflow.processIssueAsync(issue);
             redirect.addFlashAttribute("success", "Stage approved and queued to run.");
@@ -60,6 +68,7 @@ public class StageApprovalController {
                 "The planning artifact changed; refresh the stage approval", "Another issue owns this repository",
                 "Global concurrency limit reached", "Issue no longer exists", "Repository no longer exists",
                 "Choose a supported CLI provider", "A provider and model are required for this stage").contains(message)
+                || message.startsWith("Reasoning level ") || message.equals("Choose a valid reasoning level")
                 || message.matches("Issue #\\d+ must complete first")
                 || message.matches("(?:Claude Code|Codex CLI) is not installed or available on PATH\\. Install that CLI before approving this stage\\.")
                 || message.matches("(?:Claude Code|Codex CLI) subscription authentication is unavailable\\. Run (?:codex login|claude auth login) with your subscription account, then retry\\. API-key billing is not permitted\\."))) {

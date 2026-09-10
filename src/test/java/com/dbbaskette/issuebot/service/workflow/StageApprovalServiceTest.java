@@ -85,6 +85,29 @@ class StageApprovalServiceTest {
         verify(selection).validate(any());
     }
 
+    @Test void manualIssueCanApproveWhileQueueRemainsPaused() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        issue.setManualDispatch(true);
+        var control = new ProcessingControl(ProcessingState.PAUSE_AFTER_CURRENT);
+        when(controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)).thenReturn(Optional.of(control));
+        assertThat(service.approveAndClaim(2L, 3L, null, null, "alice").getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(control.getState()).isEqualTo(ProcessingState.PAUSE_AFTER_CURRENT);
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.APPROVED);
+    }
+
+    @Test void stageReasoningIsValidatedAndSaved() {
+        var reasoning = mock(com.dbbaskette.issuebot.service.codex.ReasoningSelectionService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "reasoning", reasoning);
+        when(selection.resolve(any(), any(), any(), any())).thenReturn(
+                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
+        when(reasoning.resolve(2L, "gpt-6-astra", WorkflowStage.REVIEW)).thenReturn("high");
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        assertThat(decision.getReasoningEffort()).isEqualTo("high");
+        when(reasoning.validate("gpt-6-astra", "ultra")).thenReturn("ultra");
+        service.approveAndClaim(2L, 3L, "CODEX", "gpt-6-astra", "alice", "ultra");
+        assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+    }
+
     private StageApproval waiting(WorkflowStage stage) {
         repo.setWorkflowPolicy(WorkflowPolicy.STAGED);
         StageApproval decision = service.beforeStage(issue, stage, 1);

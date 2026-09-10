@@ -14,6 +14,9 @@ import org.springframework.transaction.annotation.Transactional;
 /** Durable stage decisions, serialized with all dispatchers by control, repository, then issue. */
 @Service
 public class StageApprovalService {
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+
     private static final String PREFIX = "STAGE_APPROVAL_";
     private static final List<IssueStatus> RESERVATIONS = List.of(IssueStatus.IN_PROGRESS,
             IssueStatus.AWAITING_APPROVAL, IssueStatus.AWAITING_PLAN_APPROVAL,
@@ -93,6 +96,8 @@ public class StageApprovalService {
         var chosen = selection.resolve(saved, stage, null, null);
         decision.setProvider(chosen.provider());
         decision.setModel(chosen.model());
+        if (reasoning != null && chosen.provider() == IssueBotProperties.AgentProvider.CODEX)
+            decision.setReasoningEffort(reasoning.resolve(saved.getId(), chosen.model(), stage));
         if (requiresApproval(saved, stage)) {
             waitAt(saved, issue, stage);
         } else {
@@ -129,12 +134,19 @@ public class StageApprovalService {
     @Transactional
     public TrackedIssue approveAndClaim(Long issueId, Long approvalId,
             String provider, String model, String actor) {
+        return approveAndClaim(issueId, approvalId, provider, model, actor, null);
+    }
+
+    @Transactional
+    public TrackedIssue approveAndClaim(Long issueId, Long approvalId,
+            String provider, String model, String actor, String reasoningEffort) {
         ProcessingControl control = controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseThrow(() -> new IllegalStateException("Processing control unavailable"));
-        if (control.getState() != ProcessingState.RUNNING) {
+        TrackedIssue issue = lockIssue(issueId);
+        if (control.getState() != ProcessingState.RUNNING
+                && !(control.getState() == ProcessingState.PAUSE_AFTER_CURRENT && issue.isManualDispatch())) {
             throw new IllegalStateException("Processing is paused");
         }
-        TrackedIssue issue = lockIssue(issueId);
         StageApproval decision = approvals.findById(approvalId)
                 .orElseThrow(() -> new IllegalStateException("Stage approval no longer exists"));
         if (!Objects.equals(decision.getIssue().getId(), issueId)
@@ -169,6 +181,13 @@ public class StageApprovalService {
         String selectedModel = model == null || model.isBlank() ? decision.getModel() : model;
         var chosen = selection.resolve(issue, decision.getStage(), selectedProvider, selectedModel);
         selection.validate(chosen);
+        if (reasoning != null && chosen.provider() == IssueBotProperties.AgentProvider.CODEX) {
+            String explicit = reasoning.validate(chosen.model(), reasoningEffort);
+            String retained = reasoningEffort == null && Objects.equals(chosen.model(), decision.getModel())
+                    ? decision.getReasoningEffort() : null;
+            decision.setReasoningEffort(explicit != null ? explicit : retained != null ? retained
+                    : reasoning.resolve(issueId, chosen.model(), decision.getStage()));
+        } else decision.setReasoningEffort(null);
         decision.setProvider(chosen.provider());
         decision.setModel(chosen.model());
         approve(decision, actor == null || actor.isBlank() ? "operator" : actor);

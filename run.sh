@@ -69,4 +69,4 @@ echo "> Building..."
 ./mvnw package -DskipTests -q
 
 echo "> Starting IssueBot on port $PORT"
-exec java -jar target/issuebot-0.1.0-SNAPSHOT.jar
+exec java -jar target/issuebot.jar

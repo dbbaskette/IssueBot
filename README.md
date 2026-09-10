@@ -136,7 +136,7 @@ Alternatively, build and run manually:
 
 ```bash
 ./mvnw clean package -DskipTests
-java -jar target/issuebot-0.1.0-SNAPSHOT.jar
+java -jar target/issuebot.jar
 ```
 
 4. Open the dashboard at [http://localhost:8090](http://localhost:8090)

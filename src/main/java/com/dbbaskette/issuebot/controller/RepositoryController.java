@@ -103,6 +103,9 @@ public class RepositoryController {
         return ViewResolver.view("repositories", hx != null);
     }
 
+    @Autowired(required = false)
+    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+
     @PostMapping
     @Transactional
     public String addOrUpdate(Model model,
@@ -133,11 +136,28 @@ public class RepositoryController {
                                @RequestParam(required = false, defaultValue = "false") boolean lessonsEnabled,
                                @RequestParam(required = false) String workflowPolicy,
                                @RequestParam(required = false) List<String> approvalStages,
+                               @RequestParam(required = false) String implementationReasoningEffort,
+                               @RequestParam(required = false) String reviewReasoningEffort,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
                     "Invalid repository owner/name. Use letters, numbers, '.', '_', '-' only.");
             return ViewResolver.view("repositories", hx != null);
+        }
+        if (reasoning != null) {
+            try {
+                implementationReasoningEffort = reasoning.validate(implementationModel, implementationReasoningEffort);
+                reviewReasoningEffort = reasoning.validate(reviewModel, reviewReasoningEffort);
+            } catch (IllegalArgumentException ex) {
+                preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                    ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
+                    reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
+                    implementationModel, reviewModel, followUpMode, decompositionMode,
+                    preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
+                    safeWorkflowPolicy(id, workflowPolicy), approvalStages, implementationReasoningEffort, reviewReasoningEffort);
+                populateModel(model, null, ex.getMessage());
+                return ViewResolver.view("repositories", hx != null);
+            }
         }
         WorkflowSettings workflow;
         try {
@@ -149,7 +169,7 @@ public class RepositoryController {
                     reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
                     implementationModel, reviewModel, followUpMode, decompositionMode,
                     preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
-                    safeWorkflowPolicy, approvalStages);
+                    safeWorkflowPolicy, approvalStages, implementationReasoningEffort, reviewReasoningEffort);
             populateModel(model, null, "Choose a valid workflow policy and approval stages.");
             return ViewResolver.view("repositories", hx != null);
         }
@@ -161,6 +181,8 @@ public class RepositoryController {
                     .orElse(new WatchedRepo(owner, name));
         }
 
+        repo.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
+        repo.setReviewReasoningEffort(normalize(reviewReasoningEffort));
         repo.setOwner(owner);
         repo.setName(name);
         repo.setBranch(branch);
@@ -220,6 +242,21 @@ public class RepositoryController {
         return ViewResolver.view("repositories", hx != null);
     }
 
+    public String addOrUpdate(Model model, Long id, String owner, String name, String branch,
+            String mode, int maxIterations, boolean ciEnabled, int ciTimeoutMinutes,
+            boolean autoMerge, boolean securityReviewEnabled, int maxReviewIterations,
+            java.math.BigDecimal reviewPassThreshold, boolean autoStart, boolean followUpEnabled,
+            String allowedPaths, String verificationCommands, String implementationModel, String reviewModel,
+            String followUpMode, String decompositionMode, boolean preScreenEnabled, boolean planFirst,
+            java.math.BigDecimal issueBudgetUsd, String customInstructions, boolean lessonsEnabled,
+            String workflowPolicy, List<String> approvalStages, String hx) {
+        return addOrUpdate(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations, reviewPassThreshold,
+                autoStart, followUpEnabled, allowedPaths, verificationCommands, implementationModel, reviewModel,
+                followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd, customInstructions,
+                lessonsEnabled, workflowPolicy, approvalStages, null, null, hx);
+    }
+
     /** Compatibility overload for focused fixtures and clients predating workflow fields. */
     public String addOrUpdate(Model model, Long id, String owner, String name, String branch,
                               String mode, int maxIterations, boolean ciEnabled, int ciTimeoutMinutes,
@@ -272,7 +309,8 @@ public class RepositoryController {
             String verificationCommands, String implementationModel, String reviewModel,
             String followUpMode, String decompositionMode, boolean preScreenEnabled,
             boolean planFirst, java.math.BigDecimal issueBudgetUsd, String customInstructions,
-            boolean lessonsEnabled, String workflowPolicy, List<String> approvalStages) {
+            boolean lessonsEnabled, String workflowPolicy, List<String> approvalStages,
+            String implementationReasoningEffort, String reviewReasoningEffort) {
         Map<String, Object> values = new HashMap<>();
         values.put("id", id);
         values.put("owner", owner);
@@ -289,6 +327,8 @@ public class RepositoryController {
         values.put("autoStart", autoStart);
         values.put("allowedPaths", allowedPaths);
         values.put("verificationCommands", verificationCommands);
+        values.put("implementationReasoningEffort", implementationReasoningEffort);
+        values.put("reviewReasoningEffort", reviewReasoningEffort);
         values.put("implementationModel", implementationModel);
         values.put("reviewModel", reviewModel);
         values.put("followUpMode", followUpMode);

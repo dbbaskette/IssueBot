@@ -81,6 +81,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setManualDispatch(false);
         return claim(issue);
     }
 
@@ -106,6 +107,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setManualDispatch(false);
         return claim(issue);
     }
 
@@ -129,6 +131,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setManualDispatch(false);
         issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         return claim(issue);
     }
@@ -157,6 +160,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
 
+        issue.setManualDispatch(false);
         issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
@@ -188,6 +192,57 @@ public class IssueDispatchTransactionManager {
         return IssueDispatchService.TransitionResult.transitioned(issues.saveAndFlush(issue));
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private ProcessingControlService processingControl;
+
+    /** Reset only terminal/recoverable work, never a live process or a completed issue. */
+    @Transactional
+    public IssueDispatchService.TransitionResult resetAndPause(Long issueId) {
+        controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID).orElseThrow();
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return IssueDispatchService.TransitionResult.rejected("Issue not found", null);
+        if (!List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN, IssueStatus.BLOCKED).contains(issue.getStatus())) {
+            return IssueDispatchService.TransitionResult.rejected("Only failed, cooldown, or blocked issues can be reset", issue);
+        }
+        if (PlanRetryClassification.isSecondPlanFirstMiss(issue, reviewIterations(issue))) {
+            return IssueDispatchService.TransitionResult.rejected("Use the guided implementation retry for this conformance failure", issue);
+        }
+        issue.setStatus(IssueStatus.QUEUED);
+        issue.setCurrentPhase(null);
+        issue.setCooldownUntil(null);
+        issue.setSuspensionReason(null);
+        issue.setManualDispatch(false);
+        issue.setCurrentIteration(0);
+        issue.setCurrentReviewIteration(0);
+        issue.setWorkflowRun(issue.getWorkflowRun() + 1);
+        issues.saveAndFlush(issue);
+        processingControl.pauseAfterCurrent();
+        return IssueDispatchService.TransitionResult.transitioned(issue);
+    }
+
+    /** Explicit one-issue dispatch leaves the automatic queue paused. */
+    @Transactional
+    public IssueDispatchService.ClaimResult claimManualStart(Long issueId, int capacity,
+            Function<TrackedIssue, String> additionalGate, StartMutation mutation) {
+        ProcessingControl control = controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID).orElseThrow();
+        if (control.getState() != ProcessingState.PAUSE_AFTER_CURRENT)
+            return IssueDispatchService.ClaimResult.rejected("Pause automatic processing before a manual-only start");
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        if (!List.of(IssueStatus.PENDING, IssueStatus.QUEUED, IssueStatus.READY_TO_START).contains(issue.getStatus()))
+            return IssueDispatchService.ClaimResult.rejected("Reset this issue before starting it manually");
+        if (issue.getStatus() == IssueStatus.READY_TO_START && issue.getApprovedPlanningVersion() == null)
+            return IssueDispatchService.ClaimResult.rejected("Ready-to-start issue has no approved planning version");
+        if (issues.countByStatus(IssueStatus.IN_PROGRESS) >= capacity)
+            return IssueDispatchService.ClaimResult.rejected("Global concurrency limit reached");
+        String gate = repositoryGate(issue);
+        if (gate == null) gate = additionalGate.apply(issue);
+        if (gate != null) return IssueDispatchService.ClaimResult.rejected(gate);
+        mutation.apply(issue);
+        issue.setManualDispatch(true);
+        return claim(issue);
+    }
+
     private String rejectIfNotRunning() {
         ProcessingControl control = controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> controls.saveAndFlush(new ProcessingControl(ProcessingState.RUNNING)));
@@ -208,6 +263,11 @@ public class IssueDispatchTransactionManager {
             DecompositionReservationService.ReservationDecision decision =
                     decompositionReservations.evaluate(issue);
             if (!decision.allowed()) return decision.reason();
+        }
+        for (Integer number : issue.getBlockerNumbers()) {
+            if (issues.findByRepoAndIssueNumber(issue.getRepo(), number)
+                    .filter(dependency -> dependency.getStatus() == IssueStatus.COMPLETED).isEmpty())
+                return "Issue #" + number + " must complete first";
         }
         List<TrackedIssue> active = issues.findByRepoAndStatusInOrderByIssueNumberAsc(
                 issue.getRepo(), ACTIVE_STATUSES);

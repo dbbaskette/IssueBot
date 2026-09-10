@@ -11,6 +11,18 @@ import java.util.List;
 @Entity
 @Table(name = "tracked_issues", uniqueConstraints = @UniqueConstraint(columnNames = {"repo_id", "issue_number"}))
 public class TrackedIssue {
+    private boolean manualDispatch;
+    public boolean isManualDispatch() { return manualDispatch; }
+    public void setManualDispatch(boolean value) { manualDispatch = value; }
+
+    private String implementationReasoningEffort;
+    public String getImplementationReasoningEffort() { return implementationReasoningEffort; }
+    public void setImplementationReasoningEffort(String value) { implementationReasoningEffort = value; }
+
+    private String reviewReasoningEffort;
+    public String getReviewReasoningEffort() { return reviewReasoningEffort; }
+    public void setReviewReasoningEffort(String value) { reviewReasoningEffort = value; }
+
 
     @Column(name = "workflow_run", nullable = false)
     private int workflowRun;

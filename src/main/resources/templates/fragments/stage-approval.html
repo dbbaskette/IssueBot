@@ -29,11 +29,12 @@
                                     th:text="${catalog.key + ' · ' + model}">Model</option>
                         </optgroup>
                     </select>
+                    <div th:replace="~{fragments/reasoning :: picker('stage-model', 'reasoningEffort', ${pendingStageApproval.reasoningEffort})}"></div>
                     <small class="text-muted">Uses subscription CLI authentication. Repository defaults stay unchanged.</small>
                 </div>
-                <button type="submit" class="btn btn-primary" th:disabled="${processingMode?.name() != 'RUNNING'}"
+                <button type="submit" class="btn btn-primary" th:disabled="${processingMode?.name() != 'RUNNING' and not (processingMode?.name() == 'PAUSE_AFTER_CURRENT' and issue.manualDispatch)}"
                         th:text="${'Approve ' + #strings.toLowerCase(pendingStageApproval.stage.name())}">Approve stage</button>
-                <p th:if="${processingMode?.name() != 'RUNNING'}" class="text-sm text-muted">Resume processing before approving this stage.</p>
+                <p th:if="${processingMode?.name() != 'RUNNING' and not (processingMode?.name() == 'PAUSE_AFTER_CURRENT' and issue.manualDispatch)}" class="text-sm text-muted">Resume processing before approving this stage.</p>
             </form>
         </div>
     </section>
@@ -46,6 +47,7 @@
             <li th:each="decision : ${stageApprovalHistory}">
                 <span th:text="${decision.stage + ' · run ' + (decision.runNumber + 1) + ' · attempt ' + decision.attempt + ' · ' + decision.state}"></span>
                 <span th:if="${decision.provider != null}" th:text="${' · ' + decision.provider + '/' + decision.model}"></span>
+                <span th:if="${decision.reasoningEffort != null}" th:text="${' · reasoning: ' + decision.reasoningEffort}"></span>
                 <span th:if="${decision.actor != null}" th:text="${' · ' + decision.actor}"></span>
                 <time th:if="${decision.approvedAt != null}" th:text="${decision.approvedAt}"></time>
                 <a th:if="${decision.artifactVersionId != null and decision.artifactVersionId > 0}" href="#plan-first" th:text="${'Plan artifact ' + decision.artifactVersionId}"></a>

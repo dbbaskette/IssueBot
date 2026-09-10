@@ -72,21 +72,25 @@ public class CodexModelCatalog {
         } catch (Exception e) {
             log.debug("Codex model discovery failed: {}", e.getMessage());
         }
+        cached = FALLBACK;
+        cachedAt = Instant.now();
         return FALLBACK;
     }
 
     private List<ModelInfo> discover(List<String> command) throws Exception {
-        Process process = new ProcessBuilder(command).start();
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
         process.getOutputStream().close();
-        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-        if (!finished) process.destroyForcibly();
-        if (!finished || process.exitValue() != 0) {
-            log.debug("Codex model discovery unavailable: {}", stderr.trim());
-            return List.of();
+        var output = new java.util.concurrent.FutureTask<String>(() ->
+                new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+        Thread.ofVirtual().start(output);
+        try {
+            if (!process.waitFor(10, TimeUnit.SECONDS) || process.exitValue() != 0) return List.of();
+            return parseCatalog(objectMapper, output.get(1, TimeUnit.SECONDS));
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            process.getInputStream().close();
+            output.cancel(true);
         }
-        return parseCatalog(objectMapper, stdout);
     }
 
     static List<ModelInfo> parseCatalog(ObjectMapper objectMapper, String json) throws Exception {

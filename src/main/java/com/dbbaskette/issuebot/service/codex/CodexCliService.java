@@ -30,6 +30,17 @@ public class CodexCliService {
     private volatile boolean cliAvailable;
     private volatile Boolean cliAuthenticated;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ReasoningSelectionService reasoning;
+
+    private String effort(Long issueId, String model, com.dbbaskette.issuebot.model.WorkflowStage stage) {
+        return reasoning == null
+                ? stage == com.dbbaskette.issuebot.model.WorkflowStage.REVIEW
+                    ? properties.getCodexCli().getReviewReasoningEffort()
+                    : properties.getCodexCli().getImplementationReasoningEffort()
+                : reasoning.resolve(issueId, model, stage);
+    }
+
     public CodexCliService(IssueBotProperties properties, CodexJsonParser parser,
                            WorkflowCancellationService cancellationService) {
         this.properties = properties;
@@ -41,14 +52,14 @@ public class CodexCliService {
                                                    String sessionId, Long issueId,
                                                    Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId,
-                properties.getCodexCli().getImplementationReasoningEffort(),
+                effort(issueId, model, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION),
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false);
     }
 
     public ClaudeCodeResult executeReview(String prompt, Path directory, String model,
                                            Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
-                properties.getCodexCli().getReviewReasoningEffort(),
+                effort(issueId, model, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW),
                 properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, false);
     }
 
@@ -61,7 +72,7 @@ public class CodexCliService {
     public ClaudeCodeResult executePlanning(String prompt, Path directory, String model,
                                              Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
-                properties.getCodexCli().getImplementationReasoningEffort(),
+                effort(issueId, model, com.dbbaskette.issuebot.model.WorkflowStage.PLANNING),
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, true);
     }
 
