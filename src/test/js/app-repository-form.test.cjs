@@ -94,7 +94,7 @@ function repositoryFormHarness() {
   };
 }
 
-test('Add Repository resets the actual submitted workflow fields to the former Assist defaults', () => {
+test('Add Repository resets the actual submitted workflow fields to Assist defaults with splitting off', () => {
   const harness = repositoryFormHarness();
 
   harness.clickAdd();
@@ -103,7 +103,7 @@ test('Add Repository resets the actual submitted workflow fields to the former A
   assert.equal(harness.title.textContent, 'Add Repository');
   assert.deepEqual(harness.submittedDefaults(), {
     mode: 'APPROVAL_GATED',
-    decompositionMode: 'PROPOSE',
+    decompositionMode: 'OFF',
     followUpMode: 'ROLLING_BACKLOG',
     autoStart: true,
     autoMerge: false,

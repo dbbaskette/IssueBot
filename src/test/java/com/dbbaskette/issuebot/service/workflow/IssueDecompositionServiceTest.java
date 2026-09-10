@@ -179,6 +179,7 @@ class IssueDecompositionServiceTest {
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        qualifyLargeEpic();
 
         ObjectNode sub1 = objectMapper.createObjectNode();
         sub1.put("number", 100);
@@ -204,6 +205,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void decompose_analysisReturnsOneSubIssue_returnsFalse() {
+        // Size screening is independently qualified below the generic analysis stub.
         TrackedIssue issue = createIssue();
         ObjectNode issueDetails = createIssueDetails();
 
@@ -214,6 +216,7 @@ class IssueDecompositionServiceTest {
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        qualifyLargeEpic();
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -225,6 +228,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void decompose_claudeReturnsNull_returnsFalse() {
+        // Size screening is independently qualified below the generic analysis stub.
         TrackedIssue issue = createIssue();
         ObjectNode issueDetails = createIssueDetails();
 
@@ -232,6 +236,7 @@ class IssueDecompositionServiceTest {
         claudeResult.setSuccess(false);
         claudeResult.setOutput(null);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        qualifyLargeEpic();
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -241,6 +246,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void decompose_allGitHubCreationsFail_returnsFalse() {
+        // Size screening is independently qualified below the generic analysis stub.
         TrackedIssue issue = createIssue();
         issue.getRepo().setDecompositionMode(DecompositionMode.AUTO);
         ObjectNode issueDetails = createIssueDetails();
@@ -255,6 +261,7 @@ class IssueDecompositionServiceTest {
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        qualifyLargeEpic();
 
         when(gitHubApi.createIssue(anyString(), anyString(), anyString(), anyString(), anyList()))
                 .thenThrow(new RuntimeException("API error"));
@@ -268,10 +275,14 @@ class IssueDecompositionServiceTest {
 
     // === PROPOSE mode / parent-as-tracker tests ===
 
-    @Test
-    void proposeStoresProposalAndDoesNotCreateIssues() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.dbbaskette.issuebot.model.WorkflowPolicy.class)
+    void proposeStoresProposalAndDoesNotCreateIssues(com.dbbaskette.issuebot.model.WorkflowPolicy policy) {
+        // Size screening is independently qualified below the generic analysis stub.
         TrackedIssue issue = createIssue();
         issue.getRepo().setDecompositionMode(DecompositionMode.PROPOSE);
+        issue.setWorkflowPolicy(policy);
+        issue.setApprovalStages("");
         ObjectNode issueDetails = createIssueDetails();
 
         String claudeOutput = """
@@ -284,6 +295,7 @@ class IssueDecompositionServiceTest {
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        qualifyLargeEpic();
 
         boolean result = decompositionService.decompose(issue, issueDetails,
                 Path.of("/tmp/repo"), "timed out");
@@ -445,7 +457,7 @@ class IssueDecompositionServiceTest {
     @Test
     void preScreen_tooLarge_returnsTrue() {
         String claudeOutput = """
-                {"too_large": true, "reason": "Spans 4 layers with 12+ files", "estimated_files": 12, "estimated_complexity": "high"}
+                {"too_large": true, "reason": "Two independent capabilities in 20+ files", "independent_capabilities": 2, "estimated_files": 20, "estimated_complexity": "high"}
                 """;
         ClaudeCodeResult claudeResult = new ClaudeCodeResult();
         claudeResult.setSuccess(true);
@@ -456,7 +468,7 @@ class IssueDecompositionServiceTest {
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
 
         assertTrue(result.tooLarge());
-        assertTrue(result.reason().contains("12+ files"));
+        assertTrue(result.reason().contains("20+ files"));
     }
 
     @Test
@@ -514,7 +526,7 @@ class IssueDecompositionServiceTest {
     void parsePreScreenResult_validJson() {
         String output = """
                 ```json
-                {"too_large": true, "reason": "Multiple distinct features requested", "estimated_files": 8, "estimated_complexity": "high"}
+                {"too_large": true, "reason": "Multiple distinct features requested", "estimated_files": 20, "independent_capabilities": 2, "estimated_complexity": "high"}
                 ```
                 """;
         IssueDecompositionService.PreScreenResult result = decompositionService.parsePreScreenResult(output);
@@ -602,9 +614,47 @@ class IssueDecompositionServiceTest {
         return nodes;
     }
 
+    private void qualifyLargeEpic() {
+        ClaudeCodeResult screen = new ClaudeCodeResult();
+        screen.setOutput("""
+                {"too_large":true,"estimated_files":20,"independent_capabilities":2,
+                 "estimated_complexity":"high","reason":"Two substantial end-to-end capabilities"}
+                """);
+        when(claudeCode.executeUtility(contains("complexity estimator"), any(Path.class), any()))
+                .thenReturn(screen);
+    }
+
+    @Test
+    void offDoesNotCallModelOrGithub() {
+        TrackedIssue issue = createIssue();
+        issue.getRepo().setDecompositionMode(DecompositionMode.OFF);
+        assertFalse(decompositionService.decompose(issue, createIssueDetails(), Path.of("/tmp/repo"), "timed out"));
+        verifyNoInteractions(claudeCode, gitHubApi, issueRepository);
+    }
+
+    @Test
+    void timeoutWithoutScopeEvidenceDoesNotSplit() {
+        assertFalse(decompositionService.decompose(createIssue(), createIssueDetails(), Path.of("/tmp/repo"), "timed out"));
+        verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
+        verify(claudeCode, times(1)).executeUtility(contains("complexity estimator"), any(Path.class), any());
+    }
+
+    @Test
+    void strictThresholdRejectsOrdinaryFeaturesAndIncompleteEvidence() {
+        for (String json : List.of(
+                "{\"too_large\":true}",
+                "{\"too_large\":true,\"estimated_files\":19,\"independent_capabilities\":2,\"estimated_complexity\":\"high\",\"reason\":\"scope\"}",
+                "{\"too_large\":true,\"estimated_files\":40,\"independent_capabilities\":1,\"estimated_complexity\":\"high\",\"reason\":\"scope\"}",
+                "{\"too_large\":true,\"estimated_files\":40,\"independent_capabilities\":3,\"estimated_complexity\":\"medium\",\"reason\":\"scope\"}")) {
+            assertFalse(decompositionService.parsePreScreenResult(json).tooLarge(), json);
+        }
+        assertEquals(DecompositionMode.OFF, new WatchedRepo("owner", "new-repo").getDecompositionMode());
+    }
+
     private TrackedIssue createIssue() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
         repo.setId(1L);
+        repo.setDecompositionMode(DecompositionMode.PROPOSE);
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the login bug");
         issue.setId(1L);
         issue.setStatus(IssueStatus.IN_PROGRESS);

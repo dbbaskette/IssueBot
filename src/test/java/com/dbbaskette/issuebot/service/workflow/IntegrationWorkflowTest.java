@@ -122,6 +122,7 @@ class IntegrationWorkflowTest {
 
     private TrackedIssue createTestIssue() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setDecompositionMode(com.dbbaskette.issuebot.model.DecompositionMode.PROPOSE);
         repo.setId(1L);
         repo.setBranch("main");
         repo.setMode(RepoMode.AUTONOMOUS);
@@ -782,7 +783,7 @@ class IntegrationWorkflowTest {
 
         // Override pre-screen to flag as too large
         when(decompositionService.preScreen(any(), any()))
-                .thenReturn(new IssueDecompositionService.PreScreenResult(true, "Spans 12+ files across 4 layers"));
+                .thenReturn(new IssueDecompositionService.PreScreenResult(true, "Two independently deliverable capabilities spanning 20+ substantive files"));
 
         // Decomposition succeeds
         when(decompositionService.decompose(eq(issue), any(), any(), anyString())).thenReturn(true);

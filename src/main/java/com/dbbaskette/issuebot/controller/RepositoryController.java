@@ -128,7 +128,7 @@ public class RepositoryController {
                                @RequestParam(required = false) String implementationModel,
                                @RequestParam(required = false) String reviewModel,
                                @RequestParam(defaultValue = "ROLLING_BACKLOG") String followUpMode,
-                               @RequestParam(defaultValue = "PROPOSE") String decompositionMode,
+                               @RequestParam(defaultValue = "OFF") String decompositionMode,
                                @RequestParam(defaultValue = "false") boolean preScreenEnabled,
                                @RequestParam(defaultValue = "true") boolean planFirst,
                                @RequestParam(required = false) java.math.BigDecimal issueBudgetUsd,
