@@ -117,6 +117,16 @@
                     <p class="text-sm text-muted">Changes apply to unstarted issues. Active issues keep the workflow snapshot they already started with.</p>
                 </section>
 
+                <div class="field-group mb-3">
+                    <label for="decomposition-mode">Split large issues into smaller tasks</label>
+                    <select id="decomposition-mode" name="decompositionMode" aria-describedby="splitting-help">
+                        <option value="OFF">Off — keep issues whole (recommended)</option>
+                        <option value="PROPOSE">Large epics only — ask me first</option>
+                        <option value="AUTO">Large epics only — split automatically</option>
+                    </select>
+                    <p id="splitting-help" class="text-sm text-muted">Off prevents new split proposals and automatic splits. When enabled, only high-complexity work with at least 20 substantive file changes and 2 independently deliverable capabilities qualifies. Existing split tasks and progress are kept; pending proposals still require your decision.</p>
+                </div>
+
                 <details id="advanced-settings">
                     <summary>Advanced settings</summary>
 
@@ -166,17 +176,10 @@
                                 <option value="OFF">Off — PR review comment only</option>
                             </select>
                         </div>
-                        <div class="field-group">
-                            <label for="decomposition-mode">Large-issue splitting</label>
-                            <select id="decomposition-mode" name="decompositionMode">
-                                <option value="PROPOSE">Propose — I approve splits (recommended)</option>
-                                <option value="AUTO">Automatic (legacy)</option>
-                                <option value="OFF">Off — escalate to needs-human</option>
-                            </select>
-                        </div>
+
                         <div class="checkbox-field">
                             <input type="checkbox" id="pre-screen-enabled" name="preScreenEnabled" value="true" checked>
-                            <label for="pre-screen-enabled">Pre-screen issue size before implementing</label>
+                            <label for="pre-screen-enabled">Check for large epics before implementing (only when splitting is enabled)</label>
                         </div>
                     </div>
 

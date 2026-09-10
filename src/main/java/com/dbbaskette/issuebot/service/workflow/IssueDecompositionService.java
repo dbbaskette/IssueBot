@@ -94,6 +94,8 @@ public class IssueDecompositionService {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
 
+        if (repo.getDecompositionMode() == DecompositionMode.OFF) return false;
+
         if (hasLabel(issueDetails, DECOMPOSED_LABEL)) {
             log.info("Refusing to decompose {} #{} — already a decomposed sub-issue", repo.fullName(), issueNumber);
             eventService.log("DECOMPOSITION_REFUSED",
@@ -107,6 +109,14 @@ public class IssueDecompositionService {
                     repo.fullName(), issueNumber, openSubs.size(), MAX_OPEN_SUB_ISSUES);
             eventService.log("DECOMPOSITION_REFUSED",
                     "Open sub-issue cap reached (" + openSubs.size() + "/" + MAX_OPEN_SUB_ISSUES + ")",
+                    repo, trackedIssue);
+            return false;
+        }
+
+        // All entry points, including timeout recovery, must qualify by actual scope.
+        if (!preScreen(issueDetails, repoPath).tooLarge()) {
+            eventService.log("DECOMPOSITION_SKIPPED",
+                    "Issue does not meet the large, independently deliverable scope threshold",
                     repo, trackedIssue);
             return false;
         }
@@ -137,11 +147,11 @@ public class IssueDecompositionService {
         }
 
         boolean managed = StageWorkflowCoordinator.managed(trackedIssue);
-        boolean needsSplitApproval = managed
-                ? trackedIssue.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED
+        boolean needsSplitApproval = repo.getDecompositionMode() == DecompositionMode.PROPOSE
+                || (managed
+                    && trackedIssue.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED
                     && java.util.Arrays.asList(java.util.Optional.ofNullable(trackedIssue.getApprovalStages())
-                            .orElse(com.dbbaskette.issuebot.model.WorkflowStage.ALL).split(",")).contains("PLANNING")
-                : repo.getDecompositionMode() == DecompositionMode.PROPOSE;
+                            .orElse(com.dbbaskette.issuebot.model.WorkflowStage.ALL).split(",")).contains("PLANNING"));
         if (needsSplitApproval) {
             try {
                 trackedIssue.setDecompositionProposal(objectMapper.writeValueAsString(subIssues));
@@ -436,7 +446,7 @@ public class IssueDecompositionService {
         return """
                 You are a complexity estimator for an automated coding agent (IssueBot).
                 Analyze the following GitHub issue and the codebase to determine if this issue
-                is too large to implement in a single automated session (~10 minutes, ~30 tool calls).
+                is a genuinely large epic that benefits from separate, independently deliverable issues.
 
                 ## Issue
                 **Title:** %s
@@ -445,10 +455,14 @@ public class IssueDecompositionService {
 
                 ## Analysis Instructions
                 1. Read the codebase structure to understand the scope
-                2. Estimate how many files need to change
-                3. Consider: new features spanning multiple layers (model, service, controller, UI)
-                   are often too large; bug fixes in 1-3 files are usually fine
-                4. If the issue mentions multiple distinct features or steps, it's likely too large
+                2. Default to keeping the issue whole. Normal features spanning model, service,
+                   controller, UI and tests belong together, even with multiple implementation steps.
+                3. Mark too_large only with high complexity, at least 20 substantively changed files,
+                   AND at least 2 independently deliverable capabilities. Exclude generated files,
+                   mechanical edits and test fixtures from the file estimate.
+                4. A timeout, failed attempt, long checklist, or tool budget is not sufficient.
+                   Do not invent a 10-minute limit. When uncertain, return too_large=false.
+                5. Explain the concrete scope evidence and independent capabilities in reason.
 
                 ## Output Format
                 Respond with ONLY a JSON object:
@@ -457,7 +471,8 @@ public class IssueDecompositionService {
                   "too_large": true or false,
                   "reason": "brief explanation of why",
                   "estimated_files": number of files that would need changes,
-                  "estimated_complexity": "low", "medium", or "high"
+                  "estimated_complexity": "low", "medium", or "high",
+                  "independent_capabilities": number of independently deliverable capabilities
                 }
                 ```
                 """.formatted(title, body);
@@ -471,7 +486,11 @@ public class IssueDecompositionService {
 
         try {
             JsonNode node = objectMapper.readTree(json);
-            boolean tooLarge = node.path("too_large").asBoolean(false);
+            boolean tooLarge = node.path("too_large").asBoolean(false)
+                    && node.path("estimated_files").asInt(0) >= 20
+                    && node.path("independent_capabilities").asInt(0) >= 2
+                    && "high".equalsIgnoreCase(node.path("estimated_complexity").asText(""))
+                    && !node.path("reason").asText("").isBlank();
             String reason = node.path("reason").asText(null);
             return new PreScreenResult(tooLarge, reason);
         } catch (Exception e) {
@@ -485,7 +504,7 @@ public class IssueDecompositionService {
         String body = issueDetails.path("body").asText("No description");
 
         return """
-                You are analyzing a GitHub issue that is too large or complex to implement in a single pass.
+                You are analyzing a potentially large GitHub issue. Prefer keeping a cohesive feature whole.
                 Your task is to break it down into smaller, independently implementable sub-issues.
                 For each sub-issue, provide implementation hints based on the actual codebase.
 
@@ -496,7 +515,11 @@ public class IssueDecompositionService {
 
                 ## Instructions
                 1. Read the codebase to understand the architecture and relevant files
-                2. Identify distinct, independently implementable sub-tasks
+                2. Identify independently deliverable capabilities, NOT layers of one feature.
+                   Keep each capability's model, service, UI and tests together. Do not split
+                   setup, implementation and testing into separate issues.
+                   Return [] if there are not at least two substantial independent capabilities.
+                   A timeout or failed implementation alone is never a reason to split.
                 3. Each sub-task should be small enough to implement in a single Claude Code session
                 4. Sub-tasks should be ordered by dependency (implement prerequisite tasks first)
                 5. Create between %d and %d sub-tasks
@@ -514,9 +537,9 @@ public class IssueDecompositionService {
                 ```json
                 [
                   {
-                    "title": "1/3: Add data model for feature X",
-                    "description": "Create the JPA entity and repository...",
-                    "acceptance_criteria": "- Entity created\\n- Repository created\\n- Migration added",
+                    "title": "1/2: Deliver account import",
+                    "description": "Implement account import end to end, including storage, API, UI and tests...",
+                    "acceptance_criteria": "- Accounts import successfully\\n- UI and API tests pass",
                     "hints": "- Follow the pattern in TrackedIssue.java for the entity\\n- Add repository like TrackedIssueRepository.java\\n- Add migration as V8__add_feature_x.sql"
                   }
                 ]

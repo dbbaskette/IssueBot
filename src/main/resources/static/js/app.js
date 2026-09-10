@@ -1192,7 +1192,7 @@
     setValue('mode', 'APPROVAL_GATED');
     setChecked('auto-start', true);
     setChecked('auto-merge', false);
-    setValue('decomposition-mode', 'PROPOSE');
+    setValue('decomposition-mode', 'OFF');
     setValue('follow-up-mode', 'ROLLING_BACKLOG');
     setChecked('plan-first', true);
     syncPlanFirstSubmission();

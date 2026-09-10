@@ -74,6 +74,17 @@ class RepositoriesPageRenderTest {
     }
 
     @Test
+    void splittingControlIsVisibleWithoutAdvancedSettingsAndDefaultsOff() {
+        String html = render(List.of(), Map.of(), Map.of());
+        assertThat(html.indexOf("id=\"decomposition-mode\""))
+                .isLessThan(html.indexOf("id=\"advanced-settings\""));
+        assertThat(html).contains("Off — keep issues whole (recommended)",
+                "Large epics only — ask me first", "Existing split tasks and progress are kept");
+        assertThat(html.substring(html.indexOf("id=\"decomposition-mode\""), html.indexOf("id=\"splitting-help\"")))
+                .containsSubsequence("value=\"OFF\"", "value=\"PROPOSE\"", "value=\"AUTO\"");
+    }
+
+    @Test
     void removeButtonCarriesDataAttributes_andNoNativeConfirmRemains() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         repo.setId(7L);

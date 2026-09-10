@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Promote issue splitting out of Advanced settings and default new repositories to Off.
+- Require high complexity, at least 20 substantive changed files and two independently deliverable capabilities before proposing or automatically splitting, including after failures.
+- Keep cohesive features and their tests together; timeouts and multi-layer changes alone no longer qualify.
+- Always require split approval in Propose mode, including managed workflows. Existing groups and saved repository choices are preserved.
+
 ## 0.4.0
 
 - Make the issue queue the primary view; move the duplicate dependency table into an expandable section below it.

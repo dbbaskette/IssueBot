@@ -87,7 +87,7 @@ public class WatchedRepo {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "decomposition_mode", nullable = false)
-    private DecompositionMode decompositionMode = DecompositionMode.PROPOSE;
+    private DecompositionMode decompositionMode = DecompositionMode.OFF;
 
     @Column(name = "pre_screen_enabled", nullable = false)
     private boolean preScreenEnabled = true;
