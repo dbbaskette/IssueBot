@@ -184,7 +184,24 @@ class NotificationBellRenderTest {
         assertThat(html).contains("Issue Completed");
         // th:text HTML-escapes the detail — "&" becomes "&amp;" — which is correct/expected.
         assertThat(html).contains("acme/widgets #42 — PR #7 created &amp; merged");
-        assertThat(html).contains("14:30");
+        assertThat(html).contains("Jul 11, 14:30");
+    }
+
+    @Test
+    void severityAndReadStateRemainIndependentOfPresentation() {
+        Notification unread = notification(Notification.Severity.WARN, "Waiting", "Review this stage", 42L);
+        Notification read = notification(Notification.Severity.ERROR, "Failed", "Inspect the error", null);
+        LocalDateTime readAt = LocalDateTime.of(2026, 7, 11, 15, 0);
+        read.setReadAt(readAt);
+
+        String html = renderPanel(List.of(unread, read), 1);
+
+        assertThat(html).contains("notif-item is-unread", "sev-warn", "ti-alert-triangle",
+                "sev-error", "ti-alert-circle", "Jul 11, 14:30", "href=\"/issues/42\"",
+                "hx-post=\"/notifications/read\"", "hx-target=\"#notif-panel\"");
+        assertThat(html.split("is-unread", -1)).hasSize(2);
+        assertThat(unread.getReadAt()).isNull();
+        assertThat(read.getReadAt()).isEqualTo(readAt);
     }
 
     @Test

@@ -71,6 +71,8 @@ class ErrorPageRenderTest {
         assertThat(html).contains("Issue not found — it may have been removed with its repository.");
         assertThat(html).contains("href=\"/issues\"");
         assertThat(html).contains("Back to the queue");
+        assertThat(html).contains("class=\"panel-body empty-state error-state\" role=\"alert\"",
+                "ti ti-alert-circle", "class=\"empty-state-title\"", "class=\"btn btn-primary mt-2\"");
         assertThat(html).doesNotContain("Back to Dashboard");
     }
 

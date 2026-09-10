@@ -88,6 +88,24 @@ class InboxPageRenderTest {
         return controller(issues, mock(PlanningVersionRepository.class));
     }
 
+    @Test
+    void singleStageDecisionOmitsEmptyCategoriesWithoutLosingDeepLink() {
+        var issues = mock(TrackedIssueRepository.class);
+        var issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 9, "Ship the feature");
+        issue.setId(2L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setCurrentPhase("STAGE_APPROVAL_IMPLEMENTATION");
+        when(issues.findByStatusOrderByIdDesc(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
+        Model model = new ExtendedModelMap();
+        controller(issues).inbox(model, null);
+        String html = render(model);
+        assertThat(html).contains("id=\"approvals\"", "Implementation approval", "Ship the feature",
+                "class=\"glass-card decision-card mb-2\"", "href=\"/issues/2#stage-approval\"");
+        assertThat(html).doesNotContain("id=\"plan-approvals\"", "id=\"ready-to-start\"",
+                "id=\"split-proposals\"", "id=\"needs-human\"", "Nothing here right now.",
+                "No actions need your attention", "Stage Approval Implementation");
+    }
+
     private InboxController controller(TrackedIssueRepository issues, PlanningVersionRepository versions) {
         return new InboxController(snapshotFixture(issues), versions, mock(IssuePollingService.class), mock(NotificationRepository.class),
                 new ApprovalCardAssembler(mock(IterationRepository.class), mock(GitHubApiClient.class)),

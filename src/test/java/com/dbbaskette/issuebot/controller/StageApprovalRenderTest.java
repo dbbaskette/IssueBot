@@ -20,6 +20,8 @@ class StageApprovalRenderTest {
         assertThat(html.split("Approve implementation", -1)).hasSize(2);
         assertThat(html).contains("Starts implementation.", "approval is required for verification.",
                 "action=\"/issues/1/stages/2/approve\"", "id=\"stage-approval-form-2\" hx-preserve=\"true\"");
+        assertThat(html).contains("<h3>Stage decision history</h3>",
+                "data-ui-state-key=\"issue:1:stage-decision-history\"");
     }
 
     @Test

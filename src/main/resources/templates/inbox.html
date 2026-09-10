@@ -49,7 +49,7 @@
         </div>
 
         <!-- === PR APPROVALS === -->
-        <div id="approvals" class="panel mb-3">
+        <div id="approvals" class="panel mb-3" th:if="${not #lists.isEmpty(approvals)}">
             <div class="panel-header">
                 <h3>Approvals <span class="badge" th:text="${#lists.size(approvals)}">0</span></h3>
             </div>
@@ -60,7 +60,7 @@
                      th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
                     <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
                     <h4 class="decision-card-title" th:text="${issue.issueTitle}">Issue title</h4>
-                    <p class="decision-stage" th:text="${humanize.eventType(issue.currentPhase)}">Stage approval</p>
+                    <p class="decision-stage" th:text="${#strings.capitalize(#strings.toLowerCase(#strings.substringAfter(issue.currentPhase, 'STAGE_APPROVAL_'))) + ' approval'}">Stage approval</p>
                     <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
                 </div>
                 <div th:each="issue : ${approvals}" class="glass-card decision-card mb-2"
@@ -138,7 +138,7 @@
         </div>
 
         <!-- === PLAN APPROVALS === -->
-        <div id="plan-approvals" class="panel mb-3">
+        <div id="plan-approvals" class="panel mb-3" th:if="${not #lists.isEmpty(planApprovals)}">
             <div class="panel-header">
                 <h3>Plan Approvals <span class="badge" th:text="${#lists.size(planApprovals)}">0</span></h3>
             </div>
@@ -176,7 +176,7 @@
         </div>
 
         <!-- === READY TO START === -->
-        <div id="ready-to-start" class="panel mb-3">
+        <div id="ready-to-start" class="panel mb-3" th:if="${not #lists.isEmpty(readyToStart)}">
             <div class="panel-header">
                 <h3>Ready to Start <span class="badge" th:text="${#lists.size(readyToStart)}">0</span></h3>
             </div>
@@ -206,7 +206,7 @@
         </div>
 
         <!-- === SPLIT PROPOSALS === -->
-        <div id="split-proposals" class="panel mb-3">
+        <div id="split-proposals" class="panel mb-3" th:if="${not #lists.isEmpty(splitProposals)}">
             <div class="panel-header">
                 <h3>Split Proposals <span class="badge" th:text="${#lists.size(splitProposals)}">0</span></h3>
             </div>
@@ -245,7 +245,7 @@
         </div>
 
         <!-- === NEEDS HUMAN (FAILED / COOLDOWN) === -->
-        <div id="needs-human" class="panel mb-3">
+        <div id="needs-human" class="panel mb-3" th:if="${not #lists.isEmpty(needsHuman)}">
             <div class="panel-header">
                 <h3>Needs Human <span class="badge" th:text="${#lists.size(needsHuman)}">0</span></h3>
             </div>

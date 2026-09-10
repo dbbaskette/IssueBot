@@ -2393,6 +2393,7 @@ details summary:hover { color: var(--text-primary); }
 
 .filter-bar select,
 .filter-bar input {
+    min-height: var(--control-height);
     padding: 0.45rem 0.7rem;
     font-size: 0.82rem;
     font-family: var(--font-sans);
@@ -2432,6 +2433,7 @@ details summary:hover { color: var(--text-primary); }
 .queue-toolbar .queue-filter { flex: 0 1 13rem; width: auto; min-width: 10rem; }
 .view-chips { display: flex; align-items: center; gap: .45rem; margin: 0 0 1.25rem; flex-wrap: wrap; }
 .view-chip {
+    min-height: var(--control-height);
     display: inline-flex;
     align-items: center;
     gap: .35rem;
@@ -2617,7 +2619,8 @@ details summary:hover { color: var(--text-primary); }
     border-radius: var(--radius-md);
     background: var(--surface-raised);
 }
-.control-card-identity { min-width: 0; }
+.control-card-header { flex-wrap: wrap; }
+.control-card-identity { min-width: 0; flex: 1 1 12rem; }
 .control-card-repo {
     display: block;
     color: var(--text-tertiary);
@@ -2636,6 +2639,7 @@ details summary:hover { color: var(--text-primary); }
 }
 .control-card-title:hover { color: var(--accent); }
 .control-card-header .status {
+    flex: 0 0 auto;
     max-width: 100%;
     min-width: 0;
     white-space: normal;
@@ -2692,6 +2696,7 @@ details summary:hover { color: var(--text-primary); }
 @media (max-width: 768px) {
     .control-room-heading { align-items: flex-start; flex-direction: column; }
     .control-card-header { flex-direction: column; }
+    .control-card-identity { flex: 0 1 auto; width: 100%; }
     .control-card-header .status { align-self: flex-start; }
     .control-card-actions { align-items: stretch; flex-direction: column; }
     .control-card-actions .btn {
@@ -3468,9 +3473,9 @@ details summary:hover { color: var(--text-primary); }
 .recovery-card form > details > summary { cursor: pointer; color: var(--text-secondary); font-size: .8rem; font-weight: 600; }
 .check-row { display: flex; align-items: center; gap: .55rem; font-size: .82rem; }
 .check-row input { width: auto; }
-.secondary-section > .panel-header { user-select: none; }
+.secondary-section > .panel-header { user-select: none; justify-content: flex-start; }
 .secondary-section:not([open]) > .panel-header { border-bottom: 0; }
-.secondary-section > .panel-header::after { content: 'Expand'; color: var(--text-tertiary); font-size: .7rem; font-weight: 500; }
+.secondary-section > .panel-header::after { content: 'Expand'; margin-left: auto; color: var(--text-tertiary); font-size: .7rem; font-weight: 500; }
 .secondary-section[open] > .panel-header::after { content: 'Collapse'; }
 .secondary-section > .panel-header > .text-sm:last-child { margin-left: auto; margin-right: .65rem; }
 
@@ -3772,6 +3777,7 @@ details summary:hover { color: var(--text-primary); }
 .inset-panel > ol { padding-left: 24px; margin-top: 12px; max-width: 80ch; }
 .inset-panel > ol > li + li { margin-top: 8px; }
 .repo-workflow-summary { min-width: 16rem; max-width: 32rem; }
+.queue-number-cell { white-space: nowrap; min-width: 5rem; overflow-wrap: normal; }
 .repo-workflow-summary p { font-size: .8rem; margin-top: 4px; color: var(--text-secondary); white-space: normal; }
 .repos-table .repo-actions { min-width: 180px; }
 .repo-actions .btn { margin: 4px 4px 4px 0; }
@@ -3820,6 +3826,7 @@ button.glass-pill, a.glass-pill, .toast-dismiss, .notif-bell-btn, .mobile-menu-b
 
 @media (max-width: 768px) {
     .processing-rail { flex-wrap: wrap; gap: .5rem; }
+    .repos-table td.repo-workflow-summary { flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
     .processing-rail-state { flex: 1 0 100%; }
     .processing-rail > .flex { flex-wrap: wrap; width: 100%; }
     .processing-rail .btn { white-space: normal; }

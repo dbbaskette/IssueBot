@@ -34,3 +34,17 @@ Dashboard estimated-cost summary and every monetary metric/table cell on Costs u
 - No production access, workers, deployment, push or merge performed.
 - Existence checks add read-only queries alongside the existing per-repository/per-issue cost aggregates; no schema migration or persistence write is added.
 - Browser-measured sizing/overflow/anchor verification remains required in the root phase; no claim of final visual acceptance is made here.
+
+## Review correction round 1
+
+Addressed the root's desktop/mobile observations in a focused follow-up:
+
+- Mobile repository workflow cells now stack their label and values; a responsive CSS assertion protects the rule.
+- Dashboard status badges cannot flex-shrink beside issue titles. Card headers wrap onto another line as needed, with mobile identity sizing reset so the desktop flex basis does not become an excessive vertical height.
+- Queue issue numbers remain whole with a minimum width. The actual quick-filter `.view-chip` and search/filter input selectors now consume the shared 40px/44px control-height token.
+- Stage decision history has a proper heading; secondary disclosure headers align titles left and keep the expand/collapse hint trailing.
+- Costs average cells with no processed issues omit the numeric sort value and explain the dash as `No processed issues`.
+- Needs You omits empty categories when other work needs attention. Populated category ids and existing action links remain; the global empty state is unchanged. Stage copy is consistently `Implementation approval` (and the corresponding stage name) on Needs You and Approvals.
+- Added or extended real rendering assertions for Approvals empty/card/stage labels and action links; Issues empty/filter context; error role/icon/return action; notification date/time, severity and unchanged read state; shell classes and navigation semantics; detail history headings and preserved disclosure keys; and a single-stage Needs You view without four empty panels. Cost average metadata and responsive sizing guards are covered too.
+
+Validation: the focused rendering/controller/responsive command now runs 214 tests with zero failures/errors/skips; all 27 JavaScript tests pass; `git diff --check` is clean. Root retains the final browser recheck and full-suite gate. No backend source changes were made in this correction round.

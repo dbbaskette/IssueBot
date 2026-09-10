@@ -43,7 +43,7 @@
      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
     <details th:if="${stageApprovalHistory != null and not #lists.isEmpty(stageApprovalHistory)}" class="panel mb-3 secondary-section"
              th:attr="data-ui-state-key=${'issue:' + issue.id + ':stage-decision-history'}">
-        <summary class="panel-header">Stage decision history</summary>
+        <summary class="panel-header"><h3>Stage decision history</h3></summary>
         <ul class="panel-body">
             <li th:each="decision : ${stageApprovalHistory}">
                 <span th:text="${decision.stage + ' · run ' + (decision.runNumber + 1) + ' · attempt ' + decision.attempt + ' · ' + decision.state}"></span>

@@ -17,10 +17,32 @@ class DashboardControlRoomResponsiveCssTest {
         String rule = ruleFor(".control-card-header .status");
 
         assertThat(rule).contains(
+                "flex: 0 0 auto;",
                 "max-width: 100%;",
                 "min-width: 0;",
                 "white-space: normal;",
                 "overflow-wrap: anywhere;");
+        assertThat(ruleFor(".control-card-header")).contains("flex-wrap: wrap;");
+        assertThat(ruleFor(".control-card-identity")).contains("flex: 0 1 auto;", "width: 100%;");
+    }
+
+    @Test
+    void mobileRepositoryWorkflowStacksLabelAndValues() throws IOException {
+        assertThat(ruleFor(".repos-table td.repo-workflow-summary")).contains(
+                "flex-direction: column;", "align-items: flex-start;", "min-width: 0;");
+    }
+
+    @Test
+    void secondaryDisclosureTitlesAlignLeftWithTrailingExpandHint() throws IOException {
+        assertThat(ruleFor(".secondary-section > .panel-header")).contains("justify-content: flex-start;");
+        assertThat(ruleFor(".secondary-section > .panel-header::after")).contains("margin-left: auto;");
+    }
+
+    @Test
+    void queueIdsStayWholeAndAllFilterControlsUseSharedHeight() throws IOException {
+        assertThat(ruleFor(".queue-number-cell")).contains("white-space: nowrap;", "min-width: 5rem;", "overflow-wrap: normal;");
+        assertThat(ruleFor(".filter-bar input")).contains("min-height: var(--control-height);");
+        assertThat(ruleFor(".view-chip")).contains("min-height: var(--control-height);");
     }
 
     @Test
@@ -42,7 +64,9 @@ class DashboardControlRoomResponsiveCssTest {
         }
         Matcher matcher = Pattern.compile(Pattern.quote(selector) + "\\s*\\{([^}]*)}", Pattern.DOTALL)
                 .matcher(css);
-        assertThat(matcher.find()).as("CSS rule for %s", selector).isTrue();
-        return matcher.group(1);
+        StringBuilder rules = new StringBuilder();
+        while (matcher.find()) rules.append(matcher.group(1));
+        assertThat(rules).as("CSS rules for %s", selector).isNotEmpty();
+        return rules.toString();
     }
 }

@@ -89,7 +89,7 @@
                         <td th:text="${rb.hasCostData() ? '$' + #numbers.formatDecimal(rb.totalCost(), 1, 4) : '—'}"
                             th:attr="data-value=${rb.hasCostData() ? rb.totalCost() : null},title=${rb.hasCostData() ? null : 'No recorded estimate'}">$0.0000</td>
                         <td th:text="${rb.hasCostData() and rb.issueCount() > 0 ? '$' + #numbers.formatDecimal(rb.avgCostPerIssue(), 1, 4) : '—'}"
-                            th:attr="data-value=${rb.hasCostData() ? rb.avgCostPerIssue() : null},title=${rb.hasCostData() ? null : 'No recorded estimate'}">$0.0000</td>
+                            th:attr="data-value=${rb.hasCostData() and rb.issueCount() > 0 ? rb.avgCostPerIssue() : null},title=${!rb.hasCostData() ? 'No recorded estimate' : (rb.issueCount() == 0 ? 'No processed issues' : null)}">$0.0000</td>
                     </tr>
                 </tbody>
             </table>

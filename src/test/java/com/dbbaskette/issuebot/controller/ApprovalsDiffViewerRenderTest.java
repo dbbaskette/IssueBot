@@ -110,9 +110,35 @@ class ApprovalsDiffViewerRenderTest {
         String html = render(model);
 
         assertThat(html)
+                .contains("inset-panel decision-card", "class=\"decision-card-title\">Add feature</span>",
+                        "Awaiting approval", "hx-post=\"/approvals/2/approve\"", "hx-post=\"/approvals/2/reject\"")
                 .contains("data-diff-viewer")
                 .contains("data-ui-state-key=\"issue:2:iteration:77:diff\"")
                 .contains("data-ui-state-key=\"issue:2:iteration:77:self-assessment\"");
+    }
+
+    @Test
+    void emptyApprovalsExplainWhereFutureDecisionsAppear() {
+        Model model = new ExtendedModelMap();
+        model.addAttribute("approvals", List.of());
+        String html = render(model);
+        assertThat(html).contains("class=\"glass-card empty-state\"", "No actions need your attention",
+                "Workflow stage and pull request approvals appear here when a decision is ready.");
+        assertThat(html).doesNotContain("approval-gated repos", "class=\"decision-card-title\"");
+    }
+
+    @Test
+    void stageApprovalShowsReadableStageAndTitleWithExistingDeepLink() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 9, "Ship the feature");
+        issue.setId(2L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setCurrentPhase("STAGE_APPROVAL_IMPLEMENTATION");
+        Model model = new ExtendedModelMap();
+        model.addAttribute("approvals", List.of(issue));
+        String html = render(model);
+        assertThat(html).contains("class=\"decision-card-title\">Ship the feature</h3>",
+                "Implementation approval", "href=\"/issues/2#stage-approval\"");
+        assertThat(html).doesNotContain("Stage Approval Implementation", "hx-post=\"/approvals/2/approve\"");
     }
 
     @Test

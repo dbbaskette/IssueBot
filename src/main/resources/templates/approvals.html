@@ -19,7 +19,7 @@
          th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
         <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
         <h3 class="decision-card-title" th:text="${issue.issueTitle}">Issue title</h3>
-        <p class="decision-stage" th:text="${humanize.eventType(issue.currentPhase)}">Stage approval</p>
+        <p class="decision-stage" th:text="${#strings.capitalize(#strings.toLowerCase(#strings.substringAfter(issue.currentPhase, 'STAGE_APPROVAL_'))) + ' approval'}">Stage approval</p>
         <p class="field-hint">Review the stage and any available model choices on the issue page.</p>
         <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
     </div>

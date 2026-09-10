@@ -52,6 +52,17 @@ class CostPageRenderTest {
     }
 
     private String render(boolean hasData, BigDecimal cost) {
+        return render(hasData, cost, IssueStatus.COMPLETED);
+    }
+
+    @Test
+    void missingAverageHasExplanationAndNoNumericSortValue() {
+        String html = render(true, BigDecimal.ZERO, IssueStatus.IN_PROGRESS);
+        assertThat(html).contains("title=\"No processed issues\">—</td>");
+        assertThat(html).doesNotContainPattern("<td[^>]*data-value=[^>]*title=\"No processed issues\"");
+    }
+
+    private String render(boolean hasData, BigDecimal cost, IssueStatus status) {
         var costs = mock(CostTrackingRepository.class);
         var issues = mock(TrackedIssueRepository.class);
         var repos = mock(WatchedRepoRepository.class);
@@ -62,7 +73,7 @@ class CostPageRenderTest {
         issue.setRepo(repo);
         issue.setIssueNumber(12);
         issue.setIssueTitle("A recorded issue");
-        issue.setStatus(IssueStatus.COMPLETED);
+        issue.setStatus(status);
         when(costs.count()).thenReturn(hasData ? 1L : 0L);
         when(costs.totalCost()).thenReturn(cost);
         when(costs.totalCostForRepo(repo)).thenReturn(cost);

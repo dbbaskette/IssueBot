@@ -127,6 +127,8 @@ class LayoutSseAndAgentStatusRenderTest {
 
         assertThat(html).contains("id=\"sse-status\"");
         assertThat(html).contains("class=\"sse-dot\"");
+        assertThat(html).contains("class=\"shell-brand-header\"", "class=\"shell-status-actions\"",
+                "aria-label=\"Main navigation\"", "aria-current=\"page\"");
         assertThat(html).contains("data-state=\"none\"");
     }
 
