@@ -130,7 +130,7 @@ class IssueDetailReadyToStartRenderTest {
 
         assertThat(card)
                 .doesNotContain("disabled=\"disabled\"")
-                .contains("Start manually while paused");
+                .contains("Start issue");
         assertThat(html).contains("action=\"/issues/42/start-manual\"", "name=\"implementationReasoningEffort\"", "name=\"reviewReasoningEffort\"");
         assertThat(slice(card, "<button type=\"button\" class=\"btn btn-ghost\"", "</button>"))
                 .doesNotContain("disabled=\"disabled\"");

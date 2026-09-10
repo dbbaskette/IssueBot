@@ -20,7 +20,7 @@ public class ProcessingControlController {
         try {
             control.pauseAfterCurrent();
             redirects.addFlashAttribute("success",
-                    "Processing will pause after current work finishes; queued issues will remain queued.");
+                    "Queue paused. Running work can finish; no other issue will start automatically.");
         } catch (RuntimeException e) {
             redirects.addFlashAttribute("error",
                     "Processing could not be set to pause after current work.");
@@ -34,7 +34,7 @@ public class ProcessingControlController {
         try {
             control.stopNow();
             redirects.addFlashAttribute("success",
-                    "Processing stopped; active work is being cancelled and queued issues will remain queued.");
+                    "Stopping active work. The queue will stay stopped.");
         } catch (RuntimeException e) {
             redirects.addFlashAttribute("error",
                     "Processing could not be stopped; active work was not cancelled.");
@@ -48,7 +48,7 @@ public class ProcessingControlController {
         try {
             control.restart();
             redirects.addFlashAttribute("success",
-                    "Processing restarted; queued issues can run again.");
+                    "Queue resumed. Ready issues can start automatically.");
         } catch (RuntimeException e) {
             redirects.addFlashAttribute("error", "Processing could not be restarted.");
         }

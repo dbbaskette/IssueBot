@@ -18,7 +18,7 @@ class ProcessingControlControllerTest {
         verify(service).pauseAfterCurrent();
         verify(service, never()).stopNow();
         verify(redirects).addFlashAttribute("success",
-                "Processing will pause after current work finishes; queued issues will remain queued.");
+                "Queue paused. Running work can finish; no other issue will start automatically.");
     }
 
     @Test void pauseAfterCurrentFailureDoesNotClaimSuccess() {
@@ -33,7 +33,7 @@ class ProcessingControlControllerTest {
         verify(service).stopNow();
         verify(service, never()).pauseAfterCurrent();
         verify(redirects).addFlashAttribute("success",
-                "Processing stopped; active work is being cancelled and queued issues will remain queued.");
+                "Stopping active work. The queue will stay stopped.");
     }
 
     @Test void stopNowFailureDoesNotClaimCancellation() {
@@ -48,7 +48,7 @@ class ProcessingControlControllerTest {
         assertThat(controller.restart("/issues/7", redirects)).isEqualTo("redirect:/issues/7");
         verify(service, times(2)).restart();
         verify(redirects, times(2)).addFlashAttribute("success",
-                "Processing restarted; queued issues can run again.");
+                "Queue resumed. Ready issues can start automatically.");
     }
 
     @Test void restartFailureIsModeSpecific() {

@@ -141,8 +141,8 @@ class IssuesQueueRenderTest {
 
         assertThat(html)
                 .contains("Waiting for issue #41 to start or release the repository slot.")
-                .contains("href=\"/issues/1#ready-to-start\"")
-                .contains("Open issue #41")
+                .contains("href=\"/issues/46\"")
+                .contains("Open issue #46")
                 .doesNotContain("hx-post=\"/issues/46/start\"");
     }
 
@@ -215,11 +215,9 @@ class IssuesQueueRenderTest {
         issue.setId(4L);
         issue.setStatus(IssueStatus.PENDING);
 
-        assertThat(renderTableRows(List.of(issue), false)).contains(">Start</button>");
-        assertThat(renderTableRows(List.of(issue), true)).contains("disabled=\"disabled\"")
-                .contains("Processing is stopped and must be restarted before starting or retrying work.");
-        assertThat(renderTableRows(List.of(issue), ProcessingState.PAUSE_AFTER_CURRENT))
-                .contains("disabled=\"disabled\"")
-                .contains("Processing is waiting for current work to finish and will not start another issue.");
+        for (var mode : ProcessingState.values()) {
+            assertThat(renderTableRows(List.of(issue), mode)).contains("href=\"/issues/4\"", ">Open</a>")
+                    .doesNotContain("hx-post=\"/issues/4/start\"");
+        }
     }
 }

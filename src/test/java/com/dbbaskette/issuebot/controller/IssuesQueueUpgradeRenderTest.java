@@ -193,12 +193,22 @@ class IssuesQueueUpgradeRenderTest {
     }
 
     @Test
+    void queueComesFirstAndDependencyDetailsAreCollapsed() {
+        String html = renderContent(List.of(issue(1, "Work", IssueStatus.QUEUED)), null, 0, 1, false, false);
+        assertThat(html.indexOf("id=\"bulk-form\"")).isLessThan(html.indexOf("id=\"queue-dependencies\""));
+        assertThat(html).contains("Dependencies &amp; task order", "See what is blocking an issue");
+        assertThat(html).doesNotContain("Take control of the queue", "Enter manual recovery — release group reservations");
+        String disclosure = html.substring(html.lastIndexOf("<details", html.indexOf("id=\"queue-dependencies\"")),
+                html.indexOf(">", html.indexOf("id=\"queue-dependencies\"")));
+        assertThat(disclosure).doesNotContain(" open");
+    }
+
+    @Test
     void retryButton_showsOnFailedRow_notOnQueuedRow() {
         TrackedIssue failed = issue(1, "Broken thing", IssueStatus.FAILED);
         String failedHtml = renderContent(List.of(failed), null, 0, 1, false, false);
-        assertThat(failedHtml).contains(">Retry<");
-        assertThat(failedHtml).contains("/issues/1/retry-quick");
-        assertThat(failedHtml).contains("Retry with defaults — open the issue for model/budget options");
+        assertThat(failedHtml).contains(">Review</a>", "href=\"/issues/1\"");
+        assertThat(failedHtml).doesNotContain("/issues/1/retry-quick");
 
         TrackedIssue queued = issue(2, "Fresh thing", IssueStatus.QUEUED);
         String queuedHtml = renderContent(List.of(queued), null, 0, 1, false, false);
@@ -210,8 +220,8 @@ class IssuesQueueUpgradeRenderTest {
         TrackedIssue cooldown = issue(1, "Cooling down", IssueStatus.COOLDOWN);
         String html = renderContent(List.of(cooldown), null, 0, 1, false, false);
 
-        assertThat(html).contains(">Retry<");
-        assertThat(html).contains("/issues/1/retry-quick");
+        assertThat(html).contains(">Review</a>", "href=\"/issues/1\"");
+        assertThat(html).doesNotContain("/issues/1/retry-quick");
     }
 
     @Test
@@ -268,6 +278,7 @@ class IssuesQueueUpgradeRenderTest {
 
         // Same tag: static hx-include renders before the th:attr-generated hx-post,
         // and [^>]* keeps the match inside one element.
-        assertThat(html).containsPattern("hx-include=\"#filter-form\"[^>]*hx-post=\"/issues/1/retry-quick\"");
+        assertThat(html).contains("href=\"/issues/1\"", ">Review</a>")
+                .doesNotContain("hx-post=\"/issues/1/retry-quick\"");
     }
 }
