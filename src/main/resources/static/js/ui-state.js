@@ -282,6 +282,11 @@
     toast.setAttribute('data-toast-severity', controller.severity);
     toast.setAttribute('role', controller.severity === 'success' ? 'status' : 'alert');
 
+    // HTMX history restores serialized markup, but not listeners or expandos.
+    // Discard cached generated controls before wiring this DOM instance.
+    elementsWithin(toast, '.toast-dismiss').forEach(function (button) {
+      if (button.parentNode) { button.parentNode.removeChild(button); }
+    });
     var dismiss = document.createElement('button');
     dismiss.type = 'button';
     dismiss.className = 'toast-dismiss';

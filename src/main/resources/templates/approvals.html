@@ -81,8 +81,8 @@
             <p th:if="${rev.failureReason != null}" class="text-sm text-muted mb-1"
                th:text="${rev.failureReason}">Review unavailable</p>
             <div th:if="${rev.overall != null}" class="mb-1">
-                <span class="badge" th:text="${'Overall ' + rev.overallPercent + '%'}">Overall 0%</span>
-                <span class="badge" th:if="${rev.findingCount > 0}"
+                <span class="review-stat review-score" th:text="${'Overall ' + rev.overallPercent + '%'}">Overall 0%</span>
+                <span class="review-stat review-finding-count" th:if="${rev.findingCount > 0}"
                       th:text="${rev.findingCount + (rev.findingCount == 1 ? ' finding' : ' findings')}">0 findings</span>
             </div>
             <div th:if="${rev.overall != null}" class="text-sm text-muted"

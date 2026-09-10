@@ -181,7 +181,7 @@ class ApprovalsDiffViewerRenderTest {
         Iteration iteration = new Iteration(issue, 1);
         iteration.setReviewPassed(true);
         iteration.setReviewJson("""
-                {"passed": true, "specComplianceScore": 0.8}
+                {"passed": true, "specComplianceScore": 0.8, "findings": [{"severity": "low", "description": "Follow-up observation"}]}
                 """);
 
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
@@ -198,6 +198,9 @@ class ApprovalsDiffViewerRenderTest {
         String html = render(model);
 
         assertThat(html).contains("Overall 80%")
+                .contains("class=\"review-stat review-score\">Overall 80%</span>")
+                .contains("class=\"review-stat review-finding-count\">1 finding</span>")
+                .contains("class=\"status status-completed\">REVIEW PASSED</span>")
                 .contains("Spec 80%")
                 .doesNotContain("/10");
         assertThat(html).doesNotContain("Correctness 0.0", "Quality 0.0", "Tests 0.0",
@@ -229,6 +232,8 @@ class ApprovalsDiffViewerRenderTest {
         String html = render(model);
 
         assertThat(html).contains("Overall 0%")
+                .contains("class=\"review-stat review-score\">Overall 0%</span>")
+                .contains("class=\"status status-failed\">REVIEW FAILED</span>")
                 .contains("Spec 0%")
                 .contains("FAILED")
                 .doesNotContain("/10");

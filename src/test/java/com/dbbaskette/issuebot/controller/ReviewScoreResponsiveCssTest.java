@@ -22,5 +22,6 @@ class ReviewScoreResponsiveCssTest {
                 .contains("@media (max-width: 700px)")
                 .contains(".review-dimension-grid { grid-template-columns: minmax(0, 1fr); }")
                 .contains(".review-attempt-selector { overflow-wrap: anywhere; }");
+        assertThat(css).containsPattern("\\.review-stat \\{[^}]*background: var\\(--surface-raised\\);[^}]*color: var\\(--text-secondary\\);");
     }
 }

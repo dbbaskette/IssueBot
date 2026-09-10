@@ -51,6 +51,8 @@ class Element extends EventTarget {
     Object.entries(attrs).forEach(([key, value]) => this.setAttribute(key, value));
   }
   get id() { return this.getAttribute('id') || ''; }
+  get className() { return this.classList.toString(); }
+  set className(value) { this.setAttribute('class', value); }
   get isConnected() {
     let node = this;
     while (node) {
@@ -88,6 +90,7 @@ class Element extends EventTarget {
       return this.tagName === 'DETAILS' && this.hasAttribute('data-ui-state-key');
     }
     if (selector === '.toast') return this.classList.contains('toast');
+    if (selector === '.toast-dismiss') return this.classList.contains('toast-dismiss');
     if (selector === ':hover') return this.hovered;
     if (selector === 'summary') return this.tagName === 'SUMMARY';
     if (selector === 'details[data-ui-state-key]') return this.tagName === 'DETAILS' && this.hasAttribute('data-ui-state-key');
@@ -438,4 +441,48 @@ test('a swapped success toast keeps elapsed time and recomputes stale pause reas
   h.advance(1);
   h.advance(400);
   assert.equal(replacement.removed, true);
+});
+
+// A history snapshot contains only markup: attributes/text/children survive,
+// while listeners, initialization expandos and controller references do not.
+function serializeMarkup(element) {
+  return JSON.stringify({ tag: element.tagName, attrs: element.attributes,
+    text: element.textContent, children: element.children.map(serializeMarkup) });
+}
+
+function restoreMarkup(snapshot) {
+  const markup = JSON.parse(snapshot);
+  const element = new Element(markup.tag, markup.attrs, markup.text);
+  markup.children.forEach(child => element.appendChild(restoreMarkup(child)));
+  return element;
+}
+
+test('serialized history restores exactly one working dismiss control on every toast severity', () => {
+  for (const severityClass of ['toast-danger', 'toast-warning', 'toast-ok']) {
+    const h = harness();
+    let toast = h.document.body.appendChild(new Element('div', { class: `toast ${severityClass}` }, 'History message'));
+    h.api.initToasts(toast);
+    for (let restore = 0; restore < 3; restore++) {
+      const snapshot = serializeMarkup(toast);
+      toast.remove();
+      toast = h.document.body.appendChild(restoreMarkup(snapshot));
+      assert.equal(toast.__issuebotToastInit, undefined);
+      assert.equal(toast.querySelector('.toast-dismiss').listeners.click, undefined);
+      h.emit('htmx:historyRestore');
+      h.emit('htmx:historyRestore');
+      const controls = toast.querySelectorAll('.toast-dismiss');
+      assert.equal(controls.length, 1);
+      assert.equal(controls[0].listeners.click.length, 1);
+      assert.equal(controls[0].getAttribute('aria-label'), 'Dismiss notification');
+      assert.equal(toast.getAttribute('role'), severityClass === 'toast-ok' ? 'status' : 'alert');
+      toast.emit('mouseenter');
+      toast.emit('focusin');
+      toast.emit('mouseleave');
+      h.advance(10000);
+      assert.equal(toast.removed, false, 'errors persist and focused success stays paused');
+    }
+    toast.querySelector('.toast-dismiss').emit('click');
+    h.advance(400);
+    assert.equal(toast.removed, true, 'the sole control works after repeated serialized restores');
+  }
 });
