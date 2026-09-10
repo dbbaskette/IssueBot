@@ -1,0 +1,41 @@
+# macOS home-server deployment
+
+The current home server runs Docker Desktop and Cloudflare Tunnel, while
+IssueBot runs as a native macOS `launchd` service. This is the same topology as
+BlogForge: `cloudflared` reaches the host through `host.docker.internal`.
+
+Native execution is required until the separate `codex-cli-provider` image is
+available because IssueBot invokes the authenticated Codex or Claude CLI on the
+host. The dashboard is still exposed only through the existing Cloudflare
+Tunnel hostname, `issuebot.baskettecase.com`.
+
+The protected runtime file is `$HOME/.config/issuebot/runtime.env`, mode `0600`:
+
+```dotenv
+GITHUB_TOKEN=replace_me
+ISSUEBOT_USERNAME=admin
+ISSUEBOT_PASSWORD=replace_me
+ISSUEBOT_WEBHOOK_SECRET=replace_me
+```
+
+Install or redeploy the service with:
+
+```bash
+./deploy/macos/install-service.sh
+# Or, after a separately verified build:
+./deploy/macos/install-service.sh --skip-build
+cd ../home-server
+docker compose up -d --force-recreate cloudflared
+```
+
+Verify both sides:
+
+```bash
+curl --fail http://127.0.0.1:8090/actuator/health/readiness
+curl --fail https://issuebot.baskettecase.com/actuator/health/readiness
+```
+
+The dashboard hostname should be protected by Cloudflare Access and by
+IssueBot's own username/password. If GitHub webhooks are enabled, configure a
+path-specific Access bypass only for `/webhooks/github`; the endpoint verifies
+the GitHub HMAC signature using `ISSUEBOT_WEBHOOK_SECRET`.

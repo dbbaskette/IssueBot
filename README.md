@@ -130,7 +130,7 @@ cp .env.example .env
 
 This builds the project, kills any existing instance, and starts IssueBot on port **8090**.
 
-For the hardened two-service Docker topology and operator procedures, see the [Docker deployment runbook](docs/deployment.md). `codex-cli-provider` is built, released, authenticated, and credentialed by its independent project; IssueBot only consumes a compatible image pinned by immutable digest. **Production cutover remains forbidden until that image exists and IssueBot integration has removed direct local `claude` execution.**
+For the current `home-services.local` deployment, see the [macOS home-server runbook](docs/macos-home-server.md). It mirrors BlogForge's working topology: IssueBot is supervised by `launchd` so it can use the host's authenticated agent CLI, and the Dockerized Cloudflare Tunnel reaches it through `host.docker.internal`. The separate [hardened Docker deployment runbook](docs/deployment.md) remains the future topology once its independently released `codex-cli-provider` image exists.
 
 Alternatively, build and run manually:
 
