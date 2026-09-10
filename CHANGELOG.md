@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Replace the sidebar's decorative blue dot with the IssueBot ticket-bot icon and use it as the browser favicon.
+- Add the matching transparent IssueBot wordmark to the repository README, with reusable branding assets and generation notes.
+
 ## 0.5.0
 
 - Promote issue splitting out of Advanced settings and default new repositories to Off.

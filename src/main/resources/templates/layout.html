@@ -11,6 +11,7 @@
     <meta name="_csrf" th:if="${_csrf != null}" th:content="${_csrf.token}">
     <meta name="_csrf_header" th:if="${_csrf != null}" th:content="${_csrf.headerName}">
     <title th:text="${pageTitle != null ? pageTitle + ' — IssueBot' : 'IssueBot'}">IssueBot</title>
+    <link rel="icon" type="image/png" th:href="@{/images/issuebot-icon.png}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
@@ -31,7 +32,7 @@
     <div class="sidebar-overlay"></div>
     <nav class="sidebar" id="sidebar" aria-label="Main navigation">
         <header style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem">
-            <div><h1>IssueBot</h1><small class="text-muted" th:text="${'v' + applicationVersion}" aria-label="Application version">development</small></div>
+            <div><h1><img class="brand-icon" th:src="@{/images/issuebot-icon.png}" width="28" height="28" alt="">IssueBot</h1><small class="text-muted" th:text="${'v' + applicationVersion}" aria-label="Application version">development</small></div>
             <div style="display:flex;align-items:center;gap:0.6rem">
                 <span id="sse-status" class="sse-dot" data-state="none" title="No live stream on this page"></span>
                 <!--
