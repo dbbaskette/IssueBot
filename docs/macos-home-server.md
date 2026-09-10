@@ -9,7 +9,14 @@ available because IssueBot invokes the authenticated Codex or Claude CLI on the
 host. The dashboard is still exposed only through the existing Cloudflare
 Tunnel hostname, `issuebot.baskettecase.com`.
 
-The protected runtime file is `$HOME/.config/issuebot/runtime.env`, mode `0600`:
+The non-secret host topology is committed in
+`deploy/macos/home-server.env`. Change that file when the checkout, Java,
+home-server, hostname, label, or port changes. The installer renders the
+LaunchAgent from the committed plist template.
+
+The protected runtime file is configured by `ISSUEBOT_RUNTIME_ENV` and must
+remain outside the repository with mode `0600`. Start from the committed
+`deploy/macos/runtime.env.example`:
 
 ```dotenv
 GITHUB_TOKEN=replace_me

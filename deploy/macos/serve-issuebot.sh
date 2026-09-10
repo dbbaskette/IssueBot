@@ -2,8 +2,16 @@
 set -Eeuo pipefail
 umask 077
 
-readonly ISSUEBOT_CHECKOUT="/Users/dbbaskette/Projects/IssueBot"
-readonly ISSUEBOT_RUNTIME_ENV="/Users/dbbaskette/.config/issuebot/runtime.env"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly DEPLOY_CONFIG="${ISSUEBOT_DEPLOY_CONFIG:-$SCRIPT_DIR/home-server.env}"
+
+[[ -f "$DEPLOY_CONFIG" && ! -L "$DEPLOY_CONFIG" ]] || {
+  printf 'ERROR: deployment configuration is missing or unsafe: %s\n' "$DEPLOY_CONFIG" >&2
+  exit 1
+}
+# shellcheck disable=SC1090
+source "$DEPLOY_CONFIG"
+
 readonly ISSUEBOT_JAR="$ISSUEBOT_CHECKOUT/target/issuebot-0.1.0-SNAPSHOT.jar"
 
 [[ -f "$ISSUEBOT_RUNTIME_ENV" && ! -L "$ISSUEBOT_RUNTIME_ENV" ]] || {
@@ -20,9 +28,11 @@ set -a
 source "$ISSUEBOT_RUNTIME_ENV"
 set +a
 
-export HOME="/Users/dbbaskette"
-export PATH="$HOME/.sdkman/candidates/java/current/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+export HOME="$ISSUEBOT_SERVICE_HOME"
+export PATH="$(dirname "$ISSUEBOT_JAVA"):$ISSUEBOT_SERVICE_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export SPRING_PROFILES_ACTIVE=prod
+export SERVER_ADDRESS=0.0.0.0
+export SERVER_PORT="$ISSUEBOT_PORT"
 
 cd "$ISSUEBOT_CHECKOUT"
-exec java -jar "$ISSUEBOT_JAR"
+exec "$ISSUEBOT_JAVA" -jar "$ISSUEBOT_JAR"

@@ -3,20 +3,20 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.baskettecase.issuebot</string>
+  <string>__AGENT_LABEL__</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/dbbaskette/Projects/IssueBot/deploy/macos/serve-issuebot.sh</string>
+    <string>__SERVE_SCRIPT__</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/dbbaskette/Projects/IssueBot</string>
+  <string>__ISSUEBOT_CHECKOUT__</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/Users/dbbaskette</string>
+    <string>__SERVICE_HOME__</string>
     <key>PATH</key>
-    <string>/Users/dbbaskette/.sdkman/candidates/java/current/bin:/Users/dbbaskette/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>__SERVICE_PATH__</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -25,8 +25,8 @@
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>StandardOutPath</key>
-  <string>/Users/dbbaskette/.issuebot/logs/issuebot.log</string>
+  <string>__LOG_PATH__</string>
   <key>StandardErrorPath</key>
-  <string>/Users/dbbaskette/.issuebot/logs/issuebot.log</string>
+  <string>__LOG_PATH__</string>
 </dict>
 </plist>
