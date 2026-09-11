@@ -162,6 +162,9 @@ class RepositoriesPageRenderTest {
         String html = render(List.of(repo), Map.of(7L, 0L), Map.of(7L, 0L));
 
         assertThat(html).contains("class=\"repository-workflow-editor\"")
+                .contains("Workflow and checkpoints", "Approve before: planning, review", "repo-lessons-row",
+                        "data-ui-state-key=\"repo:7:lessons\"", "colspan=\"5\"")
+                .doesNotContain("data-label=\"Mode\"", "data-label=\"Auto\"", "data-label=\"Merge\"")
                 .contains("name=\"workflowPolicy\"")
                 .contains("name=\"approvalStages\"")
                 .contains("data-workflow-policy=\"STAGED\"")

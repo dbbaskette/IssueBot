@@ -127,6 +127,14 @@ class IssuesQueueRenderTest {
     }
 
     @Test
+    void emptyFilteredQueueExplainsHowToFindOrAddWork() {
+        String html = renderTableRows(List.of());
+        assertThat(html).contains("class=\"empty-state\"", "No issues match this view",
+                "Change your filters", "agent-ready");
+        assertThat(html).doesNotContain("No tracked issues", "class=\"bulk-select\"");
+    }
+
+    @Test
     void queuedRowNamesAndLinksTheReadyReservationHoldingItsRepository() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         repo.setId(9L);

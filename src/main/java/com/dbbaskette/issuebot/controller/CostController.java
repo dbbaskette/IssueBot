@@ -66,6 +66,7 @@ public class CostController {
         long totalOutput = costRepository.totalOutputTokens();
 
         model.addAttribute("totalCost", totalCost);
+        model.addAttribute("hasCostData", costRepository.count() > 0);
         model.addAttribute("totalInputTokens", totalInput);
         model.addAttribute("totalOutputTokens", totalOutput);
         model.addAttribute("totalTokens", totalInput + totalOutput);
@@ -80,7 +81,8 @@ public class CostController {
             BigDecimal avgCost = issueCount > 0
                     ? repoCost.divide(BigDecimal.valueOf(issueCount), 4, RoundingMode.HALF_UP)
                     : BigDecimal.ZERO;
-            repoBreakdowns.add(new RepoBreakdown(repo.fullName(), repoCost, issueCount, avgCost));
+            repoBreakdowns.add(new RepoBreakdown(repo.fullName(), repoCost, issueCount, avgCost,
+                    costRepository.existsByIssueRepo(repo)));
         }
         model.addAttribute("repoBreakdowns", repoBreakdowns);
 
@@ -97,7 +99,7 @@ public class CostController {
                     issue.getIssueTitle(),
                     issue.getStatus().name(),
                     issue.getCurrentIteration(),
-                    issueCost));
+                    issueCost, costRepository.existsByIssue(issue)));
         }
         model.addAttribute("issueBreakdowns", issueBreakdowns);
 
@@ -108,6 +110,7 @@ public class CostController {
         // Chart data block (parsed client-side): per-repo bar + cost-over-time line.
         List<Map<String, Object>> chartRepos = new ArrayList<>();
         for (RepoBreakdown rb : repoBreakdowns) {
+            if (!rb.hasCostData()) continue;
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("repoName", rb.repoName());
             row.put("totalCost", rb.totalCost().setScale(4, RoundingMode.HALF_UP));
@@ -162,6 +165,8 @@ public class CostController {
                 + (value == null ? "null" : value.getClass()));
     }
 
-    public record RepoBreakdown(String repoName, BigDecimal totalCost, long issueCount, BigDecimal avgCostPerIssue) {}
-    public record IssueBreakdown(Long id, String repoName, int issueNumber, String title, String status, int iterations, BigDecimal cost) {}
+    public record RepoBreakdown(String repoName, BigDecimal totalCost, long issueCount,
+                                BigDecimal avgCostPerIssue, boolean hasCostData) {}
+    public record IssueBreakdown(Long id, String repoName, int issueNumber, String title, String status,
+                                 int iterations, BigDecimal cost, boolean hasCostData) {}
 }

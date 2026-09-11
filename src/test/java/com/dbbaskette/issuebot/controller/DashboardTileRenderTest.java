@@ -113,7 +113,7 @@ class DashboardTileRenderTest {
     void everyMetricTile_isARealAnchorWithNonEmptyHref() {
         List<String> tiles = tileTags(renderLiveFragment());
 
-        assertThat(tiles).hasSize(11); // one per metrics-grid tile in dashboard.html
+        assertThat(tiles).hasSize(6); // overview tiles; attention and active counts live in the control room
         for (String tag : tiles) {
             Matcher hrefMatcher = HREF_ATTR.matcher(tag);
             assertThat(hrefMatcher.find()).as("tag %s has an href attribute", tag).isTrue();
@@ -138,17 +138,19 @@ class DashboardTileRenderTest {
     void metricsAreGroupedByOperatorPriority_withSecondaryCountsCollapsed() {
         String html = renderLiveFragment();
 
-        assertThat(html).contains("Needs attention", "Active work", "Overview");
+        assertThat(html).contains("Needs your decision", "Currently processing", "Overview");
+        assertThat(html).doesNotContain("attention-group", "active-group");
         assertThat(html).contains("class=\"metric-secondary\"");
         assertThat(html).contains("More workflow counts");
     }
 
     @Test
-    void recentEventMessagesLiveBehindTechnicalDetailsDisclosure() {
-        // The template must not render event.message as an always-visible sibling in the feed.
+    void recentEventsShowPreviewBeforeTechnicalDetailsDisclosure() {
+        // Useful event text is visible while the full message remains available in a disclosure.
         String html = renderLiveFragment();
         assertThat(html).contains("class=\"event-summary");
-        assertThat(html).contains("Technical details");
+        assertThat(html).contains("Technical details", "class=\"event-message\"");
+        assertThat(html.indexOf("class=\"event-message\"")).isLessThan(html.indexOf("class=\"event-technical"));
         assertThat(html).contains("class=\"event-technical");
     }
 }

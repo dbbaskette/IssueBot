@@ -137,7 +137,8 @@
                        style="white-space:pre-line"></p>
                     <h4>Suggested next step</h4>
                     <p th:text="${latestFailureDiagnostic != null and latestFailureDiagnostic.suggestedAction != null ? latestFailureDiagnostic.suggestedAction : 'Review the failure details, add guidance for the next attempt, then retry.'}"></p>
-                    <details th:if="${latestFailureDiagnostic != null and latestFailureDiagnostic.technicalDetails != null}" class="mb-2">
+                    <details th:if="${latestFailureDiagnostic != null and latestFailureDiagnostic.technicalDetails != null}" class="mb-2"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + latestFailureDiagnostic.occurredAt + ':technical'}">
                         <summary>Technical details</summary>
                         <pre class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
                     </details>
@@ -151,7 +152,8 @@
                                th:text="${reviewerInfrastructure ? 'Reviewer recovery note (optional)' : 'Guidance for the next attempt'}">Guidance for the next attempt</label>
                         <textarea id="recoveryInstructions" name="instructions" rows="4" class="modal-textarea"
                                   th:placeholder="${reviewerInfrastructure ? 'Optional note after restoring the reviewer provider or CLI' : 'What should the agent do differently this time?'}"></textarea>
-                        <details class="mt-1">
+                        <details class="mt-1"
+                                 th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + (latestFailureDiagnostic != null ? latestFailureDiagnostic.occurredAt : 'legacy') + ':advanced'}">
                             <summary>Advanced retry options</summary>
                             <div class="field-group" role="group" aria-label="Implementation" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.implementationModel, globalImplementationModel)}">
                                 <h4>Implementation for this attempt</h4>
@@ -275,7 +277,7 @@
             </section>
 
             <section th:if="${issue.status.name() == 'AWAITING_APPROVAL' and (issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_'))}"
-                     id="approval-decision" class="panel mb-3 approval-decision-card"
+                     id="approval-decision" class="panel mb-3 decision-card approval-decision-card"
                      aria-labelledby="approval-decision-title">
                 <header class="panel-header">
                     <div>
@@ -425,7 +427,8 @@
                         <a href="/issues#dependency-map">Choose the next task or resume the group in the dependency map.</a>
                     </p>
                     <details th:if="${decompositionGroup.parent() and decompositionGroup.releasable()}"
-                             class="decomposition-release">
+                             class="decomposition-release"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':decomposition:release'}">
                         <summary>Release repository control</summary>
                         <p class="text-sm text-muted">Stops active work safely, cancels unfinished children, and leaves the parent open for follow-up.</p>
                         <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/release'}" method="post">
@@ -518,7 +521,8 @@
                         </div>
                     </div>
 
-                    <details th:if="${history.criteriaTotal > 0}" class="review-criteria" open>
+                    <details th:if="${history.criteriaTotal > 0}" class="review-criteria" open
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':plan:' + (selectedPlanningVersion != null ? selectedPlanningVersion.versionNumber : 'legacy') + ':criteria'}">
                         <summary class="review-criteria-summary"
                                  th:text="${history.criteriaMet + ' of ' + history.criteriaTotal + ' met'}">4 of 4 met</summary>
                         <ul class="review-criteria-list">
@@ -541,8 +545,8 @@
 
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
-                <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-                    <h3>Blocked By</h3>
+                <div class="panel-header inset-heading">
+                    <h3>Dependencies</h3>
                     <span class="status status-blocked">WAITING</span>
                 </div>
                 <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
@@ -666,7 +670,8 @@
             <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
             <details th:if="${selectedPlanningVersion == null and planHtml != null}"
                      class="panel mb-3 plan-doc-panel secondary-section plan-section"
-                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':plan:legacy'}">
                 <summary class="panel-header">
                     <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
                     <span class="text-sm text-muted">click to expand</span>
@@ -678,7 +683,8 @@
 
             <!-- === GOAL CARD === -->
             <details class="panel mb-3 goal-card secondary-section goal-section"
-                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':goal'}">
                 <summary class="panel-header">
                     <h3>Goal</h3>
                     <span class="text-sm text-muted">Done when all of these hold:</span>
@@ -755,7 +761,8 @@
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
               <details class="panel mb-3 secondary-section timeline-section"
                        th:if="${timeline != null and not #lists.isEmpty(timeline)}"
-                       th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                       th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                                data-ui-state-key=${'issue:' + issue.id + ':timeline'}">
                 <summary class="panel-header">
                     <h3>Timeline</h3>
                     <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
@@ -1058,9 +1065,10 @@
 
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
     <details id="iteration-history" class="panel mb-3 secondary-section history-section"
-             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                      data-ui-state-key=${'issue:' + issue.id + ':iteration-history'}">
         <summary class="panel-header">
-            <h3>Iteration History</h3>
+            <h3>Iteration history</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(iterationsNewestFirst) + ' attempts'}">0 attempts</span>
         </summary>
         <div class="panel-body">
@@ -1075,7 +1083,8 @@
             <ul class="iteration-timeline" th:if="${not #lists.isEmpty(iterationsNewestFirst)}">
                 <li th:each="iter : ${iterationsNewestFirst}"
                     th:classappend="${iter.ciResult == 'PASSED' ? 'passed' : (iter.completedAt != null ? 'failed' : 'active')}">
-                    <details class="iteration-entry">
+                    <details class="iteration-entry"
+                             th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id : null}">
                         <summary class="iteration-entry-summary">
                             <span class="iteration-entry-num" th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</span>
 
@@ -1108,17 +1117,20 @@
                         </summary>
 
                         <div class="iteration-entry-body">
-                            <details th:if="${iter.selfAssessment != null}">
+                            <details th:if="${iter.selfAssessment != null}"
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':self-assessment' : null}">
                                 <summary class="text-sm">Self-Assessment</summary>
                                 <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
                             </details>
 
-                            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
+                            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}"
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':diff' : null}">
                                 <summary class="text-sm">Diff</summary>
                                 <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff content</div>
                             </details>
 
-                            <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">
+                            <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}"
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':agent-output' : null}">
                                 <summary class="text-sm">Agent Output</summary>
                                 <pre class="code-output" th:text="${iter.claudeOutput}">output</pre>
                             </details>
@@ -1134,7 +1146,8 @@
                                 </div>
                                 <div th:if="${iter.reviewModel != null}" class="text-sm text-muted mb-1"
                                      th:text="'Model: ' + ${iter.reviewModel}">model</div>
-                                <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}">
+                                <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}"
+                                         th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':review-json' : null}">
                                     <summary class="text-sm">Raw JSON</summary>
                                     <pre class="code-output" th:text="${iter.reviewJson}">review json</pre>
                                 </details>
@@ -1149,9 +1162,10 @@
 
     <!-- === ACTIVITY LOG (full width, below the grid) === -->
     <details id="activity-log" class="panel secondary-section activity-section"
-             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                      data-ui-state-key=${'issue:' + issue.id + ':activity'}">
         <summary class="panel-header">
-            <h3>Activity Log</h3>
+            <h3>Activity log</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(events) + ' events'}">0 events</span>
         </summary>
         <div class="panel-body">
@@ -1159,7 +1173,8 @@
                 <li th:each="event : ${events}" class="event-summary">
                     <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm:ss')}">12:00:00</span>
                     <span class="type" th:text="${humanize.eventType(event.eventType)}">EVENT</span>
-                    <details class="event-technical">
+                    <details class="event-technical"
+                             th:attr="data-ui-state-key=${event.id != null ? 'issue:' + issue.id + ':event:' + event.id + ':technical' : null}">
                         <summary>Technical details</summary>
                         <pre th:text="${event.message}">message</pre>
                     </details>

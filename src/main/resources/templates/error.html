@@ -7,8 +7,9 @@
         <h2 th:text="${errorTitle}">Error</h2>
     </div>
     <div class="panel">
-        <div class="panel-body" style="text-align:center;padding:3rem">
-            <p th:text="${errorMessage}" style="font-size:1.1rem">An error occurred.</p>
+        <div class="panel-body empty-state error-state" role="alert">
+            <i class="ti ti-alert-circle" aria-hidden="true"></i>
+            <p class="empty-state-title" th:text="${errorMessage}">An error occurred.</p>
             <a th:href="${backLink != null ? backLink : '/'}"
                th:text="${backLabel != null ? backLabel : 'Back to Dashboard'}"
                class="btn btn-primary mt-2">Back to Dashboard</a>

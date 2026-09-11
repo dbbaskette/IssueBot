@@ -18,7 +18,7 @@ class NeedsYouLiveRenderTest {
     void zeroBadgeAndEmptyInboxRemainAddressableInSameResponse() {
         String html = render(0, true);
         assertThat(html).contains("id=\"needs-you-badge\"", "hidden=\"hidden\"", "display:none",
-                "id=\"needs-you-content\"", "Nothing needs you");
+                "id=\"needs-you-content\"", "No actions need your attention");
         assertThat(html.split("id=\"needs-you-badge\"", -1)).hasSize(2);
         assertThat(html.split("id=\"needs-you-content\"", -1)).hasSize(2);
     }

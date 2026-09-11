@@ -125,4 +125,13 @@ class SettingsPageRenderTest {
 
         assertThat(html).doesNotContain("Pause Agent", "Resume Agent", "Polling is", "Agent paused");
     }
+
+    @Test
+    void harnessRoleSelectionsAndSaveActionsAreExplicit() {
+        String html = render();
+        assertThat(html).contains("data-shared-harness-form", "harness-selection", "model-reasoning-pair",
+                "Implementation and planning", "Save harness and models", "Save quick settings", "Save configuration (restart required)");
+        assertThat(html).containsSubsequence("id=\"implementation-model\"", "id=\"implementation-model-reasoning\"",
+                "id=\"review-model\"", "id=\"review-model-reasoning\"", "id=\"utility-model\"", "id=\"utility-model-reasoning\"");
+    }
 }

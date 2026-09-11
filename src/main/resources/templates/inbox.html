@@ -10,9 +10,9 @@
 
     <!-- === EMPTY STATE === -->
     <div th:if="${totalCount == 0}">
-        <div class="glass-card text-muted" style="text-align:center;padding:3rem">
-            <p style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem">
-                Nothing needs you — the loop is running itself.
+        <div class="glass-card empty-state">
+            <p class="empty-state-title">
+                No actions need your attention
             </p>
             <p class="text-sm"
                th:text="${activeCount + ' active · ' + queuedCount + ' queued'}">0 active · 0 queued</p>
@@ -30,7 +30,7 @@
             <div class="panel-body">
                 <div th:each="group : ${decompositionAttention}"
                      class="glass-card mb-2 decomposition-inbox-card">
-                    <div class="flex-between mb-1">
+                    <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${'Parent #' + group.parentNumber()}">Parent #153</strong>
                             <span class="text-muted text-sm"
@@ -49,27 +49,28 @@
         </div>
 
         <!-- === PR APPROVALS === -->
-        <div id="approvals" class="panel mb-3">
+        <div id="approvals" class="panel mb-3" th:if="${not #lists.isEmpty(approvals)}">
             <div class="panel-header">
-                <h3>PR Approvals <span class="badge" th:text="${#lists.size(approvals)}">0</span></h3>
+                <h3>Approvals <span class="badge" th:text="${#lists.size(approvals)}">0</span></h3>
             </div>
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(approvals)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${approvals}" class="glass-card mb-2" style="padding:1rem"
+                <div th:each="issue : ${approvals}" class="glass-card decision-card mb-2"
                      th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
                     <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
-                    <p>Workflow stage approval required.</p>
+                    <h4 class="decision-card-title" th:text="${issue.issueTitle}">Issue title</h4>
+                    <p class="decision-stage" th:text="${#strings.capitalize(#strings.toLowerCase(#strings.substringAfter(issue.currentPhase, 'STAGE_APPROVAL_'))) + ' approval'}">Stage approval</p>
                     <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
                 </div>
-                <div th:each="issue : ${approvals}" class="glass-card mb-2" style="padding:1rem"
+                <div th:each="issue : ${approvals}" class="glass-card decision-card mb-2"
                      th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
-                    <div class="flex-between mb-1">
+                    <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                            <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
                         </div>
-                        <span class="status status-awaiting_approval">AWAITING APPROVAL</span>
+                        <span class="status status-awaiting_approval">Awaiting approval</span>
                     </div>
 
                     <div class="mb-2 flex gap-1" style="align-items:center;flex-wrap:wrap">
@@ -137,7 +138,7 @@
         </div>
 
         <!-- === PLAN APPROVALS === -->
-        <div id="plan-approvals" class="panel mb-3">
+        <div id="plan-approvals" class="panel mb-3" th:if="${not #lists.isEmpty(planApprovals)}">
             <div class="panel-header">
                 <h3>Plan Approvals <span class="badge" th:text="${#lists.size(planApprovals)}">0</span></h3>
             </div>
@@ -145,11 +146,11 @@
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(planApprovals)}">Nothing here right now.</p>
 
                 <div th:each="issue : ${planApprovals}" th:with="version=${planVersions.get(issue.id)}"
-                     class="glass-card mb-2" style="padding:1rem">
-                    <div class="flex-between mb-1">
+                     class="glass-card decision-card mb-2">
+                    <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                            <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
                         </div>
                         <span class="status status-awaiting_plan_approval"
                               th:text="${version != null ? 'Plan v' + version.versionNumber + ' awaiting approval' : 'Plan awaiting approval'}">Plan v3 awaiting approval</span>
@@ -175,18 +176,18 @@
         </div>
 
         <!-- === READY TO START === -->
-        <div id="ready-to-start" class="panel mb-3">
+        <div id="ready-to-start" class="panel mb-3" th:if="${not #lists.isEmpty(readyToStart)}">
             <div class="panel-header">
                 <h3>Ready to Start <span class="badge" th:text="${#lists.size(readyToStart)}">0</span></h3>
             </div>
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(readyToStart)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${readyToStart}" class="glass-card mb-2" style="padding:1rem">
-                    <div class="flex-between mb-1" style="gap:0.75rem;flex-wrap:wrap">
+                <div th:each="issue : ${readyToStart}" class="glass-card decision-card mb-2">
+                    <div class="section-heading mb-1" style="gap:0.75rem;flex-wrap:wrap">
                         <div style="min-width:0;overflow-wrap:anywhere">
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                            <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
                         </div>
                         <span class="status status-ready_to_start">READY TO START</span>
                     </div>
@@ -205,18 +206,18 @@
         </div>
 
         <!-- === SPLIT PROPOSALS === -->
-        <div id="split-proposals" class="panel mb-3">
+        <div id="split-proposals" class="panel mb-3" th:if="${not #lists.isEmpty(splitProposals)}">
             <div class="panel-header">
                 <h3>Split Proposals <span class="badge" th:text="${#lists.size(splitProposals)}">0</span></h3>
             </div>
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(splitProposals)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${splitProposals}" class="glass-card mb-2" style="padding:1rem">
-                    <div class="flex-between mb-1">
+                <div th:each="issue : ${splitProposals}" class="glass-card decision-card mb-2">
+                    <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                            <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
                         </div>
                         <span class="status status-awaiting_decomposition">AWAITING SPLIT</span>
                     </div>
@@ -244,18 +245,18 @@
         </div>
 
         <!-- === NEEDS HUMAN (FAILED / COOLDOWN) === -->
-        <div id="needs-human" class="panel mb-3">
+        <div id="needs-human" class="panel mb-3" th:if="${not #lists.isEmpty(needsHuman)}">
             <div class="panel-header">
                 <h3>Needs Human <span class="badge" th:text="${#lists.size(needsHuman)}">0</span></h3>
             </div>
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(needsHuman)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${needsHuman}" class="glass-card mb-2" style="padding:1rem">
-                    <div class="flex-between mb-1">
+                <div th:each="issue : ${needsHuman}" class="glass-card decision-card mb-2">
+                    <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                            <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                            <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
                         </div>
                         <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
                               th:text="${issue.status}">FAILED</span>

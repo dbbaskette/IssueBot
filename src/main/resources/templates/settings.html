@@ -9,9 +9,9 @@
     </div>
 
     <!-- Models -->
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Models</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Coding harness and models</h3>
         </div>
 
         <div class="alert alert-info" style="margin-bottom:1rem">
@@ -28,7 +28,7 @@
             <div th:replace="~{fragments/reasoning :: selection('utility-model', 'utilityModel', ${utilityModel}, 'utilityReasoningEffort', ${utilityReasoningEffort}, ${harnessId}, null, false, null)}"></div>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary">
-                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Models
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save harness and models
                 </button>
             </div>
             <div class="text-sm text-muted" style="margin-top:0.5rem">
@@ -39,9 +39,9 @@
     </div>
 
     <!-- Quick Settings -->
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Quick Settings</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Quick settings</h3>
         </div>
 
         <div class="alert alert-info" style="margin-bottom:1rem">
@@ -78,15 +78,15 @@
                 </div>
             </div>
             <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="submit" class="btn btn-primary">Save quick settings</button>
             </div>
         </form>
     </div>
 
     <!-- YAML Config Editor -->
-    <div class="glass-card">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Configuration File</h3>
+    <div class="glass-card inset-panel">
+        <div class="panel-header">
+            <h3>Configuration file</h3>
             <span class="text-sm text-muted" th:text="${configPath}">~/.issuebot/config.yml</span>
         </div>
         <div class="alert alert-info" style="margin-bottom:1rem">
@@ -100,7 +100,7 @@
                       spellcheck="false" aria-label="Configuration file (YAML)"></textarea>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary">
-                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save (restart required)
+                    <i class="ti ti-device-floppy" aria-hidden="true"></i> Save configuration (restart required)
                 </button>
                 <button type="button" class="btn btn-outline"
                         data-modal-open="discard-config-modal">

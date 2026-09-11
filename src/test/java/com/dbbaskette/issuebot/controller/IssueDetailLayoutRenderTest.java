@@ -110,6 +110,9 @@ class IssueDetailLayoutRenderTest {
         assertThat(html).contains("class=\"detail-grid-right\"");
         // Left column opens before the right column.
         assertThat(html.indexOf("detail-grid-left")).isLessThan(html.indexOf("detail-grid-right"));
+        assertThat(html).contains("<h3>Iteration history</h3>", "<h3>Activity log</h3>",
+                "id=\"iteration-history\"", "data-ui-state-key=\"issue:1:iteration-history\"",
+                "data-ui-state-key=\"issue:1:activity\"");
     }
 
     @Test

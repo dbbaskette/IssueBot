@@ -25,7 +25,7 @@
                     <span class="notif-item-title" th:text="${n.title}">Title</span>
                     <span class="notif-item-detail" th:text="${n.detail}">Detail</span>
                 </span>
-                <span class="notif-item-time" th:text="${#temporals.format(n.createdAt, 'HH:mm')}">00:00</span>
+                <span class="notif-item-time" th:text="${#temporals.format(n.createdAt, 'MMM d, HH:mm')}">00:00</span>
             </a>
             <div th:unless="${n.issueId != null}" class="notif-item-content">
                 <span class="notif-item-icon" th:classappend="'sev-' + ${#strings.toLowerCase(n.severity)}">
@@ -35,7 +35,7 @@
                     <span class="notif-item-title" th:text="${n.title}">Title</span>
                     <span class="notif-item-detail" th:text="${n.detail}">Detail</span>
                 </span>
-                <span class="notif-item-time" th:text="${#temporals.format(n.createdAt, 'HH:mm')}">00:00</span>
+                <span class="notif-item-time" th:text="${#temporals.format(n.createdAt, 'MMM d, HH:mm')}">00:00</span>
             </div>
         </li>
     </ul>

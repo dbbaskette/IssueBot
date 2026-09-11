@@ -111,7 +111,8 @@
         </div>
     </form>
 
-    <details class="queue-dependencies panel mb-3" id="queue-dependencies">
+    <details class="queue-dependencies panel mb-3" id="queue-dependencies"
+             data-ui-state-key="queue:dependencies">
         <summary class="panel-header">
             <span>Dependencies &amp; task order</span>
             <small class="text-muted">See what is blocking an issue</small>
@@ -235,7 +236,7 @@
         </td>
     </tr>
     <tr th:if="${#lists.isEmpty(issues)}">
-        <td colspan="9" class="text-muted" style="text-align:center;padding:2rem">No tracked issues. Label a GitHub issue <code>agent-ready</code> to start.</td>
+        <td colspan="9" class="empty-state"><p class="empty-state-title">No issues match this view</p><p>Change your filters, or label a GitHub issue <code>agent-ready</code> to add work.</p></td>
     </tr>
 </th:block>
 </body>
