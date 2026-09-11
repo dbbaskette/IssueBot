@@ -6,7 +6,8 @@ import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.security.WebhookSignatureVerifier;
-import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient.TokenState;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient.TokenStatus;
@@ -14,13 +15,72 @@ import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class SetupControllerTest {
+
+    @Test void setupRequestSkipsAllCatalogDiscoveryAndReadinessChecksRemainFresh() throws Exception {
+        var selected = new CountingAdapter("claude", "Selected Harness");
+        var other = new CountingAdapter("codex", "Other Harness");
+        var registry = new CodingHarnessRegistry(List.of(selected, other));
+        var props = new IssueBotProperties();
+        var issues = mock(TrackedIssueRepository.class);
+        var selections = new HarnessSelectionService(registry, props, issues,
+                mock(com.dbbaskette.issuebot.repository.StageApprovalRepository.class));
+        var harness = new CodingHarnessService(registry, props, selections);
+        var controller = new SetupController(harness, props, mock(IssuePollingService.class),
+                issues, mock(GitHubApiClient.class), repoRepository,
+                webhookController, webhookDeliveryLog, mock(NotificationRepository.class));
+        var mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new HarnessCatalogAdvice(registry, new ObjectMapper(), props)).build();
+
+        mvc.perform(get("/setup")).andExpect(status().isOk())
+                .andExpect(model().attribute("effectiveHarnessName", "Selected Harness"));
+        assertThat(selected.catalogCalls).as("selected catalog discovery on Setup GET").isZero();
+        assertThat(other.catalogCalls).as("unselected catalog discovery on Setup GET").isZero();
+        assertThat(selected.availabilityCalls).isZero();
+        assertThat(selected.subscriptionCalls).isZero();
+
+        // Preserve the existing HTMX GET contract; each explicit check observes fresh credentials.
+        mvc.perform(get("/setup/prereqs")).andExpect(status().isOk())
+                .andExpect(model().attribute("cliAuthenticated", false));
+        selected.subscriptionReady = true;
+        mvc.perform(get("/setup/prereqs")).andExpect(status().isOk())
+                .andExpect(model().attribute("cliAuthenticated", true));
+        assertThat(selected.availabilityCalls).isEqualTo(2);
+        assertThat(selected.subscriptionCalls).isEqualTo(2);
+        assertThat(other.availabilityCalls).isZero();
+        assertThat(other.subscriptionCalls).isZero();
+        assertThat(selected.catalogCalls).isZero();
+        assertThat(other.catalogCalls).isZero();
+    }
+
+    private static final class CountingAdapter implements CodingHarnessAdapter {
+        private final String id;
+        private final String displayName;
+        int catalogCalls;
+        int availabilityCalls;
+        int subscriptionCalls;
+        boolean subscriptionReady;
+
+        CountingAdapter(String id, String displayName) { this.id = id; this.displayName = displayName; }
+        public String id() { return id; }
+        public String displayName() { return displayName; }
+        public List<HarnessModel> models() { catalogCalls++; return List.of(); }
+        public HarnessCapabilities capabilities() { return HarnessCapabilities.NONE; }
+        public boolean checkCliAvailable() { availabilityCalls++; return true; }
+        public boolean checkSubscriptionAuthentication() { subscriptionCalls++; return subscriptionReady; }
+        public HarnessExecutionResult execute(HarnessExecutionRequest request,
+                java.util.function.Consumer<String> lines) { throw new AssertionError("Setup cannot execute work"); }
+    }
 
     @Test void readinessCannotReportSubscriptionSuccessFromAGenericLogin() {
         var harness = mock(CodingHarnessService.class);

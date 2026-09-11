@@ -8,8 +8,8 @@ import java.util.List;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
 
-/** Shared adapter metadata. Readiness is checked explicitly by Setup and execution preflight. */
-@ControllerAdvice(assignableTypes = {SettingsController.class, SetupController.class,
+/** Model-picker metadata. Setup uses identity only, avoiding potentially slow catalog discovery. */
+@ControllerAdvice(assignableTypes = {SettingsController.class,
         RepositoryController.class, IssueController.class, StageApprovalController.class})
 public class HarnessCatalogAdvice {
     private final CodingHarnessRegistry registry;
