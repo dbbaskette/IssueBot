@@ -5,6 +5,9 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly DEPLOY_CONFIG="${ISSUEBOT_DEPLOY_CONFIG:-$SCRIPT_DIR/home-server.env}"
 readonly PLIST_TEMPLATE="$SCRIPT_DIR/com.baskettecase.issuebot.plist.template"
 
+# shellcheck source=deploy/macos/launchd.sh
+source "$SCRIPT_DIR/launchd.sh"
+
 [[ -f "$DEPLOY_CONFIG" && ! -L "$DEPLOY_CONFIG" ]] || {
   printf 'ERROR: deployment configuration is missing or unsafe: %s\n' "$DEPLOY_CONFIG" >&2
   exit 1
@@ -82,9 +85,11 @@ sed \
 plutil -lint "$rendered_plist"
 install -m 0644 "$rendered_plist" "$PLIST_TARGET"
 
-launchctl bootout "gui/$(id -u)/$ISSUEBOT_AGENT_LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_TARGET"
-launchctl kickstart -k "gui/$(id -u)/$ISSUEBOT_AGENT_LABEL"
+readonly LAUNCHD_DOMAIN="gui/$(id -u)"
+launchctl bootout "$LAUNCHD_DOMAIN/$ISSUEBOT_AGENT_LABEL" 2>/dev/null || true
+wait_for_launchd_absent "$LAUNCHD_DOMAIN" "$ISSUEBOT_AGENT_LABEL"
+launchctl bootstrap "$LAUNCHD_DOMAIN" "$PLIST_TARGET"
+launchctl kickstart -k "$LAUNCHD_DOMAIN/$ISSUEBOT_AGENT_LABEL"
 
 for _ in $(seq 1 60); do
   if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null 2>&1; then

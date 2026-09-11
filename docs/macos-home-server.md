@@ -35,6 +35,10 @@ cd ../home-server
 docker compose up -d --force-recreate cloudflared
 ```
 
+The installer waits for launchd to confirm the prior job is fully removed before
+bootstrapping the replacement. If removal does not complete within 30 seconds,
+deployment stops without racing a second registration attempt.
+
 Verify both sides:
 
 ```bash
