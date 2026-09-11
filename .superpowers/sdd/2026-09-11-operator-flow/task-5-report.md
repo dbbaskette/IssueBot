@@ -119,3 +119,44 @@ text is rendered through escaped Thymeleaf text bindings.
   scoreless complete collections, no-evidence classification, null deltas, and server rendering.
 - No unresolved fix-round concern. The full combined suite and broad browser verification remain
   assigned to the coordinated final verification task.
+
+## Review fix round 2 — post-implementation recovery identity
+
+### Result
+
+- The persisted current iteration used by LOCAL_CHECKS, CI, PR, review, or completion recovery is
+  now filtered through the same exact immutable workflow-run and approved-plan snapshot predicate
+  as every other reuse path.
+- A mismatched run, mismatched plan, or legacy-unknown row clears checkpoint recovery and enters
+  the ordinary next-iteration claim and implementation path. Its diff, verification state, CI
+  result, and review evidence are never reused.
+- A matching snapshot retains the existing recovery behavior and resumes after implementation.
+
+### Verification
+
+- First covering run:
+  `./mvnw -q -Dtest=IssueWorkflowServiceTest,IntegrationWorkflowTest,CorrectionClaimTransactionTest,IterationReviewSnapshotPersistenceTest test`
+  - Exit 1 at compilation because reassigned workflow locals could not be captured by the filter
+    lambda. The filter now captures immutable scalar run and plan IDs.
+- Same covering command after correction:
+  `./mvnw -q -Dtest=IssueWorkflowServiceTest,IntegrationWorkflowTest,CorrectionClaimTransactionTest,IterationReviewSnapshotPersistenceTest test`
+  - Exit 0; 132 tests passed, 0 failures, 0 errors, 0 skipped.
+- `git diff --check`
+  - Exit 0; no whitespace errors.
+
+### Fix-round files
+
+- `.superpowers/sdd/2026-09-11-operator-flow/task-5-report.md`
+- `src/main/java/com/dbbaskette/issuebot/service/workflow/IssueWorkflowService.java`
+- `src/test/java/com/dbbaskette/issuebot/service/workflow/IntegrationWorkflowTest.java`
+
+### Fix-round self-review and concerns
+
+- The regression executes the full workflow boundary for all three mismatch identities, asserts a
+  fresh iteration is claimed and implemented, and asserts the stale row never reaches independent
+  review. The existing matching recovery regression now makes its identity precondition explicit
+  and still asserts implementation is not repeated.
+- Resetting the durable phase to SETUP before the fresh claim prevents another restart from
+  treating the rejected checkpoint as resumable. The existing recovery checkout is preserved for
+  this invocation; no stale iteration evidence crosses into the new implementation.
+- No score-history behavior was changed in this round. No unresolved scoped concern remains.

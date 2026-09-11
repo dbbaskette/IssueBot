@@ -350,6 +350,27 @@ public class IssueWorkflowService {
             return;
         }
 
+        Iteration persistedCurrentIteration = null;
+        if (approvedPlan != null
+                && (trackedIssue.isPlanCorrectionPending() || recoveryResumePhase != null)) {
+            int currentWorkflowRun = trackedIssue.getWorkflowRun();
+            Long currentApprovedPlanId = approvedPlan.id();
+            persistedCurrentIteration = iterationRepository
+                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                            trackedIssue.getId(), trackedIssue.getCurrentIteration())
+                    .filter(candidate -> candidate.matchesAttemptIdentity(
+                            currentWorkflowRun, currentApprovedPlanId))
+                    .orElse(null);
+            if (recoveryResumePhase != null && persistedCurrentIteration == null) {
+                log.warn("Cannot resume {} for {} #{}: current iteration has no matching "
+                                + "workflow-run and approved-plan snapshot; starting a new iteration",
+                        recoveryResumePhase, repo.fullName(), issueNumber);
+                recoveryResumePhase = null;
+                trackedIssue.setCurrentPhase("SETUP");
+                issueRepository.save(trackedIssue);
+            }
+        }
+
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
                 repo.fullName(), issueNumber, repo.getMaxIterations());
 
@@ -363,24 +384,16 @@ public class IssueWorkflowService {
         String previousCiLogs = null;
         int prNumber = 0;
 
-        Iteration persistedCurrentIteration = null;
-        if (approvedPlan != null
-                && (trackedIssue.isPlanCorrectionPending() || recoveryResumePhase != null)) {
-            persistedCurrentIteration = iterationRepository
-                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
-                            trackedIssue.getId(), trackedIssue.getCurrentIteration())
-                    .orElse(null);
-            if (trackedIssue.isPlanCorrectionPending()
-                    && persistedCurrentIteration != null
-                    && persistedCurrentIteration.getReviewJson() != null
-                    && !persistedCurrentIteration.getReviewJson().isBlank()) {
-                String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
-                        + persistedCurrentIteration.getReviewJson();
-                previousFeedback = previousFeedback == null
-                        ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
-                previousDiff = persistedCurrentIteration.getDiff();
-                reviewFeedback = true;
-            }
+        if (trackedIssue.isPlanCorrectionPending()
+                && persistedCurrentIteration != null
+                && persistedCurrentIteration.getReviewJson() != null
+                && !persistedCurrentIteration.getReviewJson().isBlank()) {
+            String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
+                    + persistedCurrentIteration.getReviewJson();
+            previousFeedback = previousFeedback == null
+                    ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
+            previousDiff = persistedCurrentIteration.getDiff();
+            reviewFeedback = true;
         }
         final Iteration authoritativeCurrentIteration = persistedCurrentIteration;
 
