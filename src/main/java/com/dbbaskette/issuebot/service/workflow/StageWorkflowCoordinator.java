@@ -52,13 +52,15 @@ public class StageWorkflowCoordinator {
                     issue.getRepo(), issue);
             return false;
         }
+        var chosen = models.resolve(issue, stage, decision.getHarnessId(), decision.getModel(), decision.getReasoningEffort());
         if (stage.modelDriven()) {
             // Recheck subscription authentication at execution time before replacing the thread pin.
-            String executionHarness = decision.getHarnessId();
+            String executionHarness = chosen.harnessId();
             if (executionHarness == null) {
                 throw new IllegalStateException("Approved stage has no harness identity");
             }
             try {
+                models.validate(chosen);
                 agent.pinSubscriptionHarness(executionHarness);
             } catch (IllegalStateException unavailable) {
                 // The approval claim has already committed. Rearm that same decision rather
@@ -70,14 +72,14 @@ public class StageWorkflowCoordinator {
                 return false;
             }
             if (stage == WorkflowStage.REVIEW) {
-                issue.setResolvedReviewModel(decision.getModel());
+                issue.setResolvedReviewModel(chosen.modelId());
             } else {
                 if (stage == WorkflowStage.IMPLEMENTATION
                         && !java.util.Objects.equals(issue.getResolvedHarnessId(), executionHarness)) {
                     issue.setClaudeSessionId(null);
                 }
                 issue.setResolvedHarnessId(executionHarness);
-                issue.setResolvedImplModel(decision.getModel());
+                issue.setResolvedImplModel(chosen.modelId());
             }
             issues.save(issue);
         }

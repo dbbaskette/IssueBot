@@ -84,6 +84,7 @@ class IntegrationWorkflowTest {
         gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
         harnessService = mock(CodingHarnessService.class);
+        when(harnessService.harnessId()).thenReturn("claude");
         codeReviewService = mock(CodeReviewService.class);
         ciTemplateService = mock(CiTemplateService.class);
         localVerificationService = mock(LocalVerificationService.class);
@@ -111,7 +112,8 @@ class IntegrationWorkflowTest {
                 planFirstService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
-                        new com.dbbaskette.issuebot.config.IssueBotProperties()),
+                        new com.dbbaskette.issuebot.config.IssueBotProperties(),
+                        new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(),
                 guidanceRepository,
                 lessonRepository,
@@ -1036,7 +1038,7 @@ class IntegrationWorkflowTest {
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
-                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(), guidanceRepository, lessonRepository,
                 lessonsService, objectMapper);
         recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
@@ -1140,7 +1142,7 @@ class IntegrationWorkflowTest {
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
-                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(), guidanceRepository, lessonRepository,
                 lessonsService, objectMapper);
         recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
@@ -1220,7 +1222,7 @@ class IntegrationWorkflowTest {
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
-                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(), guidanceRepository, lessonRepository,
                 lessonsService, objectMapper);
         recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
@@ -1280,7 +1282,7 @@ class IntegrationWorkflowTest {
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
-                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(), guidanceRepository, lessonRepository,
                 lessonsService, objectMapper);
         recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
@@ -1410,7 +1412,7 @@ class IntegrationWorkflowTest {
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
-                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(), guidanceRepository, lessonRepository,
                 lessonsService, objectMapper);
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
@@ -1536,7 +1538,7 @@ class IntegrationWorkflowTest {
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, authoritativePlanFirst, followUpService,
-                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties()),
+                new com.dbbaskette.issuebot.service.claude.ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 new WorkflowCancellationService(), guidanceRepository, lessonRepository,
                 lessonsService, objectMapper);
         lifecycleWorkflow.reviewRetryBackoffBaseMs = 0;
@@ -2126,6 +2128,7 @@ class IntegrationWorkflowTest {
         issue.getRepo().setCiEnabled(false);
         // State after a failed run whose retry opted into continuation:
         issue.setClaudeSessionId("sess-kept");
+        issue.setResolvedHarnessId("claude");
         issue.setLastFailureReason("CI timed out after 15 minutes on iteration 3");
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);

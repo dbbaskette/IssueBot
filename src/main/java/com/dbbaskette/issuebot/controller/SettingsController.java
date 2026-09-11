@@ -99,12 +99,6 @@ public class SettingsController {
         implementationModel = implementationModel == null ? null : implementationModel.trim();
         reviewModel = reviewModel == null ? null : reviewModel.trim();
         utilityModel = utilityModel == null ? null : utilityModel.trim();
-        implementationReasoningEffort = normalizeReasoningEffort(implementationReasoningEffort,
-                properties.getCodexCli().getImplementationReasoningEffort());
-        reviewReasoningEffort = normalizeReasoningEffort(reviewReasoningEffort,
-                properties.getCodexCli().getReviewReasoningEffort());
-        utilityReasoningEffort = normalizeReasoningEffort(utilityReasoningEffort,
-                properties.getCodexCli().getUtilityReasoningEffort());
 
         if (isInvalidModelId(implementationModel) || isInvalidModelId(reviewModel)
                 || isInvalidModelId(utilityModel)) {
@@ -112,19 +106,11 @@ public class SettingsController {
             return "redirect:/settings";
         }
 
-        if (agentProvider == IssueBotProperties.AgentProvider.CODEX
-                && (!CodexModelCatalog.REASONING_LEVELS.contains(implementationReasoningEffort)
-                || !CodexModelCatalog.REASONING_LEVELS.contains(reviewReasoningEffort)
-                || !CodexModelCatalog.REASONING_LEVELS.contains(utilityReasoningEffort))) {
-            redirectAttributes.addFlashAttribute("error", "Choose a valid Codex reasoning level.");
-            return "redirect:/settings";
-        }
-
-        if (reasoning != null && agentProvider == IssueBotProperties.AgentProvider.CODEX) {
+        if (reasoning != null) {
             try {
-                reasoning.validate(implementationModel, implementationReasoningEffort);
-                reasoning.validate(reviewModel, reviewReasoningEffort);
-                reasoning.validate(utilityModel, utilityReasoningEffort);
+                implementationReasoningEffort = reasoning.resolve(agentProvider.getConfigValue(), implementationModel, implementationReasoningEffort).reasoningLevel();
+                reviewReasoningEffort = reasoning.resolve(agentProvider.getConfigValue(), reviewModel, reviewReasoningEffort).reasoningLevel();
+                utilityReasoningEffort = reasoning.resolve(agentProvider.getConfigValue(), utilityModel, utilityReasoningEffort).reasoningLevel();
             } catch (IllegalArgumentException ex) {
                 redirectAttributes.addFlashAttribute("error", ex.getMessage());
                 return "redirect:/settings";
@@ -137,7 +123,7 @@ public class SettingsController {
             return "redirect:/settings";
         }
 
-        properties.setAgentProvider(agentProvider);
+        properties.setAgentProvider(agentProvider.getConfigValue());
         if (agentProvider == IssueBotProperties.AgentProvider.CODEX) {
             properties.getCodexCli().setImplementationModel(implementationModel);
             properties.getCodexCli().setReviewModel(reviewModel);
@@ -149,6 +135,9 @@ public class SettingsController {
             properties.getClaudeCode().setImplementationModel(implementationModel);
             properties.getClaudeCode().setReviewModel(reviewModel);
             properties.getClaudeCode().setUtilityModel(utilityModel);
+            properties.getClaudeCode().setImplementationReasoningEffort(implementationReasoningEffort);
+            properties.getClaudeCode().setReviewReasoningEffort(reviewReasoningEffort);
+            properties.getClaudeCode().setUtilityReasoningEffort(utilityReasoningEffort);
         }
 
         redirectAttributes.addFlashAttribute("success",
@@ -161,27 +150,18 @@ public class SettingsController {
                       String implementationModel, String reviewModel, String utilityModel,
                       RedirectAttributes redirectAttributes) {
         return saveModels(agentProvider, implementationModel, reviewModel, utilityModel,
-                properties.getCodexCli().getImplementationReasoningEffort(),
-                properties.getCodexCli().getReviewReasoningEffort(),
-                properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
+                null, null, null, redirectAttributes);
     }
 
     /** Backward-compatible direct-call overload retained for controller unit tests and callers. */
     String saveModels(String implementationModel, String reviewModel, String utilityModel,
                       RedirectAttributes redirectAttributes) {
-        return saveModels(properties.getAgentProvider(), implementationModel, reviewModel,
-                utilityModel,
-                properties.getCodexCli().getImplementationReasoningEffort(),
-                properties.getCodexCli().getReviewReasoningEffort(),
-                properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
+        return saveModels(IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()), implementationModel, reviewModel,
+                utilityModel, null, null, null, redirectAttributes);
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
-
-    private static String normalizeReasoningEffort(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value.trim().toLowerCase(Locale.ROOT);
-    }
+    private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
     private static boolean isInvalidModelId(String modelId) {
         return modelId == null || modelId.isBlank() || CUSTOM_SENTINEL.equals(modelId);
@@ -201,11 +181,9 @@ public class SettingsController {
         providerSettings.put("implementation-model", implementationModel);
         providerSettings.put("review-model", reviewModel);
         providerSettings.put("utility-model", utilityModel);
-        if (provider == IssueBotProperties.AgentProvider.CODEX) {
-            providerSettings.put("implementation-reasoning-effort", implementationReasoningEffort);
-            providerSettings.put("review-reasoning-effort", reviewReasoningEffort);
-            providerSettings.put("utility-reasoning-effort", utilityReasoningEffort);
-        }
+        providerSettings.put("implementation-reasoning-effort", implementationReasoningEffort);
+        providerSettings.put("review-reasoning-effort", reviewReasoningEffort);
+        providerSettings.put("utility-reasoning-effort", utilityReasoningEffort);
         return writeConfigValues(Map.of(
                 "agent-provider", provider.getConfigValue(),
                 section, providerSettings));
@@ -340,7 +318,7 @@ public class SettingsController {
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
-        IssueBotProperties.AgentProvider provider = properties.getAgentProvider();
+        IssueBotProperties.AgentProvider provider = IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider());
         String implementationModel = provider == IssueBotProperties.AgentProvider.CODEX
                 ? properties.getCodexCli().getImplementationModel()
                 : properties.getClaudeCode().getImplementationModel();

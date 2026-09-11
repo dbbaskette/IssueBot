@@ -49,6 +49,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class IssueControllerTest {
 
+    @Test void startRejectsReasoningUnsupportedByInheritedRepositoryModelBeforeClaim() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+        f.issue.getRepo().setImplementationModel("claude-haiku-4-5");
+        var selections = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections;
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", selections);
+
+        f.controller.start(1L, null, null, null, null, "max", null, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getImplementationReasoningEffort()).isNull();
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("claude-haiku-4-5"));
+        verifyNoInteractions(f.workflowService);
+    }
+
     private static IssueDispatchService dispatch(TrackedIssueRepository issues) {
         ProcessingControlService control = mock(ProcessingControlService.class);
         when(control.isRunning()).thenReturn(true);
@@ -341,7 +355,7 @@ class IssueControllerTest {
         Fixture(IssueStatus initialStatus) {
             when(control.isRunning()).thenReturn(true);
             when(properties.getMaxConcurrentIssues()).thenReturn(5);
-            when(properties.getAgentProvider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+            when(properties.getAgentProvider()).thenReturn("claude");
             WatchedRepo repo = new WatchedRepo("acme", "widgets");
             issue = new TrackedIssue(repo, 42, "Test issue");
             issue.setId(1L);

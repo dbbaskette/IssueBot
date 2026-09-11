@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
+import com.dbbaskette.issuebot.service.harness.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,12 +16,53 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class StageApprovalServiceTest {
+    @Test void approvedLegacyBlankReasoningIsResolvedAndStoredBeforeResume() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setReasoningEffort(null);
+        decision.setState(StageApproval.State.APPROVED);
+        decision.setApprovedAt(java.time.LocalDateTime.now());
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        when(approvals.findByIssueIdAndRunNumberAndStageAndAttemptAndArtifactVersionId(2L, 0, WorkflowStage.REVIEW, 1, 0L))
+                .thenReturn(Optional.of(decision));
+        fixture.properties.getCodexCli().setReviewReasoningEffort("low");
+
+        service.beforeStage(issue, WorkflowStage.REVIEW, 1);
+
+        assertThat(decision.getReasoningEffort()).isEqualTo("medium");
+        assertThat(decision.getModel()).isEqualTo("gpt-6-astra");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.APPROVED);
+    }
+    @Test void claudeStagePersistsAndRetainsItsExactReasoningTuple() {
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        selection = new StageModelSelectionService(properties, fixture.selections, fixture.registry);
+        service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        assertThat(decision.getHarnessId()).isEqualTo("claude");
+        assertThat(decision.getReasoningEffort()).isEqualTo("high");
+        service.approveAndClaim(2L, 3L, "claude", "claude-opus-4-8", "alice", "xhigh");
+        assertThat(decision.getModel()).isEqualTo("claude-opus-4-8");
+        assertThat(decision.getReasoningEffort()).isEqualTo("xhigh");
+    }
+
+    @Test void unsupportedSelectionDoesNotMutateWaitingApprovalOrIssue() {
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        selection = new StageModelSelectionService(properties, fixture.selections, fixture.registry);
+        service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, "claude", "claude-haiku-4-5", "alice", "max"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("max");
+        assertThat(decision.getModel()).isEqualTo("claude-sonnet-5");
+        assertThat(decision.getReasoningEffort()).isEqualTo("high");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+    }
     TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
     StageApprovalRepository approvals = mock(StageApprovalRepository.class);
     ProcessingControlRepository controls = mock(ProcessingControlRepository.class);
     DecompositionReservationService reservations = mock(DecompositionReservationService.class);
-    StageModelSelectionService selection = mock(StageModelSelectionService.class);
+    HarnessSelectionFixture fixture = new HarnessSelectionFixture();
+    StageModelSelectionService selection = spy(new StageModelSelectionService(fixture.properties, fixture.selections, fixture.registry));
     IssueBotProperties properties = new IssueBotProperties();
     StageApprovalService service = new StageApprovalService(issues, repos, approvals, controls,
             reservations, selection, properties);
@@ -37,10 +79,9 @@ class StageApprovalServiceTest {
         when(issues.findById(2L)).thenReturn(Optional.of(issue));
         when(issues.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         when(approvals.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
-        when(selection.resolve(any(), any(), any(), any())).thenAnswer(call ->
-                call.getArgument(1) != null && ((WorkflowStage) call.getArgument(1)).modelDriven()
-                    ? new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra")
-                    : new StageModelSelectionService.Selection(null, null));
+        fixture.properties.setAgentProvider("codex");
+        fixture.properties.getCodexCli().setReviewModel("gpt-6-astra");
+        fixture.properties.getCodexCli().setReviewReasoningEffort("high");
         when(controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)).thenReturn(
                 Optional.of(new ProcessingControl(ProcessingState.RUNNING)));
         when(reservations.evaluate(issue)).thenReturn(
@@ -101,29 +142,19 @@ class StageApprovalServiceTest {
     }
 
     @Test void stageReasoningIsValidatedAndSaved() {
-        var reasoning = mock(com.dbbaskette.issuebot.service.codex.ReasoningSelectionService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "reasoning", reasoning);
-        when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
-        when(reasoning.resolve(2L, "gpt-6-astra", WorkflowStage.REVIEW)).thenReturn("high");
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThat(decision.getReasoningEffort()).isEqualTo("high");
         assertThat(decision.getHarnessId()).isEqualTo("codex");
-        when(reasoning.validate("gpt-6-astra", "ultra")).thenReturn("ultra");
         service.approveAndClaim(2L, 3L, "CODEX", "gpt-6-astra", "alice", "ultra");
         assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
         assertThat(decision.getHarnessId()).isEqualTo("codex");
     }
 
     @Test void existingApprovalRetainsNeutralIdentityModelAndReasoningWhenClaimed() {
-        var reasoning = mock(com.dbbaskette.issuebot.service.codex.ReasoningSelectionService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "reasoning", reasoning);
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         decision.setHarnessId("CODEX");
         decision.setModel("gpt-6-astra");
         decision.setReasoningEffort("ultra");
-        when(selection.resolve(issue, WorkflowStage.REVIEW, "CODEX", "gpt-6-astra"))
-                .thenReturn(new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
 
         service.approveAndClaim(2L, 3L, null, null, "alice");
 

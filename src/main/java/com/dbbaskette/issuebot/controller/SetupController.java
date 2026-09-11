@@ -190,9 +190,9 @@ public class SetupController {
     }
 
     private void addProviderAttributes(Model model) {
-        model.addAttribute("agentProvider", properties.getAgentProvider());
-        model.addAttribute("agentProviderName", properties.getAgentProvider().getDisplayName());
+        model.addAttribute("agentProvider", IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()));
+        model.addAttribute("agentProviderName", IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()).getDisplayName());
         model.addAttribute("codexProvider",
-                properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX);
+                "codex".equals(properties.getAgentProvider()));
     }
 }

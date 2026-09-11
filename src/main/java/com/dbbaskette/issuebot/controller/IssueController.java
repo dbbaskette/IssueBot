@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.model.WorkflowStage;
 import com.dbbaskette.issuebot.model.CostTracking;
 import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueGuidance;
@@ -289,7 +290,7 @@ public class IssueController {
     }
 
     private List<?> selectedModelCatalog() {
-        if (properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
+        if ("codex".equals(properties.getAgentProvider())) {
             return codexModelCatalog == null
                     ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
         }
@@ -311,7 +312,7 @@ public class IssueController {
     }
 
     @Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+    private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
     public String retry(Long id, String instructions, String implModelOverride, String reviewModelOverride,
             BigDecimal budgetOverrideUsd, String planFirstOverride, boolean continueSession,
@@ -334,7 +335,7 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         String error;
         try {
-            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            validateReasoning(issue, implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
             error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
                     budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
@@ -407,11 +408,11 @@ public class IssueController {
             return "The second Plan First conformance miss requires the guided implementation retry";
         }
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
-                && issue.getResolvedAgentProvider() != properties.getAgentProvider()) {
+                && !java.util.Objects.equals(issue.getResolvedHarnessId(), properties.getAgentProvider())) {
             String previousProvider = issue.getResolvedAgentProvider() == null
                     ? "an unknown provider" : issue.getResolvedAgentProvider().getDisplayName();
             return "The previous session belongs to " + previousProvider
-                    + " and cannot continue with " + properties.getAgentProvider().getDisplayName()
+                    + " and cannot continue with " + IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()).getDisplayName()
                     + ". Retry without continuing the previous session.";
         }
 
@@ -485,10 +486,17 @@ public class IssueController {
         return null;
     }
 
-    private void validateReasoning(String implementationModel, String reviewModel, String implementationEffort, String reviewEffort) {
+    private void validateReasoning(TrackedIssue issue, String implementationModel, String reviewModel,
+                                   String implementationEffort, String reviewEffort) {
         if (reasoning != null) {
-            reasoning.validate(implementationModel, implementationEffort);
-            reasoning.validate(reviewModel, reviewEffort);
+            // Validate proposed overrides against this repository before mutating the claimed issue.
+            TrackedIssue proposed = new TrackedIssue(issue.getRepo(), issue.getIssueNumber(), issue.getIssueTitle());
+            proposed.setImplModelOverride(implementationModel);
+            proposed.setReviewModelOverride(reviewModel);
+            proposed.setImplementationReasoningEffort(implementationEffort);
+            proposed.setReviewReasoningEffort(reviewEffort);
+            reasoning.forStage(proposed, properties.getAgentProvider(), WorkflowStage.IMPLEMENTATION);
+            reasoning.forStage(proposed, properties.getAgentProvider(), WorkflowStage.REVIEW);
         }
     }
 
@@ -511,7 +519,7 @@ public class IssueController {
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
         String error;
         try {
-            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            validateReasoning(issue, implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
             error = claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
                     budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
@@ -621,7 +629,8 @@ public class IssueController {
             @RequestParam(required = false) BigDecimal budgetOverrideUsd,
             @RequestParam(required = false) String planFirstOverride, RedirectAttributes redirect) {
         try {
-            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            validateReasoning(issueRepository.findById(id).orElseThrow(), implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
             var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
                     candidate -> checkGate(candidate, null), candidate -> {
                         candidate.setImplModelOverride(normalize(implModelOverride));

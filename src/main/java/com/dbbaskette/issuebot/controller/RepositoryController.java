@@ -104,7 +104,7 @@ public class RepositoryController {
     }
 
     @Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+    private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
     @PostMapping
     @Transactional
@@ -146,8 +146,8 @@ public class RepositoryController {
         }
         if (reasoning != null) {
             try {
-                implementationReasoningEffort = reasoning.validate(implementationModel, implementationReasoningEffort);
-                reviewReasoningEffort = reasoning.validate(reviewModel, reviewReasoningEffort);
+                implementationReasoningEffort = reasoning.validateOverride(implementationModel, implementationReasoningEffort, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION);
+                reviewReasoningEffort = reasoning.validateOverride(reviewModel, reviewReasoningEffort, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW);
             } catch (IllegalArgumentException ex) {
                 preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
                     ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
@@ -436,7 +436,7 @@ public class RepositoryController {
     }
 
     private List<?> selectedModelCatalog() {
-        if (properties != null && properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
+        if (properties != null && "codex".equals(properties.getAgentProvider())) {
             return codexModelCatalog == null
                     ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
         }

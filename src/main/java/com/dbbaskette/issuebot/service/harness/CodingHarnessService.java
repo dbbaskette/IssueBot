@@ -2,7 +2,6 @@ package com.dbbaskette.issuebot.service.harness;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.WorkflowStage;
-import com.dbbaskette.issuebot.service.codex.ReasoningSelectionService;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -13,30 +12,33 @@ import java.util.function.Consumer;
 public class CodingHarnessService {
     private final CodingHarnessRegistry registry;
     private final IssueBotProperties properties;
-    private final ReasoningSelectionService reasoning;
+    private final HarnessSelectionService selections;
     private final ThreadLocal<String> pinnedHarness = new ThreadLocal<>();
     private final ThreadLocal<Boolean> subscriptionOnly = new ThreadLocal<>();
 
     public CodingHarnessService(CodingHarnessRegistry registry, IssueBotProperties properties,
-                                ReasoningSelectionService reasoning) {
+                                HarnessSelectionService selections) {
         this.registry = registry;
         this.properties = properties;
-        this.reasoning = reasoning;
+        this.selections = selections;
     }
 
     public String harnessId() {
         String pinned = pinnedHarness.get();
-        return HarnessIds.normalize(pinned == null ? properties.getAgentProvider().name() : pinned);
+        return HarnessIds.normalize(pinned == null ? properties.getAgentProvider() : pinned);
     }
 
     public void pinHarness(String id) {
         if (id == null) pinnedHarness.remove();
-        else pinnedHarness.set(registry.require(id).id());
+        else {
+            if (id.isBlank()) throw new IllegalArgumentException("A harness identity is required");
+            pinnedHarness.set(registry.require(id).id());
+        }
     }
 
     /** Authentication is deliberately fresh, and a failed check leaves the current pin untouched. */
     public void pinSubscriptionHarness(String id) {
-        if (id == null) throw new IllegalArgumentException("Managed stages require a provider");
+        if (id == null || id.isBlank()) throw new IllegalArgumentException("Managed stages require a harness");
         CodingHarnessAdapter adapter = registry.require(id);
         if (!adapter.checkSubscriptionAuthentication()) {
             String command = HarnessIds.CODEX.equals(adapter.id()) ? "codex login" : "claude auth login";
@@ -63,10 +65,9 @@ public class CodingHarnessService {
 
     public HarnessExecutionResult executeUtility(String prompt, Path directory, Consumer<String> callback) {
         CodingHarnessAdapter adapter = registry.require(harnessId());
-        boolean codex = HarnessIds.CODEX.equals(adapter.id());
+        HarnessSelection chosen = selections.utility(adapter.id());
         return execute(adapter, HarnessRole.ANALYSIS_CLASSIFICATION, prompt, directory,
-                codex ? properties.getCodexCli().getUtilityModel() : properties.getClaudeCode().getUtilityModel(),
-                codex ? properties.getCodexCli().getUtilityReasoningEffort() : null, null, null, callback);
+                chosen.modelId(), chosen.reasoningLevel(), null, null, callback);
     }
 
     public HarnessExecutionResult executeUtility(String prompt, Path directory, String model,
@@ -114,18 +115,15 @@ public class CodingHarnessService {
                 prompt, directory, model, effort, null, issueId, callback);
     }
 
-    // Preserve the existing persisted Codex stage selections until general selection moves here.
     private String legacyReasoning(CodingHarnessAdapter adapter, Long issueId, String model, WorkflowStage stage) {
-        return HarnessIds.CODEX.equals(adapter.id()) ? reasoning.resolve(issueId, model, stage) : null;
+        return selections.forExecution(adapter.id(), issueId, model, stage).reasoningLevel();
     }
 
     private HarnessExecutionResult execute(CodingHarnessAdapter adapter, HarnessRole role, String prompt,
             Path directory, String model, String effort, String sessionId, Long issueId, Consumer<String> callback) {
-        HarnessModel selected = adapter.models().stream().filter(candidate -> candidate.id().equals(model))
-                .findFirst().orElseThrow(() -> new IllegalArgumentException("Model " + model
-                        + " is not available in the " + adapter.displayName() + " catalog; choose a listed model"));
+        HarnessSelection selected = selections.resolve(adapter.id(), model, effort);
         HarnessExecutionRequest request = new HarnessExecutionRequest(role, prompt, directory,
-                selected.id(), selected.resolveReasoning(effort), sessionId, issueId);
+                selected.modelId(), selected.reasoningLevel(), sessionId, issueId);
         return Boolean.TRUE.equals(subscriptionOnly.get())
                 ? adapter.executeSubscription(request, callback) : adapter.execute(request, callback);
     }

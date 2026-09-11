@@ -19,6 +19,38 @@ import static org.mockito.Mockito.mock;
 
 class SettingsControllerTest {
 
+    @Test void invalidClaudeTupleCannotChangeConfigOrRuntimeDefaults() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        Files.writeString(configFile, "issuebot: {}\n");
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "reasoning", fixture.selections);
+        var redirect = new RedirectAttributesModelMap();
+        controller.saveModels(IssueBotProperties.AgentProvider.CLAUDE_CODE,
+                "claude-haiku-4-5", "claude-sonnet-5", "claude-haiku-4-5", "max", "high", "default", redirect);
+        assertThat(redirect.getFlashAttributes().get("error")).asString().contains("max");
+        assertThat(properties.getClaudeCode().getImplementationModel()).isEqualTo("claude-opus-4-8");
+        assertThat(Files.readString(configFile)).isEqualTo("issuebot: {}\n");
+    }
+
+    @Test void blankSettingsReasoningUsesEachSelectedModelsDefaultAndPersistsIt() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        IssueBotProperties properties = new IssueBotProperties();
+        properties.getClaudeCode().setImplementationReasoningEffort("max");
+        SettingsController controller = controller(properties, configFile);
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "reasoning", fixture.selections);
+        var redirect = new RedirectAttributesModelMap();
+        controller.saveModels(IssueBotProperties.AgentProvider.CLAUDE_CODE,
+                "claude-haiku-4-5", "claude-sonnet-5", "claude-haiku-4-5", "", null, " ", redirect);
+        assertThat(redirect.getFlashAttributes().get("error")).isNull();
+        assertThat(properties.getClaudeCode().getImplementationReasoningEffort()).isEqualTo("default");
+        assertThat(properties.getClaudeCode().getReviewReasoningEffort()).isEqualTo("high");
+        assertThat(properties.getClaudeCode().getUtilityReasoningEffort()).isEqualTo("default");
+        assertThat(Files.readString(configFile)).contains("implementation-reasoning-effort: default");
+    }
+
     @TempDir
     Path tempDir;
 
@@ -27,6 +59,8 @@ class SettingsControllerTest {
                 mock(IssuePollingService.class), mock(TrackedIssueRepository.class),
                 mock(NotificationRepository.class), mock(CodexModelCatalog.class));
         controller.setConfigPathForTests(configFile);
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "reasoning", fixture.selections);
         return controller;
     }
 
@@ -78,7 +112,7 @@ class SettingsControllerTest {
                 "ultra", "high", "low", redirectAttributes);
 
         assertThat(view).isEqualTo("redirect:/settings");
-        assertThat(properties.getAgentProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+        assertThat(properties.getAgentProvider()).isEqualTo("codex");
         assertThat(properties.getCodexCli().getImplementationModel()).isEqualTo("gpt-6-astra");
         assertThat(properties.getCodexCli().getImplementationReasoningEffort()).isEqualTo("ultra");
         String written = Files.readString(configFile);

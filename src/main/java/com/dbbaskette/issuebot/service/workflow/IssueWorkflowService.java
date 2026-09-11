@@ -188,8 +188,6 @@ public class IssueWorkflowService {
             stageWorkflow.snapshot(trackedIssue);
         }
         String executionHarness = harnessService.harnessId();
-        IssueBotProperties.AgentProvider executionProvider = HarnessIds.CODEX.equals(executionHarness)
-                ? IssueBotProperties.AgentProvider.CODEX : IssueBotProperties.AgentProvider.CLAUDE_CODE;
         harnessService.pinHarness(executionHarness);
         try {
         WatchedRepo repo = trackedIssue.getRepo();
@@ -212,17 +210,16 @@ public class IssueWorkflowService {
         // Captured before it is cleared just below: a continue-session retry's first
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
-        IssueBotProperties.AgentProvider previousProvider = trackedIssue.getResolvedAgentProvider();
+        String previousProvider = trackedIssue.getResolvedHarnessId();
         boolean preserveStageRouting = StageWorkflowCoordinator.managed(trackedIssue);
         if (!preserveStageRouting && trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
-                && !java.util.Objects.equals(previousProvider == null ? null
-                        : HarnessIds.normalize(previousProvider.name()), executionHarness)) {
+                && !java.util.Objects.equals(previousProvider, executionHarness)) {
             trackedIssue.setClaudeSessionId(null);
             eventService.log("SESSION_PROVIDER_CHANGED",
                     "Previous agent session was discarded because the execution provider changed",
                     repo, trackedIssue);
         }
-        if (!preserveStageRouting) trackedIssue.setResolvedAgentProvider(executionProvider);
+        if (!preserveStageRouting) trackedIssue.setResolvedHarnessId(executionHarness);
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         // Workflow entry point for both a fresh start and a retry (IssueController.retry sets
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
@@ -234,8 +231,8 @@ public class IssueWorkflowService {
         trackedIssue.setLastFailureReason(null);
         trackedIssue.setSuspensionReason(null);
         if (!preserveStageRouting) {
-            trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
-            trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionProvider));
+            trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionHarness));
+            trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionHarness));
         }
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "

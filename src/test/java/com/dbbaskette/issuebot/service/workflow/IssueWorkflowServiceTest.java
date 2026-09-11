@@ -139,6 +139,7 @@ class IssueWorkflowServiceTest {
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
         harnessService = mock(CodingHarnessService.class);
+        when(harnessService.harnessId()).thenReturn("claude");
         eventService = mock(EventService.class);
         cancellationService = new WorkflowCancellationService();
         sseService = mock(SseService.class);
@@ -161,7 +162,8 @@ class IssueWorkflowServiceTest {
                 planFirstService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
-                        new com.dbbaskette.issuebot.config.IssueBotProperties()),
+                        new com.dbbaskette.issuebot.config.IssueBotProperties(),
+                        new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 cancellationService,
                 mock(com.dbbaskette.issuebot.repository.IssueGuidanceRepository.class),
                 mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class),
@@ -371,7 +373,9 @@ class IssueWorkflowServiceTest {
         });
         doThrow(new IllegalStateException("subscription expired")).doNothing()
                 .when(harnessService).pinSubscriptionHarness("codex");
-        var coordinator = new StageWorkflowCoordinator(stages, mock(StageModelSelectionService.class),
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var coordinator = new StageWorkflowCoordinator(stages,
+                new StageModelSelectionService(fixture.properties, fixture.selections, fixture.registry),
                 harnessService, issueRepository, mock(com.dbbaskette.issuebot.repository.PlanningVersionRepository.class),
                 mock(PlanFirstTransactionManager.class), mock(IssueDispatchService.class));
         org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", coordinator);

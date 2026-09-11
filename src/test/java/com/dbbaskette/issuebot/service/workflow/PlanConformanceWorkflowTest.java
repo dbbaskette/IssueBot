@@ -63,6 +63,7 @@ class PlanConformanceWorkflowTest {
         gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
         agent = mock(CodingHarnessService.class);
+        when(agent.harnessId()).thenReturn("claude");
         reviewer = mock(CodeReviewService.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
@@ -85,7 +86,7 @@ class PlanConformanceWorkflowTest {
                 costRepository, mock(EventService.class), mock(SseService.class),
                 mock(NotificationService.class), iterationManager,
                 mock(IssueDecompositionService.class), planFirstService, mock(FollowUpService.class),
-                new ModelResolver(new IssueBotProperties()), cancellationService,
+                new ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections), cancellationService,
                 mock(IssueGuidanceRepository.class), mock(RepoLessonRepository.class),
                 mock(LessonsService.class), objectMapper);
         workflow.reviewRetryBackoffBaseMs = 0;

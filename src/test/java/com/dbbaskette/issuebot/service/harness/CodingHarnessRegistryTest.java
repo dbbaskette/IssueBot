@@ -10,6 +10,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CodingHarnessRegistryTest {
 
+    @Test void blankLookupCannotSelectTheConfigurationDefault() {
+        var registry = new CodingHarnessRegistry(List.of(adapter("claude")));
+        for (String id : java.util.Arrays.asList(null, "", " ")) {
+            assertThatThrownBy(() -> registry.require(id)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     @Test
     void resolvesStableAndLegacyHarnessIds() {
         var claude = adapter("claude");

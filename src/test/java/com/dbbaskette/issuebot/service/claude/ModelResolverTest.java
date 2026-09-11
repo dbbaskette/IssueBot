@@ -1,84 +1,63 @@
 package com.dbbaskette.issuebot.service.claude;
 
-import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.model.TrackedIssue;
-import com.dbbaskette.issuebot.model.WatchedRepo;
-import org.junit.jupiter.api.BeforeEach;
+import com.dbbaskette.issuebot.model.*;
+import com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture;
 import org.junit.jupiter.api.Test;
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
 
 class ModelResolverTest {
+    final HarnessSelectionFixture fixture = new HarnessSelectionFixture();
+    final ModelResolver resolver = new ModelResolver(fixture.properties, fixture.selections);
+    final WatchedRepo repo = new WatchedRepo("owner", "repo");
+    final TrackedIssue issue = new TrackedIssue(repo, 1, "issue");
 
-    private IssueBotProperties properties;
-    private ModelResolver resolver;
-    private WatchedRepo repo;
-    private TrackedIssue issue;
-
-    @BeforeEach
-    void setUp() {
-        properties = new IssueBotProperties();
-        properties.getClaudeCode().setImplementationModel("global-impl");
-        properties.getClaudeCode().setReviewModel("global-review");
-        properties.getClaudeCode().setUtilityModel("global-utility");
-        resolver = new ModelResolver(properties);
-        repo = new WatchedRepo("owner", "name");
-        issue = new TrackedIssue(repo, 1, "title");
-    }
-
-    @Test
-    void fallsBackToGlobalDefaults() {
-        assertThat(resolver.implementationModel(issue)).isEqualTo("global-impl");
-        assertThat(resolver.reviewModel(issue)).isEqualTo("global-review");
-        assertThat(resolver.utilityModel()).isEqualTo("global-utility");
-    }
-
-    @Test
-    void repoOverrideBeatsGlobal() {
-        repo.setImplementationModel("repo-impl");
-        repo.setReviewModel("repo-review");
-        assertThat(resolver.implementationModel(issue)).isEqualTo("repo-impl");
-        assertThat(resolver.reviewModel(issue)).isEqualTo("repo-review");
-    }
-
-    @Test
-    void issueOverrideBeatsRepoAndGlobal() {
-        repo.setImplementationModel("repo-impl");
-        issue.setImplModelOverride("issue-impl");
-        issue.setReviewModelOverride("issue-review");
-        assertThat(resolver.implementationModel(issue)).isEqualTo("issue-impl");
-        assertThat(resolver.reviewModel(issue)).isEqualTo("issue-review");
-    }
-
-    @Test
-    void blankOverridesAreIgnored() {
-        repo.setImplementationModel("  ");
-        issue.setImplModelOverride("");
-        assertThat(resolver.implementationModel(issue)).isEqualTo("global-impl");
-    }
-
-    @Test
-    void codexProviderUsesCodexDefaultsAndIgnoresClaudeOverrides() {
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
-        properties.getCodexCli().setImplementationModel("gpt-5.6-sol");
-        properties.getCodexCli().setReviewModel("gpt-5.6-terra");
-        properties.getCodexCli().setUtilityModel("gpt-5.6-luna");
-        repo.setImplementationModel("claude-opus-4-8");
-        issue.setReviewModelOverride("claude-sonnet-5");
-
+    @Test void globalDefaultsUseTheSelectedHarnessCatalog() {
+        assertThat(resolver.implementationModel(issue)).isEqualTo("claude-opus-4-8");
+        assertThat(resolver.reviewModel(issue)).isEqualTo("claude-sonnet-5");
+        assertThat(resolver.utilityModel()).isEqualTo("claude-haiku-4-5");
+        fixture.properties.setAgentProvider("CODEX");
         assertThat(resolver.implementationModel(issue)).isEqualTo("gpt-5.6-sol");
         assertThat(resolver.reviewModel(issue)).isEqualTo("gpt-5.6-terra");
         assertThat(resolver.utilityModel()).isEqualTo("gpt-5.6-luna");
     }
 
-    @Test
-    void explicitProviderKeepsResolvedModelsStableAcrossGlobalSwitch() {
-        properties.getCodexCli().setImplementationModel("codex-mini-latest");
-        properties.getCodexCli().setReviewModel("codex-review-latest");
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+    @Test void issueOverrideBeatsCompatibleRepositoryThenGlobalDefault() {
+        repo.setImplementationModel("claude-opus-4-6");
+        assertThat(resolver.implementationModel(issue)).isEqualTo("claude-opus-4-6");
+        issue.setImplModelOverride("claude-sonnet-5");
+        assertThat(resolver.implementationModel(issue)).isEqualTo("claude-sonnet-5");
+        issue.setImplModelOverride(" ");
+        assertThat(resolver.implementationModel(issue)).isEqualTo("claude-opus-4-6");
+        repo.setImplementationModel("");
+        assertThat(resolver.implementationModel(issue)).isEqualTo("claude-opus-4-8");
+    }
 
-        assertThat(resolver.implementationModel(issue, IssueBotProperties.AgentProvider.CODEX))
-                .isEqualTo("codex-mini-latest");
-        assertThat(resolver.reviewModel(issue, IssueBotProperties.AgentProvider.CODEX))
-                .isEqualTo("codex-review-latest");
+    @Test void incompatibleRepositoryTupleDoesNotLeakAcrossHarnesses() {
+        repo.setImplementationModel("gpt-6-astra");
+        repo.setImplementationReasoningEffort("ultra");
+        assertThat(resolver.implementationModel(issue, "claude")).isEqualTo("claude-opus-4-8");
+        assertThat(fixture.selections.forStage(issue, "claude", WorkflowStage.IMPLEMENTATION).reasoningLevel()).isEqualTo("high");
+    }
+
+    @Test void explicitUnknownOrCrossHarnessIssueOverrideNeverFallsBack() {
+        for (String model : new String[]{"invented", "gpt-6-astra"}) {
+            issue.setImplModelOverride(model);
+            assertThatThrownBy(() -> resolver.implementationModel(issue, "claude"))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining(model);
+        }
+        fixture.properties.getClaudeCode().setUtilityModel("invented");
+        assertThatThrownBy(resolver::utilityModel).hasMessageContaining("invented");
+    }
+
+    @Test void explicitHarnessSurvivesGlobalChangeAndUnknownHarnessFailsClosed() {
+        assertThat(resolver.implementationModel(issue, "codex")).isEqualTo("gpt-5.6-sol");
+        fixture.properties.setAgentProvider("future_harness");
+        assertThatThrownBy(() -> resolver.implementationModel(issue)).hasMessageContaining("future_harness");
+        assertThat(resolver.reviewModel(issue, "codex")).isEqualTo("gpt-5.6-terra");
+    }
+
+    @Test void unknownRepositoryModelIsRejectedInsteadOfSilentlyUsingGlobalModel() {
+        repo.setImplementationModel("invented");
+        assertThatThrownBy(() -> resolver.implementationModel(issue)).hasMessageContaining("invented");
     }
 }

@@ -2,7 +2,9 @@ package com.dbbaskette.issuebot.service.harness;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.WorkflowStage;
-import com.dbbaskette.issuebot.service.codex.ReasoningSelectionService;
+import com.dbbaskette.issuebot.model.*;
+import com.dbbaskette.issuebot.repository.*;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
@@ -15,7 +17,8 @@ class CodingHarnessServiceTest {
     private final CodingHarnessAdapter claude = mock(CodingHarnessAdapter.class);
     private final CodingHarnessAdapter codex = mock(CodingHarnessAdapter.class);
     private final IssueBotProperties properties = new IssueBotProperties();
-    private final ReasoningSelectionService reasoning = mock(ReasoningSelectionService.class);
+    private final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
+    private final StageApprovalRepository stages = mock(StageApprovalRepository.class);
     private CodingHarnessService service;
 
     @BeforeEach void setup() {
@@ -24,7 +27,9 @@ class CodingHarnessServiceTest {
         when(codex.displayName()).thenReturn("Codex CLI");
         when(claude.models()).thenReturn(List.of(new HarnessModel("claude-opus-4-8", "Opus", "", "high", List.of("high", "max"))));
         when(codex.models()).thenReturn(List.of(new HarnessModel("gpt-6-astra", "Astra", "", "high", List.of("high", "ultra"))));
-        service = new CodingHarnessService(new CodingHarnessRegistry(List.of(claude, codex)), properties, reasoning);
+        var registry = new CodingHarnessRegistry(List.of(claude, codex));
+        service = new CodingHarnessService(registry, properties, new HarnessSelectionService(registry, properties, issues, stages));
+        when(issues.findById(9L)).thenReturn(Optional.of(new TrackedIssue(new WatchedRepo(), 1, "issue")));
     }
 
     @Test void pinnedHarnessReceivesExplicitRoleModelAndReasoning() {
@@ -50,7 +55,7 @@ class CodingHarnessServiceTest {
     }
 
     @Test void utilityUsesSelectedHarnessConfiguration() {
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        properties.setAgentProvider("codex");
         properties.getCodexCli().setUtilityModel("gpt-6-astra");
         properties.getCodexCli().setUtilityReasoningEffort("ultra");
         service.executeUtility("classify", Path.of("repo"), null);
@@ -64,7 +69,14 @@ class CodingHarnessServiceTest {
 
     @Test void legacyCodexCallsRetainPersistedStageReasoning() {
         service.pinHarness("codex");
-        when(reasoning.resolve(9L, "gpt-6-astra", WorkflowStage.PLANNING)).thenReturn("ultra");
+        StageApproval approved = new StageApproval();
+        approved.setStage(WorkflowStage.PLANNING);
+        approved.setHarnessId("codex");
+        approved.setModel("gpt-6-astra");
+        approved.setReasoningEffort("ultra");
+        approved.setArtifactVersionId(0L);
+        approved.setState(StageApproval.State.APPROVED);
+        when(stages.findByIssueIdOrderByIdAsc(9L)).thenReturn(List.of(approved));
         service.executePlanning("plan", Path.of("repo"), "gpt-6-astra", 9L, null);
         verify(codex).execute(argThat(r -> r.reasoningLevel().equals("ultra")), isNull());
     }
@@ -82,7 +94,7 @@ class CodingHarnessServiceTest {
         try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             assertEquals("claude", executor.submit(service::harnessId).get());
         }
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        properties.setAgentProvider("claude");
         assertEquals("codex", service.harnessId());
         service.clearPinnedHarness();
         assertEquals("claude", service.harnessId());

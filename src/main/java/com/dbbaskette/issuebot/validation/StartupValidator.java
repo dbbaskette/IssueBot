@@ -48,7 +48,7 @@ public class StartupValidator {
         if (harnessService.checkAuthentication()) {
             log.info("[OK] {} subscription authentication verified", provider);
         } else {
-            String command = properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+            String command = "codex".equals(properties.getAgentProvider())
                     ? "codex login" : "claude";
             log.warn("[WARN] {} subscription authentication failed. Run '{}' in a terminal to log in.",
                     provider, command);

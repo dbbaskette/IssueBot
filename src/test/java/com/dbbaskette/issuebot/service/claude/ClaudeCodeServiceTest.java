@@ -52,7 +52,7 @@ class ClaudeCodeServiceTest {
     @Test
     void explicitEffortEntryPointsStayOnClaudeDespiteGlobalCodexSelection() {
         IssueBotProperties properties = new IssueBotProperties();
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        properties.setAgentProvider("codex");
         ClaudeCodeService runner = spy(new ClaudeCodeService(properties,
                 new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new WorkflowCancellationService()));

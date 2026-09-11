@@ -27,7 +27,6 @@ class StageApprovalPersistenceTest {
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockitoBean StageModelSelectionService selection;
     @MockitoBean IssueBotProperties properties;
-    @MockitoBean com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
 
     @Test void physicallyBlankIdentityColumnsDoNotChooseClaudeOrFallBackToLegacyCodex() {
         var repo = repos.saveAndFlush(new WatchedRepo("stage", "blank-identities"));
@@ -88,10 +87,9 @@ class StageApprovalPersistenceTest {
 
     @Test void executionAuthenticationFailureDurablyRearmsSameApprovedReviewSelectionAndAttempt() {
         when(properties.getMaxConcurrentIssues()).thenReturn(3);
-        when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
-        when(reasoning.resolve(anyLong(), eq("gpt-6-astra"), eq(WorkflowStage.REVIEW))).thenReturn("high");
-        when(reasoning.validate("gpt-6-astra", "ultra")).thenReturn("ultra");
+        when(selection.defaults(any(), any())).thenReturn(new com.dbbaskette.issuebot.service.harness.HarnessSelection("codex", "gpt-6-astra", "high"));
+        when(selection.resolve(any(), any(), any(), any(), any())).thenAnswer(call ->
+                new com.dbbaskette.issuebot.service.harness.HarnessSelection("codex", "gpt-6-astra", call.getArgument(4)));
         var repo = new WatchedRepo("stage", "expired-auth");
         repo.setWorkflowPolicy(WorkflowPolicy.STAGED);
         repo = repos.saveAndFlush(repo);
@@ -156,8 +154,9 @@ class StageApprovalPersistenceTest {
 
     @Test void simultaneousApprovalsCommitOnlyOneClaimAndPersistResumePhase() throws Exception {
         when(properties.getMaxConcurrentIssues()).thenReturn(3);
-        when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
+        when(selection.defaults(any(), any())).thenReturn(new com.dbbaskette.issuebot.service.harness.HarnessSelection("codex", "gpt-6-astra", "high"));
+        when(selection.resolve(any(), any(), any(), any(), any())).thenAnswer(call ->
+                new com.dbbaskette.issuebot.service.harness.HarnessSelection("codex", "gpt-6-astra", call.getArgument(4)));
         WatchedRepo repo = new WatchedRepo("stage", "concurrency");
         repo.setWorkflowPolicy(WorkflowPolicy.STAGED);
         repo = repos.saveAndFlush(repo);
