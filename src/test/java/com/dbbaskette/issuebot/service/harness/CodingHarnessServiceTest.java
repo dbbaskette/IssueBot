@@ -42,13 +42,14 @@ class CodingHarnessServiceTest {
     }
 
     @Test void stageSubscriptionFailureTracksTheRequestedPinNotTheConfiguredDefault() {
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.UNMET);
         assertThrows(IllegalStateException.class, () -> service.pinSubscriptionHarness("codex"));
         assertEquals(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.KNOWN_UNMET, prerequisites.state("codex"));
         assertEquals(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED, prerequisites.retryState());
-        when(codex.checkSubscriptionAuthentication()).thenReturn(true);
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY);
         service.pinSubscriptionHarness("codex");
         assertEquals(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED, prerequisites.state("codex"));
-        verify(claude, never()).checkSubscriptionAuthentication();
+        verify(claude, never()).probeSubscriptionAuthentication();
     }
 
     @Test void implementationForwardsSessionCallbackAndResult() {
@@ -116,14 +117,14 @@ class CodingHarnessServiceTest {
         service.pinHarness("claude");
         assertThrows(IllegalStateException.class, () -> service.pinSubscriptionHarness("codex"));
         assertEquals("claude", service.harnessId());
-        verify(codex).checkSubscriptionAuthentication();
+        verify(codex).probeSubscriptionAuthentication();
     }
 
     @Test void subscriptionPinChecksEveryTimeAndUsesManagedExecutionUntilClear() {
-        when(codex.checkSubscriptionAuthentication()).thenReturn(true);
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY);
         service.pinSubscriptionHarness("codex");
         service.pinSubscriptionHarness("codex");
-        verify(codex, times(2)).checkSubscriptionAuthentication();
+        verify(codex, times(2)).probeSubscriptionAuthentication();
         service.executePlanning("plan", Path.of("repo"), "gpt-6-astra", "high", 9L, null);
         verify(codex).executeSubscription(any(), isNull());
         service.clearPinnedHarness();

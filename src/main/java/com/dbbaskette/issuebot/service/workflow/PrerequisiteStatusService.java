@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.harness.HarnessReadiness;
 import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,11 +51,16 @@ public class PrerequisiteStatusService {
     }
 
     /** Used only by explicit/actual preflight paths; an unavailable check supersedes older evidence with UNKNOWN. */
-    public boolean observe(Context context, Component component, java.util.function.BooleanSupplier probe) {
+    public boolean observe(Context context, Component component,
+            java.util.function.Supplier<HarnessReadiness> probe) {
         try {
-            boolean ready = probe.getAsBoolean();
-            record(context, component, ready ? Result.READY : Result.UNMET);
-            return ready;
+            var readiness = probe.get();
+            record(context, component, readiness == null ? Result.UNKNOWN : switch (readiness) {
+                case READY -> Result.READY;
+                case UNMET -> Result.UNMET;
+                case UNKNOWN -> Result.UNKNOWN;
+            });
+            return readiness == HarnessReadiness.READY;
         } catch (RuntimeException unavailable) {
             record(context, component, Result.UNKNOWN);
             throw unavailable;

@@ -77,11 +77,12 @@ class HarnessSelectionServiceTest {
 
     @Test void readyChecksAvailabilityThenFreshSubscriptionEveryTime() {
         var tuple = service.resolve("codex", "gpt-6-astra", "ultra");
+        when(codex.probeCliAvailability()).thenReturn(HarnessReadiness.UNMET);
         assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("Install");
-        verify(codex, never()).checkSubscriptionAuthentication();
-        when(codex.checkCliAvailable()).thenReturn(true);
+        verify(codex, never()).probeSubscriptionAuthentication();
+        when(codex.probeCliAvailability()).thenReturn(HarnessReadiness.READY);
         assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("codex login");
-        when(codex.checkSubscriptionAuthentication()).thenReturn(true, false);
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY, HarnessReadiness.UNMET);
         service.validateReady(tuple);
         assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("subscription");
         verifyNoInteractions(claude);
@@ -89,10 +90,11 @@ class HarnessSelectionServiceTest {
 
     @Test void actualPreflightRecordsOnlyItsHarnessAndUnavailableProbeSupersedesOldFailure() {
         var tuple = service.resolve("codex", "gpt-6-astra", "ultra");
+        when(codex.probeCliAvailability()).thenReturn(HarnessReadiness.UNMET);
         assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("Install");
         assertThat(prerequisites.state("codex")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.KNOWN_UNMET);
         assertThat(prerequisites.state("claude")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED);
-        when(codex.checkCliAvailable()).thenThrow(new IllegalStateException("unavailable"));
+        when(codex.probeCliAvailability()).thenThrow(new IllegalStateException("unavailable"));
         assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("unavailable");
         assertThat(prerequisites.state("codex")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED);
     }

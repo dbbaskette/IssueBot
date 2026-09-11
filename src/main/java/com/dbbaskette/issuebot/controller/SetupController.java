@@ -163,10 +163,9 @@ public class SetupController {
     public String recheck(Model model) {
         String harness = properties.getAgentProvider();
         var context = prerequisites.context(harness);
-        var cli = check(() -> harnessService.checkCliAvailable(harness));
-        prerequisites.record(context, CLI, cli);
-        prerequisites.record(context, SUBSCRIPTION, cli == READY
-                ? check(() -> harnessService.checkSubscriptionAuthentication(harness)) : UNKNOWN);
+        boolean cli = observeHarness(context, CLI, () -> harnessService.probeCliAvailability(harness));
+        if (cli) observeHarness(context, SUBSCRIPTION, () -> harnessService.probeSubscriptionAuthentication(harness));
+        else prerequisites.record(context, SUBSCRIPTION, UNKNOWN);
         String token = properties.getGithub().getToken();
         boolean githubTokenSet = token != null && !token.isBlank() && !"not-set".equals(token);
         var github = githubTokenSet ? UNKNOWN : UNMET;
@@ -192,6 +191,12 @@ public class SetupController {
     private PrerequisiteStatusService.Result check(java.util.function.BooleanSupplier probe) {
         try { return probe.getAsBoolean() ? READY : UNMET; }
         catch (RuntimeException unavailable) { return UNKNOWN; }
+    }
+
+    private boolean observeHarness(PrerequisiteStatusService.Context context, PrerequisiteStatusService.Component component,
+            java.util.function.Supplier<com.dbbaskette.issuebot.service.harness.HarnessReadiness> probe) {
+        try { return prerequisites.observe(context, component, probe); }
+        catch (RuntimeException unavailable) { return false; }
     }
 
     private void addPrerequisiteAttributes(Model model) {

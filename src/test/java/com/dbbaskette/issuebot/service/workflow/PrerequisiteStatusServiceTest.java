@@ -9,6 +9,17 @@ import static com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteSt
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PrerequisiteStatusServiceTest {
+    @Test void typedProbeUnknownSupersedesOldFailureWithoutAuthorizingExecution() {
+        var props = new IssueBotProperties();
+        var cache = new PrerequisiteStatusService(props);
+        var context = cache.context("claude");
+        cache.record(context, SUBSCRIPTION, UNMET);
+        assertThat(cache.observe(context, SUBSCRIPTION, () -> com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNKNOWN)).isFalse();
+        assertThat(cache.retryState()).isEqualTo(NOT_VERIFIED);
+        assertThat(cache.retryRejection()).isNull();
+        assertThat(cache.observe(context, SUBSCRIPTION, () -> com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET)).isFalse();
+        assertThat(cache.retryRejection()).isNotNull();
+    }
     private final IssueBotProperties properties = new IssueBotProperties();
     private final MutableClock clock = new MutableClock();
     private final PrerequisiteStatusService service = new PrerequisiteStatusService(properties, clock);

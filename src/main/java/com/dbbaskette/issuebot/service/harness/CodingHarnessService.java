@@ -53,7 +53,7 @@ public class CodingHarnessService {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("Managed stages require a harness");
         CodingHarnessAdapter adapter = registry.require(id);
         var context = prerequisites.context(adapter.id());
-        boolean authenticated = prerequisites.observe(context, SUBSCRIPTION, adapter::checkSubscriptionAuthentication);
+        boolean authenticated = prerequisites.observe(context, SUBSCRIPTION, adapter::probeSubscriptionAuthentication);
         if (!authenticated) {
             String command = HarnessIds.CODEX.equals(adapter.id()) ? "codex login" : "claude auth login";
             throw new IllegalStateException(adapter.displayName()
@@ -72,6 +72,8 @@ public class CodingHarnessService {
     public String displayName() { return registry.require(harnessId()).displayName(); }
     public boolean checkCliAvailable() { return registry.require(harnessId()).checkCliAvailable(); }
     public boolean checkCliAvailable(String id) { return registry.require(id).checkCliAvailable(); }
+    public HarnessReadiness probeCliAvailability(String id) { return registry.require(id).probeCliAvailability(); }
+    public HarnessReadiness probeSubscriptionAuthentication(String id) { return registry.require(id).probeSubscriptionAuthentication(); }
     public boolean isCliAvailable() { return registry.require(harnessId()).isCliAvailable(); }
     public boolean checkAuthentication() { return registry.require(harnessId()).checkAuthentication(); }
     public boolean checkSubscriptionAuthentication(String id) { return registry.require(id).checkSubscriptionAuthentication(); }

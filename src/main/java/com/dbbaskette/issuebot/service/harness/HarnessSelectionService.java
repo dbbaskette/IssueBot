@@ -48,12 +48,12 @@ public class HarnessSelectionService {
         resolve(selection.harnessId(), selection.modelId(), selection.reasoningLevel());
         CodingHarnessAdapter adapter = requireHarness(selection.harnessId());
         var context = prerequisites.context(adapter.id());
-        boolean available = prerequisites.observe(context, CLI, adapter::checkCliAvailable);
+        boolean available = prerequisites.observe(context, CLI, adapter::probeCliAvailability);
         if (!available) {
             throw new IllegalStateException(adapter.displayName()
                     + " is not installed or available on PATH. Install that CLI before approving this stage.");
         }
-        boolean authenticated = prerequisites.observe(context, SUBSCRIPTION, adapter::checkSubscriptionAuthentication);
+        boolean authenticated = prerequisites.observe(context, SUBSCRIPTION, adapter::probeSubscriptionAuthentication);
         if (!authenticated) {
             String command = switch (HarnessIds.normalize(adapter.id())) {
                 case HarnessIds.CLAUDE -> "claude auth login";

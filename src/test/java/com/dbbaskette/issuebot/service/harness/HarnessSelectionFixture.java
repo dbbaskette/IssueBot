@@ -22,9 +22,9 @@ public class HarnessSelectionFixture {
         when(catalog.models()).thenReturn(CodexModelCatalog.fallbackModels());
         registry = new CodingHarnessRegistry(List.of(new ClaudeHarnessAdapter(claude), new CodexHarnessAdapter(codex, catalog)));
         selections = new HarnessSelectionService(registry, properties, issues, stages);
-        when(claude.checkCliAvailable()).thenReturn(true);
-        when(claude.checkSubscriptionAuthentication()).thenReturn(true);
-        when(codex.checkCliAvailable()).thenReturn(true);
-        when(codex.checkSubscriptionAuthentication()).thenReturn(true);
+        when(claude.probeCliAvailability()).thenReturn(HarnessReadiness.READY);
+        when(claude.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY);
+        when(codex.probeCliAvailability()).thenReturn(HarnessReadiness.READY);
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY);
     }
 }

@@ -39,13 +39,13 @@ class StageApprovalPersistenceTest {
         var adapter = mock(CodingHarnessAdapter.class);
         when(adapter.id()).thenReturn("codex");
         when(adapter.displayName()).thenReturn("Codex CLI");
-        when(adapter.checkCliAvailable()).thenAnswer(call -> {
+        when(adapter.probeCliAvailability()).thenAnswer(call -> {
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            return true;
+            return com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY;
         });
-        when(adapter.checkSubscriptionAuthentication()).thenAnswer(call -> {
+        when(adapter.probeSubscriptionAuthentication()).thenAnswer(call -> {
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            return true;
+            return com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY;
         });
         var reads = new java.util.concurrent.atomic.AtomicInteger();
         var refreshAt = new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);

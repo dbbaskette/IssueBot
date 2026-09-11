@@ -426,8 +426,8 @@ class IssueWorkflowServiceTest {
         var adapter = mock(com.dbbaskette.issuebot.service.harness.CodingHarnessAdapter.class);
         when(adapter.id()).thenReturn("codex");
         when(adapter.displayName()).thenReturn("Codex CLI");
-        when(adapter.checkCliAvailable()).thenReturn(true);
-        when(adapter.checkSubscriptionAuthentication()).thenReturn(true);
+        when(adapter.probeCliAvailability()).thenReturn(com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY);
+        when(adapter.probeSubscriptionAuthentication()).thenReturn(com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY);
         var reads = new java.util.concurrent.atomic.AtomicInteger();
         var refreshAt = new java.util.concurrent.atomic.AtomicInteger(switch (failure) {
             case "catalog-resolution" -> 1;

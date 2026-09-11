@@ -46,7 +46,7 @@ class SetupControllerTest {
         assertThat(java.nio.file.Files.exists(work)).isFalse();
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/setup/prereqs"))
                 .andExpect(status().isForbidden());
-        verify(harness, never()).checkCliAvailable(anyString());
+        verify(harness, never()).probeCliAvailability(anyString());
         verifyNoInteractions(github);
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/setup/prereqs")
                 .with(request -> {
@@ -56,7 +56,7 @@ class SetupControllerTest {
                     return request;
                 }))
                 .andExpect(status().isOk());
-        verify(harness).checkCliAvailable("claude");
+        verify(harness).probeCliAvailability("claude");
         assertThat(java.nio.file.Files.isDirectory(work)).isTrue();
     }
 
@@ -67,6 +67,19 @@ class SetupControllerTest {
         controller(github, "test-token").recheck(model);
         assertThat(result(model, "GitHub Token")).isEqualTo(PrerequisiteStatusService.Result.UNKNOWN);
         assertThat(model.toString()).doesNotContain("private network detail", "test-token");
+    }
+
+    @Test void unknownHarnessOutcomeIsNotReportedAsAnUnmetPrerequisite() {
+        var github = mock(GitHubApiClient.class);
+        when(github.validateToken()).thenReturn(new TokenStatus(TokenState.VALID, "Verified"));
+        var controller = controller(github, "test-token");
+        var harness = (CodingHarnessService) org.springframework.test.util.ReflectionTestUtils.getField(controller, "harnessService");
+        when(harness.displayName()).thenReturn("Selected harness");
+        when(harness.probeSubscriptionAuthentication("claude")).thenReturn(HarnessReadiness.UNKNOWN);
+        var model = new ExtendedModelMap();
+        controller.recheck(model);
+        assertThat(result(model, "Selected harness Auth")).isEqualTo(PrerequisiteStatusService.Result.UNKNOWN);
+        // Other components may independently be unmet; this auth observation must remain unknown.
     }
     private static PrerequisiteStatusService.Result result(Model model, String label) {
         @SuppressWarnings("unchecked")
@@ -129,6 +142,7 @@ class SetupControllerTest {
         public HarnessCapabilities capabilities() { return HarnessCapabilities.NONE; }
         public boolean checkCliAvailable() { availabilityCalls++; return true; }
         public boolean checkSubscriptionAuthentication() { subscriptionCalls++; return subscriptionReady; }
+        public HarnessReadiness probeSubscriptionAuthentication() { return checkSubscriptionAuthentication() ? HarnessReadiness.READY : HarnessReadiness.UNMET; }
         public HarnessExecutionResult execute(HarnessExecutionRequest request,
                 java.util.function.Consumer<String> lines) { throw new AssertionError("Setup cannot execute work"); }
     }
@@ -136,9 +150,9 @@ class SetupControllerTest {
     @Test void readinessCannotReportSubscriptionSuccessFromAGenericLogin() {
         var harness = mock(CodingHarnessService.class);
         when(harness.displayName()).thenReturn("Example Harness");
-        when(harness.checkCliAvailable(anyString())).thenReturn(true);
+        when(harness.probeCliAvailability(anyString())).thenReturn(HarnessReadiness.READY);
         when(harness.checkAuthentication()).thenReturn(true);
-        when(harness.checkSubscriptionAuthentication("example")).thenReturn(false);
+        when(harness.probeSubscriptionAuthentication("example")).thenReturn(HarnessReadiness.UNMET);
         var props = new IssueBotProperties();
         props.setAgentProvider("example");
         var controller = new SetupController(harness, props, mock(IssuePollingService.class),
@@ -148,7 +162,7 @@ class SetupControllerTest {
         controller.recheck(model);
         assertThat(result(model, "Example Harness")).isEqualTo(PrerequisiteStatusService.Result.READY);
         assertThat(result(model, "Example Harness Auth")).isEqualTo(PrerequisiteStatusService.Result.UNMET);
-        verify(harness).checkSubscriptionAuthentication("example");
+        verify(harness).probeSubscriptionAuthentication("example");
     }
 
     @Test void setupUsesSelectedHarnessMetadataWithoutRunningReadinessChecks() {
@@ -180,8 +194,8 @@ class SetupControllerTest {
         IssueBotProperties props = new IssueBotProperties();
         props.getGithub().setToken(token);
         CodingHarnessService claude = mock(CodingHarnessService.class);
-        when(claude.checkCliAvailable(anyString())).thenReturn(true);
-        when(claude.checkSubscriptionAuthentication("claude")).thenReturn(true);
+        when(claude.probeCliAvailability(anyString())).thenReturn(HarnessReadiness.READY);
+        when(claude.probeSubscriptionAuthentication("claude")).thenReturn(HarnessReadiness.READY);
         lenient().when(repoRepository.findAll()).thenReturn(List.of());
         return new SetupController(claude, props, mock(IssuePollingService.class),
                 mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks, webhookDeliveryLog,

@@ -47,3 +47,44 @@ Tests: `controller/IssueControllerTest.java`, `controller/IssueDetailLayoutRende
 - No schema migration required. No version/changelog bump here: root owns the single coordinated feature release.
 - Full Java/JavaScript suites, independent review, real-browser desktop/mobile/light/dark checks, and final release work remain root gates. Browser checks should include typing guidance, changing prerequisite state via explicit Setup re-check, then refreshing/polling detail and confirming the draft survives while submit eligibility updates.
 - Known limitations by design: readiness is not continuously monitored; unknown/stale status retains normal runtime preflight instead of blocking. Five-minute TTL and restart-to-unknown were approved by the controller. No known failing focused test remains.
+
+## Review fix round 1 — Important finding 1
+
+Base: `59ac542`. The finding was confirmed: concrete Claude/Codex boolean probes swallowed unavailable outcomes, so the original cache wrapper could not distinguish them from confirmed failures.
+
+Added `HarnessReadiness` at the runner/adapter boundary. Both concrete runners now report timeout, interruption, transport/I/O, malformed/ambiguous auth output, and ambiguous nonzero exits as UNKNOWN. Thread interruption is restored; unfinished probe processes are terminated. A typed missing-file exception confirms CLI UNMET; generic I/O is not guessed to mean missing installation. Claude uses structured logged-in/auth-method/subscription fields with strict trailing-token parsing; Codex accepts exact known status responses. Confirmed logged-out/API-key/non-subscription evidence is UNMET. Unsupported or incomplete status is UNKNOWN. Neither runner stores or exposes raw error output in readiness results.
+
+Existing boolean APIs remain fail-closed wrappers: only READY returns true. Compatibility adapters expose typed probes with legacy true -> READY and false -> UNKNOWN. Both built-in adapters forward concrete typed results. Actual selection preflight, subscription pinning, and explicit Setup POST consume typed results through the cache; UNKNOWN never becomes a newly confirmed unmet prerequisite, and it never authorizes stage execution. No credential collection, login, external integration, approval-policy change, or diagnostic-storage rewrite was added. Existing FailureDiagnosticService remains reused as accepted by the controller.
+
+Concrete coverage doubles only the OS process-start boundary, using a package-private runner seam; the project's subclass Mockito maker does not support construction mocking. Both real runners, adapter forwarding, actual preflight, stage pinning, and cache participate. Each runner exercises CLI/auth combinations for timeout, startup I/O, interruption, malformed response, ambiguous nonzero exit, confirmed unauthenticated, ready, and typed missing-file outcomes. Tests also verify boolean wrappers stay fail-closed and interrupt flags remain set. These tests do not invoke an installed CLI.
+
+Shared harness, stage persistence/selection, and workflow fixtures now stub typed readiness. Setup has an explicit unknown-auth regression; cache tests assert UNKNOWN supersedes earlier failure without authorizing execution. Existing direct retry and transactional guard tests remain in the covering suite.
+
+### Exact verification commands and outcomes
+
+The first two attempts used:
+
+```sh
+./mvnw -q -Dtest=ClaudeCodeServiceTest,CodexCliServiceTest,HarnessSelectionServiceTest,CodingHarnessServiceTest,SetupControllerTest,PrerequisiteStatusServiceTest,IssueControllerTest,IssueDispatchTransactionManagerTest,IssueDispatchServicePersistenceTest,ClaudeHarnessAdapterTest,CodexHarnessAdapterTest test > /tmp/task6-r1-first.log 2>&1
+./mvnw -q -Dtest=ClaudeCodeServiceTest,CodexCliServiceTest,HarnessSelectionServiceTest,CodingHarnessServiceTest,SetupControllerTest,PrerequisiteStatusServiceTest,IssueControllerTest,IssueDispatchTransactionManagerTest,IssueDispatchServicePersistenceTest,ClaudeHarnessAdapterTest,CodexHarnessAdapterTest test > /tmp/task6-r1-second.log 2>&1
+```
+
+Both exited 1 at compilation: first an incomplete local method replacement, then missing ObjectMapper arguments in two new parser fixtures. Corrected before runtime verification.
+
+The expanded covering command was run three times, with the respective log filenames `task6-r1-third.log`, `task6-r1-fourth.log`, and `task6-r1-fifth.log`:
+
+```sh
+./mvnw -q -Dtest=ClaudeCodeServiceTest,CodexCliServiceTest,HarnessSelectionServiceTest,CodingHarnessServiceTest,SetupControllerTest,PrerequisiteStatusServiceTest,IssueControllerTest,IssueDispatchTransactionManagerTest,IssueDispatchServicePersistenceTest,ClaudeHarnessAdapterTest,CodexHarnessAdapterTest,StageModelSelectionServiceTest,StageApprovalPersistenceTest,IssueWorkflowServiceTest test > /tmp/task6-r1-fifth.log 2>&1
+```
+
+- Third run: 363 tests, one failure and two errors. The Setup assertion mistakenly treated independent work-directory failure as auth failure; scoped it to the typed auth observation. Construction mocks were unsupported by this project's intentional subclass Mockito configuration; replaced them with the narrow process-start seam rather than altering the mock engine/dependencies.
+- Fourth run: exited 1 at test compilation due to the new test lambda's checked exception declaration; corrected locally.
+- Fifth/final run: exit 0, **365 tests, zero failures, zero errors, zero skipped** across all 14 listed classes. `git diff --check` also passed.
+
+### Self-review and remaining gates
+
+Traced concrete process outcomes through each adapter and cache consumer. Confirmed no GET/poll probe was added, no readiness fallback maps false to UNMET, and UNKNOWN cannot pass actual execution preflight/pinning. Reviewed strict parser allowlists, interrupt cleanup, existing billing-environment sanitization, component isolation, freshness, and unchanged transactional/audit guard ordering.
+
+The review's Minor logging observation is baselined, not silently claimed fixed: expected synthetic controller error-path WARN output and existing logging/Flyway-H2 environment warnings remain. No unrelated logging refactor or extra suite run was performed just for those warnings.
+
+Full combined suites and browser validation remain root Task 9 gates. Root was notified that existing `UiVisualFixturesTest` Setup fixtures still expect the old automatic GET/boolean probe contract and need migration to explicit POST/typed readiness before browser capture. No UI fixture edits were made in this fix round. No publication/deployment or other external write occurred.

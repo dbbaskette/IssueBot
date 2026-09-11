@@ -11,6 +11,8 @@ public interface CodingHarnessAdapter {
     HarnessCapabilities capabilities();
     boolean checkCliAvailable();
     boolean checkSubscriptionAuthentication();
+    default HarnessReadiness probeCliAvailability() { return HarnessReadiness.fromLegacy(checkCliAvailable()); }
+    default HarnessReadiness probeSubscriptionAuthentication() { return HarnessReadiness.fromLegacy(checkSubscriptionAuthentication()); }
     default boolean isCliAvailable() { return checkCliAvailable(); }
     default boolean checkAuthentication() { return checkSubscriptionAuthentication(); }
     default void clearAuthCache() { }
