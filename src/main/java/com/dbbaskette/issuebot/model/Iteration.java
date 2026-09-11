@@ -18,6 +18,20 @@ public class Iteration {
     @Column(name = "iteration_num", nullable = false)
     private int iterationNum;
 
+    /**
+     * Immutable identity captured when this persisted attempt is created. Null identifies a
+     * legacy row whose workflow run cannot safely be reconstructed from the mutable issue.
+     */
+    @Column(name = "workflow_run_snapshot", updatable = false)
+    private Integer workflowRunSnapshot;
+
+    /**
+     * Immutable approved-plan identity for this attempt. A null value means known no-plan only
+     * when {@link #workflowRunSnapshot} is non-null; both nulls identify an unknown legacy row.
+     */
+    @Column(name = "approved_plan_snapshot_id", updatable = false)
+    private Long approvedPlanSnapshotId;
+
     @Lob
     @Column(name = "claude_output")
     private String claudeOutput;
@@ -77,8 +91,19 @@ public class Iteration {
     public Iteration() {}
 
     public Iteration(TrackedIssue issue, int iterationNum) {
+        this(issue, iterationNum,
+                issue == null ? null : issue.getWorkflowRun(),
+                issue == null || issue.getApprovedPlanningVersion() == null
+                        ? null : issue.getApprovedPlanningVersion().getId());
+    }
+
+    /** Explicit snapshot constructor for import and test fixtures; snapshots remain immutable. */
+    public Iteration(TrackedIssue issue, int iterationNum, Integer workflowRunSnapshot,
+                     Long approvedPlanSnapshotId) {
         this.issue = issue;
         this.iterationNum = iterationNum;
+        this.workflowRunSnapshot = workflowRunSnapshot;
+        this.approvedPlanSnapshotId = approvedPlanSnapshotId;
     }
 
     // Getters and setters
@@ -91,6 +116,9 @@ public class Iteration {
 
     public int getIterationNum() { return iterationNum; }
     public void setIterationNum(int iterationNum) { this.iterationNum = iterationNum; }
+
+    public Integer getWorkflowRunSnapshot() { return workflowRunSnapshot; }
+    public Long getApprovedPlanSnapshotId() { return approvedPlanSnapshotId; }
 
     public String getClaudeOutput() { return claudeOutput; }
     public void setClaudeOutput(String claudeOutput) { this.claudeOutput = claudeOutput; }

@@ -19,9 +19,12 @@ class ReviewScoreResponsiveCssTest {
         }
 
         assertThat(css).containsPattern("(?s)\\.review-score-summary \\{[^}]*overflow-wrap: anywhere;")
+                .containsPattern("(?s)\\.review-change-sentence \\{[^}]*overflow-wrap: anywhere;")
+                .containsPattern("(?s)\\.review-change-group > summary \\{[^}]*min-height: var\\(--control-height\\);")
                 .contains("@media (max-width: 700px)")
                 .contains(".review-dimension-grid { grid-template-columns: minmax(0, 1fr); }")
-                .contains(".review-attempt-selector { overflow-wrap: anywhere; }");
+                .contains(".review-attempt-selector { overflow-wrap: anywhere; }")
+                .contains(".review-change-list li { grid-template-columns: minmax(0, 1fr);");
         assertThat(css).containsPattern("\\.review-stat \\{[^}]*background: var\\(--surface-raised\\);[^}]*color: var\\(--text-secondary\\);");
     }
 }

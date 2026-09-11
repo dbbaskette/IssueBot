@@ -456,7 +456,9 @@ public class IssueWorkflowService {
                 iteration = reusableImplementationIteration(trackedIssue.getId(), iterationNum);
             }
             if (iteration == null) {
-                iteration = new Iteration(trackedIssue, iterationNum);
+                iteration = new Iteration(trackedIssue, iterationNum,
+                        trackedIssue.getWorkflowRun(),
+                        approvedPlan == null ? null : approvedPlan.id());
                 iteration.setImplModel(trackedIssue.getResolvedImplModel());
                 iterationRepository.save(iteration);
             }

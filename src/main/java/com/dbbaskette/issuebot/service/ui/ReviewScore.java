@@ -13,7 +13,12 @@ public record ReviewScore(
         List<Dimension> dimensions,
         int findingCount,
         String model,
-        List<CodeReviewResult.CriterionVerdict> criteria
+        List<CodeReviewResult.CriterionVerdict> criteria,
+        List<Criterion> criterionDetails,
+        boolean criteriaAvailable,
+        List<CodeReviewResult.ReviewFinding> findings,
+        boolean findingsAvailable,
+        boolean structuredEvidenceAvailable
 ) {
     public ReviewScore {
         if (outcome == null) {
@@ -21,6 +26,17 @@ public record ReviewScore(
         }
         dimensions = List.copyOf(dimensions);
         criteria = List.copyOf(criteria);
+        criterionDetails = List.copyOf(criterionDetails);
+        findings = List.copyOf(findings);
+    }
+
+    /** Compatibility constructor for existing view and test call sites. */
+    public ReviewScore(ReviewOutcome outcome, String failureReason, String summary, Double overall,
+                       List<Dimension> dimensions, int findingCount, String model,
+                       List<CodeReviewResult.CriterionVerdict> criteria) {
+        this(outcome, failureReason, summary, overall, dimensions, findingCount, model, criteria,
+                criteria.stream().map(criterion -> new Criterion(null, criterion)).toList(),
+                true, List.of(), false, true);
     }
 
     /** Compatibility constructor for existing test/view assembly call sites. */
@@ -30,6 +46,14 @@ public record ReviewScore(
         this(passed == null ? ReviewOutcome.UNAVAILABLE
                         : (passed ? ReviewOutcome.PASSED : ReviewOutcome.FAILED),
                 null, summary, overall, dimensions, findingCount, model, criteria);
+    }
+
+    public record Criterion(String sourceId, CodeReviewResult.CriterionVerdict verdict) {
+        public Criterion {
+            if (verdict == null) {
+                throw new IllegalArgumentException("Criterion verdict is required");
+            }
+        }
     }
 
     public Boolean passed() {

@@ -19,9 +19,21 @@ public final class ReviewScoreHistoryAssembler {
 
     private ReviewScoreHistoryAssembler() {}
 
-    public record Attempt(int iterationNumber, Long iterationId, ReviewScore score) {
+    public record Attempt(int iterationNumber, Long iterationId, ReviewScore score,
+                          Long issueId, Integer workflowRunSnapshot,
+                          Long approvedPlanSnapshotId) {
+
+        /** Compatibility constructor for direct view fixtures. Identity is intentionally unknown. */
+        public Attempt(int iterationNumber, Long iterationId, ReviewScore score) {
+            this(iterationNumber, iterationId, score, null, null, null);
+        }
+
         public Integer overallPercent() {
             return score.overall() == null ? null : scorePercent(score.overall());
+        }
+
+        public boolean hasKnownIdentity() {
+            return issueId != null && workflowRunSnapshot != null;
         }
 
         public String selectorLabel() {
@@ -56,11 +68,26 @@ public final class ReviewScoreHistoryAssembler {
             Double overallDelta,
             List<CodeReviewResult.CriterionVerdict> criteria,
             long criteriaMet,
-            int criteriaTotal) {
+            int criteriaTotal,
+            ReviewChanges changes,
+            List<Attempt> skippedAttempts,
+            String comparisonExplanation) {
         public History {
             attempts = List.copyOf(attempts);
             dimensions = List.copyOf(dimensions);
             criteria = List.copyOf(criteria);
+            skippedAttempts = List.copyOf(skippedAttempts);
+        }
+
+        /** Compatibility constructor for existing direct test/view assembly call sites. */
+        public History(Attempt selected, Attempt latest, Attempt previous,
+                       List<Attempt> attempts, List<DimensionDelta> dimensions,
+                       Double overallDelta, List<CodeReviewResult.CriterionVerdict> criteria,
+                       long criteriaMet, int criteriaTotal) {
+            this(selected, latest, previous, attempts, dimensions, overallDelta, criteria,
+                    criteriaMet, criteriaTotal,
+                    new ReviewChanges(false, "Change comparison is unavailable.", List.of(), List.of()),
+                    List.of(), "Change comparison is unavailable.");
         }
 
         public Integer overallDeltaPoints() {
@@ -73,6 +100,28 @@ public final class ReviewScoreHistoryAssembler {
 
         public long scoredAttemptCount() {
             return attempts.stream().filter(attempt -> attempt.score().overall() != null).count();
+        }
+
+        public String changeSentence() {
+            if (previous == null) {
+                return comparisonExplanation;
+            }
+            String verdict = previous.score().outcome() == selected.score().outcome()
+                    ? "Verdict remains " + verdictLabel(selected.score().outcome()) + "."
+                    : "Verdict changed from " + verdictLabel(previous.score().outcome())
+                    + " to " + verdictLabel(selected.score().outcome()) + ".";
+            String score = overallDeltaPoints() == null ? ""
+                    : overallDeltaPoints() == 0 ? " Overall score is unchanged."
+                    : overallDeltaPoints() > 0
+                    ? " Overall score improved " + overallDeltaPoints() + " "
+                    + overallDeltaPointUnit() + "."
+                    : " Overall score declined " + Math.abs(overallDeltaPoints()) + " "
+                    + overallDeltaPointUnit() + ".";
+            return verdict + score + " " + comparisonExplanation;
+        }
+
+        private static String verdictLabel(ReviewOutcome outcome) {
+            return outcome == ReviewOutcome.PASSED ? "passed" : "changes requested";
         }
     }
 
@@ -88,7 +137,9 @@ public final class ReviewScoreHistoryAssembler {
             }
             ReviewScore score = ReviewScoreParser.parse(iteration);
             if (score != null) {
-                chronological.add(new Attempt(iteration.getIterationNum(), iteration.getId(), score));
+                chronological.add(new Attempt(iteration.getIterationNum(), iteration.getId(), score,
+                        iteration.getIssue() == null ? null : iteration.getIssue().getId(),
+                        iteration.getWorkflowRunSnapshot(), iteration.getApprovedPlanSnapshotId()));
             }
         }
         if (chronological.isEmpty()) {
@@ -106,14 +157,21 @@ public final class ReviewScoreHistoryAssembler {
                 .orElse(latestScored);
 
         Attempt previous = null;
-        for (Attempt candidate : chronological) {
-            if (candidate == selected) {
-                break;
+        List<Attempt> skippedAttempts = new ArrayList<>();
+        int selectedIndex = chronological.indexOf(selected);
+        if (isComparableCompleted(selected) && selected.hasKnownIdentity()) {
+            for (int index = selectedIndex - 1; index >= 0; index--) {
+                Attempt candidate = chronological.get(index);
+                if (sameIdentity(candidate, selected) && isComparableCompleted(candidate)) {
+                    previous = candidate;
+                    break;
+                }
+                skippedAttempts.add(candidate);
             }
-            if (candidate.score().overall() != null) {
-                previous = candidate;
-            }
+        } else if (selectedIndex > 0) {
+            skippedAttempts.addAll(chronological.subList(0, selectedIndex));
         }
+        Collections.reverse(skippedAttempts);
 
         Map<String, ReviewScore.Dimension> priorByKey = previous == null ? Map.of()
                 : previous.score().dimensions().stream().collect(Collectors.toMap(
@@ -136,8 +194,63 @@ public final class ReviewScoreHistoryAssembler {
         long met = criteria.stream().filter(criterion -> "met".equals(criterion.verdict())).count();
         List<Attempt> newestFirst = new ArrayList<>(chronological);
         Collections.reverse(newestFirst);
+        ReviewChanges changes = ReviewChangeAssembler.compare(
+                previous == null ? null : previous.score(), selected.score());
+        String explanation = comparisonExplanation(selected, previous, skippedAttempts, changes);
         return new History(selected, latest, previous, List.copyOf(newestFirst), deltas,
-                overallDelta, List.copyOf(criteria), met, criteria.size());
+                overallDelta, List.copyOf(criteria), met, criteria.size(), changes,
+                skippedAttempts, explanation);
+    }
+
+    private static boolean isComparableCompleted(Attempt attempt) {
+        return attempt.score().overall() != null && attempt.score().structuredEvidenceAvailable()
+                && (attempt.score().outcome() == ReviewOutcome.PASSED
+                || attempt.score().outcome() == ReviewOutcome.FAILED);
+    }
+
+    private static boolean sameIdentity(Attempt first, Attempt second) {
+        return first.hasKnownIdentity() && second.hasKnownIdentity()
+                && first.issueId().equals(second.issueId())
+                && first.workflowRunSnapshot().equals(second.workflowRunSnapshot())
+                && java.util.Objects.equals(first.approvedPlanSnapshotId(),
+                second.approvedPlanSnapshotId());
+    }
+
+    private static String comparisonExplanation(Attempt selected, Attempt previous,
+                                                List<Attempt> skipped,
+                                                ReviewChanges changes) {
+        if (!selected.hasKnownIdentity()) {
+            return "Change comparison unavailable: this legacy review has no persisted workflow-run identity.";
+        }
+        if (!isComparableCompleted(selected)) {
+            return "Change comparison unavailable: the selected review has no completed structured score.";
+        }
+        if (previous == null) {
+            String reason = skipped.isEmpty()
+                    ? "No earlier completed review is available for this workflow run and approved plan."
+                    : "No earlier completed review has the same issue, workflow run, and approved plan.";
+            return reason + skippedExplanation(skipped);
+        }
+        String baseline = "Compared with " + attemptName(previous) + ".";
+        String detail = changes.comparable() ? "" : " " + changes.explanation();
+        return baseline + skippedExplanation(skipped) + detail;
+    }
+
+    private static String skippedExplanation(List<Attempt> skipped) {
+        if (skipped.isEmpty()) {
+            return "";
+        }
+        String names = skipped.stream().map(ReviewScoreHistoryAssembler::attemptName)
+                .collect(Collectors.joining(", "));
+        return " Skipped " + names + " because "
+                + (skipped.size() == 1 ? "its" : "their")
+                + " review details or comparison identity were unavailable.";
+    }
+
+    private static String attemptName(Attempt attempt) {
+        return "review " + attempt.iterationNumber()
+                + (attempt.iterationId() == null ? ""
+                : " (attempt " + attempt.iterationId() + ")");
     }
 
     private static int scorePercent(double value) {

@@ -467,26 +467,30 @@
                     <div class="review-score-overview" th:if="${history.selected.score.overall != null}">
                         <strong th:text="${history.selected.overallPercent + '%'}">95%</strong>
                         <div class="review-score-context">
-                            <span th:if="${history.previous == null}">First scored review</span>
+                            <span th:if="${history.previous == null}"
+                                  th:text="${history.skippedAttempts.isEmpty() ? 'First scored review' : 'No comparable baseline'}">First scored review</span>
                             <span th:if="${history.previous != null and history.overallDeltaPoints != null and history.overallDeltaPoints != 0}"
                                   th:text="${history.overallDeltaPoints + ' ' + history.overallDeltaPointUnit + ' from review ' + history.previous.iterationNumber}">22 points from review 1</span>
                             <span th:if="${history.previous != null and history.overallDeltaPoints == 0}">No overall change</span>
                             <span class="review-score-meta"
-                                  th:if="${history.selected.score.model != null or history.selected.score.findingCount > 0}"
                                   th:text="${history.selected.score.model != null
-                                      ? history.selected.score.model + ' · ' + history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')
-                                      : history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')}">review-model · 2 findings</span>
+                                      ? history.selected.score.model + ' · ' + (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'findings unavailable')
+                                      : (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'Findings unavailable')}">review-model · 2 findings</span>
                         </div>
                     </div>
 
                     <div class="review-score-meta review-score-meta-only"
-                         th:if="${history.selected.score.overall == null and (history.selected.score.model != null or history.selected.score.findingCount > 0)}"
+                         th:if="${history.selected.score.overall == null}"
                          th:text="${history.selected.score.model != null
-                             ? history.selected.score.model + ' · ' + history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')
-                             : history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')}">review-model · 0 findings</div>
+                             ? history.selected.score.model + ' · ' + (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'findings unavailable')
+                             : (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'Findings unavailable')}">review-model · 0 findings</div>
 
                     <p class="review-score-summary" th:if="${history.selected.score.summary != null}"
                        th:text="${history.selected.score.summary}">Review summary</p>
+
+                    <p class="review-change-sentence" th:text="${history.changeSentence}">
+                        Verdict remains passed. Compared with review 1.
+                    </p>
 
                     <nav th:if="${history.scoredAttemptCount > 2}" class="review-attempt-selector"
                          aria-label="Review attempts">
@@ -498,8 +502,12 @@
                            th:text="${attempt.selectorLabel}">Review 2 · Passed · 95%</a>
                     </nav>
 
-                    <div class="review-dimension-grid" th:if="${not history.dimensions.isEmpty()}">
-                        <div th:each="dimension : ${history.dimensions}" class="review-dimension">
+                    <details class="review-change-group" open
+                             th:if="${not history.dimensions.isEmpty()}"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':dimensions'}">
+                        <summary>Dimension changes</summary>
+                        <div class="review-dimension-grid">
+                          <div th:each="dimension : ${history.dimensions}" class="review-dimension">
                             <div class="review-dimension-heading">
                                 <strong th:text="${dimension.label}">Test coverage</strong>
                                 <span th:text="${dimension.currentPercent + '%'}">94%</span>
@@ -518,13 +526,32 @@
                             <span class="review-score-delta"
                                   th:classappend="${dimension.deltaPoints == null ? 'is-added' : (dimension.deltaPoints == 0 ? 'is-neutral' : (dimension.deltaPoints > 0 ? 'is-positive' : 'is-negative'))}"
                                   th:text="${dimension.deltaPoints == null ? 'New' : (dimension.deltaPoints == 0 ? 'No change' : (dimension.deltaPoints > 0 ? '+' : '') + dimension.deltaPoints)}">+49</span>
+                          </div>
                         </div>
-                    </div>
+                    </details>
 
-                    <details th:if="${history.criteriaTotal > 0}" class="review-criteria" open
+                    <details th:if="${history.criteriaTotal > 0 or not history.changes.criteria.isEmpty() or not history.selected.score.criteriaAvailable}"
+                             class="review-criteria review-change-group" open
                              th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':plan:' + (selectedPlanningVersion != null ? selectedPlanningVersion.versionNumber : 'legacy') + ':criteria'}">
                         <summary class="review-criteria-summary"
-                                 th:text="${history.criteriaMet + ' of ' + history.criteriaTotal + ' met'}">4 of 4 met</summary>
+                                 th:text="${history.selected.score.criteriaAvailable ? 'Acceptance criteria · ' + history.criteriaMet + ' of ' + history.criteriaTotal + ' met' : 'Acceptance criteria · unavailable'}">Acceptance criteria · 4 of 4 met</summary>
+                        <p th:if="${not history.selected.score.criteriaAvailable}"
+                           class="review-change-unavailable">Acceptance criteria were not included in this review.</p>
+                        <ul th:if="${not history.changes.criteria.isEmpty()}" class="review-change-list">
+                            <li th:each="change : ${history.changes.criteria}"
+                                th:classappend="${change.cssClass}">
+                                <span class="review-change-label" th:text="${change.label}">Newly met</span>
+                                <strong th:text="${change.text}">Criterion</strong>
+                                <span class="review-change-state"
+                                      th:if="${change.previousState != null or change.currentState != null}"
+                                      th:text="${change.previousState != null and change.currentState != null
+                                          ? change.previousState + ' → ' + change.currentState
+                                          : (change.currentState != null ? change.currentState : change.previousState)}">unmet → met</span>
+                            </li>
+                        </ul>
+                        <p class="review-current-evidence-label" th:if="${history.criteriaTotal > 0}">
+                            Current criterion evidence
+                        </p>
                         <ul class="review-criteria-list">
                             <li th:each="criterion : ${history.criteria}"
                                 th:classappend="${'is-' + criterion.verdict}">
@@ -537,6 +564,29 @@
                                     <span th:if="${criterion.note != null and not #strings.isEmpty(criterion.note)}"
                                           th:text="${criterion.note}">Criterion note</span>
                                 </div>
+                            </li>
+                        </ul>
+                    </details>
+
+                    <details class="review-change-group review-finding-changes"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':findings'}">
+                        <summary th:text="${history.selected.score.findingsAvailable
+                            ? 'Findings · ' + history.selected.score.findingCount
+                            : 'Findings · unavailable'}">Findings · 2</summary>
+                        <p th:if="${not history.selected.score.findingsAvailable}"
+                           class="review-change-unavailable">Findings were not included in this review.</p>
+                        <p th:if="${history.selected.score.findingsAvailable and history.selected.score.findingCount == 0}"
+                           class="review-change-unavailable">No findings in this review.</p>
+                        <ul th:if="${not history.changes.findings.isEmpty()}" class="review-change-list">
+                            <li th:each="change : ${history.changes.findings}"
+                                th:classappend="${change.cssClass}">
+                                <span class="review-change-label" th:text="${change.label}">Persistent</span>
+                                <strong th:text="${change.text}">Finding</strong>
+                                <span class="review-change-state"
+                                      th:if="${change.previousState != null or change.currentState != null}"
+                                      th:text="${change.previousState != null and change.currentState != null
+                                          ? change.previousState + ' → ' + change.currentState
+                                          : (change.currentState != null ? change.currentState : change.previousState)}">medium → high</span>
                             </li>
                         </ul>
                     </details>

@@ -44,15 +44,25 @@ public final class ReviewScoreParser {
             if (outcome == ReviewOutcome.OPERATIONAL_ERROR) {
                 return emptyScore(outcome, failureReason, iteration);
             }
+            if (!root.isObject()) {
+                return emptyScore(outcome, failureReason, iteration);
+            }
             List<ReviewScore.Dimension> dimensions = dimensions(root);
             Double overall = dimensions.isEmpty() ? null : dimensions.stream()
                     .mapToDouble(ReviewScore.Dimension::value)
                     .average()
                     .orElseThrow();
-            int findingCount = root.path("findings").isArray() ? root.path("findings").size() : 0;
+            boolean criteriaAvailable = root.has("criteria") && root.path("criteria").isArray();
+            boolean findingsAvailable = root.has("findings") && root.path("findings").isArray();
+            List<ReviewScore.Criterion> criterionDetails = criteria(root.path("criteria"));
+            List<CodeReviewResult.CriterionVerdict> criteria = criterionDetails.stream()
+                    .map(ReviewScore.Criterion::verdict)
+                    .toList();
+            List<CodeReviewResult.ReviewFinding> findings = findings(root.path("findings"));
+            int findingCount = findingsAvailable ? findings.size() : 0;
             return new ReviewScore(outcome, failureReason, root.path("summary").asText(null),
                     overall, dimensions, findingCount, iteration.getReviewModel(),
-                    criteria(root.path("criteria")));
+                    criteria, criterionDetails, criteriaAvailable, findings, findingsAvailable, true);
         } catch (Exception e) {
             log.warn("Could not parse review JSON for iteration {}: {}", iteration.getId(), e.getMessage());
             return emptyScore(outcome, failureReason, iteration);
@@ -71,24 +81,55 @@ public final class ReviewScoreParser {
         return dimensions;
     }
 
-    private static List<CodeReviewResult.CriterionVerdict> criteria(JsonNode criteriaNode) {
+    private static List<ReviewScore.Criterion> criteria(JsonNode criteriaNode) {
         if (!criteriaNode.isArray()) {
             return List.of();
         }
-        List<CodeReviewResult.CriterionVerdict> criteria = new ArrayList<>();
+        List<ReviewScore.Criterion> criteria = new ArrayList<>();
         for (JsonNode criterion : criteriaNode) {
-            criteria.add(CodeReviewResult.CriterionVerdict.lenient(
-                    criterion.path("text").asText(""),
-                    criterion.path("verdict").asText(""),
-                    criterion.path("note").asText("")));
+            CodeReviewResult.CriterionVerdict verdict = CodeReviewResult.CriterionVerdict.lenient(
+                    criterion.path("text").asText(""), criterion.path("verdict").asText(""),
+                    criterion.path("note").asText(""));
+            criteria.add(new ReviewScore.Criterion(sourceId(criterion), verdict));
         }
         return criteria;
+    }
+
+    private static String sourceId(JsonNode criterion) {
+        for (String field : List.of("id", "sourceId", "source_id", "criterionId", "criterion_id")) {
+            JsonNode value = criterion.get(field);
+            if (value != null && value.isValueNode() && !value.isNull()) {
+                String text = value.asText();
+                if (!text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static List<CodeReviewResult.ReviewFinding> findings(JsonNode findingsNode) {
+        if (!findingsNode.isArray()) {
+            return List.of();
+        }
+        List<CodeReviewResult.ReviewFinding> findings = new ArrayList<>();
+        for (JsonNode finding : findingsNode) {
+            Integer line = finding.hasNonNull("line") ? finding.path("line").asInt() : null;
+            findings.add(new CodeReviewResult.ReviewFinding(
+                    finding.path("severity").asText(""),
+                    finding.path("category").asText(""),
+                    finding.path("file").asText(""),
+                    line,
+                    finding.path("finding").asText(""),
+                    finding.path("suggestion").asText("")));
+        }
+        return findings;
     }
 
     private static ReviewScore emptyScore(ReviewOutcome outcome, String failureReason,
                                           Iteration iteration) {
         return new ReviewScore(outcome, failureReason, failureReason, null, List.of(), 0,
-                iteration.getReviewModel(), List.of());
+                iteration.getReviewModel(), List.of(), List.of(), false, List.of(), false, false);
     }
 
     private record DimensionDefinition(String jsonField, String key, String label) {}

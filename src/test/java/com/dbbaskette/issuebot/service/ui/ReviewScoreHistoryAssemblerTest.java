@@ -39,6 +39,65 @@ class ReviewScoreHistoryAssemblerTest {
     }
 
     @Test
+    void unavailableMiddleAttemptIsNamedAndSkippedForSameIdentityBaseline() {
+        Iteration first = review(10L, 1, false,
+                "{\"specComplianceScore\":0.60,\"criteria\":[],\"findings\":[]}");
+        Iteration unavailable = review(20L, 2, null,
+                PersistedReviewOutcome.operationalErrorJson("review timed out"));
+        Iteration current = review(30L, 3, true,
+                "{\"specComplianceScore\":0.90,\"criteria\":[],\"findings\":[]}");
+
+        History history = ReviewScoreHistoryAssembler.assemble(
+                List.of(current, unavailable, first), null);
+
+        assertThat(history.previous().iterationId()).isEqualTo(10L);
+        assertThat(history.skippedAttempts()).extracting(Attempt::iterationId)
+                .containsExactly(20L);
+        assertThat(history.changeSentence())
+                .contains("Compared with review 1 (attempt 10)")
+                .contains("Skipped review 2 (attempt 20)");
+    }
+
+    @Test
+    void changedRunOrPlanNeverSuppliesBaseline() {
+        TrackedIssue issue = issue();
+        Iteration priorRun = review(issue, 10L, 1, false,
+                "{\"specComplianceScore\":0.60}", 4, 100L);
+        Iteration priorPlan = review(issue, 20L, 2, false,
+                "{\"specComplianceScore\":0.70}", 5, 100L);
+        Iteration current = review(issue, 30L, 3, true,
+                "{\"specComplianceScore\":0.90}", 5, 101L);
+
+        History history = ReviewScoreHistoryAssembler.assemble(
+                List.of(current, priorPlan, priorRun), null);
+
+        assertThat(history.previous()).isNull();
+        assertThat(history.overallDelta()).isNull();
+        assertThat(history.comparisonExplanation()).contains("same issue, workflow run, and approved plan");
+    }
+
+    @Test
+    void legacyUnknownIdentityDoesNotUseCurrentMutableIssueValues() {
+        TrackedIssue issue = issue();
+        issue.setWorkflowRun(8);
+        Iteration legacy = new Iteration();
+        legacy.setIssue(issue);
+        legacy.setIterationNum(1);
+        legacy.setId(10L);
+        legacy.setReviewPassed(false);
+        legacy.setReviewJson("{\"specComplianceScore\":0.60}");
+        Iteration current = review(issue, 20L, 2, true,
+                "{\"specComplianceScore\":0.90}", 8, null);
+
+        History history = ReviewScoreHistoryAssembler.assemble(List.of(legacy, current), null);
+
+        assertThat(history.previous()).isNull();
+        assertThat(history.skippedAttempts()).extracting(Attempt::iterationId)
+                .containsExactly(10L);
+        assertThat(history.comparisonExplanation()).contains("same issue, workflow run, and approved plan");
+    }
+
+    @Test
     void requestedOlderAttemptUsesNearestEarlierScoredBaseline() {
         History history = ReviewScoreHistoryAssembler.assemble(
                 List.of(scored(1, false, 0.60, 0.50),
@@ -256,12 +315,28 @@ class ReviewScoreHistoryAssemblerTest {
     }
 
     private Iteration review(long id, int number, Boolean passed, String reviewJson) {
-        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42, "Test issue");
+        TrackedIssue issue = issue();
         Iteration iteration = new Iteration(issue, number);
         iteration.setId(id);
         iteration.setReviewPassed(passed);
         iteration.setReviewJson(reviewJson);
         iteration.setReviewModel("claude-sonnet-4-6");
         return iteration;
+    }
+
+    private Iteration review(TrackedIssue issue, long id, int number, Boolean passed,
+                             String reviewJson, Integer run, Long planId) {
+        Iteration iteration = new Iteration(issue, number, run, planId);
+        iteration.setId(id);
+        iteration.setReviewPassed(passed);
+        iteration.setReviewJson(reviewJson);
+        iteration.setReviewModel("claude-sonnet-4-6");
+        return iteration;
+    }
+
+    private TrackedIssue issue() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 42, "Test issue");
+        issue.setId(42L);
+        return issue;
     }
 }
