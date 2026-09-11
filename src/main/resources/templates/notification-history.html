@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en"><body>
+<section th:fragment="content" class="notification-history">
+    <div class="page-header"><h2>Notification history</h2></div>
+    <p>Every event is retained here. Unread actions count groups needing attention; reading a group does not resolve its decision.</p>
+    <form action="/notifications" method="get" class="filter-bar">
+        <label>Search history <input name="query" maxlength="200" th:value="${query}" placeholder="Search all events"></label>
+        <label>Repository <select name="repoId"><option value="">All repositories</option>
+            <option th:each="repo : ${repos}" th:value="${repo.id}" th:text="${repo.fullName()}" th:selected="${repo.id == repoId}"></option>
+        </select></label>
+        <label>Category <select name="category"><option th:each="value : ${ {'ALL','APPROVAL','RECOVERY','PROGRESS','COMPLETION','SYSTEM','LEGACY'} }"
+            th:value="${value}" th:text="${#strings.capitalize(#strings.toLowerCase(value))}" th:selected="${value == category}"></option></select></label>
+        <label>Read state <select name="readFilter"><option th:each="value : ${ {'ALL','UNREAD','READ'} }"
+            th:value="${value}" th:text="${#strings.capitalize(#strings.toLowerCase(value))}" th:selected="${value == readFilter}"></option></select></label>
+        <label><input type="checkbox" name="actionsOnly" value="true" th:checked="${actionsOnly}"> Actions only</label>
+        <button type="submit" class="btn">Filter history</button>
+    </form>
+    <details data-ui-state-key="notification:shared-mutes">
+        <summary>Shared notification delivery preferences</summary>
+        <p>These settings apply to everyone using this console. Muted events stay in history and search. Approvals, recovery, system errors, and current action-required events always remain eligible for delivery.</p>
+        <div class="form-actions">
+            <form th:each="value : ${ {'PROGRESS','COMPLETION'} }" th:action="@{/notifications/mute}" method="post"
+                  th:with="isMuted=${mutedCategories.![name()].contains(value)}">
+                <input type="hidden" name="category" th:value="${value}">
+                <input type="hidden" name="muted" th:value="${!isMuted}">
+                <button type="submit" class="btn btn-ghost" th:text="${(isMuted ? 'Unmute ' : 'Mute ') + #strings.toLowerCase(value)}">Mute category</button>
+            </form>
+        </div>
+    </details>
+    <p><strong th:text="${notificationSnapshot.unreadActionGroupCount}">0</strong> unread action groups across all notifications</p>
+    <form th:if="${notificationSnapshot.highestVisibleEventId > 0}" th:action="@{/notifications/read}" method="post">
+        <input type="hidden" name="throughId" th:value="${notificationSnapshot.highestVisibleEventId}">
+        <input type="hidden" name="returnTo" value="history">
+        <button type="submit" class="btn btn-ghost">Mark all read through this snapshot</button>
+    </form>
+    <div th:replace="~{notifications :: groups(${notificationSnapshot}, true)}"></div>
+    <nav class="pager" aria-label="Notification history pages">
+        <a th:if="${notificationSnapshot.groups.hasPrevious()}" class="btn btn-ghost"
+           th:href="@{/notifications(query=${query},repoId=${repoId},category=${category},readFilter=${readFilter},actionsOnly=${actionsOnly},page=${notificationSnapshot.groups.number - 1})}">Previous page</a>
+        <span th:text="${'Page ' + (notificationSnapshot.groups.number + 1) + ' · ' + notificationSnapshot.groups.totalElements + ' groups'}"></span>
+        <a th:if="${notificationSnapshot.groups.hasNext()}" class="btn btn-ghost"
+           th:href="@{/notifications(query=${query},repoId=${repoId},category=${category},readFilter=${readFilter},actionsOnly=${actionsOnly},page=${notificationSnapshot.groups.number + 1})}">Next page</a>
+    </nav>
+</section>
+<div th:fragment="entries" class="notification-entry-page">
+    <p class="text-muted">Events in chronological order, 25 per page.</p>
+    <ol>
+        <li th:each="event : ${historyEvents.content}">
+            <time th:text="${#temporals.format(event.createdAt, 'MMM d, HH:mm:ss')}"></time>
+            <strong th:text="${event.title}"></strong>
+            <span th:text="${event.unread ? 'Unread' : 'Read'}"></span>
+            <p th:text="${event.detail}"></p>
+        </li>
+    </ol>
+    <p th:if="${historyEvents.empty}">No events in this group.</p>
+    <form th:if="${historyThroughId > 0}" th:action="@{/notifications/group/read}" method="post">
+        <input type="hidden" name="groupKey" th:value="${groupKey}">
+        <input type="hidden" name="throughId" th:value="${historyThroughId}">
+        <input type="hidden" name="returnTo" value="history">
+        <button class="btn btn-ghost" type="submit">Mark group read through these events</button>
+    </form>
+    <nav class="pager" aria-label="Group event pages">
+        <button th:if="${historyEvents.hasPrevious()}" class="btn btn-ghost" type="button"
+                th:hx-get="@{/notifications/group(groupKey=${groupKey},page=${historyEvents.number - 1})}"
+                hx-target="closest .notification-entries" hx-swap="innerHTML">Earlier events</button>
+        <span th:text="${'Page ' + (historyEvents.number + 1) + ' · ' + historyEvents.totalElements + ' events'}"></span>
+        <button th:if="${historyEvents.hasNext()}" class="btn btn-ghost" type="button"
+                th:hx-get="@{/notifications/group(groupKey=${groupKey},page=${historyEvents.number + 1})}"
+                hx-target="closest .notification-entries" hx-swap="innerHTML">Later events</button>
+    </nav>
+</div>
+</body></html>

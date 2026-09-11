@@ -202,7 +202,6 @@ public class IssueController {
         model.addAttribute("hasNext", issuePage.hasNext());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         populateDependencies(model, repoId);
         return ViewResolver.view("issues", hx != null);
     }
@@ -614,7 +613,7 @@ public class IssueController {
             String message = "Started implementation for " + issue.getRepo().fullName()
                     + " #" + issue.getIssueNumber() + " from approved Plan v" + version;
             eventService.log("IMPLEMENTATION_STARTED", message, issue.getRepo(), issue);
-            notificationService.info("Implementation Started", message, issue);
+            notificationService.progress("Implementation Started", message, issue);
         } else {
             eventService.log("MANUAL_START",
                     "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
@@ -698,7 +697,7 @@ public class IssueController {
         String message = "Released the repository slot for " + issue.getRepo().fullName()
                 + " #" + issue.getIssueNumber() + approvedPlanReleaseDescription(issue);
         eventService.log("READY_SLOT_RELEASED", message, issue.getRepo(), issue);
-        notificationService.info("Repository Slot Released", message, issue);
+        notificationService.progress("Repository Slot Released", message, issue);
         redirectAttributes.addFlashAttribute("success",
                 "Returned to queue. The approved plan was preserved; normal automatic processing may start this issue later.");
         return "redirect:/issues/" + id + "#ready-to-start";
@@ -1349,7 +1348,6 @@ public class IssueController {
         model.addAttribute("workflowStepper", workflowStepperAssembler.assemble(issue));
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         BigDecimal effectiveBudget = issue.effectiveBudgetUsd();
         model.addAttribute("issueSpent", totalCost);
         model.addAttribute("effectiveBudget", effectiveBudget);

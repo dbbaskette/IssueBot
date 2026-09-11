@@ -18,9 +18,8 @@ import org.springframework.web.bind.annotation.ModelAttribute;
  * <p>Only ZERO-COST attributes belong here: {@code @ModelAttribute} methods on a
  * {@code @ControllerAdvice} run for EVERY handler invocation app-wide — including SSE stream
  * subscriptions, webhook posts, and the 30s fragment polls — not just page renders. The bell's
- * unread count (a database COUNT) started life here and was moved into the layout-rendering
- * page controllers, alongside their {@code pendingApprovals} count, for exactly that reason
- * (PR #102 review).
+ * unread-action snapshot belongs to {@code NotificationWebConfig}'s post-render interceptor,
+ * which reuses the history/panel snapshot and does not run database queries for SSE/webhooks.
  */
 @ControllerAdvice
 public class UiModelAdvice {

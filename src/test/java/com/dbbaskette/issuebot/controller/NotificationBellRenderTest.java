@@ -150,8 +150,13 @@ class NotificationBellRenderTest {
 
     private String renderPanel(List<Notification> notifications, long unreadCount) {
         WebContext context = new WebContext(webExchange, Locale.US);
-        context.setVariable("notifications", notifications);
-        context.setVariable("unreadCount", unreadCount);
+        var groups = notifications.stream().map(n -> new com.dbbaskette.issuebot.service.notification.NotificationSnapshot.Group(
+                "legacy:" + n.getId(), n, n.isUnread() ? 1 : 0, n.getId(),
+                n.getIssueId() == null ? null : new com.dbbaskette.issuebot.service.ui.IssueNextAction(
+                        "Current state", "View issue", "/issues/" + n.getIssueId(),
+                        com.dbbaskette.issuebot.service.ui.IssueNextAction.Tone.NEUTRAL, false), false)).toList();
+        context.setVariable("notificationSnapshot", new com.dbbaskette.issuebot.service.notification.NotificationSnapshot(
+                new org.springframework.data.domain.PageImpl<>(groups), unreadCount, unreadCount > 0 ? 10 : 0));
 
         TemplateSpec spec = new TemplateSpec("notifications", Set.of("panel"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);

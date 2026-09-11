@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.Notification;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
+import com.dbbaskette.issuebot.repository.NotificationPreferenceRepository;
+import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,12 +32,25 @@ public class NotificationService {
     private final EventService eventService;
     private final NotificationRepository notificationRepository;
     private final boolean systemTraySupported;
+    private final NotificationPreferenceRepository preferences;
+    private final IssueNextActionResolver nextAction;
+    private final NotificationTriageService triage;
 
     public NotificationService(IssueBotProperties properties, EventService eventService,
                                 NotificationRepository notificationRepository) {
+        this(properties, eventService, notificationRepository, null, new IssueNextActionResolver(), null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public NotificationService(IssueBotProperties properties, EventService eventService,
+            NotificationRepository notificationRepository, NotificationPreferenceRepository preferences,
+            IssueNextActionResolver nextAction, NotificationTriageService triage) {
         this.properties = properties;
         this.eventService = eventService;
         this.notificationRepository = notificationRepository;
+        this.preferences = preferences;
+        this.nextAction = nextAction;
+        this.triage = triage;
         this.systemTraySupported = checkSystemTraySupport();
     }
 
@@ -89,9 +104,7 @@ public class NotificationService {
      * system-level notifications with no associated issue.
      */
     public void info(String title, String message, TrackedIssue issue) {
-        sendDesktopNotification(title, message, TrayIcon.MessageType.INFO);
-        sendDashboardEvent("NOTIFICATION_INFO", title + ": " + message);
-        persist(Notification.Severity.INFO, title, message, issue);
+        emit(null, Notification.Severity.INFO, title, message, issue);
     }
 
     public void warn(String title, String message) {
@@ -99,15 +112,50 @@ public class NotificationService {
     }
 
     public void warn(String title, String message, TrackedIssue issue) {
-        sendDesktopNotification(title, message, TrayIcon.MessageType.WARNING);
-        sendDashboardEvent("NOTIFICATION_WARN", title + ": " + message);
-        persist(Notification.Severity.WARN, title, message, issue);
+        emit(null, Notification.Severity.WARN, title, message, issue);
     }
 
     public void error(String title, String message) {
-        sendDesktopNotification(title, message, TrayIcon.MessageType.ERROR);
-        sendDashboardEvent("NOTIFICATION_ERROR", title + ": " + message);
-        persist(Notification.Severity.ERROR, title, message, null);
+        emit(null, Notification.Severity.ERROR, title, message, null);
+    }
+
+    public void approval(String title, String message, TrackedIssue issue) {
+        emit(Notification.Category.APPROVAL, Notification.Severity.INFO, title, message, issue);
+    }
+    public void recovery(String title, String message, TrackedIssue issue) {
+        emit(Notification.Category.RECOVERY, Notification.Severity.WARN, title, message, issue);
+    }
+    public void progress(String title, String message, TrackedIssue issue) {
+        emit(Notification.Category.PROGRESS, Notification.Severity.INFO, title, message, issue);
+    }
+    public void completion(String title, String message, TrackedIssue issue) {
+        emit(Notification.Category.COMPLETION, Notification.Severity.INFO, title, message, issue);
+    }
+    public void systemError(String title, String message) {
+        emit(Notification.Category.SYSTEM, Notification.Severity.ERROR, title, message, null);
+    }
+
+    private void emit(Notification.Category category, Notification.Severity severity, String title,
+                      String message, TrackedIssue issue) {
+        // Store before delivery selection. A mute is never a retention or search filter.
+        persist(category, severity, title, message, issue);
+        boolean muted = false;
+        if (preferences != null && (category == Notification.Category.PROGRESS || category == Notification.Category.COMPLETION)
+                && !nextAction.resolve(issue).actionRequired()) {
+            try {
+                muted = preferences.findById(category).map(com.dbbaskette.issuebot.model.NotificationPreference::isMuted).orElse(false)
+                        && (issue == null || triage == null || !triage.isActionRequired(issue.getId()));
+            }
+            catch (Exception unavailable) { log.warn("Notification preferences unavailable; delivering notification"); }
+        }
+        if (muted) return;
+        TrayIcon.MessageType type = switch (severity) {
+            case INFO -> TrayIcon.MessageType.INFO;
+            case WARN -> TrayIcon.MessageType.WARNING;
+            case ERROR -> TrayIcon.MessageType.ERROR;
+        };
+        sendDesktopNotification(title, message, type);
+        sendDashboardEvent("NOTIFICATION_" + severity.name(), title + ": " + message);
     }
 
     /** Column limits from the V22 migration — over-long inputs are clamped, not dropped. */
@@ -117,16 +165,22 @@ public class NotificationService {
     /**
      * Best-effort persistence for the notification-bell history (#89) — unconditional (not
      * gated by the dashboard toggle, see class javadoc) and never allowed to propagate: a
-     * database failure here must not take down desktop/toast delivery, which already happened
-     * by the time this runs. Title/detail are clamped to their column widths up front (PR #102
+     * database failure here must not prevent the subsequent desktop/toast delivery. Title/detail
+     * are clamped to their column widths up front (PR #102
      * review) so an over-long message — e.g. a long issue title concatenated into the detail —
      * persists truncated instead of tripping the failure path and vanishing from the history.
      */
-    private void persist(Notification.Severity severity, String title, String message, TrackedIssue issue) {
+    private void persist(Notification.Category category, Notification.Severity severity, String title, String message, TrackedIssue issue) {
         try {
             Long issueId = issue != null ? issue.getId() : null;
-            notificationRepository.save(new Notification(severity,
-                    clamp(title, MAX_TITLE_LENGTH), clamp(message, MAX_DETAIL_LENGTH), issueId));
+            Notification notification = new Notification(severity,
+                    clamp(title, MAX_TITLE_LENGTH), clamp(message, MAX_DETAIL_LENGTH), issueId);
+            Long repoId = issue != null && issue.getRepo() != null ? issue.getRepo().getId() : null;
+            notification.setRepoId(repoId);
+            notification.setCategory(category);
+            if (issueId != null) notification.setGroupKey("issue:" + (repoId == null ? 0 : repoId) + ":" + issueId);
+            else if (category != null) notification.setGroupKey("system:" + category.name());
+            notificationRepository.save(notification);
         } catch (Exception e) {
             log.warn("Failed to persist notification '{}': {}", title, e.getMessage());
         }

@@ -1,45 +1,56 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
-<!--
-  Notification-bell dropdown panel (#89) — a standalone template (not a page; there is no
-  full-page route for this) so NotificationController can address it as
-  "notifications :: panel" the same way SettingsController addresses "layout :: agent-status".
-  Always rendered as an HTMX fragment, swapped into layout.html's #notif-panel container.
--->
-<body>
-<div th:fragment="panel" id="notif-panel-content" th:attr="data-unread-count=${unreadCount}">
+<html xmlns:th="http://www.thymeleaf.org" lang="en"><body>
+<div th:fragment="panel" id="notif-panel-content"
+     th:attr="data-unread-count=${notificationSnapshot.unreadActionGroupCount}">
     <div class="notif-panel-header">
-        <span class="notif-panel-title">Notifications</span>
-        <button type="button" class="btn btn-ghost btn-sm" th:if="${unreadCount != null and unreadCount > 0}"
-                hx-post="/notifications/read" hx-target="#notif-panel" hx-swap="innerHTML">
-            Mark all read
-        </button>
+        <span class="notif-panel-title">Unread actions <span th:text="${notificationSnapshot.unreadActionGroupCount}">0</span></span>
+        <a href="/notifications" class="btn btn-ghost">Full history</a>
     </div>
-    <ul class="notif-list" th:if="${not #lists.isEmpty(notifications)}">
-        <li th:each="n : ${notifications}" class="notif-item" th:classappend="${n.readAt == null} ? 'is-unread' : ''">
-            <a th:if="${n.issueId != null}" th:href="@{/issues/{id}(id=${n.issueId})}" class="notif-item-content">
-                <span class="notif-item-icon" th:classappend="'sev-' + ${#strings.toLowerCase(n.severity)}">
-                    <i th:class="${n.severity.name() == 'WARN'} ? 'ti ti-alert-triangle' : (${n.severity.name() == 'ERROR'} ? 'ti ti-alert-circle' : 'ti ti-info-circle')" aria-hidden="true"></i>
-                </span>
-                <span class="notif-item-body">
-                    <span class="notif-item-title" th:text="${n.title}">Title</span>
-                    <span class="notif-item-detail" th:text="${n.detail}">Detail</span>
-                </span>
-                <span class="notif-item-time" th:text="${#temporals.format(n.createdAt, 'MMM d, HH:mm')}">00:00</span>
-            </a>
-            <div th:unless="${n.issueId != null}" class="notif-item-content">
-                <span class="notif-item-icon" th:classappend="'sev-' + ${#strings.toLowerCase(n.severity)}">
-                    <i th:class="${n.severity.name() == 'WARN'} ? 'ti ti-alert-triangle' : (${n.severity.name() == 'ERROR'} ? 'ti ti-alert-circle' : 'ti ti-info-circle')" aria-hidden="true"></i>
-                </span>
-                <span class="notif-item-body">
-                    <span class="notif-item-title" th:text="${n.title}">Title</span>
-                    <span class="notif-item-detail" th:text="${n.detail}">Detail</span>
-                </span>
-                <span class="notif-item-time" th:text="${#temporals.format(n.createdAt, 'MMM d, HH:mm')}">00:00</span>
+    <p class="notif-empty text-muted">Reading notifications does not resolve Needs You decisions.</p>
+    <form th:if="${notificationSnapshot.highestVisibleEventId > 0}" th:action="@{/notifications/read}" method="post"
+          hx-post="/notifications/read" hx-target="#notif-panel" hx-swap="innerHTML" class="notif-read-all">
+        <input type="hidden" name="throughId" th:value="${notificationSnapshot.highestVisibleEventId}">
+        <button class="btn btn-ghost" type="submit">Mark all read through this snapshot</button>
+    </form>
+    <div th:replace="~{notifications :: groups(${notificationSnapshot}, false)}"></div>
+</div>
+
+<div th:fragment="groups(snapshot, history)" class="notification-groups">
+    <p class="text-muted notif-empty" th:if="${snapshot.groups.empty}">No notifications yet, or none match these filters.</p>
+    <ul class="notif-list" th:unless="${snapshot.groups.empty}">
+        <li th:each="group : ${snapshot.groups.content}" class="notif-item" th:classappend="${group.unreadCount > 0} ? 'is-unread' : ''">
+            <div class="notification-group-body">
+                <div class="section-heading">
+                    <span class="notif-item-icon" th:classappend="${'sev-' + #strings.toLowerCase(group.latest.severity)}">
+                        <i th:class="${group.latest.severity.name() == 'WARN'} ? 'ti ti-alert-triangle' : (${group.latest.severity.name() == 'ERROR'} ? 'ti ti-alert-circle' : 'ti ti-info-circle')" aria-hidden="true"></i>
+                    </span>
+                    <strong th:text="${group.latest.title}">Latest notification</strong>
+                    <span class="badge" th:text="${group.unreadCount + ' unread'}">0 unread</span>
+                </div>
+                <p class="text-muted"><span th:text="${group.categoryLabel()}">Category</span> · <time th:text="${#temporals.format(group.latest.createdAt, 'MMM d, HH:mm')}">Time</time></p>
+                <p th:text="${group.latest.detail}">Latest detail</p>
+                <p th:if="${group.action != null}" th:text="${group.action.summary}">Current state</p>
+                <p th:if="${group.critical}" class="text-danger">System error needs attention.</p>
+                <div class="form-actions">
+                    <a th:if="${group.action != null and group.action.hasAction()}" th:href="${group.action.href}"
+                       class="btn btn-ghost" th:text="${group.action.ctaLabel}">View issue</a>
+                    <form th:if="${group.unreadCount > 0}" th:action="@{/notifications/group/read}" method="post"
+                          th:attr="hx-post=${history ? null : '/notifications/group/read'},hx-target=${history ? null : '#notif-panel'}">
+                        <input type="hidden" name="groupKey" th:value="${group.key}">
+                        <input type="hidden" name="throughId" th:value="${group.throughId}">
+                        <input type="hidden" name="returnTo" th:value="${history ? 'history' : 'panel'}">
+                        <button class="btn btn-ghost" type="submit">Mark group read</button>
+                    </form>
+                </div>
+                <details th:if="${history}" th:attr="data-ui-state-key=${'notification:' + group.key + ':history'}">
+                    <summary>Event history</summary>
+                    <div class="notification-entries">
+                        <button class="btn btn-ghost" type="button" th:hx-get="@{/notifications/group(groupKey=${group.key})}"
+                                hx-target="closest .notification-entries" hx-swap="innerHTML">Load events</button>
+                    </div>
+                </details>
             </div>
         </li>
     </ul>
-    <p class="text-muted notif-empty" th:if="${#lists.isEmpty(notifications)}">No notifications yet.</p>
 </div>
-</body>
-</html>
+</body></html>

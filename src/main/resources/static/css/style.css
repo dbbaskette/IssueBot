@@ -3927,6 +3927,18 @@ button.glass-pill, a.glass-pill, .toast-dismiss, .notif-bell-btn, .mobile-menu-b
     min-height: var(--control-height); min-width: var(--control-height);
 }
 .notif-panel { width: 400px; }
+.notification-group-body { padding: 16px; overflow-wrap: anywhere; }
+.notification-group-body p { margin: 8px 0; }
+.notification-group-body .text-danger { color: var(--danger); }
+.notification-group-body .section-heading { align-items: flex-start; flex-wrap: wrap; }
+.notification-history .filter-bar { flex-wrap: wrap; align-items: end; }
+.notification-history .filter-bar label { display: grid; gap: 4px; min-width: 0; }
+.notification-history .filter-bar input, .notification-history .filter-bar select { max-width: 100%; }
+.notification-history .notif-list { max-height: none; overflow: visible; }
+.notification-history .notification-groups { margin: 16px 0; }
+.notification-history .notification-entry-page ol { padding-left: 24px; }
+.notification-history .notification-entry-page li { margin: 12px 0; }
+.notif-read-all { padding: 0 16px; }
 .notif-panel-header { padding: 16px; gap: 8px; }
 .notif-item-content { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px 12px; padding: 16px; }
 .notif-item-time { grid-column: 2; font-family: var(--font-sans); font-variant-numeric: tabular-nums; }

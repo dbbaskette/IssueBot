@@ -25,6 +25,52 @@ import static org.mockito.Mockito.*;
  * CI) — this class only exercises the new persistence path.
  */
 class NotificationServiceTest {
+    @Test
+    void mutedDeliveryStillPersistsAndActionRequiredEventsBypassMute() {
+        var preferences = mock(com.dbbaskette.issuebot.repository.NotificationPreferenceRepository.class);
+        when(preferences.findById(Notification.Category.PROGRESS)).thenReturn(java.util.Optional.of(
+                new com.dbbaskette.issuebot.model.NotificationPreference(Notification.Category.PROGRESS, true)));
+        var service = spy(new NotificationService(properties, eventService, notificationRepository, preferences,
+                new com.dbbaskette.issuebot.service.ui.IssueNextActionResolver(), null));
+        var issue = issue(42);
+        issue.setStatus(com.dbbaskette.issuebot.model.IssueStatus.IN_PROGRESS);
+        service.progress("Progress", "Muted", issue);
+        verify(service, never()).sendDesktopNotification(anyString(), anyString(), any());
+        verifyNoInteractions(eventService);
+        var captured = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationRepository).save(captured.capture());
+        assertThat(captured.getValue().getCategory()).isEqualTo(Notification.Category.PROGRESS);
+        assertThat(captured.getValue().getGroupKey()).isEqualTo("issue:1:42");
+        issue.setStatus(com.dbbaskette.issuebot.model.IssueStatus.AWAITING_APPROVAL);
+        service.progress("Action", "Never muted", issue);
+        verify(service).sendDesktopNotification(eq("Action"), eq("Never muted"), any());
+        service.approval("Approval", "Never muted", issue);
+        service.recovery("Recovery", "Never muted", issue);
+        service.systemError("System", "Never muted");
+        verify(service).sendDesktopNotification(eq("Approval"), anyString(), any());
+        verify(service).sendDesktopNotification(eq("Recovery"), anyString(), any());
+        verify(service).sendDesktopNotification(eq("System"), anyString(), any());
+        verify(notificationRepository, times(5)).save(any());
+    }
+
+    @Test
+    void currentGroupAttentionAndPreferenceFailureFailOpenForDelivery() {
+        var preferences = mock(com.dbbaskette.issuebot.repository.NotificationPreferenceRepository.class);
+        var triage = mock(NotificationTriageService.class);
+        when(preferences.findById(Notification.Category.COMPLETION)).thenReturn(java.util.Optional.of(
+                new com.dbbaskette.issuebot.model.NotificationPreference(Notification.Category.COMPLETION, true)));
+        when(triage.isActionRequired(42L)).thenReturn(true);
+        var service = spy(new NotificationService(properties, eventService, notificationRepository, preferences,
+                new com.dbbaskette.issuebot.service.ui.IssueNextActionResolver(), triage));
+        var issue = issue(42);
+        issue.setStatus(com.dbbaskette.issuebot.model.IssueStatus.COMPLETED);
+        service.completion("Group attention", "Never muted", issue);
+        verify(service).sendDesktopNotification(eq("Group attention"), anyString(), any());
+        when(preferences.findById(Notification.Category.COMPLETION)).thenThrow(new IllegalStateException("Unavailable"));
+        service.completion("Unavailable preference", "Never muted", issue);
+        verify(service).sendDesktopNotification(eq("Unavailable preference"), anyString(), any());
+        verify(notificationRepository, times(2)).save(any());
+    }
 
     private IssueBotProperties properties;
     private EventService eventService;

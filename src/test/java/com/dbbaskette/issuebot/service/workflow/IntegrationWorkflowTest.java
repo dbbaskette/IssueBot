@@ -238,7 +238,7 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertNull(issue.getCurrentPhase());
         verify(gitHubApi, never()).markPrReady(anyString(), anyString(), anyInt());
-        verify(notificationService).info(eq("Issue Completed"), anyString(), eq(issue));
+        verify(notificationService).completion(eq("Issue Completed"), anyString(), eq(issue));
         // Passing review delegates non-blocking findings routing to FollowUpService
         verify(followUpService).handleNonBlockingFindings(
                 eq(issue), any(), any(CodeReviewResult.class), eq(99));

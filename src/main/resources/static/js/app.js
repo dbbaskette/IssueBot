@@ -95,12 +95,19 @@
     var btn = notifBellBtn();
     if (!btn || !panelElement) { return; }
     var content = panelElement.querySelector('#notif-panel-content');
-    var count = content ? parseInt(content.getAttribute('data-unread-count'), 10) || 0 : 0;
+    var rawCount = content && content.getAttribute('data-unread-count');
+    if (rawCount == null || !/^\d+$/.test(rawCount)) {
+      btn.setAttribute('title', 'Notification state unavailable');
+      return;
+    }
+    var count = Number(rawCount);
+    btn.setAttribute('title', 'Unread actions');
     var badge = btn.querySelector('.notif-badge');
     if (count > 0) {
       if (!badge) {
         badge = document.createElement('span');
         badge.className = 'badge notif-badge';
+        badge.setAttribute('aria-label', 'Unread actions');
         btn.appendChild(badge);
       }
       badge.textContent = String(count);

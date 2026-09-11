@@ -44,11 +44,13 @@
                 -->
                 <div class="notif-bell-wrap" th:if="${dashboardNotificationsEnabled}">
                     <button id="notif-bell-btn" class="btn btn-ghost notif-bell-btn" type="button"
-                            aria-label="Notifications" aria-haspopup="true" aria-expanded="false"
+                            aria-label="Notifications — unread actions" aria-haspopup="true" aria-expanded="false"
+                            th:title="${notificationStateAvailable == false ? 'Notification state unavailable' : 'Unread actions'}"
                             aria-controls="notif-panel"
                             hx-get="/notifications/panel" hx-target="#notif-panel" hx-swap="innerHTML">
                         <i class="ti ti-bell" aria-hidden="true"></i>
                         <span class="badge notif-badge"
+                              aria-label="Unread actions"
                               th:if="${unreadNotificationCount != null and unreadNotificationCount > 0}"
                               th:text="${unreadNotificationCount}">0</span>
                     </button>

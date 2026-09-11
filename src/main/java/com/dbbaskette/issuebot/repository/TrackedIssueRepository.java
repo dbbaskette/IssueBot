@@ -47,6 +47,11 @@ public interface TrackedIssueRepository extends JpaRepository<TrackedIssue, Long
 
     List<TrackedIssue> findByStatusIn(List<IssueStatus> statuses);
 
+    /** Bounded notification header lookup, including metadata without per-issue repository fetches. */
+    @EntityGraph(attributePaths = {"repo", "approvedPlanningVersion"})
+    @Query("SELECT i FROM TrackedIssue i WHERE i.id IN :ids")
+    List<TrackedIssue> findNotificationIssues(@Param("ids") List<Long> ids);
+
     /**
      * Newest-first variant of {@link #findByStatus} for the Needs You inbox (#91), whose groups
      * are listed newest-first — {@code findByStatus} itself makes no ordering guarantee.

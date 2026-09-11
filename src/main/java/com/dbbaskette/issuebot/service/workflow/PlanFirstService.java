@@ -177,7 +177,7 @@ public class PlanFirstService {
                                 + version.getVersionNumber() + " — awaiting approval",
                         issue.getRepo(), issue));
         runAfterPersistence("send planning proposal notification",
-                () -> notifications.info(commit.revision() ? "Plan Revision Generated" : "Plan Proposed",
+                () -> notifications.approval(commit.revision() ? "Plan Revision Generated" : "Plan Proposed",
                         issue.getRepo().fullName() + " #" + issue.getIssueNumber()
                                 + " — version " + version.getVersionNumber() + " awaits approval",
                         issue));
@@ -199,7 +199,7 @@ public class PlanFirstService {
                                 + " — waiting for manual implementation start",
                         issue.getRepo(), issue));
         runAfterPersistence("send planning approval notification",
-                () -> notifications.info("Plan Approved",
+                () -> notifications.approval("Plan Approved",
                         issue.getRepo().fullName() + " #" + issue.getIssueNumber()
                                 + " — version " + current.getVersionNumber()
                                 + " approved; waiting for you to start implementation",
@@ -237,7 +237,7 @@ public class PlanFirstService {
                         "Revision requested for planning version " + current.getVersionNumber(),
                         issue.getRepo(), issue));
         runAfterPersistence("send planning revision notification",
-                () -> notifications.info("Plan Revision Requested",
+                () -> notifications.progress("Plan Revision Requested",
                         issue.getRepo().fullName() + " #" + issue.getIssueNumber()
                                 + " — version " + current.getVersionNumber() + " will be regenerated",
                         issue));
@@ -317,7 +317,7 @@ public class PlanFirstService {
         runAfterPersistence("record planning failure event",
                 () -> events.log("PLAN_FAILED", reason, failed.getRepo(), failed));
         runAfterPersistence("send planning failure notification",
-                () -> notifications.warn("Planning Failed",
+                () -> notifications.recovery("Planning Failed",
                         failed.getRepo().fullName() + " #" + failed.getIssueNumber() + " — " + reason,
                         failed));
         return PlanningOutcome.FAILED;

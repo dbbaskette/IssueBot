@@ -1430,22 +1430,22 @@ public class IssueWorkflowService {
         trackedIssue.setCurrentPhase(null);
         if (merged) {
             trackedIssue.setStatus(IssueStatus.COMPLETED);
-            notificationService.info("Issue Completed",
+            notificationService.completion("Issue Completed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR #" + prNumber + " is merged", trackedIssue);
         } else if (isApprovalGated) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
-            notificationService.info("PR Ready for Review",
+            notificationService.approval("PR Ready for Review",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR created, awaiting approval", trackedIssue);
         } else if (shouldAutoMerge && !merged) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
-            notificationService.warn("Auto-Merge Failed",
+            notificationService.recovery("Auto-Merge Failed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR #" + prNumber + " created but merge failed, needs manual merge", trackedIssue);
         } else {
             trackedIssue.setStatus(IssueStatus.COMPLETED);
-            notificationService.info("Issue Completed",
+            notificationService.completion("Issue Completed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR #" + prNumber + (merged ? " created & merged" : " created"), trackedIssue);
         }

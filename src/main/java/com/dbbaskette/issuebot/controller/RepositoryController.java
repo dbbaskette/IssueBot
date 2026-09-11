@@ -420,7 +420,6 @@ public class RepositoryController {
         model.addAttribute("lessonsByRepo", lessonsByRepo);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
         if (error != null) model.addAttribute("error", error);
     }

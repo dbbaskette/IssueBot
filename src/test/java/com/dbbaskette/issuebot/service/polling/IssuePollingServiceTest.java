@@ -327,7 +327,7 @@ class IssuePollingServiceTest {
         verify(eventService).log("ISSUE_QUEUED",
                 "Issue #3 queued — waiting for issue #1 to start or release the repository slot",
                 testRepo, queued.getValue());
-        verify(notificationService).info(eq("Issue Queued"),
+        verify(notificationService).progress(eq("Issue Queued"),
                 argThat(message -> message.contains("issue #1")
                         && message.contains("start or release the repository slot")),
                 same(queued.getValue()));

@@ -20,6 +20,17 @@ import java.time.LocalDateTime;
 public class Notification {
 
     public enum Severity { INFO, WARN, ERROR }
+    public enum Category { APPROVAL, RECOVERY, PROGRESS, COMPLETION, SYSTEM }
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private Category category;
+
+    @Column(name = "group_key", length = 100)
+    private String groupKey;
+
+    @Column(name = "repo_id")
+    private Long repoId;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -77,4 +88,10 @@ public class Notification {
     public void setReadAt(LocalDateTime readAt) { this.readAt = readAt; }
 
     public boolean isUnread() { return readAt == null; }
+    public Category getCategory() { return category; }
+    public void setCategory(Category category) { this.category = category; }
+    public String getGroupKey() { return groupKey; }
+    public void setGroupKey(String groupKey) { this.groupKey = groupKey; }
+    public Long getRepoId() { return repoId; }
+    public void setRepoId(Long repoId) { this.repoId = repoId; }
 }

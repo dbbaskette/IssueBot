@@ -127,7 +127,6 @@ public class ApprovalController {
         model.addAttribute("ciStatuses", cards.ciStatuses());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", (long) approvals.size());
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
     }
 }

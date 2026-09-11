@@ -47,7 +47,6 @@ class DashboardControllerTest {
         CostTrackingRepository costs = mock(CostTrackingRepository.class);
         NotificationRepository notifications = mock(NotificationRepository.class);
         DashboardControlRoomAssembler controlRoomAssembler = mock(DashboardControlRoomAssembler.class);
-        when(notifications.countByReadAtIsNull()).thenReturn(4L);
         when(controlRoomAssembler.assemble()).thenReturn(controlRoom());
         DashboardController controller = new DashboardController(issues,
                 mock(WatchedRepoRepository.class), costs,
@@ -57,7 +56,7 @@ class DashboardControllerTest {
         Model model = new ExtendedModelMap();
         controller.dashboard(model, null);
 
-        assertThat(model.getAttribute("unreadNotificationCount")).isEqualTo(4L);
+        assertThat(model.getAttribute("unreadNotificationCount")).isNull(); // Shared snapshot interceptor owns this value.
     }
 
     @Test

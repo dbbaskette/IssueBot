@@ -173,7 +173,7 @@ public class IssueDecompositionService {
             eventService.log("DECOMPOSITION_PROPOSED",
                     "Proposed split into " + subIssues.size() + " sub-issues — awaiting approval",
                     repo, trackedIssue);
-            notificationService.info("Decomposition Proposed",
+            notificationService.approval("Decomposition Proposed",
                     repo.fullName() + " #" + issueNumber + " — approve or reject in the dashboard", trackedIssue);
             return true;
         }
@@ -212,7 +212,7 @@ public class IssueDecompositionService {
                 "Decomposed into " + createdNumbers.size() + " sub-issues: " + createdNumbers,
                 repo, trackedIssue);
 
-        notificationService.info("Issue Decomposed",
+        notificationService.completion("Issue Decomposed",
                 repo.fullName() + " #" + issueNumber + " split into "
                         + createdNumbers.size() + " sub-issues", trackedIssue);
 
@@ -339,7 +339,7 @@ public class IssueDecompositionService {
                 "Decomposed into " + createdNumbers.size() + " sub-issues: " + createdNumbers,
                 repo, issue);
 
-        notificationService.info("Issue Decomposed",
+        notificationService.completion("Issue Decomposed",
                 repo.fullName() + " #" + issueNumber + " split into "
                         + createdNumbers.size() + " sub-issues", issue);
     }
@@ -366,7 +366,7 @@ public class IssueDecompositionService {
             eventService.log("DECOMPOSITION_COMPLETED",
                     "Durable decomposition group created with " + subIssues.size() + " ordered children",
                     issue.getRepo(), issue);
-            notificationService.info("Issue Decomposed",
+            notificationService.completion("Issue Decomposed",
                     issue.getRepo().fullName() + " #" + issue.getIssueNumber() + " split into "
                             + subIssues.size() + " ordered sub-issues", issue);
         }

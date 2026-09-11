@@ -731,7 +731,7 @@ class IssueControllerTest {
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v3")),
                 eq(f.issue.getRepo()), same(f.issue));
-        verify(f.notificationService).info(eq("Implementation Started"),
+        verify(f.notificationService).progress(eq("Implementation Started"),
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v3")),
                 same(f.issue));
@@ -773,7 +773,7 @@ class IssueControllerTest {
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v4")),
                 eq(f.issue.getRepo()), same(f.issue));
-        verify(f.notificationService).info(eq("Repository Slot Released"),
+        verify(f.notificationService).progress(eq("Repository Slot Released"),
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v4")),
                 same(f.issue));
@@ -794,7 +794,7 @@ class IssueControllerTest {
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && !message.contains("Plan v")),
                 eq(f.issue.getRepo()), same(f.issue));
-        verify(f.notificationService).info(eq("Repository Slot Released"),
+        verify(f.notificationService).progress(eq("Repository Slot Released"),
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && !message.contains("Plan v")),
                 same(f.issue));
