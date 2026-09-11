@@ -64,6 +64,7 @@ import static org.mockito.Mockito.*;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class IssueDispatchServicePersistenceTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean private PrerequisiteStatusService prerequisites;
 
     @Autowired
     private IssueDispatchTransactionManager dispatch;

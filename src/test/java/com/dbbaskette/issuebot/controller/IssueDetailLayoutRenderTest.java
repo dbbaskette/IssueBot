@@ -80,6 +80,9 @@ class IssueDetailLayoutRenderTest {
     }
 
     private String render(WebContext context, String fragment) {
+        context.setVariable("recoveryGuidance", new com.dbbaskette.issuebot.service.ui.RecoveryGuidanceAssembler().assemble(
+                (FailureDiagnostic) context.getVariable("latestFailureDiagnostic"),
+                com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED));
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
@@ -293,8 +296,8 @@ class IssueDetailLayoutRenderTest {
 
         String html = render(context, "content");
 
-        assertThat(html).contains("What happened", "Unit tests failed");
-        assertThat(html).contains("Suggested next step", "Fix the failing assertions before retrying");
+        assertThat(html).contains("What happened", "Verification did not pass");
+        assertThat(html).contains("Suggested next step", "Inspect evidence and add guidance");
         assertThat(html).contains("Technical details", "three assertions failed");
         assertThat(html).contains("name=\"instructions\"");
     }
@@ -312,8 +315,8 @@ class IssueDetailLayoutRenderTest {
 
         String html = render(context, "content");
 
-        assertThat(html).contains("The independent review could not run after 2 attempts")
-                .contains("Check the reviewer provider, CLI, authentication, and configuration")
+        assertThat(html).contains("The reviewer was unavailable or could not complete its assessment")
+                .contains("Open Setup and re-check")
                 .contains("review provider timed out")
                 .contains("Reviewer recovery note (optional)")
                 .contains("Optional note after restoring the reviewer provider or CLI")

@@ -2193,6 +2193,7 @@ select {
     .plan-guidance-form label { grid-column: auto; }
     .plan-review-actions .btn,
     .plan-guidance-form .btn { justify-content: center; width: 100%; }
+    .plan-guidance-submit { justify-content: center; width: 100%; }
     .plan-approval-form {
         align-items: stretch;
         padding: 1rem 0 0;

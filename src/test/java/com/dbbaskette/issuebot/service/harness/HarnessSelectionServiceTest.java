@@ -23,12 +23,14 @@ class HarnessSelectionServiceTest {
     final CodexModelCatalog catalog = mock(CodexModelCatalog.class);
     final CodingHarnessRegistry registry;
     final HarnessSelectionService service;
+    final com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService prerequisites =
+            new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(properties);
     final TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 1, "Issue");
 
     HarnessSelectionServiceTest() {
         when(catalog.models()).thenReturn(CodexModelCatalog.fallbackModels());
         registry = new CodingHarnessRegistry(List.of(new ClaudeHarnessAdapter(claude), new CodexHarnessAdapter(codex, catalog)));
-        service = new HarnessSelectionService(registry, properties, issues, stages);
+        service = new HarnessSelectionService(registry, properties, issues, stages, prerequisites);
         when(issues.findById(1L)).thenReturn(Optional.of(issue));
     }
 
@@ -83,6 +85,16 @@ class HarnessSelectionServiceTest {
         service.validateReady(tuple);
         assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("subscription");
         verifyNoInteractions(claude);
+    }
+
+    @Test void actualPreflightRecordsOnlyItsHarnessAndUnavailableProbeSupersedesOldFailure() {
+        var tuple = service.resolve("codex", "gpt-6-astra", "ultra");
+        assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("Install");
+        assertThat(prerequisites.state("codex")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.KNOWN_UNMET);
+        assertThat(prerequisites.state("claude")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED);
+        when(codex.checkCliAvailable()).thenThrow(new IllegalStateException("unavailable"));
+        assertThatThrownBy(() -> service.validateReady(tuple)).hasMessageContaining("unavailable");
+        assertThat(prerequisites.state("codex")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED);
     }
 
     @Test void reasoningPrecedenceUsesRoleAndRejectsUnsupportedInheritedValues() {

@@ -107,6 +107,11 @@ public class IssueController {
     private final IssueNextActionResolver nextActionResolver;
     private final NotificationService notificationService;
     private final WorkflowStepperAssembler workflowStepperAssembler;
+    @Autowired
+    private com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService prerequisites;
+    @Autowired
+    private com.dbbaskette.issuebot.service.ui.RecoveryGuidanceAssembler recoveryGuidanceAssembler =
+            new com.dbbaskette.issuebot.service.ui.RecoveryGuidanceAssembler();
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -165,6 +170,8 @@ public class IssueController {
         this.nextActionResolver = nextActionResolver;
         this.notificationService = notificationService;
         this.workflowStepperAssembler = workflowStepperAssembler;
+        // Direct-controller fixtures use the same unknown-on-start contract; Spring injects the shared cache.
+        this.prerequisites = new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(properties);
     }
 
     @GetMapping
@@ -175,6 +182,7 @@ public class IssueController {
                        @RequestParam(defaultValue = "0") int page,
                        @RequestHeader(value = "HX-Request", required = false) String hx) {
         Page<TrackedIssue> issuePage = searchIssues(status, repoId, q, page);
+        model.addAttribute("retryPrerequisitesUnmet", prerequisites.retryRejection() != null);
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issues");
@@ -404,6 +412,8 @@ public class IssueController {
         String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
                 implementationReasoningEffort, reviewReasoningEffort);
         if (selectionError != null) return selectionError;
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return prerequisiteRejection;
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
                 && !java.util.Objects.equals(issue.getResolvedHarnessId(), properties.getAgentProvider())) {
             String previousHarness = issue.getResolvedHarnessId() == null
@@ -1104,6 +1114,11 @@ public class IssueController {
             text = text.substring(0, 4000);
         }
 
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) {
+            redirectAttributes.addFlashAttribute("error", prerequisiteRejection);
+            return planReviewRedirect(id);
+        }
         IssueDispatchService.ClaimResult claim = dispatchService.claimGuidedRetry(
                 id, text, properties.getMaxConcurrentIssues());
         if (!claim.claimed()) {
@@ -1312,8 +1327,9 @@ public class IssueController {
         model.addAttribute("guidanceRequestToken", java.util.UUID.randomUUID().toString());
         model.addAttribute("nextAction", nextActionResolver.resolve(
                 issue, readyReservationFor(issue, readyReservationsByRepository())));
-        model.addAttribute("latestFailureDiagnostic", failureDiagnosticService == null
-                ? null : failureDiagnosticService.latestFor(issue).orElse(null));
+        var latestFailure = failureDiagnosticService == null ? null : failureDiagnosticService.latestFor(issue).orElse(null);
+        model.addAttribute("latestFailureDiagnostic", latestFailure);
+        model.addAttribute("recoveryGuidance", recoveryGuidanceAssembler.assemble(latestFailure, prerequisites.retryState()));
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
         // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
         model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));

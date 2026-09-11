@@ -23,6 +23,7 @@ import static com.dbbaskette.issuebot.service.history.DecisionDraft.*;
 @Service
 public class IssueDispatchTransactionManager {
     @org.springframework.beans.factory.annotation.Autowired private DecisionProducer decisions;
+    @org.springframework.beans.factory.annotation.Autowired private PrerequisiteStatusService prerequisites;
 
     static final List<IssueStatus> ACTIVE_STATUSES = List.of(
             IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
@@ -143,6 +144,8 @@ public class IssueDispatchTransactionManager {
             return IssueDispatchService.ClaimResult.rejected(
                     "The second Plan First conformance miss requires the guided implementation retry");
         }
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return IssueDispatchService.ClaimResult.rejected(prerequisiteRejection);
         String rejection = additionalGate.apply(issue);
         if (rejection != null) return IssueDispatchService.ClaimResult.rejected(rejection);
         String serialized = repositoryGate(issue);
@@ -180,6 +183,8 @@ public class IssueDispatchTransactionManager {
                     "Guided retry is only available after the second Plan First conformance miss "
                             + "with an approved non-legacy planning version");
         }
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return IssueDispatchService.ClaimResult.rejected(prerequisiteRejection);
         long active = issues.countByStatus(IssueStatus.IN_PROGRESS);
         if (active >= maxConcurrentIssues) {
             return IssueDispatchService.ClaimResult.rejected(

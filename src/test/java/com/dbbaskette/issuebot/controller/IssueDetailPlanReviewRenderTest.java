@@ -420,7 +420,7 @@ class IssueDetailPlanReviewRenderTest {
             WebContext context = context(issue, List.of(approved), approved, approved, attempts);
             context.setVariable("showPlanGuidance", true);
             context.setVariable("processingMode", mode);
-            String retry = slice(render(context), "class=\"plan-guidance-form\"", "</form>");
+            String retry = slice(render(context), "form=\"plan-guidance-form-42-0\"", "</button>");
 
             if (mode == ProcessingState.RUNNING) {
                 assertThat(retry)

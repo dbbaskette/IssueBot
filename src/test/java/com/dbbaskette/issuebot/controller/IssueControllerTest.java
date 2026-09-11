@@ -49,6 +49,39 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class IssueControllerTest {
+    @Test void knownUnmetPrerequisiteBlocksAllDirectRetryPostsBeforeAnyExternalWork() throws Exception {
+        for (String path : List.of("/issues/1/retry", "/issues/1/retry-quick", "/issues/bulk/retry", "/issues/1/plan/retry-implementation")) {
+            Fixture f = new Fixture(IssueStatus.FAILED);
+            var prerequisites = new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(f.properties);
+            prerequisites.record(prerequisites.context("claude"),
+                    com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.CLI,
+                    com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.UNMET);
+            org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "prerequisites", prerequisites);
+            MockMvcBuilders.standaloneSetup(f.controller).build().perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
+                            .param("ids", "1").param("guidance", "Operator guidance"))
+                    .andExpect(status().is3xxRedirection());
+            verifyNoInteractions(f.gitHubApiClient, f.workflowService);
+            verify(f.issues, never()).save(any());
+            verify(f.dispatchService, never()).claimGuidedRetry(anyLong(), anyString(), anyInt());
+        }
+    }
+
+    @Test void detailAndPollOnlyReadPrerequisiteCacheAndNeverCallExternalServices() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        var prerequisites = new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(f.properties);
+        prerequisites.record(prerequisites.context("claude"),
+                com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.SUBSCRIPTION,
+                com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.UNMET);
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "prerequisites", prerequisites);
+        var detail = new org.springframework.ui.ExtendedModelMap();
+        var poll = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(detail, 1L, null, null, null);
+        f.controller.liveStatus(poll, 1L);
+        org.assertj.core.api.Assertions.assertThat(detail.get("recoveryGuidance")).isEqualTo(poll.get("recoveryGuidance"));
+        org.assertj.core.api.Assertions.assertThat(((com.dbbaskette.issuebot.service.ui.RecoveryGuidance) detail.get("recoveryGuidance")).retryAllowed()).isFalse();
+        verifyNoInteractions(f.gitHubApiClient, f.workflowService);
+    }
 
     @Test void rejectedStartAndRetryPreserveExactModelAndReasoningInputs() {
         for (boolean retry : new boolean[] {false, true}) {
@@ -1206,8 +1239,9 @@ class IssueControllerTest {
     }
 
     private static void stubPersistedMiss(Fixture f) {
+        Iteration missed = review(f.issue, 2, false, 0.70, 0.65);
         when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
-                .thenReturn(List.of(review(f.issue, 2, false, 0.70, 0.65)));
+                .thenReturn(List.of(missed));
     }
 
     private static Fixture approvedPlanFixture(IssueStatus status, int conformanceAttempt) {

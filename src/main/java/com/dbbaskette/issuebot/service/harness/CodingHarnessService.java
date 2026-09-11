@@ -3,6 +3,8 @@ package com.dbbaskette.issuebot.service.harness;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.WorkflowStage;
 import org.springframework.stereotype.Service;
+import com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService;
+import static com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.*;
 
 import java.nio.file.Path;
 import java.util.function.Consumer;
@@ -13,14 +15,24 @@ public class CodingHarnessService {
     private final CodingHarnessRegistry registry;
     private final IssueBotProperties properties;
     private final HarnessSelectionService selections;
+    private final PrerequisiteStatusService prerequisites;
     private final ThreadLocal<String> pinnedHarness = new ThreadLocal<>();
     private final ThreadLocal<Boolean> subscriptionOnly = new ThreadLocal<>();
 
     public CodingHarnessService(CodingHarnessRegistry registry, IssueBotProperties properties,
                                 HarnessSelectionService selections) {
+        this(registry, properties, selections,
+                new PrerequisiteStatusService(properties));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CodingHarnessService(CodingHarnessRegistry registry, IssueBotProperties properties,
+                                HarnessSelectionService selections,
+                                PrerequisiteStatusService prerequisites) {
         this.registry = registry;
         this.properties = properties;
         this.selections = selections;
+        this.prerequisites = prerequisites;
     }
 
     public String harnessId() {
@@ -40,7 +52,9 @@ public class CodingHarnessService {
     public void pinSubscriptionHarness(String id) {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("Managed stages require a harness");
         CodingHarnessAdapter adapter = registry.require(id);
-        if (!adapter.checkSubscriptionAuthentication()) {
+        var context = prerequisites.context(adapter.id());
+        boolean authenticated = prerequisites.observe(context, SUBSCRIPTION, adapter::checkSubscriptionAuthentication);
+        if (!authenticated) {
             String command = HarnessIds.CODEX.equals(adapter.id()) ? "codex login" : "claude auth login";
             throw new IllegalStateException(adapter.displayName()
                     + " subscription authentication is unavailable. Run " + command

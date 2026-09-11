@@ -133,14 +133,17 @@
                 </div>
                 <div class="panel-body">
                     <h4>What happened</h4>
-                    <p th:text="${latestFailureDiagnostic != null ? latestFailureDiagnostic.summary : (issue.lastFailureReason != null ? issue.lastFailureReason : 'No failure summary was recorded. Review the technical activity below before retrying.')}"
+                    <p th:text="${recoveryGuidance != null ? recoveryGuidance.explanation : 'The cause is unavailable. Inspect the evidence and add guidance before trying again.'}"
                        style="white-space:pre-line"></p>
                     <h4>Suggested next step</h4>
-                    <p th:text="${latestFailureDiagnostic != null and latestFailureDiagnostic.suggestedAction != null ? latestFailureDiagnostic.suggestedAction : 'Review the failure details, add guidance for the next attempt, then retry.'}"></p>
-                    <details th:if="${latestFailureDiagnostic != null and latestFailureDiagnostic.technicalDetails != null}" class="mb-2"
-                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + latestFailureDiagnostic.occurredAt + ':technical'}">
+                    <p><a th:href="${recoveryGuidance != null ? recoveryGuidance.primaryPath : '#recovery-evidence'}"
+                          th:text="${recoveryGuidance != null ? recoveryGuidance.primaryLabel : 'Inspect evidence and add guidance'}"></a></p>
+                    <p class="text-sm" th:text="${recoveryGuidance != null ? recoveryGuidance.retryExplanation : 'Prerequisites: Not verified. Re-check in Setup; normal preflight checks still apply.'}"></p>
+                    <details id="recovery-evidence" class="mb-2"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + (latestFailureDiagnostic != null ? latestFailureDiagnostic.occurredAt : 'legacy') + ':technical'}">
                         <summary>Technical details</summary>
-                        <pre class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
+                        <pre th:if="${latestFailureDiagnostic != null}" class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
+                        <p th:if="${latestFailureDiagnostic == null}" class="text-muted">No diagnostic was recorded. Inspect the existing workflow history below.</p>
                     </details>
                     <p th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}" class="text-sm text-muted"
                        th:text="'Cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></p>
@@ -185,12 +188,13 @@
                                 The previous session cannot be continued with the selected provider.
                             </p>
                         </details>
-                        <div class="modal-actions">
-                            <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingMode?.name() != 'RUNNING'}"
+                    </form>
+                        <div class="modal-actions" th:with="reviewerInfrastructure=${latestFailureDiagnostic != null and latestFailureDiagnostic.category?.name() == 'REVIEW_INFRASTRUCTURE'}">
+                            <button type="submit" class="btn btn-primary btn-sm" th:form="${'recovery-form-' + issue.id + '-' + issue.currentIteration}"
+                                    th:disabled="${processingMode?.name() != 'RUNNING' or (recoveryGuidance != null and !recoveryGuidance.retryAllowed)}"
                                     th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : (reviewerInfrastructure ? 'Retry workflow after reviewer recovery' : 'Retry with this guidance')}"
                                     th:text="${reviewerInfrastructure ? 'Retry after recovery' : 'Retry with guidance'}">Retry with guidance</button>
                         </div>
-                    </form>
                 </div>
             </section>
 
@@ -232,10 +236,12 @@
                         <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
                         <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
                                   placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
-                        <button type="submit" class="btn btn-primary"
-                                th:disabled="${processingMode?.name() != 'RUNNING'}"
-                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                     </form>
+                    <p th:if="${recoveryGuidance != null}" class="text-sm" th:text="${recoveryGuidance.retryExplanation}"></p>
+                    <a th:if="${recoveryGuidance != null and !recoveryGuidance.retryAllowed}" href="/setup">Open Setup and re-check</a>
+                        <button type="submit" class="btn btn-primary plan-guidance-submit" th:form="${'plan-guidance-form-' + issue.id + '-' + issue.currentIteration}"
+                                th:disabled="${processingMode?.name() != 'RUNNING' or (recoveryGuidance != null and !recoveryGuidance.retryAllowed)}"
+                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                 </div>
             </section>
             </div>

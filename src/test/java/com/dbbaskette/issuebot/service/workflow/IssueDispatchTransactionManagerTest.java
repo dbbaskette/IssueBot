@@ -44,6 +44,7 @@ import static org.mockito.Mockito.*;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class IssueDispatchTransactionManagerTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean private PrerequisiteStatusService prerequisites;
 
     @Autowired private IssueDispatchTransactionManager dispatch;
     @Autowired private PlanFirstTransactionManager planTransactions;
@@ -55,6 +56,24 @@ class IssueDispatchTransactionManagerTest {
     @Autowired private DecompositionGroupRepository decompositionGroups;
     @Autowired private DecompositionChildRepository decompositionChildren;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
+    @Test void knownUnmetPrerequisiteRejectsBothLockedRetryClaimsWithoutMutation() {
+        Long ordinary = seedApprovedIssue(IssueStatus.FAILED, 0, 91);
+        Long guided = seedApprovedIssue(IssueStatus.FAILED, 2, 92);
+        seedReview(guided, 2, false, "{}");
+        when(prerequisites.retryRejection()).thenReturn(PrerequisiteStatusService.RETRY_BLOCKED);
+        for (Long id : List.of(ordinary, guided)) {
+            var before = issues.findById(id).orElseThrow();
+            int run = before.getWorkflowRun();
+            var result = id.equals(ordinary)
+                    ? dispatch.claimRetry(id, candidate -> null, IssueDispatchTransactionManager.RetryMutation.none())
+                    : dispatch.claimGuidedRetry(id, "Guidance", 100);
+            assertThat(result.claimed()).isFalse();
+            assertThat(result.reason()).isEqualTo(PrerequisiteStatusService.RETRY_BLOCKED);
+            var after = issues.findById(id).orElseThrow();
+            assertThat(after.getStatus()).isEqualTo(IssueStatus.FAILED);
+            assertThat(after.getWorkflowRun()).isEqualTo(run);
+        }
+    }
     @Autowired private PlatformTransactionManager transactionManager;
 
     @AfterEach

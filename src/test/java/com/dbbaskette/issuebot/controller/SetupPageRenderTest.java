@@ -94,8 +94,8 @@ class SetupPageRenderTest {
         assertContainedTables(html, 4);
         assertThat(html).contains("aria-label=\"Prerequisite checks\"", "aria-label=\"Webhook configuration\"",
                 "aria-label=\"Watched repositories\"", "aria-label=\"Recent webhook deliveries\"",
-                "id=\"prereqs-table\" hx-get=\"/setup/prereqs\" hx-trigger=\"load\" hx-swap=\"innerHTML\"",
-                "hx-target=\"#prereqs-table\" hx-swap=\"innerHTML\"", "CHECKING", "NOT SET",
+                "id=\"prereqs-table\"", "hx-post=\"/setup/prereqs\"", "method=\"post\"",
+                "hx-target=\"#prereqs-table\" hx-swap=\"innerHTML\"", "Not verified", "NOT SET",
                 "bad-signature", "Full delivery diagnostic", "data-ui-state-key=\"setup:webhooks\"");
     }
 
@@ -111,10 +111,15 @@ class SetupPageRenderTest {
         context.setVariable("workDirOk", true);
         context.setVariable("workDirMessage", "/very/long/complete/path/to/the/issuebot/work/directory");
         context.setVariable("allPassed", false);
+        context.setVariable("prerequisiteRows", List.of(
+                new SetupController.PrerequisiteRow("Codex CLI", com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.READY),
+                new SetupController.PrerequisiteRow("Codex CLI Auth", com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.UNMET),
+                new SetupController.PrerequisiteRow("GitHub Token", com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.UNMET)));
         String html = render(context, "prereqs");
         assertContainedTables(html, 1);
-        assertThat(html).contains("aria-label=\"Prerequisite checks\"", "FAILED", "INVALID", "Complete the subscription login for Codex CLI",
-                "Token rejected; verify repository access.", "/very/long/complete/path/to/the/issuebot/work/directory");
+        assertThat(html).contains("aria-label=\"Prerequisite checks\"", "Needs attention", "Complete subscription login for the selected harness",
+                "Set a valid GitHub token with repository access");
+        assertThat(html).doesNotContain("Token rejected; verify repository access.", "/very/long/complete/path/to/the/issuebot/work/directory");
         assertThat(html).doesNotContain("id=\"prereqs-table\""); // innerHTML target remains the existing node
     }
 
