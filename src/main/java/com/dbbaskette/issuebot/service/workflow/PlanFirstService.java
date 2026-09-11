@@ -6,7 +6,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
@@ -123,7 +123,7 @@ public class PlanFirstService {
         try {
             String prompt = buildPlanningPrompt(issueDetails, context.feedback(), context.previous());
 
-            ClaudeCodeResult result;
+            HarnessExecutionResult result;
             try (PlanningWorkspaceService.PlanningWorkspace workspace = planningWorkspaces.open(repoPath)) {
                 if (StageWorkflowCoordinator.managed(trackedIssue)) agent.pinSubscriptionProvider(context.provider());
                 else agent.pinProvider(context.provider());
@@ -280,7 +280,7 @@ public class PlanFirstService {
         return prompt.toString();
     }
 
-    private void requireSuccessfulResult(ClaudeCodeResult result) {
+    private void requireSuccessfulResult(HarnessExecutionResult result) {
         if (result == null) {
             throw new IllegalStateException("Planner returned no result");
         }

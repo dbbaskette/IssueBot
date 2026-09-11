@@ -12,7 +12,7 @@ import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
@@ -143,8 +143,8 @@ class IntegrationWorkflowTest {
         return details;
     }
 
-    private ClaudeCodeResult successResult() {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult successResult() {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("implementation done");
         result.setInputTokens(1000);
@@ -1626,8 +1626,8 @@ class IntegrationWorkflowTest {
                 .count(), "the atomic claim row must be reused by the workflow");
     }
 
-    private ClaudeCodeResult planningResult(String spec, String plan) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult planningResult(String spec, String plan) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("# Design Spec\n" + spec + "\n# Implementation Plan\n" + plan);
         return result;
@@ -1965,9 +1965,9 @@ class IntegrationWorkflowTest {
         when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
         when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
-        ClaudeCodeResult iter1Result = successResult();
+        HarnessExecutionResult iter1Result = successResult();
         iter1Result.setSessionId("sess-iter1");
-        ClaudeCodeResult iter2Result = successResult();
+        HarnessExecutionResult iter2Result = successResult();
         iter2Result.setSessionId("sess-iter2");
 
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
@@ -2011,14 +2011,14 @@ class IntegrationWorkflowTest {
         when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
         when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
-        ClaudeCodeResult iter1Success = successResult();
+        HarnessExecutionResult iter1Success = successResult();
         iter1Success.setSessionId("sess-iter1");
 
-        ClaudeCodeResult resumedFailure = new ClaudeCodeResult();
+        HarnessExecutionResult resumedFailure = new HarnessExecutionResult();
         resumedFailure.setSuccess(false);
         resumedFailure.setErrorMessage("No conversation found with session ID: sess-iter1");
 
-        ClaudeCodeResult coldRetrySuccess = successResult();
+        HarnessExecutionResult coldRetrySuccess = successResult();
         coldRetrySuccess.setSessionId("sess-iter2-cold");
 
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
@@ -2061,17 +2061,17 @@ class IntegrationWorkflowTest {
         when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
         when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
-        ClaudeCodeResult iter1Success = successResult(); // 1000/500 tokens
+        HarnessExecutionResult iter1Success = successResult(); // 1000/500 tokens
         iter1Success.setSessionId("sess-iter1");
 
-        ClaudeCodeResult resumedFailure = new ClaudeCodeResult();
+        HarnessExecutionResult resumedFailure = new HarnessExecutionResult();
         resumedFailure.setSuccess(false);
         resumedFailure.setErrorMessage("session crashed mid-run");
         resumedFailure.setInputTokens(5000);
         resumedFailure.setOutputTokens(2000);
         resumedFailure.setModel("claude-opus-4-6");
 
-        ClaudeCodeResult coldRetrySuccess = successResult(); // 1000/500 tokens
+        HarnessExecutionResult coldRetrySuccess = successResult(); // 1000/500 tokens
 
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(iter1Success, coldRetrySuccess);

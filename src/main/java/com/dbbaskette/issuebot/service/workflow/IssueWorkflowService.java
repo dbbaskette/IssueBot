@@ -6,7 +6,7 @@ import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
@@ -477,7 +477,7 @@ public class IssueWorkflowService {
                     "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
             // === Phase 2: Implementation (Opus) ===
-            ClaudeCodeResult implResult = null;
+            HarnessExecutionResult implResult = null;
             if (resumePhase == null) {
                 try {
                     implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
@@ -916,7 +916,7 @@ public class IssueWorkflowService {
 
     /** Checkpoint first; accounting and telemetry are deliberately ordered after its commit. */
     WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpointSuccessfulImplementation(
-            TrackedIssue issue, Iteration iteration, ClaudeCodeResult result,
+            TrackedIssue issue, Iteration iteration, HarnessExecutionResult result,
             String diff, int iterationNum) {
         WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpoint =
                 workflowCheckpoints.persistImplementationComplete(
@@ -1096,7 +1096,7 @@ public class IssueWorkflowService {
      *        processIssue cleared it — surfaced in a continue-session retry's first
      *        resumed prompt when no other retry context exists (#67 review).
      */
-    ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
+    HarnessExecutionResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
                                           Path repoPath, String previousDiff,
                                           String previousAssessment, String previousCiLogs,
                                           String lastRunFailureReason) {
@@ -1104,7 +1104,7 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs, lastRunFailureReason, null, null);
     }
 
-    ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
+    HarnessExecutionResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
                                           Path repoPath, String previousDiff,
                                           String previousAssessment, String previousCiLogs,
                                           String lastRunFailureReason,
@@ -1134,7 +1134,7 @@ public class IssueWorkflowService {
         sseService.broadcastClaudeLog(issueId, "[system] Launching " + claudeCode.providerDisplayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
                 + (resumed ? " (resuming session)" : "") + "...");
-        ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
+        HarnessExecutionResult result = claudeCode.executeImplementation(prompt, repoPath,
                 trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
 
         if (!result.isSuccess() && resumed) {
@@ -1901,7 +1901,7 @@ public class IssueWorkflowService {
      * Post Opus's implementation response as a comment on the GitHub issue
      * when it addresses review feedback, showing what changed.
      */
-    private void postImplementationResponseToIssue(TrackedIssue trackedIssue, ClaudeCodeResult implResult,
+    private void postImplementationResponseToIssue(TrackedIssue trackedIssue, HarnessExecutionResult implResult,
                                                     String previousFeedback, int iterationNum) {
         WatchedRepo repo = trackedIssue.getRepo();
         try {
@@ -2140,7 +2140,7 @@ public class IssueWorkflowService {
     // =====================================================
 
     private void trackCost(TrackedIssue trackedIssue, int iterationNum,
-                            ClaudeCodeResult result, String phase) {
+                            HarnessExecutionResult result, String phase) {
         trackCost(trackedIssue, iterationNum, result.getCostUsd(), result.getInputTokens(),
                 result.getOutputTokens(), result.getModel(), phase);
     }

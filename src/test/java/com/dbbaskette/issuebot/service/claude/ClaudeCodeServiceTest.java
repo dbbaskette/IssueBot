@@ -1,5 +1,7 @@
 package com.dbbaskette.issuebot.service.claude;
 
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.dbbaskette.issuebot.service.codex.CodexCliService;
@@ -19,6 +21,52 @@ import static org.mockito.Mockito.*;
  * (issue #67 — session continuity via --resume).
  */
 class ClaudeCodeServiceTest {
+
+    @Test
+    void explicitEffortEntryPointsStayOnClaudeDespiteGlobalCodexSelection() {
+        IssueBotProperties properties = new IssueBotProperties();
+        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
+        CodexCliService codex = mock(CodexCliService.class);
+        ClaudeCodeService runner = spy(new ClaudeCodeService(properties,
+                new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
+                new WorkflowCancellationService(), codex));
+        var result = new com.dbbaskette.issuebot.service.harness.HarnessExecutionResult();
+        doReturn(result).when(runner).executeTask(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), any(), any(), any());
+        assertSame(result, runner.executeImplementation("implement", java.nio.file.Path.of("."),
+                "claude-opus-4-8", "xhigh", "session-1", 7L, null));
+        assertSame(result, runner.executeReview("review", java.nio.file.Path.of("."),
+                "claude-opus-4-8", "high", 7L, null));
+        assertSame(result, runner.executeUtility("classify", java.nio.file.Path.of("."),
+                "claude-haiku-4-5", "default", null));
+        verify(runner).executeTask("implement", java.nio.file.Path.of("."), "claude-opus-4-8", "xhigh",
+                properties.getClaudeCode().getMaxTurnsPerInvocation(), properties.getClaudeCode().getTimeoutMinutes(),
+                null, "session-1", 7L, null);
+        verify(runner).executeTask("review", java.nio.file.Path.of("."), "claude-opus-4-8", "high",
+                properties.getClaudeCode().getReviewMaxTurns(), properties.getClaudeCode().getReviewTimeoutMinutes(),
+                null, null, 7L, null);
+        verify(runner).executeTask("classify", java.nio.file.Path.of("."), "claude-haiku-4-5", "default",
+                properties.getClaudeCode().getReviewMaxTurns(), properties.getClaudeCode().getReviewTimeoutMinutes(),
+                null, null, null, null);
+        verifyNoInteractions(codex);
+    }
+
+    @Test
+    void explicitEffortIsIncludedForImplementationAndReadOnlyPlanning() {
+        List<String> implementation = service.buildCommand("prompt", "claude-opus-4-8", "xhigh", 30, null, "session-1");
+        List<String> planning = service.buildPlanningCommand("prompt", "claude-opus-4-8", "max", 30);
+        assertEquals("xhigh", implementation.get(implementation.indexOf("--effort") + 1));
+        assertEquals("session-1", implementation.get(implementation.indexOf("--resume") + 1));
+        assertEquals("max", planning.get(planning.indexOf("--effort") + 1));
+        assertFalse(planning.contains("--resume"));
+        assertTrue(planning.contains("Read,Glob,Grep"));
+    }
+
+    @Test
+    void defaultOnlyModelOmitsEffortForImplementationAndPlanning() {
+        assertFalse(service.buildCommand("prompt", "claude-haiku-4-5", "default", 30, null, null).contains("--effort"));
+        assertFalse(service.buildPlanningCommand("prompt", "claude-haiku-4-5", "default", 30).contains("--effort"));
+    }
 
     @Test
     void managedCommandsDisableCredentialHelpersAndClearRestoresLegacySettings() {
@@ -207,7 +255,7 @@ class ClaudeCodeServiceTest {
     void timedOutResult_keepsBilledUsageAndSession_insteadOfZeroingThem() {
         // A killed run's tokens were billed regardless — zeroing them (what a fresh failedResult
         // does) silently under-counts the issue's cost and budget. Regression guard.
-        ClaudeCodeResult parsed = new ClaudeCodeResult();
+        HarnessExecutionResult parsed = new HarnessExecutionResult();
         parsed.setInputTokens(15441);
         parsed.setOutputTokens(2000);
         parsed.setCostUsd(new java.math.BigDecimal("1.23"));
@@ -215,7 +263,7 @@ class ClaudeCodeServiceTest {
         parsed.setFilesChanged(java.util.List.of("Foo.java"));
         parsed.setSuccess(true);
 
-        ClaudeCodeResult r = ClaudeCodeService.timedOutResult(parsed, 1200116L, 20, "");
+        HarnessExecutionResult r = ClaudeCodeService.timedOutResult(parsed, 1200116L, 20, "");
 
         assertFalse(r.isSuccess(), "a timed-out run is still a failure");
         assertTrue(r.isTimedOut());
@@ -246,7 +294,7 @@ class ClaudeCodeServiceTest {
         ClaudeCodeService facade = new ClaudeCodeService(properties,
                 new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new WorkflowCancellationService(), codex);
-        ClaudeCodeResult expected = new ClaudeCodeResult();
+        HarnessExecutionResult expected = new HarnessExecutionResult();
         when(codex.executeImplementation(anyString(), any(), anyString(), any(), any(), any()))
                 .thenReturn(expected);
         when(codex.checkCliAvailable()).thenReturn(true);
@@ -267,7 +315,7 @@ class ClaudeCodeServiceTest {
         ClaudeCodeService facade = new ClaudeCodeService(properties,
                 new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new WorkflowCancellationService(), codex);
-        ClaudeCodeResult expected = new ClaudeCodeResult();
+        HarnessExecutionResult expected = new HarnessExecutionResult();
         when(codex.executeImplementation(anyString(), any(), anyString(), any(), any(), any()))
                 .thenReturn(expected);
 

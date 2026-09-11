@@ -5,7 +5,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -175,7 +175,7 @@ class IssueDecompositionServiceTest {
                   {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": "See Bar.java"}
                 ]
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -212,7 +212,7 @@ class IssueDecompositionServiceTest {
         String claudeOutput = """
                 [{"title": "Only task", "description": "Single task", "acceptance_criteria": "Done"}]
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -232,7 +232,7 @@ class IssueDecompositionServiceTest {
         TrackedIssue issue = createIssue();
         ObjectNode issueDetails = createIssueDetails();
 
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(false);
         claudeResult.setOutput(null);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -257,7 +257,7 @@ class IssueDecompositionServiceTest {
                   {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
                 ]
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -291,7 +291,7 @@ class IssueDecompositionServiceTest {
                   {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": "See Bar.java"}
                 ]
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -459,7 +459,7 @@ class IssueDecompositionServiceTest {
         String claudeOutput = """
                 {"too_large": true, "reason": "Two independent capabilities in 20+ files", "independent_capabilities": 2, "estimated_files": 20, "estimated_complexity": "high"}
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -476,7 +476,7 @@ class IssueDecompositionServiceTest {
         String claudeOutput = """
                 {"too_large": false, "reason": "Simple bug fix in 2 files", "estimated_files": 2, "estimated_complexity": "low"}
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -500,7 +500,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void preScreen_emptyResponse_defaultsToFalse() {
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setOutput("");
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
@@ -512,7 +512,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void preScreen_invalidJson_defaultsToFalse() {
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setOutput("Not JSON at all");
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
@@ -588,7 +588,7 @@ class IssueDecompositionServiceTest {
                   {"title": "2/2: Second task", "description": "Do second thing", "acceptance_criteria": "Done", "hints": ""}
                 ]
                 """;
-        ClaudeCodeResult claudeResult = new ClaudeCodeResult();
+        HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
         when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
@@ -615,7 +615,7 @@ class IssueDecompositionServiceTest {
     }
 
     private void qualifyLargeEpic() {
-        ClaudeCodeResult screen = new ClaudeCodeResult();
+        HarnessExecutionResult screen = new HarnessExecutionResult();
         screen.setOutput("""
                 {"too_large":true,"estimated_files":20,"independent_capabilities":2,
                  "estimated_complexity":"high","reason":"Two substantial end-to-end capabilities"}

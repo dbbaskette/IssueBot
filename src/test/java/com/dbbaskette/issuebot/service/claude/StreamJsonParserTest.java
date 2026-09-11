@@ -1,5 +1,7 @@
 package com.dbbaskette.issuebot.service.claude;
 
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -10,14 +12,14 @@ class StreamJsonParserTest {
 
     @Test
     void parseEmptyOutput() {
-        ClaudeCodeResult result = parser.parse("");
+        HarnessExecutionResult result = parser.parse("");
         assertFalse(result.isSuccess());
         assertNotNull(result.getErrorMessage());
     }
 
     @Test
     void parseNullOutput() {
-        ClaudeCodeResult result = parser.parse(null);
+        HarnessExecutionResult result = parser.parse(null);
         assertFalse(result.isSuccess());
     }
 
@@ -26,7 +28,7 @@ class StreamJsonParserTest {
         String json = """
                 {"type":"result","result":"Implementation complete","model":"claude-sonnet-4-5-20250929","usage":{"input_tokens":1500,"output_tokens":800}}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
         assertTrue(result.isSuccess());
         assertTrue(result.getOutput().contains("Implementation complete"));
         assertEquals("claude-sonnet-4-5-20250929", result.getModel());
@@ -42,7 +44,7 @@ class StreamJsonParserTest {
                 {"type":"assistant","message":{"content":[{"type":"text","text":"Perfect! Now let me check the tests."}]}}
                 {"type":"result","result":"# Spec\\nThe design.\\n\\n# Plan\\n1. First task."}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
 
         // finalResult is the clean document only — no "Let me look at" / "Perfect!" narration.
         assertEquals("# Spec\nThe design.\n\n# Plan\n1. First task.", result.getFinalResult());
@@ -56,7 +58,7 @@ class StreamJsonParserTest {
     @Test
     void parseNonJsonLines() {
         String output = "Some random text\nnot json at all\n";
-        ClaudeCodeResult result = parser.parse(output);
+        HarnessExecutionResult result = parser.parse(output);
         assertTrue(result.isSuccess());
         assertEquals("", result.getOutput());
     }
@@ -66,14 +68,14 @@ class StreamJsonParserTest {
         String output = """
                 {"type":"result","result":"done","model":"claude-opus-4-8","total_cost_usd":0.4321,"usage":{"input_tokens":100,"output_tokens":50}}
                 """;
-        ClaudeCodeResult result = parser.parse(output);
+        HarnessExecutionResult result = parser.parse(output);
         assertNotNull(result.getCostUsd());
         assertEquals(0, result.getCostUsd().compareTo(new java.math.BigDecimal("0.4321")));
     }
 
     @Test
     void costUsdIsNullWhenAbsent() {
-        ClaudeCodeResult result = parser.parse("{\"type\":\"result\",\"result\":\"done\"}");
+        HarnessExecutionResult result = parser.parse("{\"type\":\"result\",\"result\":\"done\"}");
         assertNull(result.getCostUsd());
     }
 
@@ -90,7 +92,7 @@ class StreamJsonParserTest {
         String json = """
                 {"type":"tool_use","name":"Edit","tool":"Bash","input":{"file_path":"/src/Foo.java"}}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
         assertTrue(result.isSuccess());
         assertTrue(result.getFilesChanged().contains("/src/Foo.java"),
                 "Expected /src/Foo.java in filesChanged when name=Edit wins over tool=Bash");
@@ -107,7 +109,7 @@ class StreamJsonParserTest {
         String json = """
                 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/src/Bar.java"}}]}}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
         assertTrue(result.isSuccess());
         // The parser currently only checks top-level type=tool_use blocks for filesChanged,
         // so this test documents that assistant-nested tool_use blocks are NOT tracked yet.
@@ -124,7 +126,7 @@ class StreamJsonParserTest {
         String json = """
                 {"type":"tool_use","name":"Write","input":{"file_path":"/src/New.java"}}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
         assertTrue(result.isSuccess());
         assertTrue(result.getFilesChanged().contains("/src/New.java"),
                 "Expected /src/New.java tracked when tool name comes from 'name' key only");
@@ -137,7 +139,7 @@ class StreamJsonParserTest {
         String json = """
                 {"type":"system","subtype":"init","session_id":"sess-abc123"}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
         assertTrue(result.isSuccess());
         assertEquals("sess-abc123", result.getSessionId());
     }
@@ -147,7 +149,7 @@ class StreamJsonParserTest {
         String json = """
                 {"type":"result","result":"done","session_id":"sess-xyz789"}
                 """;
-        ClaudeCodeResult result = parser.parse(json);
+        HarnessExecutionResult result = parser.parse(json);
         assertTrue(result.isSuccess());
         assertEquals("sess-xyz789", result.getSessionId());
     }
@@ -158,7 +160,7 @@ class StreamJsonParserTest {
                 {"type":"system","subtype":"init"}
                 {"type":"result","result":"done"}
                 """;
-        ClaudeCodeResult result = parser.parse(output);
+        HarnessExecutionResult result = parser.parse(output);
         assertTrue(result.isSuccess());
         assertNull(result.getSessionId());
     }
@@ -174,7 +176,7 @@ class StreamJsonParserTest {
                 {"type":"system","subtype":"init","session_id":"sess-init"}
                 {"type":"result","result":"done","session_id":"sess-final"}
                 """;
-        ClaudeCodeResult result = parser.parse(output);
+        HarnessExecutionResult result = parser.parse(output);
         assertTrue(result.isSuccess());
         assertEquals("sess-final", result.getSessionId());
     }
@@ -189,7 +191,7 @@ class StreamJsonParserTest {
                 {"type":"assistant","message":{"cont\
                 """;
 
-        ClaudeCodeResult result = parser.parse(output);
+        HarnessExecutionResult result = parser.parse(output);
 
         assertEquals("sess-1", result.getSessionId());
         assertEquals(15441, result.getInputTokens()); // usage before the truncation survives

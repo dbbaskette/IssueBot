@@ -13,7 +13,7 @@ import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
@@ -86,7 +86,7 @@ class IssueWorkflowServiceTest {
         issue.setId(1L);
         Iteration iteration = new Iteration(issue, 1);
         iteration.setId(2L);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("done");
         result.setModel("gpt-5.6-sol");
@@ -457,7 +457,7 @@ class IssueWorkflowServiceTest {
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
         when(issueRepository.findById(issue.getId())).thenReturn(Optional.empty());
-        ClaudeCodeResult success = new ClaudeCodeResult();
+        HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("implemented");
         when(claudeCode.executeImplementation(
@@ -794,14 +794,14 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult success = new ClaudeCodeResult();
+        HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("done");
         success.setSessionId("sess-new-1");
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(success);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertTrue(result.isSuccess());
@@ -827,14 +827,14 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details — must not appear in a resumed prompt");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult success = new ClaudeCodeResult();
+        HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("done");
         // No new session id returned this time — the stored one should remain.
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-prior"), any(), any()))
                 .thenReturn(success);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertTrue(result.isSuccess());
@@ -866,11 +866,11 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult failure = new ClaudeCodeResult();
+        HarnessExecutionResult failure = new HarnessExecutionResult();
         failure.setSuccess(false);
         failure.setErrorMessage("No conversation found with session ID: sess-stale");
 
-        ClaudeCodeResult coldSuccess = new ClaudeCodeResult();
+        HarnessExecutionResult coldSuccess = new HarnessExecutionResult();
         coldSuccess.setSuccess(true);
         coldSuccess.setOutput("done cold");
         coldSuccess.setSessionId("sess-fresh");
@@ -880,7 +880,7 @@ class IssueWorkflowServiceTest {
         when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(coldSuccess);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertTrue(result.isSuccess());
@@ -913,7 +913,7 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult killed = new ClaudeCodeResult();
+        HarnessExecutionResult killed = new HarnessExecutionResult();
         killed.setSuccess(false);
         killed.setErrorMessage("Claude Code exited with code 143"); // SIGTERM from cancel
 
@@ -922,7 +922,7 @@ class IssueWorkflowServiceTest {
 
         cancellationService.requestCancel(1L);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertFalse(result.isSuccess());
@@ -972,14 +972,14 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult failure = new ClaudeCodeResult();
+        HarnessExecutionResult failure = new HarnessExecutionResult();
         failure.setSuccess(false);
         failure.setErrorMessage("session crashed mid-run");
         failure.setInputTokens(5000);
         failure.setOutputTokens(2000);
         failure.setModel("claude-opus-4-8");
 
-        ClaudeCodeResult coldSuccess = new ClaudeCodeResult();
+        HarnessExecutionResult coldSuccess = new HarnessExecutionResult();
         coldSuccess.setSuccess(true);
         coldSuccess.setOutput("done cold");
 
@@ -1218,7 +1218,7 @@ class IssueWorkflowServiceTest {
         when(issueRepository.findById(anyLong())).thenReturn(Optional.empty());
 
         // Stub phaseImplementation to return a successful result (skips real Claude invocation)
-        ClaudeCodeResult successResult = new ClaudeCodeResult();
+        HarnessExecutionResult successResult = new HarnessExecutionResult();
         successResult.setSuccess(true);
         successResult.setOutput("Implementation complete");
         doReturn(successResult).when(spy).phaseImplementation(

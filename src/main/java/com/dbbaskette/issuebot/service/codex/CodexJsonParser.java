@@ -1,6 +1,6 @@
 package com.dbbaskette.issuebot.service.codex;
 
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -19,8 +19,8 @@ public class CodexJsonParser {
         this.objectMapper = objectMapper;
     }
 
-    public ClaudeCodeResult parse(String rawOutput) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    public HarnessExecutionResult parse(String rawOutput) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         // ChatGPT-subscription usage has no per-invocation API charge.
         result.setCostUsd(BigDecimal.ZERO);
         List<String> filesChanged = new ArrayList<>();
@@ -65,7 +65,7 @@ public class CodexJsonParser {
         return result;
     }
 
-    private static void parseCompletedItem(JsonNode item, ClaudeCodeResult result,
+    private static void parseCompletedItem(JsonNode item, HarnessExecutionResult result,
                                            StringBuilder output, List<String> filesChanged) {
         switch (item.path("type").asText()) {
             case "agent_message" -> {

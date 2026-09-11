@@ -4,7 +4,7 @@ import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.RepoLessonRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,8 +43,8 @@ class LessonsServiceTest {
         return issue;
     }
 
-    private ClaudeCodeResult success(String output) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult success(String output) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput(output);
         return result;
@@ -155,7 +155,7 @@ class LessonsServiceTest {
     @Test
     void cliUnsuccessfulResult_noExceptionEscapes_nothingStored() {
         TrackedIssue issue = issueWithLessons(true);
-        ClaudeCodeResult failure = new ClaudeCodeResult();
+        HarnessExecutionResult failure = new HarnessExecutionResult();
         failure.setSuccess(false);
         failure.setErrorMessage("utility model unavailable");
         when(claudeCode.executeUtility(anyString(), any(Path.class), isNull())).thenReturn(failure);

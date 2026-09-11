@@ -255,7 +255,7 @@ class IssueDetailLivePollRenderTest {
             issue.setStatus(terminalStatus);
             issue.setCurrentPhase(null);
             ModelCatalog.ModelInfo model = new ModelCatalog.ModelInfo(
-                    "claude-live-recovery", "Claude Live Recovery", 1.0, 2.0);
+                    "claude-live-recovery", "Claude Live Recovery", 1.0, 2.0, "default", List.of("default"));
             String terminalPoll = render(issue, "live-status-poll", -1, false,
                     context -> context.setVariable("modelCatalog", List.of(model)));
 

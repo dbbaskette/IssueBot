@@ -6,7 +6,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -410,7 +410,7 @@ public class IssueDecompositionService {
         String prompt = buildPreScreenPrompt(issueDetails);
 
         try {
-            ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
+            HarnessExecutionResult result = claudeCode.executeUtility(prompt, repoPath, null);
 
             if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
                 log.warn("Pre-screen returned empty response, allowing implementation");
@@ -430,7 +430,7 @@ public class IssueDecompositionService {
     List<SubIssue> analyzeAndDecompose(JsonNode issueDetails, Path repoPath) {
         String prompt = buildDecompositionPrompt(issueDetails);
 
-        ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
+        HarnessExecutionResult result = claudeCode.executeUtility(prompt, repoPath, null);
 
         if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
             throw new RuntimeException("Claude returned empty response for decomposition");

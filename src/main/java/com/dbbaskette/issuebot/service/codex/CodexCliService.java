@@ -1,7 +1,7 @@
 package com.dbbaskette.issuebot.service.codex;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +48,7 @@ public class CodexCliService {
         this.cancellationService = cancellationService;
     }
 
-    public ClaudeCodeResult executeImplementation(String prompt, Path directory, String model,
+    public HarnessExecutionResult executeImplementation(String prompt, Path directory, String model,
                                                    String sessionId, Long issueId,
                                                    Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId,
@@ -56,27 +56,55 @@ public class CodexCliService {
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false);
     }
 
-    public ClaudeCodeResult executeReview(String prompt, Path directory, String model,
+    public HarnessExecutionResult executeReview(String prompt, Path directory, String model,
                                            Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
                 effort(issueId, model, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW),
                 properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, false);
     }
 
-    public ClaudeCodeResult executeUtility(String prompt, Path directory, Consumer<String> callback) {
+    public HarnessExecutionResult executeUtility(String prompt, Path directory, Consumer<String> callback) {
         return executeTask(prompt, directory, properties.getCodexCli().getUtilityModel(), null,
                 properties.getCodexCli().getUtilityReasoningEffort(),
                 properties.getCodexCli().getReviewTimeoutMinutes(), null, callback, false);
     }
 
-    public ClaudeCodeResult executePlanning(String prompt, Path directory, String model,
+    public HarnessExecutionResult executePlanning(String prompt, Path directory, String model,
                                              Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
                 effort(issueId, model, com.dbbaskette.issuebot.model.WorkflowStage.PLANNING),
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, true);
     }
 
-    public ClaudeCodeResult executeTask(String prompt, Path directory, String model,
+    /** Explicit harness inputs bypass legacy workflow reasoning selection. */
+    public HarnessExecutionResult executeImplementation(String prompt, Path directory, String model,
+                                                        String reasoningLevel, String sessionId, Long issueId,
+                                                        Consumer<String> callback) {
+        return executeTask(prompt, directory, model, sessionId, reasoningLevel,
+                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false);
+    }
+
+    public HarnessExecutionResult executeReview(String prompt, Path directory, String model,
+                                                String reasoningLevel, Long issueId,
+                                                Consumer<String> callback) {
+        return executeTask(prompt, directory, model, null, reasoningLevel,
+                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, false);
+    }
+
+    public HarnessExecutionResult executeUtility(String prompt, Path directory, String model,
+                                                 String reasoningLevel, Consumer<String> callback) {
+        return executeTask(prompt, directory, model, null, reasoningLevel,
+                properties.getCodexCli().getReviewTimeoutMinutes(), null, callback, false);
+    }
+
+    public HarnessExecutionResult executePlanning(String prompt, Path directory, String model,
+                                                  String reasoningLevel, Long issueId,
+                                                  Consumer<String> callback) {
+        return executeTask(prompt, directory, model, null, reasoningLevel,
+                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, true);
+    }
+
+    public HarnessExecutionResult executeTask(String prompt, Path directory, String model,
                                          String sessionId, int timeoutMinutes, Long issueId,
                                          Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId,
@@ -84,7 +112,7 @@ public class CodexCliService {
                 timeoutMinutes, issueId, callback, false);
     }
 
-    private ClaudeCodeResult executeTask(String prompt, Path directory, String model,
+    private HarnessExecutionResult executeTask(String prompt, Path directory, String model,
                                           String sessionId, String reasoningEffort,
                                           int timeoutMinutes, Long issueId,
                                           Consumer<String> callback, boolean planningMode) {
@@ -116,7 +144,7 @@ public class CodexCliService {
                     terminateTimedOutProcess(process);
                     outReader.join(3000);
                     errReader.join(3000);
-                    ClaudeCodeResult result = parser.parse(stdout.toString());
+                    HarnessExecutionResult result = parser.parse(stdout.toString());
                     result.setSuccess(false);
                     result.setTimedOut(true);
                     result.setDurationMs(duration);
@@ -127,7 +155,7 @@ public class CodexCliService {
 
                 outReader.join(5000);
                 errReader.join(5000);
-                ClaudeCodeResult result = parser.parse(stdout.toString());
+                HarnessExecutionResult result = parser.parse(stdout.toString());
                 result.setDurationMs(duration);
                 result.setModel(model);
                 if (process.exitValue() != 0) {
@@ -281,8 +309,8 @@ public class CodexCliService {
         return "Codex CLI exited with code " + code + (detail.isBlank() ? "" : ": " + detail);
     }
 
-    private static ClaudeCodeResult failed(long duration, String message) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private static HarnessExecutionResult failed(long duration, String message) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setDurationMs(duration);
         result.setErrorMessage(message);

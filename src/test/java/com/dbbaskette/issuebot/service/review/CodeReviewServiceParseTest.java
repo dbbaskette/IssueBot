@@ -1,6 +1,6 @@
 package com.dbbaskette.issuebot.service.review;
 
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,8 +28,8 @@ class CodeReviewServiceParseTest {
                 new ObjectMapper());
     }
 
-    private ClaudeCodeResult resultWithOutput(String json) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult resultWithOutput(String json) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput(json);
         result.setInputTokens(100);

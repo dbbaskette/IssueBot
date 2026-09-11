@@ -13,7 +13,7 @@ import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.event.EventService;
@@ -310,8 +310,8 @@ class PlanConformanceWorkflowTest {
                 .thenReturn(successImplementation());
     }
 
-    private ClaudeCodeResult successImplementation() {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult successImplementation() {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("implemented");
         result.setModel("implementation-model");

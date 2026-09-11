@@ -14,7 +14,7 @@ import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
@@ -705,7 +705,7 @@ class PlanFirstTransactionManagerTest {
                 mock(PlanningWorkspaceService.PlanningWorkspace.class);
         when(planningWorkspaces.open(any(Path.class))).thenReturn(workspace);
         when(workspace.path()).thenReturn(Path.of("/tmp/read-only-plan"));
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("# Design Spec\ndesign\n# Implementation Plan\nimplementation");
         when(agent.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
@@ -750,7 +750,7 @@ class PlanFirstTransactionManagerTest {
                         winnerIssue.setCurrentPhase(null);
                         issues.saveAndFlush(winnerIssue);
                     });
-                    ClaudeCodeResult losingResult = new ClaudeCodeResult();
+                    HarnessExecutionResult losingResult = new HarnessExecutionResult();
                     losingResult.setSuccess(false);
                     losingResult.setErrorMessage("losing provider was interrupted");
                     return losingResult;

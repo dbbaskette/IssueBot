@@ -8,7 +8,7 @@ import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,7 +75,7 @@ public class WorkflowCheckpointTransactionManager {
     /** Commits successful provider output and the next resumable phase before any effects. */
     @Transactional
     public ImplementationCheckpoint persistImplementationComplete(
-            Long issueId, Long iterationId, ClaudeCodeResult result, String diff) {
+            Long issueId, Long iterationId, HarnessExecutionResult result, String diff) {
         if (result == null || !result.isSuccess()) {
             throw new IllegalArgumentException("Only a successful implementation can be checkpointed");
         }

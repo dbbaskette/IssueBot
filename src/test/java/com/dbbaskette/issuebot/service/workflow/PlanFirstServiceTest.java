@@ -9,7 +9,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
@@ -221,7 +221,7 @@ class PlanFirstServiceTest {
 
     @Test
     void generationParsesOnlyFinalPlannerResult() {
-        ClaudeCodeResult result = success("narration without required headings");
+        HarnessExecutionResult result = success("narration without required headings");
         result.setFinalResult("# Design Spec\nfinal spec\n# Implementation Plan\nfinal plan");
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull())).thenReturn(result);
 
@@ -250,7 +250,7 @@ class PlanFirstServiceTest {
 
     @Test
     void unsuccessfulPlannerResultStopsWithProviderFailure() {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setErrorMessage("Codex exited 17");
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull())).thenReturn(result);
@@ -617,8 +617,8 @@ class PlanFirstServiceTest {
         verifyNoInteractions(issues, versions, gitHub);
     }
 
-    private ClaudeCodeResult success(String output) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult success(String output) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput(output);
         return result;
