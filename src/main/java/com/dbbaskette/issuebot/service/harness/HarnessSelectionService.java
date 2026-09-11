@@ -26,8 +26,8 @@ public class HarnessSelectionService {
     public HarnessSelection resolve(String harnessId, String modelId, String reasoningLevel) {
         CodingHarnessAdapter adapter = requireHarness(harnessId);
         String model = present(modelId) ? modelId.trim() : null;
-        HarnessModel selected = adapter.models().stream().filter(candidate -> candidate.id().equals(model))
-                .findFirst().orElseThrow(() -> new IllegalArgumentException("Model " + modelId
+        HarnessModel selected = catalog(adapter).stream().filter(candidate -> candidate.id().equals(model))
+                .findFirst().orElseThrow(() -> new HarnessSelectionException(HarnessSelectionException.Problem.MODEL, "Model " + modelId
                         + " is not available in the " + adapter.displayName() + " catalog; choose a listed model"));
         return new HarnessSelection(HarnessIds.normalize(adapter.id()), selected.id(), selected.resolveReasoning(reasoningLevel));
     }
@@ -58,7 +58,8 @@ public class HarnessSelectionService {
         String repoModel = review ? issue.getRepo().getReviewModel() : issue.getRepo().getImplementationModel();
         if (!present(issueModel) && present(repoModel)
                 && registry.adapters().stream().noneMatch(candidate -> compatible(candidate, repoModel))) {
-            throw new IllegalArgumentException("Repository model " + repoModel + " is not available in a harness catalog");
+            throw new HarnessSelectionException(HarnessSelectionException.Problem.MODEL,
+                    "Repository model " + repoModel + " is not available in a harness catalog");
         }
         String model = present(issueModel) ? issueModel : compatible(adapter, repoModel) ? repoModel
                 : globalModel(adapter.id(), review, false);
@@ -93,7 +94,8 @@ public class HarnessSelectionService {
             StageApproval decision = approved.get();
             HarnessSelection saved = resolve(decision.getHarnessId(), decision.getModel(), decision.getReasoningEffort());
             if (!saved.harnessId().equals(HarnessIds.normalize(adapter.id())) || !saved.modelId().equals(model)) {
-                throw new IllegalArgumentException("Execution selection differs from the approved harness/model tuple");
+                throw new HarnessSelectionException(HarnessSelectionException.Problem.TUPLE,
+                        "Execution selection differs from the approved harness/model tuple");
             }
             return saved;
         }
@@ -112,7 +114,16 @@ public class HarnessSelectionService {
     }
 
     private boolean compatible(CodingHarnessAdapter adapter, String model) {
-        return present(model) && adapter.models().stream().anyMatch(candidate -> candidate.id().equals(model.trim()));
+        return present(model) && catalog(adapter).stream().anyMatch(candidate -> candidate.id().equals(model.trim()));
+    }
+
+    private java.util.List<HarnessModel> catalog(CodingHarnessAdapter adapter) {
+        try {
+            return java.util.List.copyOf(adapter.models());
+        } catch (RuntimeException unavailable) {
+            throw new HarnessSelectionException(HarnessSelectionException.Problem.CATALOG,
+                    "Coding harness model catalog is unavailable");
+        }
     }
 
     private String globalModel(String id, boolean review, boolean utility) {
@@ -136,7 +147,6 @@ public class HarnessSelectionService {
     }
 
     private CodingHarnessAdapter requireHarness(String id) {
-        if (!present(id)) throw new IllegalArgumentException("A harness identity is required");
         return registry.require(id);
     }
 

@@ -25,7 +25,8 @@ public class StageModelSelectionService {
     public HarnessSelection resolve(TrackedIssue issue, WorkflowStage stage, String harnessId, String model, String reasoning) {
         if (!stage.modelDriven()) {
             if (harnessId != null || model != null || reasoning != null) {
-                throw new IllegalArgumentException(stage + " does not accept harness, model, or reasoning selections");
+                throw new HarnessSelectionException(HarnessSelectionException.Problem.DETERMINISTIC_STAGE,
+                        stage + " does not accept harness, model, or reasoning selections");
             }
             return new HarnessSelection(null, null, null);
         }

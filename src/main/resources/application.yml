@@ -36,11 +36,10 @@ issuebot:
     # exceeds 10 minutes; the old cap killed healthy runs mid-flight and discarded the work.
     timeout-minutes: 45
     implementation-model: claude-opus-4-8
-    implementation-reasoning-effort: high
     review-model: claude-sonnet-5
-    review-reasoning-effort: high
     utility-model: claude-haiku-4-5
-    utility-reasoning-effort: default
+    # Omitted reasoning uses the exact selected model's catalog default. Settings saves
+    # explicit reasoning with each model; keep omission compatible with pre-0.6 config.
     review-max-turns: 15
     # Review/utility: smaller than implementation (it only reads a diff and returns a verdict),
     # but 5 minutes was too tight for large diffs — the real cause of "Review Could Not Run".

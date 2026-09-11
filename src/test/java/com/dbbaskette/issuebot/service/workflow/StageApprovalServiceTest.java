@@ -173,7 +173,7 @@ class StageApprovalServiceTest {
         assertThat(decision.getHarnessId()).isNull();
         assertThat(decision.getProvider()).isNull();
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
         assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
     }
 
@@ -184,7 +184,7 @@ class StageApprovalServiceTest {
         ReflectionTestUtils.setField(decision, "harnessId", blank);
         clearInvocations(selection);
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
         assertThat(decision.getHarnessId()).isNull();
         assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
         verifyNoInteractions(selection);
@@ -198,7 +198,7 @@ class StageApprovalServiceTest {
         ReflectionTestUtils.setField(decision, "provider", blank);
         clearInvocations(selection);
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
         assertThat(decision.getHarnessId()).isNull();
         assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
         verifyNoInteractions(selection);
@@ -210,7 +210,7 @@ class StageApprovalServiceTest {
         clearInvocations(selection);
 
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
         assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
         verifyNoInteractions(selection);
@@ -222,7 +222,7 @@ class StageApprovalServiceTest {
         clearInvocations(selection);
 
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("model");
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("model");
         assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
         verifyNoInteractions(selection);
     }

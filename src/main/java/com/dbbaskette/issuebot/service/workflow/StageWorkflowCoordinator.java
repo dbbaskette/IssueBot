@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessSelection;
+import com.dbbaskette.issuebot.service.harness.HarnessSelectionException;
 import org.springframework.stereotype.Service;
 
 /** Adapts durable stage decisions to the existing workflow and versioned-plan lifecycle. */
@@ -52,25 +54,23 @@ public class StageWorkflowCoordinator {
                     issue.getRepo(), issue);
             return false;
         }
-        var chosen = models.resolve(issue, stage, decision.getHarnessId(), decision.getModel(), decision.getReasoningEffort());
-        if (stage.modelDriven()) {
-            // Recheck subscription authentication at execution time before replacing the thread pin.
-            String executionHarness = chosen.harnessId();
-            if (executionHarness == null) {
-                throw new IllegalStateException("Approved stage has no harness identity");
-            }
-            try {
+        HarnessSelection chosen;
+        try {
+            chosen = models.resolve(issue, stage, decision.getHarnessId(), decision.getModel(), decision.getReasoningEffort());
+            if (stage.modelDriven()) {
+                // Both catalog refreshes and subscription changes can invalidate the committed claim.
                 models.validate(chosen);
-                agent.pinSubscriptionHarness(executionHarness);
-            } catch (IllegalStateException unavailable) {
-                // The approval claim has already committed. Rearm that same decision rather
-                // than losing a completed implementation through the async failure handler.
-                TrackedIssue waiting = stages.rearmAfterAuthenticationFailure(issue.getId(), decision.getId());
-                issue.setStatus(waiting.getStatus());
-                issue.setCurrentPhase(waiting.getCurrentPhase());
-                issue.setLastFailureReason(waiting.getLastFailureReason());
-                return false;
+                agent.pinSubscriptionHarness(chosen.harnessId());
             }
+        } catch (HarnessSelectionException unavailable) {
+            copyWaitingState(stages.rearmAfterSelectionFailure(issue.getId(), decision.getId(), unavailable), issue);
+            return false;
+        } catch (IllegalStateException unavailable) {
+            copyWaitingState(stages.rearmAfterAuthenticationFailure(issue.getId(), decision.getId()), issue);
+            return false;
+        }
+        if (stage.modelDriven()) {
+            String executionHarness = chosen.harnessId();
             if (stage == WorkflowStage.REVIEW) {
                 issue.setResolvedReviewModel(chosen.modelId());
             } else {
@@ -84,6 +84,12 @@ public class StageWorkflowCoordinator {
             issues.save(issue);
         }
         return true;
+    }
+
+    private static void copyWaitingState(TrackedIssue waiting, TrackedIssue issue) {
+        issue.setStatus(waiting.getStatus());
+        issue.setCurrentPhase(waiting.getCurrentPhase());
+        issue.setLastFailureReason(waiting.getLastFailureReason());
     }
 
     /** System-accept the immutable plan; any implementation approval is a separate stage gate. */

@@ -38,7 +38,8 @@ public record HarnessModel(
 
     public void validateReasoning(String value) {
         if (!supportedReasoningLevels.contains(value)) {
-            throw new IllegalArgumentException("Reasoning " + value + " is not supported by " + id);
+            throw new HarnessSelectionException(HarnessSelectionException.Problem.REASONING,
+                    "Reasoning " + value + " is not supported by " + id);
         }
     }
 

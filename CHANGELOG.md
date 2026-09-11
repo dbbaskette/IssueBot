@@ -5,6 +5,7 @@
 - Route Claude Code and Codex through a shared coding harness registry with model and reasoning capabilities.
 - Pair every saved model with compatible reasoning, including Claude effort, and drive settings and run selectors from adapter capabilities.
 - Migrate persisted harness identities to stable `claude` and `codex` IDs while preserving legacy settings, sessions, and active workflow history.
+- Resolve missing legacy Claude reasoning from the selected model and preserve approved stage checkpoints when catalog or authentication checks fail.
 
 ## 0.5.1
 

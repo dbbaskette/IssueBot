@@ -330,8 +330,9 @@ class IssueWorkflowServiceTest {
         verify(issueRepository, never()).save(any());
     }
 
-    @Test
-    void expiredReviewAuthenticationPreservesClaimAndRecoveryDoesNotReimplement() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"authentication", "catalog-resolution", "catalog-readiness"})
+    void unavailableReviewSelectionPreservesClaimAndRecoveryDoesNotReimplement(String failure) throws Exception {
         var issue = planFirstWorkflowIssue();
         issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
         issue.setStatus(IssueStatus.IN_PROGRESS);
@@ -366,16 +367,36 @@ class IssueWorkflowServiceTest {
         decision.setReasoningEffort("ultra");
         decision.setAttempt(2);
         when(stages.beforeStage(issue, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW, 2)).thenReturn(decision);
-        when(stages.rearmAfterAuthenticationFailure(1L, 52L)).thenAnswer(call -> {
+        org.mockito.stubbing.Answer<TrackedIssue> rearm = invocation -> {
             issue.setStatus(IssueStatus.AWAITING_APPROVAL);
             issue.setCurrentPhase("STAGE_APPROVAL_REVIEW");
             return issue;
-        });
-        doThrow(new IllegalStateException("subscription expired")).doNothing()
-                .when(harnessService).pinSubscriptionHarness("codex");
+        };
+        doAnswer(rearm).when(stages).rearmAfterAuthenticationFailure(1L, 52L);
+        doAnswer(rearm).when(stages).rearmAfterSelectionFailure(eq(1L), eq(52L), any());
+        if (failure.equals("authentication")) {
+            doThrow(new IllegalStateException("subscription expired")).doNothing()
+                    .when(harnessService).pinSubscriptionHarness("codex");
+        }
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var adapter = mock(com.dbbaskette.issuebot.service.harness.CodingHarnessAdapter.class);
+        when(adapter.id()).thenReturn("codex");
+        when(adapter.displayName()).thenReturn("Codex CLI");
+        when(adapter.checkCliAvailable()).thenReturn(true);
+        when(adapter.checkSubscriptionAuthentication()).thenReturn(true);
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var refreshAt = new java.util.concurrent.atomic.AtomicInteger(switch (failure) {
+            case "catalog-resolution" -> 1;
+            case "catalog-readiness" -> 2;
+            default -> Integer.MAX_VALUE;
+        });
+        var availableModels = fixture.registry.require("codex").models();
+        when(adapter.models()).thenAnswer(call -> reads.incrementAndGet() >= refreshAt.get() ? List.of() : availableModels);
+        var selections = new com.dbbaskette.issuebot.service.harness.HarnessSelectionService(
+                new com.dbbaskette.issuebot.service.harness.CodingHarnessRegistry(List.of(adapter)),
+                fixture.properties, issueRepository, fixture.stages);
         var coordinator = new StageWorkflowCoordinator(stages,
-                new StageModelSelectionService(fixture.properties, fixture.selections),
+                new StageModelSelectionService(fixture.properties, selections),
                 harnessService, issueRepository, mock(com.dbbaskette.issuebot.repository.PlanningVersionRepository.class),
                 mock(PlanFirstTransactionManager.class), mock(IssueDispatchService.class));
         org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", coordinator);
@@ -391,12 +412,13 @@ class IssueWorkflowServiceTest {
         assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
         assertEquals("STAGE_APPROVAL_REVIEW", issue.getCurrentPhase());
         assertEquals(2, issue.getCurrentIteration());
-        verify(stages).rearmAfterAuthenticationFailure(1L, 52L);
+        if (failure.equals("authentication")) verify(stages).rearmAfterAuthenticationFailure(1L, 52L);
         verify(workflow, never()).phaseIndependentReview(any(), any(), any(), anyString(), anyInt(), any(), anyList(), any(), any());
 
         // approveAndClaim restores this exact phase; the persistence test verifies that transaction.
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        refreshAt.set(Integer.MAX_VALUE);
         workflow.processIssueAsync(issue);
 
         verify(workflow).phaseIndependentReview(same(issue), any(), any(), anyString(), eq(42), same(completed),

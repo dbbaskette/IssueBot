@@ -50,13 +50,15 @@ public class StageApprovalController {
     }
 
     private static String safeError(RuntimeException error) {
+        if (error instanceof com.dbbaskette.issuebot.service.harness.HarnessSelectionException selection) {
+            return selection.safeMessage();
+        }
         String message = error.getMessage();
         if (message != null && (java.util.Set.of("Processing is paused", "Processing control unavailable",
                 "Stage approval no longer exists", "This stage approval is stale or already claimed",
                 "The planning artifact changed; refresh the stage approval", "Another issue owns this repository",
                 "Global concurrency limit reached", "Issue no longer exists", "Repository no longer exists",
                 "Choose a supported CLI provider", "A provider and model are required for this stage").contains(message)
-                || message.startsWith("Reasoning level ") || message.equals("Choose a valid reasoning level")
                 || message.matches("Issue #\\d+ must complete first")
                 || message.matches("(?:Claude Code|Codex CLI) is not installed or available on PATH\\. Install that CLI before approving this stage\\.")
                 || message.matches("(?:Claude Code|Codex CLI) subscription authentication is unavailable\\. Run (?:codex login|claude auth login) with your subscription account, then retry\\. API-key billing is not permitted\\."))) {

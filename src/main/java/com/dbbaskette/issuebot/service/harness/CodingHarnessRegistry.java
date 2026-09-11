@@ -33,11 +33,13 @@ public class CodingHarnessRegistry {
     }
 
     public CodingHarnessAdapter require(String id) {
-        if (id == null || id.isBlank()) throw new IllegalArgumentException("A harness identity is required");
+        if (id == null || id.isBlank()) throw new HarnessSelectionException(
+                HarnessSelectionException.Problem.HARNESS, "A harness identity is required");
         String normalized = HarnessIds.normalize(id);
         CodingHarnessAdapter adapter = adapters.get(normalized);
         if (adapter == null) {
-            throw new IllegalArgumentException("Unsupported coding harness: " + id);
+            throw new HarnessSelectionException(HarnessSelectionException.Problem.HARNESS,
+                    "Unsupported coding harness: " + id);
         }
         return adapter;
     }

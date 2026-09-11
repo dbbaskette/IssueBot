@@ -85,9 +85,10 @@ public class IssueBotProperties {
         private String reviewModel = "claude-sonnet-5";
         // Cheap model for pre-screen / decomposition analysis
         private String utilityModel = "claude-haiku-4-5";
-        private String implementationReasoningEffort = "high";
-        private String reviewReasoningEffort = "high";
-        private String utilityReasoningEffort = "default";
+        // Missing legacy values resolve from the selected model's catalog default.
+        private String implementationReasoningEffort;
+        private String reviewReasoningEffort;
+        private String utilityReasoningEffort;
         @Min(1)
         private int reviewMaxTurns = 15;
         /**

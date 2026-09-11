@@ -34,11 +34,19 @@ class StageApprovalRenderTest {
                 "action=\"/issues/1/stages/2/approve\"", "id=\"stage-approval-form-2\" hx-preserve=\"true\"");
     }
 
-    @Test
-    void deterministicStageDoesNotRenderModelSelector() {
-        assertThat(render(WorkflowStage.MERGE)).contains("Approve merge", "#iteration-history",
-                        "No further approval checkpoints; continues automatically to completion.")
-                .doesNotContain("name=\"selection\"");
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("deterministicStages")
+    void deterministicStageDoesNotRenderTupleControls(WorkflowStage stage) {
+        assertThat(render(stage)).contains("Approve " + stage.name().toLowerCase(java.util.Locale.ROOT), "#iteration-history")
+                .doesNotContain("name=\"harnessId\"", "name=\"model\"", "name=\"reasoningEffort\"",
+                        "data-reasoning-picker", "data-harness-select", "data-model-select", "data-reasoning-select");
+        if (stage == WorkflowStage.MERGE) {
+            assertThat(render(stage)).contains("No further approval checkpoints; continues automatically to completion.");
+        }
+    }
+
+    static java.util.stream.Stream<WorkflowStage> deterministicStages() {
+        return java.util.Arrays.stream(WorkflowStage.values()).filter(stage -> !stage.modelDriven());
     }
 
     @Test
