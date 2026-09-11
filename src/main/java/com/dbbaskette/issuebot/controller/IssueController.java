@@ -104,7 +104,7 @@ public class IssueController {
     private final ApprovalCardAssembler approvalCardAssembler;
     private final IssueNextActionResolver nextActionResolver;
     private final NotificationService notificationService;
-    private final WorkflowStepperAssembler workflowStepperAssembler = new WorkflowStepperAssembler();
+    private final WorkflowStepperAssembler workflowStepperAssembler;
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -137,7 +137,8 @@ public class IssueController {
                             PlanningVersionRepository planningVersionRepository,
                             ApprovalCardAssembler approvalCardAssembler,
                             IssueNextActionResolver nextActionResolver,
-                            NotificationService notificationService) {
+                            NotificationService notificationService,
+                            WorkflowStepperAssembler workflowStepperAssembler) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -161,6 +162,7 @@ public class IssueController {
         this.approvalCardAssembler = approvalCardAssembler;
         this.nextActionResolver = nextActionResolver;
         this.notificationService = notificationService;
+        this.workflowStepperAssembler = workflowStepperAssembler;
     }
 
     @GetMapping

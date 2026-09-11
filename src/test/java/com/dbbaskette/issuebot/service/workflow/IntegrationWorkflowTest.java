@@ -28,6 +28,7 @@ import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
+import com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -1589,7 +1590,7 @@ class IntegrationWorkflowTest {
                 new WorkflowCancellationService(), guidanceRepository, objectMapper,
                 new TimelineAssembler(), mock(NotificationRepository.class), new MarkdownRenderer(),
                 dispatch, lifecycleVersions, mock(ApprovalCardAssembler.class), new IssueNextActionResolver(),
-                notificationService);
+                notificationService, new WorkflowStepperAssembler());
 
         controller.retryPlanImplementation(
                 issue.getId(), "test rollback on network failure", redirectAttributes);

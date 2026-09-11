@@ -14,6 +14,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class WorkflowStepperAssemblerTest {
 
+    @Test
+    void assemblerIsDiscoveredAsASpringComponent() {
+        var scanner = new org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider(true);
+        assertThat(scanner.findCandidateComponents("com.dbbaskette.issuebot.service.ui"))
+                .extracting(org.springframework.beans.factory.config.BeanDefinition::getBeanClassName)
+                .contains(WorkflowStepperAssembler.class.getName());
+    }
+
     private final WorkflowStepperAssembler assembler = new WorkflowStepperAssembler();
 
     @ParameterizedTest

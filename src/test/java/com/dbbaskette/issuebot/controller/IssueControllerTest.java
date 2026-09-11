@@ -24,6 +24,7 @@ import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.IssueNextAction;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.service.ui.ReviewScore;
+import com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
@@ -155,7 +156,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -184,7 +185,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -213,7 +214,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -236,7 +237,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -273,7 +274,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -421,6 +422,7 @@ class IssueControllerTest {
         final PlanningVersionRepository planningVersions = mock(PlanningVersionRepository.class);
         final ApprovalCardAssembler approvalCardAssembler = mock(ApprovalCardAssembler.class);
         final NotificationService notificationService = mock(NotificationService.class);
+        final WorkflowStepperAssembler workflowStepperAssembler = new WorkflowStepperAssembler();
         final IssueDispatchService dispatchService;
         final IssueController controller;
         final TrackedIssue issue;
@@ -459,8 +461,16 @@ class IssueControllerTest {
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatchService,
                     planningVersions, approvalCardAssembler, new IssueNextActionResolver(),
-                    notificationService);
+                    notificationService, workflowStepperAssembler);
         }
+    }
+
+    @Test
+    void controllerRetainsTheInjectedWorkflowStepperAssembler() {
+        Fixture fixture = new Fixture(IssueStatus.IN_PROGRESS);
+        org.assertj.core.api.Assertions.assertThat(org.springframework.test.util.ReflectionTestUtils
+                        .getField(fixture.controller, "workflowStepperAssembler"))
+                .isSameAs(fixture.workflowStepperAssembler);
     }
 
     @Test
@@ -2015,7 +2025,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
     }
 
     @Test
