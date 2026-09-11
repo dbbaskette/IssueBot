@@ -119,6 +119,8 @@ class NotificationTriageServiceTest {
     }
     @Test void malformedFiltersAndWatermarksRejected() {
         assertThatThrownBy(() -> triage.markAllRead(-1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> triage.markAllRead(0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> triage.markGroupRead("legacy:1", 0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> triage.markGroupRead("bad;sql", 1)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> triage.snapshot("x".repeat(201), null, "ALL", "ALL", false, PageRequest.of(0, 25))).isInstanceOf(IllegalArgumentException.class);
     }

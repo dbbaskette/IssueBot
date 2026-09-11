@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.*;
@@ -37,6 +38,7 @@ class NotificationHistoryTest {
     @Autowired TrackedIssueRepository issues;
     @Autowired WatchedRepoRepository repos;
     @Autowired NotificationPreferenceRepository preferences;
+    @MockitoSpyBean com.dbbaskette.issuebot.service.notification.NotificationTriageService triage;
     @MockitoBean IssuePollingService polling;
     @MockitoBean StartupValidator startupValidator;
     @MockitoBean ClaudeCodeService claude;
@@ -83,8 +85,11 @@ class NotificationHistoryTest {
         mvc.perform(post("/notifications/read").param("throughId", "1")).andExpect(status().isForbidden());
         mvc.perform(post("/notifications/group/read").param("groupKey", "legacy:1").param("throughId", "1")).andExpect(status().isForbidden());
         mvc.perform(post("/notifications/mute").param("category", "PROGRESS").param("muted", "true")).andExpect(status().isForbidden());
-        for (String cutoff : new String[]{"-1", "banana", "9223372036854775808"})
+        for (String cutoff : new String[]{"0", "-1", "banana", "9223372036854775808"}) {
             mvc.perform(post("/notifications/read").with(csrf()).param("throughId", cutoff)).andExpect(status().isBadRequest());
+            mvc.perform(post("/notifications/group/read").with(csrf()).param("groupKey", "legacy:1")
+                    .param("throughId", cutoff)).andExpect(status().isBadRequest());
+        }
         mvc.perform(post("/notifications/read").with(csrf())).andExpect(status().isBadRequest());
         for (String category : new String[]{"APPROVAL", "RECOVERY", "SYSTEM", "NOPE"})
             mvc.perform(post("/notifications/mute").with(csrf()).param("category", category).param("muted", "true"))
@@ -110,5 +115,21 @@ class NotificationHistoryTest {
                     .andExpect(status().is3xxRedirection());
             assertThat(preferences.findById(Notification.Category.COMPLETION).orElseThrow().isMuted()).isEqualTo(Boolean.parseBoolean(muted));
         }
+    }
+
+    @Test void actualPanelFailureReturnsHttpErrorAndLaterRefreshRecoversWithoutReading() throws Exception {
+        event(null, "Unread legacy event");
+        doThrow(new IllegalStateException("Synthetic notification snapshot failure")).when(triage)
+                .snapshot("", null, "ALL", "ALL", false, org.springframework.data.domain.PageRequest.of(0, 10));
+        var failed = mvc.perform(get("/notifications/panel").header("HX-Request", "true"))
+                .andExpect(status().isInternalServerError()).andReturn();
+        assertThat(failed.getResponse().getContentAsString()).doesNotContain("data-unread-count=");
+        assertThat(notifications.countByReadAtIsNull()).isEqualTo(1);
+        doCallRealMethod().when(triage).snapshot("", null, "ALL", "ALL", false,
+                org.springframework.data.domain.PageRequest.of(0, 10));
+        var recovered = mvc.perform(get("/notifications/panel").header("HX-Request", "true"))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(recovered.getResponse().getContentAsString()).contains("data-unread-count=\"0\"", "Unread legacy event");
+        assertThat(notifications.countByReadAtIsNull()).isEqualTo(1);
     }
 }

@@ -124,6 +124,6 @@ public class NotificationTriageService {
             throw new IllegalArgumentException("Invalid notification group");
     }
     public static void validateWatermark(long throughId) {
-        if (throughId < 0) throw new IllegalArgumentException("Invalid notification watermark");
+        if (throughId <= 0) throw new IllegalArgumentException("Invalid notification watermark");
     }
 }

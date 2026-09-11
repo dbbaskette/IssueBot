@@ -91,17 +91,49 @@
   // from "Mark all read" — can't update it via normal HTMX targeting. The
   // panel fragment carries the fresh count in data-unread-count for exactly
   // this: read it after every swap and reflect it on the badge.
+  function markNotifUnavailable() {
+    var btn = notifBellBtn();
+    if (!btn) { return; }
+    btn.setAttribute('title', 'Notification state unavailable');
+    btn.setAttribute('aria-label', 'Notifications — unread actions unavailable');
+    var badge = btn.querySelector('.notif-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge notif-badge';
+      btn.appendChild(badge);
+    }
+    // Keep any last-known number visibly stale. A previous zero has no badge,
+    // so show '?' rather than leaving the bell looking currently empty.
+    var lastKnown = (badge.textContent || '').replace(/\?$/, '');
+    badge.textContent = lastKnown + '?';
+    badge.setAttribute('aria-label', lastKnown
+      ? 'Unread actions unavailable; last known count ' + lastKnown
+      : 'Unread actions unavailable');
+  }
+
+  // Failed HTTP responses and network failures normally do not swap content.
+  // Scope the failure indication to requests targeting this panel only.
+  function notificationRequestFailed(evt) {
+    var detail = evt.detail || {};
+    var target = detail.target || (detail.requestConfig && detail.requestConfig.target);
+    if (target && target.id === 'notif-panel') { markNotifUnavailable(); }
+  }
+  ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
+    document.body.addEventListener(name, notificationRequestFailed);
+  });
+
   function syncNotifBadge(panelElement) {
     var btn = notifBellBtn();
     if (!btn || !panelElement) { return; }
     var content = panelElement.querySelector('#notif-panel-content');
     var rawCount = content && content.getAttribute('data-unread-count');
     if (rawCount == null || !/^\d+$/.test(rawCount)) {
-      btn.setAttribute('title', 'Notification state unavailable');
+      markNotifUnavailable();
       return;
     }
     var count = Number(rawCount);
     btn.setAttribute('title', 'Unread actions');
+    btn.setAttribute('aria-label', 'Notifications — unread actions');
     var badge = btn.querySelector('.notif-badge');
     if (count > 0) {
       if (!badge) {
@@ -111,6 +143,7 @@
         btn.appendChild(badge);
       }
       badge.textContent = String(count);
+      badge.setAttribute('aria-label', 'Unread actions');
     } else if (badge) {
       badge.remove();
     }

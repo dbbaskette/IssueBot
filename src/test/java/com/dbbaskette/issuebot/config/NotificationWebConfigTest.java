@@ -51,5 +51,10 @@ class NotificationWebConfigTest {
         render(interceptor, unavailable);
         assertThat(unavailable.getModel().get("unreadNotificationCount")).isNull();
         assertThat(unavailable.getModel().get("notificationStateAvailable")).isEqualTo(false);
+        doReturn(snapshot).when(service).snapshot("", null, "ALL", "ALL", false, PageRequest.of(0, 10));
+        var recovered = new ModelAndView("layout");
+        render(interceptor, recovered);
+        assertThat(recovered.getModel().get("notificationStateAvailable")).isEqualTo(true);
+        assertThat(recovered.getModel().get("unreadNotificationCount")).isEqualTo(3L);
     }
 }
