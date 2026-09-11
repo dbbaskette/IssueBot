@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -94,7 +95,7 @@ public class StageApprovalService {
         decision.setAttempt(attempt);
         decision.setArtifactVersionId(artifact);
         var chosen = selection.resolve(saved, stage, null, null);
-        decision.setProvider(chosen.provider());
+        decision.setHarnessId(chosen.provider() == null ? null : chosen.provider().name());
         decision.setModel(chosen.model());
         if (reasoning != null && chosen.provider() == IssueBotProperties.AgentProvider.CODEX)
             decision.setReasoningEffort(reasoning.resolve(saved.getId(), chosen.model(), stage));
@@ -201,9 +202,14 @@ public class StageApprovalService {
             }
         }
         String selectedProvider = provider == null || provider.isBlank()
-                ? decision.getProvider() == null ? null : decision.getProvider().name() : provider;
+                ? decision.getHarnessId() : provider;
         String selectedModel = model == null || model.isBlank() ? decision.getModel() : model;
-        var chosen = selection.resolve(issue, decision.getStage(), selectedProvider, selectedModel);
+        if (decision.getStage().modelDriven()
+                && (selectedProvider == null || selectedProvider.isBlank()
+                    || selectedModel == null || selectedModel.isBlank())) {
+            throw new IllegalStateException("Choose an explicit harness and model for this stage approval");
+        }
+        var chosen = selection.resolve(issue, decision.getStage(), legacyProviderName(selectedProvider), selectedModel);
         selection.validate(chosen);
         if (reasoning != null && chosen.provider() == IssueBotProperties.AgentProvider.CODEX) {
             String explicit = reasoning.validate(chosen.model(), reasoningEffort);
@@ -212,7 +218,7 @@ public class StageApprovalService {
             decision.setReasoningEffort(explicit != null ? explicit : retained != null ? retained
                     : reasoning.resolve(issueId, chosen.model(), decision.getStage()));
         } else decision.setReasoningEffort(null);
-        decision.setProvider(chosen.provider());
+        decision.setHarnessId(chosen.provider() == null ? null : chosen.provider().name());
         decision.setModel(chosen.model());
         approve(decision, actor == null || actor.isBlank() ? "operator" : actor);
         approvals.saveAndFlush(decision);
@@ -225,6 +231,16 @@ public class StageApprovalService {
             default -> null;
         });
         return issues.saveAndFlush(issue);
+    }
+
+    // Stage selection keeps its enum/config bridge until the configuration migration.
+    private static String legacyProviderName(String harnessId) {
+        if (harnessId == null) return null;
+        return switch (HarnessIds.normalize(harnessId)) {
+            case HarnessIds.CLAUDE -> "CLAUDE_CODE";
+            case HarnessIds.CODEX -> "CODEX";
+            default -> harnessId;
+        };
     }
 
     private TrackedIssue lockIssue(Long issueId) {

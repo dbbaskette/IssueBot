@@ -34,8 +34,10 @@ class StageApprovalServiceTest {
         when(issues.findById(2L)).thenReturn(Optional.of(issue));
         when(issues.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         when(approvals.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
-        when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(null, null));
+        when(selection.resolve(any(), any(), any(), any())).thenAnswer(call ->
+                call.getArgument(1) != null && ((WorkflowStage) call.getArgument(1)).modelDriven()
+                    ? new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra")
+                    : new StageModelSelectionService.Selection(null, null));
         when(controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)).thenReturn(
                 Optional.of(new ProcessingControl(ProcessingState.RUNNING)));
         when(reservations.evaluate(issue)).thenReturn(
@@ -103,9 +105,53 @@ class StageApprovalServiceTest {
         when(reasoning.resolve(2L, "gpt-6-astra", WorkflowStage.REVIEW)).thenReturn("high");
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThat(decision.getReasoningEffort()).isEqualTo("high");
+        assertThat(decision.getHarnessId()).isEqualTo("codex");
         when(reasoning.validate("gpt-6-astra", "ultra")).thenReturn("ultra");
         service.approveAndClaim(2L, 3L, "CODEX", "gpt-6-astra", "alice", "ultra");
         assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+        assertThat(decision.getHarnessId()).isEqualTo("codex");
+    }
+
+    @Test void existingApprovalRetainsNeutralIdentityModelAndReasoningWhenClaimed() {
+        var reasoning = mock(com.dbbaskette.issuebot.service.codex.ReasoningSelectionService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "reasoning", reasoning);
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setHarnessId("CODEX");
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+        when(selection.resolve(issue, WorkflowStage.REVIEW, "CODEX", "gpt-6-astra"))
+                .thenReturn(new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
+
+        service.approveAndClaim(2L, 3L, null, null, "alice");
+
+        assertThat(decision.getHarnessId()).isEqualTo("codex");
+        assertThat(decision.getProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+        assertThat(decision.getModel()).isEqualTo("gpt-6-astra");
+        assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.APPROVED);
+    }
+
+    @Test void missingPersistedIdentityRequiresExplicitChoiceInsteadOfDefaultProvider() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setHarnessId(null);
+        clearInvocations(selection);
+
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        verifyNoInteractions(selection);
+    }
+
+    @Test void missingPersistedModelRequiresExplicitChoiceInsteadOfDefaultModel() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setModel(null);
+        clearInvocations(selection);
+
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("model");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        verifyNoInteractions(selection);
     }
 
     private StageApproval waiting(WorkflowStage stage) {

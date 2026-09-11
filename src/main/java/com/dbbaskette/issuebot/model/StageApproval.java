@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.model;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -29,8 +30,10 @@ public class StageApproval {
     private int attempt;
     @Enumerated(EnumType.STRING) @Column(nullable = false)
     private State state = State.WAITING;
-    @Enumerated(EnumType.STRING)
-    private AgentProvider provider;
+    // Raw legacy data remains loadable even when an older installation stored an unknown ID.
+    private String provider;
+    @Column(name = "harness_id", length = 64)
+    private String harnessId;
     private String model;
     @Column(name = "artifact_version_id", nullable = false)
     private Long artifactVersionId = 0L;
@@ -50,8 +53,30 @@ public class StageApproval {
     public void setAttempt(int value) { attempt = value; }
     public State getState() { return state; }
     public void setState(State value) { state = value; }
-    public AgentProvider getProvider() { return provider; }
-    public void setProvider(AgentProvider value) { provider = value; }
+    public String getHarnessId() {
+        String value = harnessId != null ? harnessId : provider;
+        return value == null ? null : HarnessIds.normalize(value);
+    }
+    public void setHarnessId(String value) {
+        harnessId = value == null ? null : HarnessIds.normalize(value);
+        provider = switch (harnessId) {
+            case null -> null;
+            case HarnessIds.CLAUDE -> "CLAUDE_CODE";
+            case HarnessIds.CODEX -> "CODEX";
+            default -> null;
+        };
+    }
+    /** Compatibility bridge for legacy configuration and UI consumers. */
+    @Deprecated
+    public AgentProvider getProvider() {
+        return switch (getHarnessId()) {
+            case HarnessIds.CLAUDE -> AgentProvider.CLAUDE_CODE;
+            case HarnessIds.CODEX -> AgentProvider.CODEX;
+            case null, default -> null;
+        };
+    }
+    @Deprecated
+    public void setProvider(AgentProvider value) { setHarnessId(value == null ? null : value.name()); }
     public String getModel() { return model; }
     public void setModel(String value) { model = value; }
     public Long getArtifactVersionId() { return artifactVersionId; }

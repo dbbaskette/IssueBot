@@ -101,6 +101,35 @@ class PlanFirstTransactionManagerTest {
     }
 
     @Test
+    void generationUsesAuthoritativePersistedHarnessAndRejectsIdentityChanges() {
+        Long issueId = seedIssue(IssueStatus.IN_PROGRESS, "planning");
+        tx().executeWithoutResult(ignored -> entityManager.createNativeQuery(
+                "UPDATE tracked_issues SET resolved_harness_id = 'future_harness' WHERE id = :id")
+                .setParameter("id", issueId).executeUpdate());
+
+        var context = transactions.prepareGeneration(issueId);
+        assertThat(context.harnessId()).isEqualTo("future_harness");
+        configureIssue(issueId, issue -> issue.setResolvedHarnessId("codex"));
+
+        assertThatThrownBy(() -> transactions.persistGeneratedVersion(context, "design", "plan"))
+                .isInstanceOf(PlanFirstTransactionManager.StalePlanningGenerationException.class);
+        assertThat(versions.findByIssueIdOrderByVersionNumberDesc(issueId)).isEmpty();
+    }
+
+    @Test
+    void legacyOnlyAndUnknownProviderRowsRemainReadable() {
+        Long issueId = seedIssue(IssueStatus.IN_PROGRESS, "planning");
+        tx().executeWithoutResult(ignored -> entityManager.createNativeQuery(
+                "UPDATE tracked_issues SET resolved_harness_id = NULL WHERE id = :id")
+                .setParameter("id", issueId).executeUpdate());
+        assertThat(transactions.prepareGeneration(issueId).harnessId()).isEqualTo("codex");
+        tx().executeWithoutResult(ignored -> entityManager.createNativeQuery(
+                "UPDATE tracked_issues SET resolved_agent_provider = 'OTHER', resolved_harness_id = 'other' WHERE id = :id")
+                .setParameter("id", issueId).executeUpdate());
+        assertThat(transactions.prepareGeneration(issueId).harnessId()).isEqualTo("other");
+    }
+
+    @Test
     void generationVersionSaveFailureRollsBackTheWholeTransition() {
         Long issueId = seedIssue(IssueStatus.IN_PROGRESS, "planning");
         PlanFirstTransactionManager.GenerationContext context =

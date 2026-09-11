@@ -8,7 +8,6 @@ import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
-import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -126,7 +125,7 @@ public class PlanFirstService {
 
             HarnessExecutionResult result;
             try (PlanningWorkspaceService.PlanningWorkspace workspace = planningWorkspaces.open(repoPath)) {
-                String harnessId = HarnessIds.normalize(context.provider().name());
+                String harnessId = context.harnessId();
                 if (StageWorkflowCoordinator.managed(trackedIssue)) agent.pinSubscriptionHarness(harnessId);
                 else agent.pinHarness(harnessId);
                 try {

@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.model;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -102,9 +103,11 @@ public class TrackedIssue {
     @Column(name = "resolved_review_model")
     private String resolvedReviewModel;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "resolved_agent_provider")
-    private IssueBotProperties.AgentProvider resolvedAgentProvider;
+    private String resolvedAgentProvider;
+
+    @Column(name = "resolved_harness_id", length = 64)
+    private String resolvedHarnessId;
 
     @Column(name = "last_failure_reason", length = 2000)
     private String lastFailureReason;
@@ -228,9 +231,33 @@ public class TrackedIssue {
     public String getResolvedReviewModel() { return resolvedReviewModel; }
     public void setResolvedReviewModel(String resolvedReviewModel) { this.resolvedReviewModel = resolvedReviewModel; }
 
-    public IssueBotProperties.AgentProvider getResolvedAgentProvider() { return resolvedAgentProvider; }
+    public String getResolvedHarnessId() {
+        String value = resolvedHarnessId != null ? resolvedHarnessId : resolvedAgentProvider;
+        return value == null ? null : HarnessIds.normalize(value);
+    }
+    public void setResolvedHarnessId(String value) {
+        resolvedHarnessId = value == null ? null : HarnessIds.normalize(value);
+        // Retain the legacy representation for old active-run consumers and rollback.
+        resolvedAgentProvider = switch (resolvedHarnessId) {
+            case null -> null;
+            case HarnessIds.CLAUDE -> "CLAUDE_CODE";
+            case HarnessIds.CODEX -> "CODEX";
+            default -> null;
+        };
+    }
+
+    /** Compatibility bridge for configuration and legacy workflow callers. */
+    @Deprecated
+    public IssueBotProperties.AgentProvider getResolvedAgentProvider() {
+        return switch (getResolvedHarnessId()) {
+            case HarnessIds.CLAUDE -> IssueBotProperties.AgentProvider.CLAUDE_CODE;
+            case HarnessIds.CODEX -> IssueBotProperties.AgentProvider.CODEX;
+            case null, default -> null;
+        };
+    }
+    @Deprecated
     public void setResolvedAgentProvider(IssueBotProperties.AgentProvider resolvedAgentProvider) {
-        this.resolvedAgentProvider = resolvedAgentProvider;
+        setResolvedHarnessId(resolvedAgentProvider == null ? null : resolvedAgentProvider.name());
     }
 
     public String getLastFailureReason() { return lastFailureReason; }
@@ -292,6 +319,7 @@ public class TrackedIssue {
         resolvedImplModel = null;
         resolvedReviewModel = null;
         resolvedAgentProvider = null;
+        resolvedHarnessId = null;
         lastFailureReason = null;
         suspensionReason = null;
         planFeedback = null;

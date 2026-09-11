@@ -24,9 +24,36 @@ class StageApprovalPersistenceTest {
     @Autowired TrackedIssueRepository issues;
     @Autowired WatchedRepoRepository repos;
     @Autowired StageApprovalRepository approvals;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockitoBean StageModelSelectionService selection;
     @MockitoBean IssueBotProperties properties;
     @MockitoBean com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+
+    @Test void legacyOnlyAndUnknownStageRowsHydrateWithoutChangingIdentity() {
+        var repo = repos.saveAndFlush(new WatchedRepo("stage", "legacy-identities"));
+        var issue = issues.saveAndFlush(new TrackedIssue(repo, 1, "legacy approval"));
+        try {
+            jdbc.update("""
+                    INSERT INTO stage_approvals (issue_id, stage, attempt, state, provider, harness_id, model)
+                    VALUES (?, 'REVIEW', 1, 'WAITING', 'CLAUDE_CODE', NULL, 'saved-model')
+                    """, issue.getId());
+            assertThat(service.history(issue.getId())).singleElement().satisfies(saved -> {
+                assertThat(saved.getHarnessId()).isEqualTo("claude");
+                assertThat(saved.getProvider()).isEqualTo(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+            });
+            jdbc.update("UPDATE stage_approvals SET provider = 'OTHER', harness_id = 'other' WHERE issue_id = ?",
+                    issue.getId());
+            assertThat(service.history(issue.getId())).singleElement().satisfies(saved -> {
+                assertThat(saved.getHarnessId()).isEqualTo("other");
+                assertThat(saved.getProvider()).isNull();
+                assertThat(saved.getModel()).isEqualTo("saved-model");
+            });
+        } finally {
+            approvals.deleteAll();
+            issues.deleteAll();
+            repos.deleteAll();
+        }
+    }
 
     @Test void executionAuthenticationFailureDurablyRearmsSameApprovedReviewSelectionAndAttempt() {
         when(properties.getMaxConcurrentIssues()).thenReturn(3);
@@ -65,6 +92,9 @@ class StageApprovalPersistenceTest {
                 assertThat(saved.getId()).isEqualTo(decision.getId());
                 assertThat(saved.getAttempt()).isEqualTo(2);
                 assertThat(saved.getProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+                assertThat(saved.getHarnessId()).isEqualTo("codex");
+                assertThat(saved.getRunNumber()).isEqualTo(decision.getRunNumber());
+                assertThat(saved.getArtifactVersionId()).isEqualTo(decision.getArtifactVersionId());
                 assertThat(saved.getModel()).isEqualTo("gpt-6-astra");
                 assertThat(saved.getReasoningEffort()).isEqualTo("ultra");
                 assertThat(saved.getApprovedAt()).isNull();
@@ -82,6 +112,10 @@ class StageApprovalPersistenceTest {
                 assertThat(saved.getAttempt()).isEqualTo(2);
                 assertThat(saved.getReasoningEffort()).isEqualTo("ultra");
             });
+            assertThat(jdbc.queryForObject("SELECT harness_id FROM stage_approvals WHERE id = ?",
+                    String.class, decision.getId())).isEqualTo("codex");
+            assertThat(jdbc.queryForObject("SELECT provider FROM stage_approvals WHERE id = ?",
+                    String.class, decision.getId())).isEqualTo("CODEX");
         } finally {
             approvals.deleteAll();
             issues.deleteAll();
@@ -92,7 +126,7 @@ class StageApprovalPersistenceTest {
     @Test void simultaneousApprovalsCommitOnlyOneClaimAndPersistResumePhase() throws Exception {
         when(properties.getMaxConcurrentIssues()).thenReturn(3);
         when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(null, null));
+                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
         WatchedRepo repo = new WatchedRepo("stage", "concurrency");
         repo.setWorkflowPolicy(WorkflowPolicy.STAGED);
         repo = repos.saveAndFlush(repo);

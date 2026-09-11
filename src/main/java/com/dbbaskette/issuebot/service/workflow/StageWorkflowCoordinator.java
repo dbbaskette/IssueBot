@@ -4,7 +4,6 @@ import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
-import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import org.springframework.stereotype.Service;
 
 /** Adapts durable stage decisions to the existing workflow and versioned-plan lifecycle. */
@@ -54,9 +53,11 @@ public class StageWorkflowCoordinator {
             return false;
         }
         if (stage.modelDriven()) {
-            var selection = new StageModelSelectionService.Selection(decision.getProvider(), decision.getModel());
             // Recheck subscription authentication at execution time before replacing the thread pin.
-            String executionHarness = HarnessIds.normalize(selection.provider().name());
+            String executionHarness = decision.getHarnessId();
+            if (executionHarness == null) {
+                throw new IllegalStateException("Approved stage has no harness identity");
+            }
             try {
                 agent.pinSubscriptionHarness(executionHarness);
             } catch (IllegalStateException unavailable) {
@@ -69,15 +70,14 @@ public class StageWorkflowCoordinator {
                 return false;
             }
             if (stage == WorkflowStage.REVIEW) {
-                issue.setResolvedReviewModel(selection.model());
+                issue.setResolvedReviewModel(decision.getModel());
             } else {
                 if (stage == WorkflowStage.IMPLEMENTATION
-                        && !java.util.Objects.equals(issue.getResolvedAgentProvider() == null ? null
-                                : HarnessIds.normalize(issue.getResolvedAgentProvider().name()), executionHarness)) {
+                        && !java.util.Objects.equals(issue.getResolvedHarnessId(), executionHarness)) {
                     issue.setClaudeSessionId(null);
                 }
-                issue.setResolvedAgentProvider(selection.provider());
-                issue.setResolvedImplModel(selection.model());
+                issue.setResolvedHarnessId(executionHarness);
+                issue.setResolvedImplModel(decision.getModel());
             }
             issues.save(issue);
         }

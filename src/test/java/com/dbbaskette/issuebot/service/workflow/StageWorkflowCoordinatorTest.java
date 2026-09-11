@@ -52,11 +52,33 @@ class StageWorkflowCoordinatorTest {
             issue.setClaudeSessionId("old-session");
             assertThat(coordinator.before(issue, stage, 1)).isTrue();
             assertThat(issue.getResolvedAgentProvider()).isEqualTo(AgentProvider.CODEX);
+            assertThat(issue.getResolvedHarnessId()).isEqualTo("codex");
             assertThat(issue.getResolvedImplModel()).isEqualTo("selected-model");
             if (stage == WorkflowStage.IMPLEMENTATION) assertThat(issue.getClaudeSessionId()).isNull();
         }
         verify(agent, times(2)).pinSubscriptionHarness("codex");
         verify(models, never()).validate(any());
+    }
+
+    @Test void executionUsesNeutralIdentityEvenWhenLegacyColumnDisagrees() {
+        StageApproval decision = new StageApproval();
+        decision.setProvider(AgentProvider.CLAUDE_CODE);
+        org.springframework.test.util.ReflectionTestUtils.setField(decision, "harnessId", "codex");
+        decision.setModel("saved-model");
+        decision.setReasoningEffort("ultra");
+        decision.setState(StageApproval.State.APPROVED);
+        decision.setApprovedAt(LocalDateTime.now());
+        when(stages.beforeStage(issue, WorkflowStage.IMPLEMENTATION, 1)).thenReturn(decision);
+        issue.setResolvedHarnessId("CODEX");
+        issue.setClaudeSessionId("same-harness-session");
+
+        assertThat(coordinator.before(issue, WorkflowStage.IMPLEMENTATION, 1)).isTrue();
+        assertThat(issue.getResolvedHarnessId()).isEqualTo("codex");
+        assertThat(issue.getResolvedImplModel()).isEqualTo("saved-model");
+        assertThat(issue.getClaudeSessionId()).isEqualTo("same-harness-session");
+        assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+        verify(agent).pinSubscriptionHarness("codex");
+        verifyNoInteractions(models);
     }
 
     @Test void reviewSelectionPreservesImplementationProvenance() {
