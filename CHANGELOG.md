@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Apply processing mode changes and stop-request cancellations only after the database transaction commits, preventing rolled-back controls from publishing stale state or cancelling active work.
+
 ## 0.6.1
 
 - Wait for launchd to finish removing the prior IssueBot job before bootstrapping a replacement, preventing transient macOS error 5 during redeploys.
