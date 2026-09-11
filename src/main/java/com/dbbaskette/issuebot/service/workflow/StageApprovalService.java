@@ -121,6 +121,30 @@ public class StageApprovalService {
                         issueId, issue.getWorkflowRun(), StageApproval.State.WAITING));
     }
 
+    /** Release the execution slot while retaining the exact approval tuple and stage identity. */
+    @Transactional
+    public TrackedIssue rearmAfterAuthenticationFailure(Long issueId, Long approvalId) {
+        TrackedIssue saved = lockIssue(issueId);
+        StageApproval decision = approvals.findById(approvalId)
+                .orElseThrow(() -> new IllegalStateException("Stage approval no longer exists"));
+        Long artifact = saved.getApprovedPlanningVersion() == null ? 0L
+                : saved.getApprovedPlanningVersion().getId();
+        // A delayed worker must not move another run or an externally stopped issue backward.
+        if (!Objects.equals(decision.getIssue().getId(), issueId)
+                || decision.getRunNumber() != saved.getWorkflowRun()
+                || !Objects.equals(decision.getArtifactVersionId(), artifact)
+                || decision.getState() != StageApproval.State.APPROVED
+                || saved.getStatus() != IssueStatus.IN_PROGRESS) {
+            return saved;
+        }
+        decision.setState(StageApproval.State.WAITING);
+        decision.setApprovedAt(null);
+        approvals.saveAndFlush(decision);
+        saved.setLastFailureReason("Stage execution requires available CLI subscription authentication; repair access and approve this stage.");
+        waitAt(saved, saved, decision.getStage());
+        return saved;
+    }
+
     @Transactional(readOnly = true)
     public List<StageApproval> history(Long issueId) {
         return approvals.findByIssueIdOrderByIdAsc(issueId);

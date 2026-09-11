@@ -72,6 +72,33 @@ class StageWorkflowCoordinatorTest {
         verify(agent).pinSubscriptionHarness("codex");
     }
 
+    @Test void expiredExecutionAuthenticationRearmsClaimBeforeReturningWithoutRunning() {
+        StageApproval decision = new StageApproval();
+        decision.setId(42L);
+        decision.setState(StageApproval.State.APPROVED);
+        decision.setApprovedAt(LocalDateTime.now());
+        decision.setProvider(AgentProvider.CODEX);
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+        decision.setAttempt(2);
+        when(stages.beforeStage(issue, WorkflowStage.REVIEW, 2)).thenReturn(decision);
+        doThrow(new IllegalStateException("subscription expired")).when(agent).pinSubscriptionHarness("codex");
+        TrackedIssue waiting = issue();
+        waiting.setStatus(IssueStatus.AWAITING_APPROVAL);
+        waiting.setCurrentPhase("STAGE_APPROVAL_REVIEW");
+        waiting.setLastFailureReason("Repair subscription access and approve this stage.");
+        when(stages.rearmAfterAuthenticationFailure(10L, 42L)).thenReturn(waiting);
+
+        assertThat(coordinator.before(issue, WorkflowStage.REVIEW, 2)).isFalse();
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        assertThat(issue.getCurrentPhase()).isEqualTo("STAGE_APPROVAL_REVIEW");
+        assertThat(issue.getLastFailureReason()).contains("subscription");
+        verify(stages).rearmAfterAuthenticationFailure(10L, 42L);
+        verify(issues, never()).save(any());
+        verify(agent, never()).pinHarness(any());
+    }
+
     @Test void deterministicStagesDoNotPinModels() {
         approved(WorkflowStage.VERIFICATION);
         assertThat(coordinator.before(issue, WorkflowStage.VERIFICATION, 1)).isTrue();

@@ -329,6 +329,83 @@ class IssueWorkflowServiceTest {
     }
 
     @Test
+    void expiredReviewAuthenticationPreservesClaimAndRecoveryDoesNotReimplement() throws Exception {
+        var issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        issue.setBranchName("issuebot/issue-42");
+        issue.setPrNumber(42);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        issue.setClaudeSessionId("completed-implementation-session");
+        var version = PlanningVersion.pending(issue, 1, "spec", "plan", "CLAUDE_CODE", "claude-opus-4-8", null);
+        org.springframework.test.util.ReflectionTestUtils.setField(version, "id", 14L);
+        version.approve(java.time.LocalDateTime.now());
+        issue.setApprovedPlanningVersion(version);
+        var approvedPlan = new ApprovedPlanContext(14L, 1, "spec", "plan");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedPlan));
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+        Iteration completed = new Iteration(issue, 2);
+        completed.setId(9L);
+        completed.setDiff("completed diff");
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 2)).thenReturn(Optional.of(completed));
+        when(gitOps.openRepo("owner", "repo")).thenReturn(mock(Git.class));
+        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("repo"));
+        when(costRepository.totalCostForIssue(issue)).thenReturn(java.math.BigDecimal.ZERO);
+        var stages = mock(StageApprovalService.class);
+        var decision = new com.dbbaskette.issuebot.model.StageApproval();
+        decision.setId(52L);
+        decision.setState(com.dbbaskette.issuebot.model.StageApproval.State.APPROVED);
+        decision.setApprovedAt(java.time.LocalDateTime.now());
+        decision.setProvider(IssueBotProperties.AgentProvider.CODEX);
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+        decision.setAttempt(2);
+        when(stages.beforeStage(issue, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW, 2)).thenReturn(decision);
+        when(stages.rearmAfterAuthenticationFailure(1L, 52L)).thenAnswer(call -> {
+            issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+            issue.setCurrentPhase("STAGE_APPROVAL_REVIEW");
+            return issue;
+        });
+        doThrow(new IllegalStateException("subscription expired")).doNothing()
+                .when(harnessService).pinSubscriptionHarness("codex");
+        var coordinator = new StageWorkflowCoordinator(stages, mock(StageModelSelectionService.class),
+                harnessService, issueRepository, mock(com.dbbaskette.issuebot.repository.PlanningVersionRepository.class),
+                mock(PlanFirstTransactionManager.class), mock(IssueDispatchService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", coordinator);
+        var guard = mock(ManagedMergeGuard.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "managedMergeGuard", guard);
+        var workflow = workflowSpyWithIssueDetails(issue);
+        doReturn(CodeReviewResult.failed("review boundary reached", 0, 0, "gpt-6-astra"))
+                .when(workflow).phaseIndependentReview(same(issue), any(), any(), anyString(), anyInt(), same(completed),
+                        anyList(), eq(approvedPlan), any());
+
+        workflow.processIssueAsync(issue);
+
+        assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
+        assertEquals("STAGE_APPROVAL_REVIEW", issue.getCurrentPhase());
+        assertEquals(2, issue.getCurrentIteration());
+        verify(stages).rearmAfterAuthenticationFailure(1L, 52L);
+        verify(workflow, never()).phaseIndependentReview(any(), any(), any(), anyString(), anyInt(), any(), anyList(), any(), any());
+
+        // approveAndClaim restores this exact phase; the persistence test verifies that transaction.
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        workflow.processIssueAsync(issue);
+
+        verify(workflow).phaseIndependentReview(same(issue), any(), any(), anyString(), eq(42), same(completed),
+                anyList(), eq(approvedPlan), any());
+        assertEquals("gpt-6-astra", issue.getResolvedReviewModel());
+        assertEquals("ultra", decision.getReasoningEffort());
+        assertEquals(2, issue.getCurrentIteration());
+        verify(harnessService, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(workflow, never()).phaseSetup(any());
+        verify(stages, times(2)).beforeStage(issue, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW, 2);
+    }
+
+    @Test
     void managedResumePreservesImplementationProviderModelAndSession() {
         TrackedIssue issue = planFirstWorkflowIssue();
         issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);

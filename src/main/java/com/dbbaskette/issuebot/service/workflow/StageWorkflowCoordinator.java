@@ -57,7 +57,17 @@ public class StageWorkflowCoordinator {
             var selection = new StageModelSelectionService.Selection(decision.getProvider(), decision.getModel());
             // Recheck subscription authentication at execution time before replacing the thread pin.
             String executionHarness = HarnessIds.normalize(selection.provider().name());
-            agent.pinSubscriptionHarness(executionHarness);
+            try {
+                agent.pinSubscriptionHarness(executionHarness);
+            } catch (IllegalStateException unavailable) {
+                // The approval claim has already committed. Rearm that same decision rather
+                // than losing a completed implementation through the async failure handler.
+                TrackedIssue waiting = stages.rearmAfterAuthenticationFailure(issue.getId(), decision.getId());
+                issue.setStatus(waiting.getStatus());
+                issue.setCurrentPhase(waiting.getCurrentPhase());
+                issue.setLastFailureReason(waiting.getLastFailureReason());
+                return false;
+            }
             if (stage == WorkflowStage.REVIEW) {
                 issue.setResolvedReviewModel(selection.model());
             } else {

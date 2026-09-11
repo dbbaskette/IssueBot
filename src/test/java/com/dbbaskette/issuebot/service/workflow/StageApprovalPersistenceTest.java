@@ -26,6 +26,68 @@ class StageApprovalPersistenceTest {
     @Autowired StageApprovalRepository approvals;
     @MockitoBean StageModelSelectionService selection;
     @MockitoBean IssueBotProperties properties;
+    @MockitoBean com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+
+    @Test void executionAuthenticationFailureDurablyRearmsSameApprovedReviewSelectionAndAttempt() {
+        when(properties.getMaxConcurrentIssues()).thenReturn(3);
+        when(selection.resolve(any(), any(), any(), any())).thenReturn(
+                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
+        when(reasoning.resolve(anyLong(), eq("gpt-6-astra"), eq(WorkflowStage.REVIEW))).thenReturn("high");
+        when(reasoning.validate("gpt-6-astra", "ultra")).thenReturn("ultra");
+        var repo = new WatchedRepo("stage", "expired-auth");
+        repo.setWorkflowPolicy(WorkflowPolicy.STAGED);
+        repo = repos.saveAndFlush(repo);
+        var issue = new TrackedIssue(repo, 2, "completed implementation awaits review");
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setBranchName("issuebot/completed-implementation");
+        issue.setClaudeSessionId("completed-session");
+        issue = issues.saveAndFlush(issue);
+        try {
+            var decision = service.beforeStage(issue, WorkflowStage.REVIEW, 2);
+            var claimed = service.approveAndClaim(issue.getId(), decision.getId(), "CODEX", "gpt-6-astra", "operator", "ultra");
+            verify(selection).validate(any()); // Approval authentication succeeded.
+            assertThat(claimed.getCurrentPhase()).isEqualTo("INDEPENDENT_REVIEW");
+            var agent = mock(com.dbbaskette.issuebot.service.harness.CodingHarnessService.class);
+            doThrow(new IllegalStateException("subscription expired")).doNothing()
+                    .when(agent).pinSubscriptionHarness("codex");
+            var coordinator = new StageWorkflowCoordinator(service, selection, agent, issues,
+                    mock(PlanningVersionRepository.class), mock(PlanFirstTransactionManager.class), mock(IssueDispatchService.class));
+
+            assertThat(coordinator.before(claimed, WorkflowStage.REVIEW, 2)).isFalse();
+
+            var waiting = issues.findById(issue.getId()).orElseThrow();
+            assertThat(waiting.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+            assertThat(waiting.getCurrentPhase()).isEqualTo("STAGE_APPROVAL_REVIEW");
+            assertThat(waiting.getLastFailureReason()).contains("subscription");
+            assertThat(issues.countByStatus(IssueStatus.IN_PROGRESS)).isZero();
+            assertThat(service.pending(issue.getId())).hasValueSatisfying(saved -> {
+                assertThat(saved.getId()).isEqualTo(decision.getId());
+                assertThat(saved.getAttempt()).isEqualTo(2);
+                assertThat(saved.getProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+                assertThat(saved.getModel()).isEqualTo("gpt-6-astra");
+                assertThat(saved.getReasoningEffort()).isEqualTo("ultra");
+                assertThat(saved.getApprovedAt()).isNull();
+            });
+
+            var recovered = service.approveAndClaim(issue.getId(), decision.getId(), null, null, "operator");
+            assertThat(recovered.getCurrentPhase()).isEqualTo("INDEPENDENT_REVIEW");
+            assertThat(recovered.getCurrentIteration()).isEqualTo(2);
+            assertThat(recovered.getBranchName()).isEqualTo("issuebot/completed-implementation");
+            assertThat(recovered.getClaudeSessionId()).isEqualTo("completed-session");
+            assertThat(coordinator.before(recovered, WorkflowStage.REVIEW, 2)).isTrue();
+            assertThat(service.history(issue.getId())).singleElement().satisfies(saved -> {
+                assertThat(saved.getId()).isEqualTo(decision.getId());
+                assertThat(saved.getState()).isEqualTo(StageApproval.State.APPROVED);
+                assertThat(saved.getAttempt()).isEqualTo(2);
+                assertThat(saved.getReasoningEffort()).isEqualTo("ultra");
+            });
+        } finally {
+            approvals.deleteAll();
+            issues.deleteAll();
+            repos.deleteAll();
+        }
+    }
 
     @Test void simultaneousApprovalsCommitOnlyOneClaimAndPersistResumePhase() throws Exception {
         when(properties.getMaxConcurrentIssues()).thenReturn(3);
