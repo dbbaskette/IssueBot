@@ -228,4 +228,19 @@ class IssuesQueueRenderTest {
                     .doesNotContain("hx-post=\"/issues/4/start\"");
         }
     }
+
+    @Test
+    void issueRowsAndExplicitOpenLinksExposeOnlyStableNavigationIdentity() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        TrackedIssue issue = new TrackedIssue(repo, 46, "Open safely");
+        issue.setId(142L);
+        issue.setStatus(IssueStatus.QUEUED);
+
+        String html = renderTableRows(List.of(issue));
+
+        assertThat(html).contains("data-navigation-issue=\"142\"", "data-issue-href=\"/issues/142\"");
+        assertThat(java.util.regex.Pattern.compile("data-navigation-issue=\"142\"")
+                .matcher(html).results().count()).isEqualTo(2);
+        assertThat(html).doesNotContain("data-navigation-title", "data-navigation-body");
+    }
 }

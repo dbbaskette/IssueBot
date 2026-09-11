@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="content" id="needs-you-content">
+<div th:fragment="content" id="needs-you-content" data-navigation-list>
     <div th:replace="~{layout :: toasts}"></div>
 
     <div class="page-header">
@@ -29,7 +29,8 @@
             </div>
             <div class="panel-body">
                 <div th:each="group : ${decompositionAttention}"
-                     class="glass-card mb-2 decomposition-inbox-card">
+                     class="glass-card mb-2 decomposition-inbox-card"
+                     th:attr="data-navigation-issue=${group.parentId()}">
                     <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${'Parent #' + group.parentNumber()}">Parent #153</strong>
@@ -41,7 +42,8 @@
                     </div>
                     <p th:text="${group.attentionReason()}">The current child needs attention.</p>
                     <a class="btn btn-primary btn-sm"
-                       th:href="@{'/issues/' + ${group.parentId()} + '#decomposition-group'}">
+                       th:href="@{'/issues/' + ${group.parentId()} + '#decomposition-group'}"
+                       th:attr="data-navigation-issue=${group.parentId()}">
                         Review group
                     </a>
                 </div>
@@ -57,14 +59,17 @@
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(approvals)}">Nothing here right now.</p>
 
                 <div th:each="issue : ${approvals}" class="glass-card decision-card mb-2"
-                     th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
+                     th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}"
+                     th:attr="data-navigation-issue=${issue.id}">
                     <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
                     <h4 class="decision-card-title" th:text="${issue.issueTitle}">Issue title</h4>
                     <p class="decision-stage" th:text="${#strings.capitalize(#strings.toLowerCase(#strings.substringAfter(issue.currentPhase, 'STAGE_APPROVAL_'))) + ' approval'}">Stage approval</p>
-                    <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
+                    <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}"
+                       th:attr="data-navigation-issue=${issue.id}">Review stage</a>
                 </div>
                 <div th:each="issue : ${approvals}" class="glass-card decision-card mb-2"
-                     th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
+                     th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}"
+                     th:attr="data-navigation-issue=${issue.id}">
                     <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
@@ -146,7 +151,7 @@
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(planApprovals)}">Nothing here right now.</p>
 
                 <div th:each="issue : ${planApprovals}" th:with="version=${planVersions.get(issue.id)}"
-                     class="glass-card decision-card mb-2">
+                     class="glass-card decision-card mb-2" th:attr="data-navigation-issue=${issue.id}">
                     <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
@@ -167,7 +172,8 @@
                     </div>
 
                     <div class="form-actions flex gap-1">
-                        <a class="btn btn-primary btn-sm" th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">
+                        <a class="btn btn-primary btn-sm" th:href="@{'/issues/' + ${issue.id} + '#plan-review'}"
+                           th:attr="data-navigation-issue=${issue.id}">
                             <i class="ti ti-file-description" aria-hidden="true"></i> Review spec &amp; plan
                         </a>
                     </div>
@@ -183,7 +189,8 @@
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(readyToStart)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${readyToStart}" class="glass-card decision-card mb-2">
+                <div th:each="issue : ${readyToStart}" class="glass-card decision-card mb-2"
+                     th:attr="data-navigation-issue=${issue.id}">
                     <div class="section-heading mb-1" style="gap:0.75rem;flex-wrap:wrap">
                         <div style="min-width:0;overflow-wrap:anywhere">
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
@@ -197,7 +204,8 @@
                     </p>
                     <div class="form-actions flex gap-1" style="flex-wrap:wrap">
                         <a class="btn btn-primary btn-sm"
-                           th:href="@{'/issues/' + ${issue.id} + '#ready-to-start'}">
+                           th:href="@{'/issues/' + ${issue.id} + '#ready-to-start'}"
+                           th:attr="data-navigation-issue=${issue.id}">
                             <i class="ti ti-player-play" aria-hidden="true"></i> Open start controls
                         </a>
                     </div>
@@ -213,7 +221,8 @@
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(splitProposals)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${splitProposals}" class="glass-card decision-card mb-2">
+                <div th:each="issue : ${splitProposals}" class="glass-card decision-card mb-2"
+                     th:attr="data-navigation-issue=${issue.id}">
                     <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
@@ -252,7 +261,8 @@
             <div class="panel-body">
                 <p class="text-muted text-sm" th:if="${#lists.isEmpty(needsHuman)}">Nothing here right now.</p>
 
-                <div th:each="issue : ${needsHuman}" class="glass-card decision-card mb-2">
+                <div th:each="issue : ${needsHuman}" class="glass-card decision-card mb-2"
+                     th:attr="data-navigation-issue=${issue.id}">
                     <div class="section-heading mb-1">
                         <div>
                             <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
@@ -271,7 +281,8 @@
                         Cooldown until</p>
 
                     <a class="btn btn-ghost btn-sm" th:href="@{'/issues/' + ${issue.id}}"
-                       th:hx-get="@{'/issues/' + ${issue.id}}" hx-target="#content" hx-push-url="true">
+                       th:hx-get="@{'/issues/' + ${issue.id}}" th:attr="data-navigation-issue=${issue.id}"
+                       hx-target="#content" hx-push-url="true">
                         <i class="ti ti-arrow-right" aria-hidden="true"></i> Open issue for retry options
                     </a>
                 </div>

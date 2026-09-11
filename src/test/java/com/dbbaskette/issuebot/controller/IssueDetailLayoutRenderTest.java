@@ -119,6 +119,21 @@ class IssueDetailLayoutRenderTest {
     }
 
     @Test
+    void detailRendersProgressiveReturnAndBoundedSequenceControlsOutsideLivePolling() {
+        String html = renderContent(issue(142L, 42, IssueStatus.IN_PROGRESS), List.of());
+
+        assertThat(html).contains(
+                "data-navigation-detail", "data-current-issue-id=\"142\"",
+                "data-navigation-return", "Back to queue",
+                "data-navigation-sequence", "In this result set",
+                "data-navigation-previous", "data-navigation-previous-disabled",
+                "data-navigation-next", "data-navigation-next-disabled",
+                "class=\"btn btn-ghost btn-sm\"");
+        assertThat(render(baseContext(issue(142L, 42, IssueStatus.IN_PROGRESS), List.of()), "live-status"))
+                .doesNotContain("data-navigation-return", "data-navigation-sequence");
+    }
+
+    @Test
     void liveTerminalPanel_rendersInsideTheRightColumn_notTheLeft() {
         String html = renderContent(issue(2L, 2, IssueStatus.IN_PROGRESS), List.of());
 

@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="content" th:if="${issue}">
+<div th:fragment="content" th:if="${issue}" data-navigation-detail
+     th:attr="data-current-issue-id=${issue.id}">
     <div th:replace="~{layout :: toasts}"></div>
 
     <!-- === Two-column layout (#90): LEFT carries header/banners/decision cards/goal/
@@ -19,7 +20,8 @@
 
             <div class="page-header">
                 <div>
-                    <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
+                    <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true"
+                       data-navigation-return class="btn btn-ghost btn-sm">&larr; Back to queue</a>
                     <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
                     <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
                         <a class="repo-link" target="_blank" rel="noopener"
@@ -61,6 +63,24 @@
                     </button>
                 </div>
             </div>
+
+            <nav class="pager mb-3" aria-label="Issue navigation" data-navigation-sequence hidden>
+                <span class="pager-info" data-navigation-sequence-label>In this result set</span>
+                <a class="btn btn-ghost btn-sm" href="/issues" hx-get="/issues" hx-target="#content"
+                   hx-push-url="true" data-navigation-previous hidden>
+                    <i class="ti ti-chevron-left" aria-hidden="true"></i> Previous
+                </a>
+                <button type="button" class="btn btn-ghost btn-sm" data-navigation-previous-disabled disabled hidden>
+                    <i class="ti ti-chevron-left" aria-hidden="true"></i> Previous
+                </button>
+                <a class="btn btn-ghost btn-sm" href="/issues" hx-get="/issues" hx-target="#content"
+                   hx-push-url="true" data-navigation-next hidden>
+                    Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
+                </a>
+                <button type="button" class="btn btn-ghost btn-sm" data-navigation-next-disabled disabled hidden>
+                    Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
+                </button>
+            </nav>
 
             <!-- One decision surface; independently refreshed children preserve poll/dialog boundaries. -->
             <section id="issue-decision" class="issue-decision panel mb-3" aria-label="Current issue decision">

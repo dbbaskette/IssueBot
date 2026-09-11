@@ -1651,8 +1651,17 @@
     });
   }
 
+  function initNavigationContext(scope) {
+    if (!window.IssueBotNavigation) { return; }
+    // The navigation module owns only result-set identity and return scrolling.
+    // IssueBotUiState continues to own drafts, disclosures, toasts, and native
+    // history restoration; both modules initialize the same swapped subtree.
+    window.IssueBotNavigation.decorateDetail(scope || document);
+  }
+
   // Re-run enhanced widgets after HTMX swaps in new content. ui-state.js owns
-  // disclosure restoration, navigation scroll, and toast lifetimes.
+  // disclosure restoration, ordinary SPA scroll, and toast lifetimes; the
+  // navigation module adds only an explicit Back-to-results scroll restore.
   document.body.addEventListener('htmx:afterSwap', function (evt) {
     initDiffViewers();
     initSortableTables();
@@ -1670,6 +1679,7 @@
     // pipeline — including the queue's SSE-triggered refresh, which flows
     // through htmx's normal fetch+swap cycle) marks just that region's key.
     var target = evt.detail && evt.detail.target;
+    initNavigationContext(target);
     if (target && target.id === 'content') {
       // Re-trigger footgun (mirrors the fix already applied to issues.html's
       // #issue-table-body): htmx does not reliably wire up a *nested* self-morphing
@@ -1834,6 +1844,7 @@
     initCostCharts();
     updateBulkActionBar();
     restoreSubmittedRepoForm();
+    initNavigationContext(document);
     UpdateStamps.markAllVisible();
     document.querySelectorAll('[data-plan-revision-guidance]').forEach(syncPlanRevisionButton);
   }

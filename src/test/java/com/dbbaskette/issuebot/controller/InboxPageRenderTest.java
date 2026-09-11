@@ -100,7 +100,8 @@ class InboxPageRenderTest {
         controller(issues).inbox(model, null);
         String html = render(model);
         assertThat(html).contains("id=\"approvals\"", "Implementation approval", "Ship the feature",
-                "class=\"glass-card decision-card mb-2\"", "href=\"/issues/2#stage-approval\"");
+                "class=\"glass-card decision-card mb-2\"", "href=\"/issues/2#stage-approval\"",
+                "data-navigation-list", "data-navigation-issue=\"2\"");
         assertThat(html).doesNotContain("id=\"plan-approvals\"", "id=\"ready-to-start\"",
                 "id=\"split-proposals\"", "id=\"needs-human\"", "Nothing here right now.",
                 "No actions need your attention", "Stage Approval Implementation");

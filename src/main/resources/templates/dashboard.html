@@ -8,7 +8,7 @@
         <span class="text-sm text-muted" data-updated-stamp="dashboard"></span>
     </div>
 
-    <div th:fragment="live" id="dashboard-live"
+    <div th:fragment="live" id="dashboard-live" data-navigation-list
          hx-get="/dashboard/live"
          hx-trigger="every 10s"
          hx-ext="morph"
@@ -86,7 +86,8 @@
                         th:classappend="${hasIssue} ? 'is-link' : ''"
                         th:attr="hx-get=${hasIssue} ? '/issues/' + ${event.issue.id} : null,
                                  hx-target=${hasIssue} ? '#content' : null,
-                                 hx-push-url=${hasIssue} ? 'true' : null">
+                                 hx-push-url=${hasIssue} ? 'true' : null,
+                                 data-navigation-issue=${hasIssue} ? ${event.issue.id} : null">
                         <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm')}">12:00</span>
                         <span class="type" th:switch="${event.eventType}">
                             <span th:case="'WORKFLOW_STARTED'"><i class="ti ti-player-play"></i> Workflow started</span>
@@ -151,6 +152,7 @@
                     <span class="control-card-repo" th:text="${card.repositoryLabel()}">owner/repo</span>
                     <a th:if="${card.issue().id != null}" class="control-card-title"
                        th:href="${'/issues/' + card.issue().id}"
+                       th:attr="data-navigation-issue=${card.issue().id}"
                        th:text="${'#' + card.issue().issueNumber + ' — ' + card.issueLabel()}">#1 — Title</a>
                     <strong th:unless="${card.issue().id != null}" class="control-card-title"
                             th:text="${'#' + card.issue().issueNumber + ' — ' + card.issueLabel()}">#1 — Title</strong>
@@ -164,7 +166,9 @@
 
             <div class="control-card-actions">
                 <a th:if="${card.nextAction().hasAction()}" class="btn btn-outline btn-sm"
-                   th:href="${card.nextAction().href()}" th:text="${card.nextAction().ctaLabel()}">View issue</a>
+                   th:href="${card.nextAction().href()}"
+                   th:attr="data-navigation-issue=${#strings.startsWith(card.nextAction().href(), '/issues/') ? card.issue().id : null}"
+                   th:text="${card.nextAction().ctaLabel()}">View issue</a>
             </div>
 
             <details class="control-room-run-details" th:if="${card.runDetails() != null}"

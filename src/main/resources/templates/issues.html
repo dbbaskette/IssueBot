@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="content">
+<div th:fragment="content" data-navigation-list>
     <div th:replace="~{layout :: toasts}"></div>
     <div class="page-header">
         <div><h2>Issues</h2><p class="text-sm text-muted queue-intro">Open an issue to review it or choose how to run it.</p></div>
@@ -27,13 +27,16 @@
                aria-label="Search issues by title or number"
                hx-get="/issues" hx-target="#content" hx-include="#filter-form"
                hx-trigger="input changed delay:400ms, search"
+               hx-push-url="true"
                hx-indicator="#issue-refresh-indicator">
         <select class="queue-filter" hx-get="/issues" hx-target="#content" name="status" hx-include="#filter-form"
+                hx-push-url="true"
                 hx-indicator="#issue-refresh-indicator">
             <option value="">All statuses</option>
             <option th:each="s : ${statuses}" th:value="${s}" th:text="${humanize.status(s)}" th:selected="${s.name() == selectedStatus}">Status</option>
         </select>
         <select class="queue-filter" hx-get="/issues" hx-target="#content" name="repoId" hx-include="#filter-form"
+                hx-push-url="true"
                 hx-indicator="#issue-refresh-indicator">
             <option value="">All repositories</option>
             <option th:each="repo : ${repos}" th:value="${repo.id}" th:text="${repo.fullName()}" th:selected="${repo.id == selectedRepoId}">owner/repo</option>
@@ -126,14 +129,16 @@
          to go, and hidden altogether when everything fits on one page. -->
     <div class="pager" th:if="${totalPages > 1}">
         <a th:if="${hasPrevious}" class="btn btn-ghost btn-sm"
+           th:href="@{/issues(status=${selectedStatus},repoId=${selectedRepoId},q=${searchQuery},page=${currentPage - 1})}"
            th:attr="hx-get=@{/issues(status=${selectedStatus},repoId=${selectedRepoId},q=${searchQuery},page=${currentPage - 1})}"
-           hx-target="#content">
+           hx-target="#content" hx-push-url="true">
             <i class="ti ti-chevron-left" aria-hidden="true"></i> Prev
         </a>
         <span class="pager-info" th:text="'Page ' + (${currentPage} + 1) + ' of ' + ${totalPages}">Page 1 of 1</span>
         <a th:if="${hasNext}" class="btn btn-ghost btn-sm"
+           th:href="@{/issues(status=${selectedStatus},repoId=${selectedRepoId},q=${searchQuery},page=${currentPage + 1})}"
            th:attr="hx-get=@{/issues(status=${selectedStatus},repoId=${selectedRepoId},q=${searchQuery},page=${currentPage + 1})}"
-           hx-target="#content">
+           hx-target="#content" hx-push-url="true">
             Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
         </a>
     </div>
@@ -167,6 +172,7 @@
         role="link"
         th:attr="hx-get='/issues/' + ${issue.id},
                  data-issue-href='/issues/' + ${issue.id},
+                 data-navigation-issue=${issue.id},
                  aria-label='Open issue #' + ${issue.issueNumber} + ' ' + ${issue.issueTitle}"
         hx-target="#content"
         hx-push-url="true">
@@ -230,6 +236,7 @@
         <td class="text-sm text-muted queue-updated-cell" th:text="${#temporals.format(issue.updatedAt, 'MMM d HH:mm')}">Jan 1 12:00</td>
         <td class="queue-actions-cell">
             <a class="btn btn-outline btn-sm" th:href="@{'/issues/' + ${issue.id}}"
+               th:attr="data-navigation-issue=${issue.id}"
                onclick="event.stopPropagation()"
                th:text="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'
                     or #strings.startsWith(issue.status.name(), 'AWAITING') ? 'Review' : 'Open'}"

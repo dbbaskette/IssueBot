@@ -123,6 +123,8 @@ class DashboardControlRoomRenderTest {
                 emptyProcessingLane(), emptyUpNextLane()));
 
         assertThat(html).contains("href=\"/issues/9\"", "href=\"/issues/9#recovery\"");
+        assertThat(java.util.regex.Pattern.compile("data-navigation-issue=\"9\"")
+                .matcher(html).results().count()).isEqualTo(2);
         assertThat(html).doesNotContain("<form", "method=\"post\"");
         assertNoNestedAnchors(html);
     }
@@ -136,7 +138,8 @@ class DashboardControlRoomRenderTest {
                 "hx-get=\"/dashboard/live\"",
                 "hx-trigger=\"every 10s\"",
                 "hx-swap=\"morph:outerHTML\"",
-                "hx-target=\"this\"");
+                "hx-target=\"this\"",
+                "data-navigation-list");
     }
 
     @Test
