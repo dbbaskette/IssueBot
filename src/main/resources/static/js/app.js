@@ -365,7 +365,10 @@
     var href = row.getAttribute('data-issue-href');
     if (!href) { return; }
     if (window.htmx && typeof window.htmx.ajax === 'function') {
-      window.htmx.ajax('GET', href, { target: '#content', pushUrl: true });
+      // Passing the row as the supported HTMX request source preserves its
+      // inherited hx-target and hx-push-url behavior. HTMX 2.0.4 does not
+      // support the later pushUrl ajax option.
+      window.htmx.ajax('GET', href, { source: row, target: '#content', event: e });
     } else {
       window.location.href = href;
     }

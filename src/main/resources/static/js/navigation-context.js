@@ -328,6 +328,16 @@
     return parsed.pathname + parsed.search + parsed.hash;
   }
 
+  function issueIdForUrl(raw) {
+    if (typeof raw !== 'string' || raw.indexOf('//') === 0) { return null; }
+    var parsed;
+    try { parsed = new root.URL(raw, root.location.href); }
+    catch (error) { return null; }
+    var origin = new root.URL(root.location.href).origin;
+    var match = parsed.origin === origin && parsed.pathname.match(/^\/issues\/([1-9][0-9]{0,15})$/);
+    return match ? positiveId(match[1]) : null;
+  }
+
   function decorateIssueMarker(marker, token) {
     ['data-issue-href', 'hx-get', 'data-hx-get', 'href'].forEach(function (attribute) {
       if (!marker.hasAttribute || !marker.hasAttribute(attribute)) { return; }
@@ -484,6 +494,23 @@
     if (control && control !== marker) { return; }
     prepareIssueNavigation(marker);
   }, true);
+
+  // HTMX snapshots an hx-get path when it processes an element. A capture-phase
+  // click/keydown can update the visible attributes, but that does not update the
+  // already-initialized request handler's closed-over path. configRequest is the
+  // supported HTMX 2.x hook for replacing that actual outbound path. Validate the
+  // request independently so a nested control or spoofed URL cannot acquire a
+  // navigation token for a different issue.
+  document.addEventListener('htmx:configRequest', function (event) {
+    var detail = event.detail;
+    var source = detail && detail.elt;
+    var marker = source && source.closest && source.closest('[data-navigation-issue]');
+    var markerId = positiveId(marker && marker.getAttribute && marker.getAttribute('data-navigation-issue'));
+    if (markerId == null || issueIdForUrl(detail.path) !== markerId) { return; }
+    var context = prepareIssueNavigation(marker);
+    var decorated = context && issueUrl(detail.path, context.token);
+    if (decorated) { detail.path = decorated; }
+  });
 
   document.addEventListener('htmx:afterSwap', function (event) {
     var target = event.detail && event.detail.target;

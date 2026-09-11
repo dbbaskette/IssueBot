@@ -232,6 +232,37 @@ test('deliberate detail navigation decorates only the issue URL with the context
   assert.equal(stored.source, '/inbox');
 });
 
+test('HTMX config hook replaces its initialized request path with the bounded detail URL', () => {
+  const h = harness({ url: '/issues?status=FAILED' });
+  const result = list(h.document, [12, 19]);
+  const marker = result.children[1];
+  const initializedPath = marker.getAttribute('hx-get');
+
+  // This is the order used by HTMX: its listener has already captured the
+  // initialized path when our capture-phase click decorates the DOM.
+  h.emit('click', {}, marker);
+  const request = { elt: marker, path: initializedPath, headers: {}, parameters: {} };
+  h.emit('htmx:configRequest', request, marker);
+
+  assert.match(request.path, /^\/issues\/19\?nav=[a-f0-9]{32}$/);
+  assert.equal(request.path, marker.getAttribute('hx-get'));
+  assert.notEqual(request.path, initializedPath);
+});
+
+test('HTMX config hook does not decorate a mismatched or cross-origin request path', () => {
+  const h = harness();
+  const marker = list(h.document, [12]).children[0];
+
+  const mismatch = { elt: marker, path: '/issues/99', headers: {}, parameters: {} };
+  h.emit('htmx:configRequest', mismatch, marker);
+  assert.equal(mismatch.path, '/issues/99');
+
+  const crossOrigin = { elt: marker, path: 'https://evil.example/issues/12', headers: {}, parameters: {} };
+  h.emit('htmx:configRequest', crossOrigin, marker);
+  assert.equal(crossOrigin.path, 'https://evil.example/issues/12');
+  assert.equal(h.sessionStorage.value('issuebot.navigation-context.v1'), undefined);
+});
+
 test('row controls do not create a snapshot when they do not navigate to detail', () => {
   const h = harness();
   const result = h.document.body.appendChild(new Element('section', { 'data-navigation-list': '' }));
