@@ -35,6 +35,11 @@ public class DecisionProducer {
                 action.name(), OperatorTransition.State.ACCEPTED));
         return "transition:" + transition.getId() + ":accepted";
     }
+    /** Persist before acceptance is appended; never recreate or resend this intent on replay. */
+    public void prepareGuidanceComment(TrackedIssue issue, Long guidanceId) {
+        transitions.saveAndFlush(new OperatorTransition(issue.getId(), "guidance:" + guidanceId,
+                "GUIDANCE_COMMENT", OperatorTransition.State.IN_FLIGHT));
+    }
     /** Preserve the intent's immutable context even if a later workflow run has begun. */
     public void outcomeOf(String acceptedSource, String resultSource, Outcome outcome) {
         var accepted = ledger.findBySourceKey(acceptedSource).orElseThrow().asDraft();

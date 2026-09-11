@@ -200,13 +200,14 @@ public class IssueDispatchTransactionManager {
         issue.setStatus(IssueStatus.IN_PROGRESS);
         IssueGuidance savedGuidance = guidance.saveAndFlush(new IssueGuidance(issue.getId(), operatorGuidance));
         TrackedIssue saved = issues.saveAndFlush(issue);
+        decisions.prepareGuidanceComment(issue, savedGuidance.getId());
         decisions.record(issue, "guidance:" + savedGuidance.getId() + ":retry", Actor.OPERATOR,
                 Action.RETRY, Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED,
                 issue.getApprovedPlanningVersion().getId(), null, null, savedGuidance.getId());
         decisions.record(issue, "guidance:" + savedGuidance.getId() + ":accepted", Actor.OPERATOR,
                 Action.GUIDE, Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED,
                 issue.getApprovedPlanningVersion().getId(), null, null, savedGuidance.getId());
-        return IssueDispatchService.ClaimResult.claimed(saved);
+        return IssueDispatchService.ClaimResult.claimed(saved, savedGuidance.getId());
     }
 
     @Transactional
@@ -329,6 +330,7 @@ public class IssueDispatchTransactionManager {
         issue.setSuspensionReason(null);
         TrackedIssue saved = issues.saveAndFlush(issue);
         String source = decisions.transitionKey(issue, action);
+        if (artifact != null) decisions.prepareGuidanceComment(issue, artifact.getId());
         if (artifact == null) {
             decisions.accepted(issue, source, actor, action,
                     actor == Actor.AUTOMATION ? Reason.POLICY_AUTOMATIC : Reason.USER_REQUEST);
@@ -340,7 +342,7 @@ public class IssueDispatchTransactionManager {
                     Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED, planId, null, null, artifact.getId());
         }
         // Entity graph above initialized the approved version and repository before OSIV closes.
-        return IssueDispatchService.ClaimResult.claimed(saved);
+        return IssueDispatchService.ClaimResult.claimed(saved, artifact == null ? null : artifact.getId());
     }
 
     private List<Iteration> reviewIterations(TrackedIssue issue) {

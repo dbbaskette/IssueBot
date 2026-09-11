@@ -39,8 +39,14 @@ class StageApprovalPersistenceTest {
         var adapter = mock(CodingHarnessAdapter.class);
         when(adapter.id()).thenReturn("codex");
         when(adapter.displayName()).thenReturn("Codex CLI");
-        when(adapter.checkCliAvailable()).thenReturn(true);
-        when(adapter.checkSubscriptionAuthentication()).thenReturn(true);
+        when(adapter.checkCliAvailable()).thenAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return true;
+        });
+        when(adapter.checkSubscriptionAuthentication()).thenAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return true;
+        });
         var reads = new java.util.concurrent.atomic.AtomicInteger();
         var refreshAt = new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
         var original = new HarnessModel("gpt-6-astra", "Astra", "", "high", List.of("high", "ultra"));

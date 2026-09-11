@@ -259,7 +259,11 @@ public class IssueDispatchService {
         return legacyIterations.findByIssueOrderByIterationNumAsc(issue);
     }
 
-    public record ClaimResult(boolean claimed, String reason, TrackedIssue issue) {
+    public record ClaimResult(boolean claimed, String reason, TrackedIssue issue, Long guidanceId) {
+        public ClaimResult(boolean claimed, String reason, TrackedIssue issue) { this(claimed, reason, issue, null); }
+        static ClaimResult claimed(TrackedIssue issue, Long guidanceId) {
+            return new ClaimResult(true, null, issue, guidanceId);
+        }
         static ClaimResult claimed(TrackedIssue issue) {
             return new ClaimResult(true, null, issue);
         }

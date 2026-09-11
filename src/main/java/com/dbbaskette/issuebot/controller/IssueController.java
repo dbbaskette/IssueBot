@@ -468,14 +468,8 @@ public class IssueController {
         eventService.log("MANUAL_RETRY", retryMessage, issue.getRepo(), issue);
 
         if (trimmedInstructions != null) {
-            try {
-                gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                        issue.getIssueNumber(),
-                        "**ADDITIONAL HUMAN INSTRUCTIONS** (manual retry):\n\n" + trimmedInstructions);
-            } catch (Exception e) {
-                log.warn("Failed to post retry instructions comment on #{}: {}",
-                        issue.getIssueNumber(), e.getMessage());
-            }
+            postGuidanceComment(issue, claim.guidanceId(),
+                    "**ADDITIONAL HUMAN INSTRUCTIONS** (manual retry):\n\n" + trimmedInstructions);
         }
 
         workflowService.processIssueAsync(issue, trimmedInstructions);
@@ -945,24 +939,8 @@ public class IssueController {
             return "redirect:/issues/" + id;
         }
 
-        boolean commentConfirmed = false;
-        try {
-            if (accepted.created())
-            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                    issue.getIssueNumber(), "**Operator guidance (mid-run):** " + text);
-            commentConfirmed = true;
-        } catch (Exception e) {
-            log.warn("Failed to post guidance comment on #{}: {}",
-                    issue.getIssueNumber(), e.getMessage());
-        }
-
         if (accepted.created()) {
-            try {
-                operatorTransactions.guidanceCommentResult(id, accepted.guidance().getId(), commentConfirmed);
-            } catch (RuntimeException auditFailure) {
-                // Acceptance is already durable. Never resend the comment to repair an audit write.
-                log.warn("Guidance comment outcome could not be recorded for issue {}; accepted guidance remains queued", id);
-            }
+            postGuidanceComment(issue, accepted.guidance().getId(), "**Operator guidance (mid-run):** " + text);
         }
 
         eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + text,
@@ -1140,15 +1118,8 @@ public class IssueController {
                         + " with operator guidance",
                 issue.getRepo(), issue);
 
-        try {
-            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                    issue.getIssueNumber(),
-                    "**IssueBot guided implementation retry (approved Plan v" + versionNumber
-                            + " unchanged):** " + text);
-        } catch (Exception e) {
-            log.warn("Failed to post guided retry comment on #{}: {}",
-                    issue.getIssueNumber(), e.getMessage());
-        }
+        postGuidanceComment(issue, claim.guidanceId(), "**IssueBot guided implementation retry (approved Plan v"
+                + versionNumber + " unchanged):** " + text);
 
         // The guidance row committed with the claim is the single source of truth. The workflow
         // consumes it only when the exact implementation context is durably checkpointed.
@@ -1160,6 +1131,22 @@ public class IssueController {
 
     private static String planReviewRedirect(Long id) {
         return "redirect:/issues/" + id + "#plan-review";
+    }
+
+    private void postGuidanceComment(TrackedIssue issue, Long guidanceId, String text) {
+        boolean confirmed = false;
+        try {
+            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(), issue.getIssueNumber(), text);
+            confirmed = true;
+        } catch (Exception failure) {
+            log.warn("Guidance comment outcome is unknown for issue {}", issue.getId());
+        }
+        try {
+            operatorTransactions.guidanceCommentResult(issue.getId(), guidanceId, confirmed);
+        } catch (RuntimeException auditFailure) {
+            // The durable comment intent remains IN_FLIGHT for startup UNKNOWN recovery, never replay.
+            log.warn("Guidance comment outcome could not be recorded for issue {}; accepted guidance remains queued", issue.getId());
+        }
     }
 
     private static String planFirstRedirect(Long id) {

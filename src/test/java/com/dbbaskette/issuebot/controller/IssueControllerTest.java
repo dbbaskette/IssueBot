@@ -1776,16 +1776,49 @@ class IssueControllerTest {
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
     }
 
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void allGuidanceCommentPathsRecordKnownOrUnknownOutcomes(boolean confirmed) {
+        for (String path : java.util.List.of("mid-run", "ordinary", "guided")) {
+            Fixture f = path.equals("guided") ? approvedPlanFixture(IssueStatus.FAILED, 2)
+                    : new Fixture(path.equals("mid-run") ? IssueStatus.IN_PROGRESS : IssueStatus.FAILED);
+            if (!confirmed) doThrow(new IllegalStateException("private external failure"))
+                    .when(f.gitHubApiClient).addComment(any(), any(), anyInt(), any());
+            var row = new IssueGuidance(1L, "instructions"); row.setId(17L);
+            if (path.equals("mid-run")) {
+                when(f.operatorTransactions.guide(1L, "instructions", "comment-token"))
+                        .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, true));
+                f.controller.guide(1L, "instructions", "comment-token", f.redirectAttributes);
+            } else if (path.equals("ordinary")) {
+                doReturn(new IssueDispatchService.ClaimResult(true, null, f.issue, 17L)).when(f.dispatchService)
+                        .claimRetry(eq(1L), any(), any(), eq("instructions"));
+                f.controller.retry(1L, "instructions", null, null, null, null, false, f.redirectAttributes);
+                verify(f.workflowService).processIssueAsync(f.issue, "instructions");
+            } else {
+                doReturn(new IssueDispatchService.ClaimResult(true, null, f.issue, 17L)).when(f.dispatchService)
+                        .claimGuidedRetry(eq(1L), eq("instructions"), anyInt());
+                f.controller.retryPlanImplementation(1L, "instructions", f.redirectAttributes);
+                verify(f.workflowService).processIssueAsync(f.issue);
+            }
+            verify(f.gitHubApiClient, times(1)).addComment(any(), any(), anyInt(), any());
+            verify(f.operatorTransactions).guidanceCommentResult(1L, 17L, confirmed);
+            verify(f.redirectAttributes, never()).addFlashAttribute(eq("error"), any());
+        }
+    }
+
     @Test void guidanceOutcomeAuditFailureDoesNotInvalidateAcceptedGuidanceOrRepeatComment() {
         Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
         var row = new IssueGuidance(1L, "same guidance"); row.setId(17L);
         when(f.operatorTransactions.guide(1L, "same guidance", "stable-token"))
-                .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, true));
+                .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, true),
+                        new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, false));
         doThrow(new IllegalStateException("private database error"))
                 .when(f.operatorTransactions).guidanceCommentResult(1L, 17L, true);
         f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
+        f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
         verify(f.gitHubApiClient, times(1)).addComment(any(), any(), anyInt(), any());
-        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        verify(f.operatorTransactions, times(1)).guidanceCommentResult(1L, 17L, true);
+        verify(f.redirectAttributes, times(2)).addFlashAttribute(eq("success"), anyString());
         verify(f.redirectAttributes, never()).addFlashAttribute(eq("error"), any());
     }
 

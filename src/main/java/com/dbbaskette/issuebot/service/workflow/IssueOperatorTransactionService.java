@@ -50,6 +50,7 @@ public class IssueOperatorTransactionService {
         var row = new IssueGuidance(id, normalized);
         row.setRequestToken(token == null ? java.util.UUID.randomUUID().toString() : token);
         guidance.saveAndFlush(row);
+        decisions.prepareGuidanceComment(issue, row.getId());
         decisions.record(issue, "guidance:" + row.getId() + ":accepted", Actor.OPERATOR,
                 Action.GUIDE, Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED,
                 null, null, null, row.getId());
@@ -78,7 +79,29 @@ public class IssueOperatorTransactionService {
         var issue = lock(issueId);
         var row = guidance.findById(guidanceId).orElseThrow();
         if (!issueId.equals(row.getIssueId())) throw new IllegalArgumentException("Guidance belongs to another issue");
+        var intent = transitions.findFirstByIssueIdAndScopeKeyAndKindOrderByIdDesc(
+                issueId, "guidance:" + guidanceId, "GUIDANCE_COMMENT").orElseThrow();
+        if (intent.getState() == OperatorTransition.State.SUCCEEDED) return;
+        intent.setState(confirmed ? OperatorTransition.State.SUCCEEDED : OperatorTransition.State.UNKNOWN);
+        transitions.saveAndFlush(intent);
         var outcome = confirmed ? Outcome.SUCCEEDED : Outcome.UNKNOWN;
         decisions.outcomeOf("guidance:" + guidanceId + ":accepted", "guidance:" + guidanceId + ":comment:" + outcome, outcome);
+    }
+
+    /** Startup records uncertainty only; it never sends a comment or guesses success. */
+    @Transactional
+    public void recoverGuidanceComment(Long issueId, Long intentId) {
+        // Load the intent only after acquiring its owner lock, avoiding a stale managed snapshot.
+        boolean issueExists = issues.findRepoIdByIssueId(issueId).isPresent();
+        if (issueExists) lock(issueId);
+        var intent = transitions.findById(intentId).orElseThrow();
+        if (!"GUIDANCE_COMMENT".equals(intent.getKind()) || !issueId.equals(intent.getIssueId()))
+            throw new IllegalArgumentException("Not an owned comment intent");
+        if (intent.getState() != OperatorTransition.State.IN_FLIGHT) return;
+        Long guidanceId = Long.valueOf(intent.getScopeKey().substring("guidance:".length()));
+        intent.setState(OperatorTransition.State.UNKNOWN);
+        transitions.saveAndFlush(intent);
+        if (issueExists && guidance.existsById(guidanceId)) decisions.outcomeOf("guidance:" + guidanceId + ":accepted",
+                "guidance:" + guidanceId + ":comment:UNKNOWN", Outcome.UNKNOWN);
     }
 }

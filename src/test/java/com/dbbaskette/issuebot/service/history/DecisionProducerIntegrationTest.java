@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.*;
 import org.springframework.transaction.support.*;
@@ -31,7 +32,7 @@ import static org.mockito.Mockito.*;
         ApprovalDecisionService.class, ApprovalDecisionTransactionManager.class, ApprovalIntentRecovery.class,
         IssueDispatchTransactionManager.class, PlanFirstTransactionManager.class,
         StageApprovalService.class, DecompositionReservationService.class,
-        DecompositionGroupTransactionManager.class, QueueRecoveryService.class})
+        DecompositionGroupTransactionManager.class, QueueRecoveryService.class, GuidanceCommentRecovery.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class DecisionProducerIntegrationTest {
     @Autowired IssueOperatorTransactionService operators;
@@ -41,6 +42,8 @@ class DecisionProducerIntegrationTest {
     @Autowired ApprovalDecisionService approval;
     @Autowired ApprovalDecisionTransactionManager approvalTx;
     @Autowired ApprovalIntentRecovery recovery;
+    @Autowired GuidanceCommentRecovery commentRecovery;
+    @MockitoSpyBean DecisionProducer producer;
     @Autowired PlanFirstTransactionManager plans;
     @Autowired StageApprovalService stages;
     @Autowired DecompositionGroupTransactionManager groups;
@@ -48,6 +51,7 @@ class DecisionProducerIntegrationTest {
     @Autowired TrackedIssueRepository issues;
     @Autowired WatchedRepoRepository repos;
     @Autowired IssueGuidanceRepository guidance;
+    @Autowired IterationRepository iterations;
     @Autowired PlanningVersionRepository versions;
     @Autowired OperatorTransitionRepository intents;
     @Autowired PlatformTransactionManager manager;
@@ -128,6 +132,53 @@ class DecisionProducerIntegrationTest {
         verify(cancellation).requestCancel(issue.getId());
         assertThat(rows()).hasSize(1).first().extracting(IssueDecision::getAction).isEqualTo(Action.STOP);
     }
+    @Test void unresolvedGuidanceCommentRecoversUnknownWithoutResendingAfterOutcomeRollback() {
+        status(IssueStatus.IN_PROGRESS);
+        var accepted = operators.guide(issue.getId(), "private guidance", "restart-token");
+        tx().executeWithoutResult(t -> {
+            operators.guidanceCommentResult(issue.getId(), accepted.guidance().getId(), true);
+            t.setRollbackOnly();
+        });
+        assertThat(rows()).hasSize(1);
+        assertThat(intents.findByKindAndState("GUIDANCE_COMMENT", OperatorTransition.State.IN_FLIGHT)).hasSize(1);
+        commentRecovery.recover(); commentRecovery.recover();
+        assertThat(rows()).extracting(IssueDecision::getOutcome).containsExactly(Outcome.UNKNOWN, Outcome.ACCEPTED);
+        assertThat(operators.guide(issue.getId(), "private guidance", "restart-token").created()).isFalse();
+        verifyNoInteractions(github);
+    }
+
+    @Test void readinessRunsWithoutTransactionAndRejectsChangedExactStageTuple() {
+        issue.getRepo().setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
+        repos.saveAndFlush(issue.getRepo()); status(IssueStatus.IN_PROGRESS);
+        doAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return null;
+        }).when(selections).validate(any());
+        var automatic = stages.beforeStage(issue, WorkflowStage.VERIFICATION, 1);
+        stages.rearmAfterAuthenticationFailure(issue.getId(), automatic.getId());
+        doAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            tx().executeWithoutResult(t -> jdbc.update("UPDATE stage_approvals SET decision_generation=decision_generation+1 WHERE id=?", automatic.getId()));
+            return null;
+        }).when(selections).validate(any());
+        assertThatThrownBy(() -> stages.approveAndClaim(issue.getId(), automatic.getId(), null, null, "operator"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("stale");
+        assertThat(rows()).hasSize(1);
+        assertThat(issues.findById(issue.getId()).orElseThrow().getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+    }
+
+    @Test void automaticReadinessRejectsAChangedWorkflowRunBeforeAcceptance() {
+        issue.getRepo().setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
+        repos.saveAndFlush(issue.getRepo()); status(IssueStatus.IN_PROGRESS);
+        doAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            tx().executeWithoutResult(t -> jdbc.update("UPDATE tracked_issues SET workflow_run=workflow_run+1 WHERE id=?", issue.getId()));
+            return null;
+        }).when(selections).validate(any());
+        assertThatThrownBy(() -> stages.beforeStage(issue, WorkflowStage.VERIFICATION, 1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("stale");
+        assertThat(rows()).isEmpty();
+    }
     @Test void startsAndRetriesHaveCorrectActorAndLaterRunIdentity() {
         assertThat(dispatch.claimStart(issue.getId(), IssueDispatchTransactionManager.StartMutation.none()).claimed()).isTrue();
         assertThat(dispatch.claimStart(issue.getId()).claimed()).isFalse();
@@ -160,7 +211,9 @@ class DecisionProducerIntegrationTest {
             t.setRollbackOnly();
         });
         assertThat(guidance.count()).isZero(); assertThat(rows()).isEmpty();
-        dispatch.claimRetry(issue.getId(), i -> null, IssueDispatchTransactionManager.RetryMutation.none(), "private retry guidance");
+        var claim = dispatch.claimRetry(issue.getId(), i -> null, IssueDispatchTransactionManager.RetryMutation.none(), "private retry guidance");
+        assertThat(claim.guidanceId()).isNotNull();
+        assertThat(intents.findByKindAndState("GUIDANCE_COMMENT", OperatorTransition.State.IN_FLIGHT)).hasSize(1);
         assertThat(rows()).hasSize(2).allSatisfy(row -> assertThat(row.getGuidanceId()).isNotNull());
         assertThat(rows()).extracting(IssueDecision::getAction).containsExactly(Action.GUIDE, Action.RETRY);
         assertThat(guidance.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(issue.getId())).isEmpty();
@@ -179,6 +232,29 @@ class DecisionProducerIntegrationTest {
         tx().executeWithoutResult(t -> { control.stopNow(); t.setRollbackOnly(); });
         assertThat(rows()).hasSize(2); verifyNoInteractions(cancellation);
         control.stopNow(); assertThat(rows().getFirst().getAction()).isEqualTo(Action.STOP);
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void guidedRetryReturnsDurableCommentIdentityAndRetainsQueuedInstructionDelivery(boolean confirmed) {
+        issue.setPlanFirstOverride(true);
+        issue.setPlanConformanceAttempt(2);
+        status(IssueStatus.FAILED);
+        var plan = PlanningVersion.pending(issue, 1, "spec", "plan", "CODEX", "test", null);
+        plan.approve(java.time.LocalDateTime.now());
+        issue.setApprovedPlanningVersion(versions.saveAndFlush(plan));
+        issue = issues.saveAndFlush(issue);
+        var review = new Iteration(issue, 2); review.setReviewPassed(false);
+        iterations.saveAndFlush(review);
+        var claim = dispatch.claimGuidedRetry(issue.getId(), "private guided retry", 5);
+        assertThat(claim.claimed()).isTrue(); assertThat(claim.guidanceId()).isNotNull();
+        assertThat(guidance.findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(issue.getId()))
+                .singleElement().extracting(IssueGuidance::getId).isEqualTo(claim.guidanceId());
+        operators.guidanceCommentResult(issue.getId(), claim.guidanceId(), confirmed);
+        assertThat(rows()).extracting(IssueDecision::getOutcome)
+                .containsExactly(confirmed ? Outcome.SUCCEEDED : Outcome.UNKNOWN, Outcome.ACCEPTED, Outcome.ACCEPTED);
+        commentRecovery.recover();
+        assertThat(rows()).hasSize(3);
+        verifyNoInteractions(github);
     }
     @Test void planApprovalAndRevisionAreBoundToTheExactVersion() {
         status(IssueStatus.AWAITING_PLAN_APPROVAL);
@@ -276,11 +352,14 @@ class DecisionProducerIntegrationTest {
         repos.saveAndFlush(issue.getRepo()); status(IssueStatus.IN_PROGRESS);
         var automatic = stages.beforeStage(issue, WorkflowStage.VERIFICATION, 1);
         stages.rearmAfterAuthenticationFailure(issue.getId(), automatic.getId());
-        tx().executeWithoutResult(t -> {
-            stages.approveAndClaim(issue.getId(), automatic.getId(), null, null, "operator");
-            t.setRollbackOnly();
-        });
+        DecisionProducer producerTarget = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(producer);
+        doThrow(new IllegalStateException("audit persistence failure")).when(producerTarget)
+                .record(any(), anyString(), eq(Actor.OPERATOR), eq(Action.APPROVE), any(), any(), any(), any(), any(), any());
+        assertThatThrownBy(() -> stages.approveAndClaim(issue.getId(), automatic.getId(), null, null, "operator"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("audit persistence");
         assertThat(rows()).hasSize(1);
+        doCallRealMethod().when(producerTarget)
+                .record(any(), anyString(), eq(Actor.OPERATOR), eq(Action.APPROVE), any(), any(), any(), any(), any(), any());
         stages.approveAndClaim(issue.getId(), automatic.getId(), null, null, "operator");
         assertThatThrownBy(() -> stages.approveAndClaim(issue.getId(), automatic.getId(), null, null, "operator"))
                 .isInstanceOf(IllegalStateException.class);
