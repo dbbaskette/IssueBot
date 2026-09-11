@@ -3,7 +3,7 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.*;
 import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -14,8 +14,9 @@ import static org.mockito.Mockito.*;
 
 class StageWorkflowCoordinatorTest {
     StageApprovalService stages = mock(StageApprovalService.class);
-    StageModelSelectionService models = mock(StageModelSelectionService.class);
-    ClaudeCodeService agent = mock(ClaudeCodeService.class);
+    HarnessSelectionFixture fixture = new HarnessSelectionFixture();
+    StageModelSelectionService models = spy(new StageModelSelectionService(fixture.properties, fixture.selections));
+    CodingHarnessService agent = mock(CodingHarnessService.class);
     TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
     PlanFirstTransactionManager plans = mock(PlanFirstTransactionManager.class);
@@ -52,11 +53,33 @@ class StageWorkflowCoordinatorTest {
             issue.setClaudeSessionId("old-session");
             assertThat(coordinator.before(issue, stage, 1)).isTrue();
             assertThat(issue.getResolvedAgentProvider()).isEqualTo(AgentProvider.CODEX);
-            assertThat(issue.getResolvedImplModel()).isEqualTo("selected-model");
+            assertThat(issue.getResolvedHarnessId()).isEqualTo("codex");
+            assertThat(issue.getResolvedImplModel()).isEqualTo("gpt-6-astra");
             if (stage == WorkflowStage.IMPLEMENTATION) assertThat(issue.getClaudeSessionId()).isNull();
         }
-        verify(agent, times(2)).pinSubscriptionProvider(AgentProvider.CODEX);
-        verify(models, never()).validate(any());
+        verify(agent, times(2)).pinSubscriptionHarness("codex");
+        verify(models, times(2)).validate(any());
+    }
+
+    @Test void executionUsesNeutralIdentityEvenWhenLegacyColumnDisagrees() {
+        StageApproval decision = new StageApproval();
+        decision.setProvider(AgentProvider.CLAUDE_CODE);
+        org.springframework.test.util.ReflectionTestUtils.setField(decision, "harnessId", "codex");
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+        decision.setState(StageApproval.State.APPROVED);
+        decision.setApprovedAt(LocalDateTime.now());
+        when(stages.beforeStage(issue, WorkflowStage.IMPLEMENTATION, 1)).thenReturn(decision);
+        issue.setResolvedHarnessId("CODEX");
+        issue.setClaudeSessionId("same-harness-session");
+
+        assertThat(coordinator.before(issue, WorkflowStage.IMPLEMENTATION, 1)).isTrue();
+        assertThat(issue.getResolvedHarnessId()).isEqualTo("codex");
+        assertThat(issue.getResolvedImplModel()).isEqualTo("gpt-6-astra");
+        assertThat(issue.getClaudeSessionId()).isEqualTo("same-harness-session");
+        assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+        verify(agent).pinSubscriptionHarness("codex");
+        verify(models).validate(new HarnessSelection("codex", "gpt-6-astra", "ultra"));
     }
 
     @Test void reviewSelectionPreservesImplementationProvenance() {
@@ -65,17 +88,44 @@ class StageWorkflowCoordinatorTest {
         issue.setResolvedImplModel("implementation-model");
         issue.setClaudeSessionId("implementation-session");
         assertThat(coordinator.before(issue, WorkflowStage.REVIEW, 1)).isTrue();
-        assertThat(issue.getResolvedReviewModel()).isEqualTo("selected-model");
+        assertThat(issue.getResolvedReviewModel()).isEqualTo("gpt-6-astra");
         assertThat(issue.getResolvedImplModel()).isEqualTo("implementation-model");
         assertThat(issue.getResolvedAgentProvider()).isEqualTo(AgentProvider.CLAUDE_CODE);
         assertThat(issue.getClaudeSessionId()).isEqualTo("implementation-session");
-        verify(agent).pinSubscriptionProvider(AgentProvider.CODEX);
+        verify(agent).pinSubscriptionHarness("codex");
+    }
+
+    @Test void expiredExecutionAuthenticationRearmsClaimBeforeReturningWithoutRunning() {
+        StageApproval decision = new StageApproval();
+        decision.setId(42L);
+        decision.setState(StageApproval.State.APPROVED);
+        decision.setApprovedAt(LocalDateTime.now());
+        decision.setProvider(AgentProvider.CODEX);
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+        decision.setAttempt(2);
+        when(stages.beforeStage(issue, WorkflowStage.REVIEW, 2)).thenReturn(decision);
+        doThrow(new IllegalStateException("subscription expired")).when(agent).pinSubscriptionHarness("codex");
+        TrackedIssue waiting = issue();
+        waiting.setStatus(IssueStatus.AWAITING_APPROVAL);
+        waiting.setCurrentPhase("STAGE_APPROVAL_REVIEW");
+        waiting.setLastFailureReason("Repair subscription access and approve this stage.");
+        when(stages.rearmAfterAuthenticationFailure(10L, 42L)).thenReturn(waiting);
+
+        assertThat(coordinator.before(issue, WorkflowStage.REVIEW, 2)).isFalse();
+
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        assertThat(issue.getCurrentPhase()).isEqualTo("STAGE_APPROVAL_REVIEW");
+        assertThat(issue.getLastFailureReason()).contains("subscription");
+        verify(stages).rearmAfterAuthenticationFailure(10L, 42L);
+        verify(issues, never()).save(any());
+        verify(agent, never()).pinHarness(any());
     }
 
     @Test void deterministicStagesDoNotPinModels() {
         approved(WorkflowStage.VERIFICATION);
         assertThat(coordinator.before(issue, WorkflowStage.VERIFICATION, 1)).isTrue();
-        verifyNoInteractions(agent, models);
+        verifyNoInteractions(agent);
     }
 
     @Test void planningAttemptFollowsHighestImmutableVersionNumber() {
@@ -118,8 +168,11 @@ class StageWorkflowCoordinatorTest {
         StageApproval approval = new StageApproval();
         approval.setState(StageApproval.State.APPROVED);
         approval.setApprovedAt(LocalDateTime.now());
-        approval.setProvider(AgentProvider.CODEX);
-        approval.setModel("selected-model");
+        if (stage.modelDriven()) {
+            approval.setProvider(AgentProvider.CODEX);
+            approval.setModel("gpt-6-astra");
+            approval.setReasoningEffort("ultra");
+        }
         when(stages.beforeStage(issue, stage, 1)).thenReturn(approval);
     }
 

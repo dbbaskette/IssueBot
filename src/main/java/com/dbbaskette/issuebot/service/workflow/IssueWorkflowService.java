@@ -6,8 +6,9 @@ import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
@@ -64,7 +65,7 @@ public class IssueWorkflowService {
 
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
-    private final ClaudeCodeService claudeCode;
+    private final CodingHarnessService harnessService;
     private final CodeReviewService codeReviewService;
     private final CiTemplateService ciTemplateService;
     private final LocalVerificationService localVerificationService;
@@ -105,7 +106,7 @@ public class IssueWorkflowService {
 
     public IssueWorkflowService(GitOperationsService gitOps,
                                  GitHubApiClient gitHubApi,
-                                 ClaudeCodeService claudeCode,
+                                 CodingHarnessService harnessService,
                                  CodeReviewService codeReviewService,
                                  CiTemplateService ciTemplateService,
                                  LocalVerificationService localVerificationService,
@@ -127,7 +128,7 @@ public class IssueWorkflowService {
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
-        this.claudeCode = claudeCode;
+        this.harnessService = harnessService;
         this.codeReviewService = codeReviewService;
         this.ciTemplateService = ciTemplateService;
         this.localVerificationService = localVerificationService;
@@ -186,8 +187,8 @@ public class IssueWorkflowService {
             if (StageApprovalService.isStageWaiting(fresh)) return;
             stageWorkflow.snapshot(trackedIssue);
         }
-        IssueBotProperties.AgentProvider executionProvider = claudeCode.provider();
-        claudeCode.pinProvider(executionProvider);
+        String executionHarness = harnessService.harnessId();
+        harnessService.pinHarness(executionHarness);
         try {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
@@ -209,16 +210,16 @@ public class IssueWorkflowService {
         // Captured before it is cleared just below: a continue-session retry's first
         // resumed prompt surfaces this when the operator supplied nothing new (#67).
         String lastRunFailureReason = trackedIssue.getLastFailureReason();
-        IssueBotProperties.AgentProvider previousProvider = trackedIssue.getResolvedAgentProvider();
+        String previousProvider = trackedIssue.getResolvedHarnessId();
         boolean preserveStageRouting = StageWorkflowCoordinator.managed(trackedIssue);
         if (!preserveStageRouting && trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
-                && previousProvider != executionProvider) {
+                && !java.util.Objects.equals(previousProvider, executionHarness)) {
             trackedIssue.setClaudeSessionId(null);
             eventService.log("SESSION_PROVIDER_CHANGED",
                     "Previous agent session was discarded because the execution provider changed",
                     repo, trackedIssue);
         }
-        if (!preserveStageRouting) trackedIssue.setResolvedAgentProvider(executionProvider);
+        if (!preserveStageRouting) trackedIssue.setResolvedHarnessId(executionHarness);
         trackedIssue.setStatus(IssueStatus.IN_PROGRESS);
         // Workflow entry point for both a fresh start and a retry (IssueController.retry sets
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
@@ -230,8 +231,8 @@ public class IssueWorkflowService {
         trackedIssue.setLastFailureReason(null);
         trackedIssue.setSuspensionReason(null);
         if (!preserveStageRouting) {
-            trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionProvider));
-            trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionProvider));
+            trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionHarness));
+            trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionHarness));
         }
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
@@ -477,7 +478,7 @@ public class IssueWorkflowService {
                     "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
             // === Phase 2: Implementation (Opus) ===
-            ClaudeCodeResult implResult = null;
+            HarnessExecutionResult implResult = null;
             if (resumePhase == null) {
                 try {
                     implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
@@ -521,7 +522,7 @@ public class IssueWorkflowService {
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             if (resumePhase == null && !implResult.isSuccess()) {
-                log.warn("{} returned failure for iteration {}", claudeCode.providerDisplayName(), iterationNum);
+                log.warn("{} returned failure for iteration {}", harnessService.displayName(), iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
 
@@ -542,7 +543,7 @@ public class IssueWorkflowService {
                     return;
                 }
 
-                previousFeedback = claudeCode.providerDisplayName() + " failed: " + implResult.getErrorMessage();
+                previousFeedback = harnessService.displayName() + " failed: " + implResult.getErrorMessage();
                 reviewFeedback = false; // implementation-provider failure is not review feedback
                 continue;
             }
@@ -871,7 +872,7 @@ public class IssueWorkflowService {
         captureLessons(trackedIssue, "failed after max iterations", previousFeedback, previousCiLogs, repoPath);
         iterationManager.handleMaxIterationsReached(trackedIssue);
         } finally {
-            claudeCode.clearPinnedProvider();
+            harnessService.clearPinnedHarness();
         }
     }
 
@@ -916,7 +917,7 @@ public class IssueWorkflowService {
 
     /** Checkpoint first; accounting and telemetry are deliberately ordered after its commit. */
     WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpointSuccessfulImplementation(
-            TrackedIssue issue, Iteration iteration, ClaudeCodeResult result,
+            TrackedIssue issue, Iteration iteration, HarnessExecutionResult result,
             String diff, int iterationNum) {
         WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpoint =
                 workflowCheckpoints.persistImplementationComplete(
@@ -1096,7 +1097,7 @@ public class IssueWorkflowService {
      *        processIssue cleared it — surfaced in a continue-session retry's first
      *        resumed prompt when no other retry context exists (#67 review).
      */
-    ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
+    HarnessExecutionResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
                                           Path repoPath, String previousDiff,
                                           String previousAssessment, String previousCiLogs,
                                           String lastRunFailureReason) {
@@ -1104,7 +1105,7 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs, lastRunFailureReason, null, null);
     }
 
-    ClaudeCodeResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
+    HarnessExecutionResult phaseImplementation(TrackedIssue trackedIssue, JsonNode issueDetails,
                                           Path repoPath, String previousDiff,
                                           String previousAssessment, String previousCiLogs,
                                           String lastRunFailureReason,
@@ -1131,10 +1132,10 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
                 repoInstructions, lessons, legacyApprovedPlan);
 
-        sseService.broadcastClaudeLog(issueId, "[system] Launching " + claudeCode.providerDisplayName() + " ("
+        sseService.broadcastClaudeLog(issueId, "[system] Launching " + harnessService.displayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
                 + (resumed ? " (resuming session)" : "") + "...");
-        ClaudeCodeResult result = claudeCode.executeImplementation(prompt, repoPath,
+        HarnessExecutionResult result = harnessService.executeImplementation(prompt, repoPath,
                 trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
 
         if (!result.isSuccess() && resumed) {
@@ -1167,8 +1168,8 @@ public class IssueWorkflowService {
                     previousAssessment, previousCiLogs, false, null, approvedPlan,
                     repoInstructions, lessons, legacyApprovedPlan);
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
-                    + claudeCode.providerDisplayName() + " session...");
-            result = claudeCode.executeImplementation(coldPrompt, repoPath,
+                    + harnessService.displayName() + " session...");
+            result = harnessService.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
         }
 
@@ -1901,7 +1902,7 @@ public class IssueWorkflowService {
      * Post Opus's implementation response as a comment on the GitHub issue
      * when it addresses review feedback, showing what changed.
      */
-    private void postImplementationResponseToIssue(TrackedIssue trackedIssue, ClaudeCodeResult implResult,
+    private void postImplementationResponseToIssue(TrackedIssue trackedIssue, HarnessExecutionResult implResult,
                                                     String previousFeedback, int iterationNum) {
         WatchedRepo repo = trackedIssue.getRepo();
         try {
@@ -2140,7 +2141,7 @@ public class IssueWorkflowService {
     // =====================================================
 
     private void trackCost(TrackedIssue trackedIssue, int iterationNum,
-                            ClaudeCodeResult result, String phase) {
+                            HarnessExecutionResult result, String phase) {
         trackCost(trackedIssue, iterationNum, result.getCostUsd(), result.getInputTokens(),
                 result.getOutputTokens(), result.getModel(), phase);
     }

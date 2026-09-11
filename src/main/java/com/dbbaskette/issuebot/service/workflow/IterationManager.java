@@ -9,7 +9,7 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -156,7 +156,7 @@ public class IterationManager {
      * Evaluate whether retrying an iteration is worthwhile based on the failure context.
      * Returns a reason string if retry should be skipped, or null if retry is OK.
      */
-    public String shouldSkipRetry(TrackedIssue trackedIssue, ClaudeCodeResult implResult,
+    public String shouldSkipRetry(TrackedIssue trackedIssue, HarnessExecutionResult implResult,
                                     String ciResult, String failureContext) {
         int currentIter = trackedIssue.getCurrentIteration();
 

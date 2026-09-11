@@ -1,7 +1,7 @@
 package com.dbbaskette.issuebot.validation;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,13 +14,13 @@ public class StartupValidator {
 
     private static final Logger log = LoggerFactory.getLogger(StartupValidator.class);
 
-    private final ClaudeCodeService claudeCodeService;
+    private final CodingHarnessService harnessService;
     private final IssueBotProperties properties;
     private final GitHubApiClient gitHubApiClient;
 
-    public StartupValidator(ClaudeCodeService claudeCodeService, IssueBotProperties properties,
+    public StartupValidator(CodingHarnessService harnessService, IssueBotProperties properties,
                             GitHubApiClient gitHubApiClient) {
-        this.claudeCodeService = claudeCodeService;
+        this.harnessService = harnessService;
         this.properties = properties;
         this.gitHubApiClient = gitHubApiClient;
     }
@@ -36,8 +36,8 @@ public class StartupValidator {
     }
 
     private void validateAgentCli() {
-        String provider = claudeCodeService.providerDisplayName();
-        if (claudeCodeService.checkCliAvailable()) {
+        String provider = harnessService.displayName();
+        if (harnessService.checkCliAvailable()) {
             log.info("[OK] {} is installed", provider);
         } else {
             log.warn("[WARN] {} not found. Install it before processing issues.", provider);
@@ -45,10 +45,10 @@ public class StartupValidator {
         }
 
         // Only check auth if CLI is available
-        if (claudeCodeService.checkAuthentication()) {
+        if (harnessService.checkAuthentication()) {
             log.info("[OK] {} subscription authentication verified", provider);
         } else {
-            String command = properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX
+            String command = "codex".equals(properties.getAgentProvider())
                     ? "codex login" : "claude";
             log.warn("[WARN] {} subscription authentication failed. Run '{}' in a terminal to log in.",
                     provider, command);

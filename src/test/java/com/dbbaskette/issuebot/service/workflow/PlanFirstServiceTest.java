@@ -9,8 +9,8 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -40,7 +40,7 @@ class PlanFirstServiceTest {
     private static final Path REPO_PATH = Path.of("/tmp/repo");
 
     private PlanFirstService service;
-    private ClaudeCodeService agent;
+    private CodingHarnessService agent;
     private GitHubApiClient gitHub;
     private TrackedIssueRepository issues;
     private PlanningVersionRepository versions;
@@ -55,7 +55,7 @@ class PlanFirstServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        agent = mock(ClaudeCodeService.class);
+        agent = mock(CodingHarnessService.class);
         gitHub = mock(GitHubApiClient.class);
         issues = mock(TrackedIssueRepository.class);
         versions = mock(PlanningVersionRepository.class);
@@ -151,10 +151,10 @@ class PlanFirstServiceTest {
         assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
 
         InOrder routing = inOrder(agent);
-        routing.verify(agent).pinProvider(AgentProvider.CODEX);
+        routing.verify(agent).pinHarness("codex");
         routing.verify(agent).executePlanning(anyString(), eq(REPO_PATH),
                 eq("gpt-5.6-sol"), eq(8L), isNull());
-        routing.verify(agent).clearPinnedProvider();
+        routing.verify(agent).clearPinnedHarness();
     }
 
     @Test
@@ -193,10 +193,10 @@ class PlanFirstServiceTest {
         assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(FAILED);
 
         InOrder routing = inOrder(agent);
-        routing.verify(agent).pinProvider(AgentProvider.CODEX);
+        routing.verify(agent).pinHarness("codex");
         routing.verify(agent).executePlanning(anyString(), eq(REPO_PATH),
                 eq("gpt-5.6-sol"), eq(8L), isNull());
-        routing.verify(agent).clearPinnedProvider();
+        routing.verify(agent).clearPinnedHarness();
     }
 
     @Test
@@ -221,7 +221,7 @@ class PlanFirstServiceTest {
 
     @Test
     void generationParsesOnlyFinalPlannerResult() {
-        ClaudeCodeResult result = success("narration without required headings");
+        HarnessExecutionResult result = success("narration without required headings");
         result.setFinalResult("# Design Spec\nfinal spec\n# Implementation Plan\nfinal plan");
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull())).thenReturn(result);
 
@@ -250,7 +250,7 @@ class PlanFirstServiceTest {
 
     @Test
     void unsuccessfulPlannerResultStopsWithProviderFailure() {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setErrorMessage("Codex exited 17");
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull())).thenReturn(result);
@@ -617,8 +617,8 @@ class PlanFirstServiceTest {
         verifyNoInteractions(issues, versions, gitHub);
     }
 
-    private ClaudeCodeResult success(String output) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult success(String output) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput(output);
         return result;

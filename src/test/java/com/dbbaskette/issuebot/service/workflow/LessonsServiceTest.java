@@ -4,8 +4,8 @@ import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.RepoLessonRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,17 +21,17 @@ import static org.mockito.Mockito.*;
 
 class LessonsServiceTest {
 
-    private ClaudeCodeService claudeCode;
+    private CodingHarnessService harnessService;
     private RepoLessonRepository lessonRepository;
     private EventService eventService;
     private LessonsService lessonsService;
 
     @BeforeEach
     void setUp() {
-        claudeCode = mock(ClaudeCodeService.class);
+        harnessService = mock(CodingHarnessService.class);
         lessonRepository = mock(RepoLessonRepository.class);
         eventService = mock(EventService.class);
-        lessonsService = new LessonsService(claudeCode, lessonRepository, eventService);
+        lessonsService = new LessonsService(harnessService, lessonRepository, eventService);
     }
 
     private TrackedIssue issueWithLessons(boolean enabled) {
@@ -43,8 +43,8 @@ class LessonsServiceTest {
         return issue;
     }
 
-    private ClaudeCodeResult success(String output) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult success(String output) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput(output);
         return result;
@@ -56,14 +56,14 @@ class LessonsServiceTest {
 
         lessonsService.capture(issue, "completed successfully", "no failures", Path.of("/tmp/repo"));
 
-        verifyNoInteractions(claudeCode);
+        verifyNoInteractions(harnessService);
         verifyNoInteractions(lessonRepository);
     }
 
     @Test
     void happyPath_threeLinesStored() {
         TrackedIssue issue = issueWithLessons(true);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
                 .thenReturn(success("Use constructor injection here\n"
                         + "Run tests with ./mvnw not mvn\n"
                         + "Never touch the legacy/ directory"));
@@ -86,7 +86,7 @@ class LessonsServiceTest {
     @Test
     void noneResponse_storesNothing() {
         TrackedIssue issue = issueWithLessons(true);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
                 .thenReturn(success("NONE"));
 
         lessonsService.capture(issue, "completed successfully", "no failures", Path.of("/tmp/repo"));
@@ -97,7 +97,7 @@ class LessonsServiceTest {
     @Test
     void moreThanThreeLines_capsAtThree() {
         TrackedIssue issue = issueWithLessons(true);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
                 .thenReturn(success("Lesson one\nLesson two\nLesson three\nLesson four\nLesson five"));
         when(lessonRepository.countByRepoId(1L)).thenReturn(3L);
 
@@ -109,7 +109,7 @@ class LessonsServiceTest {
     @Test
     void blankAndBulletMarkerLines_areCleaned() {
         TrackedIssue issue = issueWithLessons(true);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
                 .thenReturn(success("- Use constructor injection\n"
                         + "\n"
                         + "1. Run ./mvnw not mvn\n"
@@ -128,7 +128,7 @@ class LessonsServiceTest {
     @Test
     void capEviction_deletesOldestBeyondThirty() {
         TrackedIssue issue = issueWithLessons(true);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
                 .thenReturn(success("One new lesson"));
         // After this capture's insert(s), the repo has 33 rows — 3 over the cap of 30.
         when(lessonRepository.countByRepoId(1L)).thenReturn(33L);
@@ -143,7 +143,7 @@ class LessonsServiceTest {
     @Test
     void cliFailure_noExceptionEscapes_nothingStored() {
         TrackedIssue issue = issueWithLessons(true);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
                 .thenThrow(new RuntimeException("claude CLI crashed"));
 
         assertDoesNotThrow(() ->
@@ -155,10 +155,10 @@ class LessonsServiceTest {
     @Test
     void cliUnsuccessfulResult_noExceptionEscapes_nothingStored() {
         TrackedIssue issue = issueWithLessons(true);
-        ClaudeCodeResult failure = new ClaudeCodeResult();
+        HarnessExecutionResult failure = new HarnessExecutionResult();
         failure.setSuccess(false);
         failure.setErrorMessage("utility model unavailable");
-        when(claudeCode.executeUtility(anyString(), any(Path.class), isNull())).thenReturn(failure);
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull())).thenReturn(failure);
 
         assertDoesNotThrow(() ->
                 lessonsService.capture(issue, "completed successfully", "no failures", Path.of("/tmp/repo")));

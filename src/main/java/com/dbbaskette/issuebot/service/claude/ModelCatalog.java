@@ -13,14 +13,25 @@ import java.util.Optional;
 public final class ModelCatalog {
 
     public record ModelInfo(String id, String displayName,
-                            double inputPerMTok, double outputPerMTok) {}
+                            double inputPerMTok, double outputPerMTok,
+                            String defaultReasoningLevel, List<String> supportedReasoningLevels) {
+        public ModelInfo {
+            supportedReasoningLevels = List.copyOf(supportedReasoningLevels);
+        }
+
+        public boolean supportsEffort() {
+            return !supportedReasoningLevels.equals(List.of("default"));
+        }
+    }
+
+    private static final List<String> EFFORT_LEVELS = List.of("low", "medium", "high", "xhigh", "max");
 
     public static final List<ModelInfo> MODELS = List.of(
-            new ModelInfo("claude-opus-4-8", "Claude Opus 4.8", 5.0, 25.0),
-            new ModelInfo("claude-opus-4-6", "Claude Opus 4.6", 5.0, 25.0),
-            new ModelInfo("claude-sonnet-5", "Claude Sonnet 5", 3.0, 15.0),
-            new ModelInfo("claude-sonnet-4-6", "Claude Sonnet 4.6", 3.0, 15.0),
-            new ModelInfo("claude-haiku-4-5", "Claude Haiku 4.5", 1.0, 5.0));
+            new ModelInfo("claude-opus-4-8", "Claude Opus 4.8", 5.0, 25.0, "high", EFFORT_LEVELS),
+            new ModelInfo("claude-opus-4-6", "Claude Opus 4.6", 5.0, 25.0, "high", EFFORT_LEVELS),
+            new ModelInfo("claude-sonnet-5", "Claude Sonnet 5", 3.0, 15.0, "high", EFFORT_LEVELS),
+            new ModelInfo("claude-sonnet-4-6", "Claude Sonnet 4.6", 3.0, 15.0, "high", EFFORT_LEVELS),
+            new ModelInfo("claude-haiku-4-5", "Claude Haiku 4.5", 1.0, 5.0, "default", List.of("default")));
 
     private ModelCatalog() {}
 

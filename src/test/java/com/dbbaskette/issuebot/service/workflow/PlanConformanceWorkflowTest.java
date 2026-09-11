@@ -13,8 +13,8 @@ import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
@@ -45,7 +45,7 @@ class PlanConformanceWorkflowTest {
 
     private GitOperationsService gitOps;
     private GitHubApiClient gitHubApi;
-    private ClaudeCodeService agent;
+    private CodingHarnessService agent;
     private CodeReviewService reviewer;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
@@ -62,7 +62,8 @@ class PlanConformanceWorkflowTest {
     void setUp() {
         gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
-        agent = mock(ClaudeCodeService.class);
+        agent = mock(CodingHarnessService.class);
+        when(agent.harnessId()).thenReturn("claude");
         reviewer = mock(CodeReviewService.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
@@ -85,7 +86,7 @@ class PlanConformanceWorkflowTest {
                 costRepository, mock(EventService.class), mock(SseService.class),
                 mock(NotificationService.class), iterationManager,
                 mock(IssueDecompositionService.class), planFirstService, mock(FollowUpService.class),
-                new ModelResolver(new IssueBotProperties()), cancellationService,
+                new ModelResolver(new IssueBotProperties(), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections), cancellationService,
                 mock(IssueGuidanceRepository.class), mock(RepoLessonRepository.class),
                 mock(LessonsService.class), objectMapper);
         workflow.reviewRetryBackoffBaseMs = 0;
@@ -310,8 +311,8 @@ class PlanConformanceWorkflowTest {
                 .thenReturn(successImplementation());
     }
 
-    private ClaudeCodeResult successImplementation() {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult successImplementation() {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("implemented");
         result.setModel("implementation-model");

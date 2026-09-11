@@ -14,8 +14,8 @@ import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -88,7 +88,7 @@ class PlanFirstTransactionManagerTest {
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private EntityManager entityManager;
 
-    @MockitoBean private ClaudeCodeService agent;
+    @MockitoBean private CodingHarnessService agent;
     @MockitoBean private GitHubApiClient gitHub;
     @MockitoBean private EventService events;
     @MockitoBean private NotificationService notifications;
@@ -98,6 +98,35 @@ class PlanFirstTransactionManagerTest {
     @AfterEach
     void restoreRepositorySpies() {
         reset(issues, versions, repos);
+    }
+
+    @Test
+    void generationUsesAuthoritativePersistedHarnessAndRejectsIdentityChanges() {
+        Long issueId = seedIssue(IssueStatus.IN_PROGRESS, "planning");
+        tx().executeWithoutResult(ignored -> entityManager.createNativeQuery(
+                "UPDATE tracked_issues SET resolved_harness_id = 'future_harness' WHERE id = :id")
+                .setParameter("id", issueId).executeUpdate());
+
+        var context = transactions.prepareGeneration(issueId);
+        assertThat(context.harnessId()).isEqualTo("future_harness");
+        configureIssue(issueId, issue -> issue.setResolvedHarnessId("codex"));
+
+        assertThatThrownBy(() -> transactions.persistGeneratedVersion(context, "design", "plan"))
+                .isInstanceOf(PlanFirstTransactionManager.StalePlanningGenerationException.class);
+        assertThat(versions.findByIssueIdOrderByVersionNumberDesc(issueId)).isEmpty();
+    }
+
+    @Test
+    void legacyOnlyAndUnknownProviderRowsRemainReadable() {
+        Long issueId = seedIssue(IssueStatus.IN_PROGRESS, "planning");
+        tx().executeWithoutResult(ignored -> entityManager.createNativeQuery(
+                "UPDATE tracked_issues SET resolved_harness_id = NULL WHERE id = :id")
+                .setParameter("id", issueId).executeUpdate());
+        assertThat(transactions.prepareGeneration(issueId).harnessId()).isEqualTo("codex");
+        tx().executeWithoutResult(ignored -> entityManager.createNativeQuery(
+                "UPDATE tracked_issues SET resolved_agent_provider = 'OTHER', resolved_harness_id = 'other' WHERE id = :id")
+                .setParameter("id", issueId).executeUpdate());
+        assertThat(transactions.prepareGeneration(issueId).harnessId()).isEqualTo("other");
     }
 
     @Test
@@ -705,7 +734,7 @@ class PlanFirstTransactionManagerTest {
                 mock(PlanningWorkspaceService.PlanningWorkspace.class);
         when(planningWorkspaces.open(any(Path.class))).thenReturn(workspace);
         when(workspace.path()).thenReturn(Path.of("/tmp/read-only-plan"));
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("# Design Spec\ndesign\n# Implementation Plan\nimplementation");
         when(agent.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
@@ -750,7 +779,7 @@ class PlanFirstTransactionManagerTest {
                         winnerIssue.setCurrentPhase(null);
                         issues.saveAndFlush(winnerIssue);
                     });
-                    ClaudeCodeResult losingResult = new ClaudeCodeResult();
+                    HarnessExecutionResult losingResult = new HarnessExecutionResult();
                     losingResult.setSuccess(false);
                     losingResult.setErrorMessage("losing provider was interrupted");
                     return losingResult;

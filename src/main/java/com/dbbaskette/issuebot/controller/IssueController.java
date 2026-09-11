@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.model.WorkflowStage;
 import com.dbbaskette.issuebot.model.CostTracking;
 import com.dbbaskette.issuebot.model.Event;
 import com.dbbaskette.issuebot.model.IssueGuidance;
@@ -45,7 +46,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -108,9 +108,6 @@ public class IssueController {
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
-
-    @Autowired(required = false)
-    private CodexModelCatalog codexModelCatalog;
 
     @Autowired(required = false)
     private DecompositionGroupViewAssembler decompositionGroupViews;
@@ -262,7 +259,6 @@ public class IssueController {
                 "/issues", "Back to the queue"));
         populateDetailModel(model, issue, id, parseRequestedInteger(planVersion),
                 parseRequestedLong(reviewAttempt));
-        model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
     }
 
@@ -288,13 +284,6 @@ public class IssueController {
         }
     }
 
-    private List<?> selectedModelCatalog() {
-        if (properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
-            return codexModelCatalog == null
-                    ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
-        }
-        return com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS;
-    }
 
     /**
      * HTMX fragment endpoint — returns just the status section (metrics + phase pipeline)
@@ -304,14 +293,13 @@ public class IssueController {
     public String liveStatus(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id, null, null);
-        model.addAttribute("modelCatalog", selectedModelCatalog());
         // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
         // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
         return "issue-detail :: live-status-poll";
     }
 
     @Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+    private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
     public String retry(Long id, String instructions, String implModelOverride, String reviewModelOverride,
             BigDecimal budgetOverrideUsd, String planFirstOverride, boolean continueSession,
@@ -334,12 +322,13 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         String error;
         try {
-            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
             error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
                     budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
+            preserveSelection(redirectAttributes, implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
         } else {
             redirectAttributes.addFlashAttribute("success", "Issue retry started");
         }
@@ -406,12 +395,15 @@ public class IssueController {
                 iterationRepository.findByIssueOrderByIterationNumAsc(issue))) {
             return "The second Plan First conformance miss requires the guided implementation retry";
         }
+        String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
+                implementationReasoningEffort, reviewReasoningEffort);
+        if (selectionError != null) return selectionError;
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
-                && issue.getResolvedAgentProvider() != properties.getAgentProvider()) {
-            String previousProvider = issue.getResolvedAgentProvider() == null
-                    ? "an unknown provider" : issue.getResolvedAgentProvider().getDisplayName();
-            return "The previous session belongs to " + previousProvider
-                    + " and cannot continue with " + properties.getAgentProvider().getDisplayName()
+                && !java.util.Objects.equals(issue.getResolvedHarnessId(), properties.getAgentProvider())) {
+            String previousHarness = issue.getResolvedHarnessId() == null
+                    ? "an unknown coding harness" : issue.getResolvedHarnessId();
+            return "The previous session belongs to " + previousHarness
+                    + " and cannot continue with " + properties.getAgentProvider()
                     + ". Retry without continuing the previous session.";
         }
 
@@ -485,10 +477,32 @@ public class IssueController {
         return null;
     }
 
-    private void validateReasoning(String implementationModel, String reviewModel, String implementationEffort, String reviewEffort) {
-        if (reasoning != null) {
-            reasoning.validate(implementationModel, implementationEffort);
-            reasoning.validate(reviewModel, reviewEffort);
+    private void preserveSelection(RedirectAttributes redirect, String implementationModel, String reviewModel,
+            String implementationReasoning, String reviewReasoning) {
+        redirect.addFlashAttribute("selectionRejected", true);
+        redirect.addFlashAttribute("effectiveHarnessId", properties.getAgentProvider());
+        redirect.addFlashAttribute("submittedImplModel", implementationModel);
+        redirect.addFlashAttribute("submittedReviewModel", reviewModel);
+        redirect.addFlashAttribute("submittedImplementationReasoning", implementationReasoning);
+        redirect.addFlashAttribute("submittedReviewReasoning", reviewReasoning);
+    }
+
+    /** Shared selection preflight: callers must run this before claims or PR cleanup. */
+    private String selectionError(TrackedIssue issue, String implementationModel, String reviewModel,
+                                  String implementationEffort, String reviewEffort) {
+        if (reasoning == null) return null;
+        try {
+            // Validate proposed overrides against this repository before mutating the claimed issue.
+            TrackedIssue proposed = new TrackedIssue(issue.getRepo(), issue.getIssueNumber(), issue.getIssueTitle());
+            proposed.setImplModelOverride(implementationModel);
+            proposed.setReviewModelOverride(reviewModel);
+            proposed.setImplementationReasoningEffort(implementationEffort);
+            proposed.setReviewReasoningEffort(reviewEffort);
+            reasoning.forStage(proposed, properties.getAgentProvider(), WorkflowStage.IMPLEMENTATION);
+            reasoning.forStage(proposed, properties.getAgentProvider(), WorkflowStage.REVIEW);
+            return null;
+        } catch (IllegalArgumentException invalidSelection) {
+            return invalidSelection.getMessage();
         }
     }
 
@@ -511,12 +525,13 @@ public class IssueController {
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
         String error;
         try {
-            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
             error = claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
                     budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
+            preserveSelection(redirectAttributes, implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
         } else {
             redirectAttributes.addFlashAttribute("success",
                     readyStart ? "Implementation started." : "Issue started");
@@ -559,6 +574,9 @@ public class IssueController {
     private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
             String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
             boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort) {
+        String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
+                implementationReasoningEffort, reviewReasoningEffort);
+        if (selectionError != null) return selectionError;
         // Enforce the same gating as the polling service
         String gateReason = checkGate(issue, null);
         if (gateReason != null) {
@@ -621,7 +639,14 @@ public class IssueController {
             @RequestParam(required = false) BigDecimal budgetOverrideUsd,
             @RequestParam(required = false) String planFirstOverride, RedirectAttributes redirect) {
         try {
-            validateReasoning(implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
+            String selectionError = selectionError(issueRepository.findById(id).orElseThrow(), implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
+            if (selectionError != null) {
+                redirect.addFlashAttribute("error", selectionError);
+                preserveSelection(redirect, implModelOverride, reviewModelOverride,
+                        implementationReasoningEffort, reviewReasoningEffort);
+                return "redirect:/issues/" + id;
+            }
             var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
                     candidate -> checkGate(candidate, null), candidate -> {
                         candidate.setImplModelOverride(normalize(implModelOverride));
@@ -633,14 +658,21 @@ public class IssueController {
                             candidate.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
                         candidate.setCurrentPhase(null);
                     });
-            if (!result.claimed()) redirect.addFlashAttribute("error", result.reason());
-            else {
+            if (!result.claimed()) {
+                redirect.addFlashAttribute("error", result.reason());
+                preserveSelection(redirect, implModelOverride, reviewModelOverride,
+                        implementationReasoningEffort, reviewReasoningEffort);
+            } else {
                 eventService.log("MANUAL_START", "Started only this issue while automatic processing remains paused",
                         result.issue().getRepo(), result.issue());
                 workflowService.processIssueAsync(result.issue());
                 redirect.addFlashAttribute("success", "Issue started manually. Automatic processing remains paused.");
             }
-        } catch (IllegalArgumentException ex) { redirect.addFlashAttribute("error", ex.getMessage()); }
+        } catch (IllegalArgumentException ex) {
+            redirect.addFlashAttribute("error", ex.getMessage());
+            preserveSelection(redirect, implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
+        }
         return "redirect:/issues/" + id;
     }
 

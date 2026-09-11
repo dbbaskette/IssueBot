@@ -1,7 +1,7 @@
 package com.dbbaskette.issuebot.service.review;
 
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.dbbaskette.issuebot.service.workflow.ApprovedPlanContext;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -25,16 +25,16 @@ public class CodeReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(CodeReviewService.class);
 
-    private final ClaudeCodeService claudeCodeService;
+    private final CodingHarnessService harnessService;
     private final ReviewPromptBuilder reviewPromptBuilder;
     private final GitOperationsService gitOperationsService;
     private final ObjectMapper objectMapper;
 
-    public CodeReviewService(ClaudeCodeService claudeCodeService,
+    public CodeReviewService(CodingHarnessService harnessService,
                                ReviewPromptBuilder reviewPromptBuilder,
                                GitOperationsService gitOperationsService,
                                ObjectMapper objectMapper) {
-        this.claudeCodeService = claudeCodeService;
+        this.harnessService = harnessService;
         this.reviewPromptBuilder = reviewPromptBuilder;
         this.gitOperationsService = gitOperationsService;
         this.objectMapper = objectMapper;
@@ -89,7 +89,7 @@ public class CodeReviewService {
                 repoInstructions, approvedPlan, testEvidence);
 
         // 3. Invoke the review model via CLI
-        ClaudeCodeResult result = claudeCodeService.executeReview(prompt, repoPath, model, issueId, lineCallback);
+        HarnessExecutionResult result = harnessService.executeReview(prompt, repoPath, model, issueId, lineCallback);
 
         if (!result.isSuccess()) {
             log.error("Sonnet review invocation failed: {}", result.getErrorMessage());
@@ -137,7 +137,7 @@ public class CodeReviewService {
      * Parse the review response JSON from Claude Code output.
      * Package-private for direct unit testing of the parsing logic.
      */
-    CodeReviewResult parseReviewResponse(ClaudeCodeResult result) {
+    CodeReviewResult parseReviewResponse(HarnessExecutionResult result) {
         return parseReviewResponse(result, 0.70, false);
     }
 
@@ -146,7 +146,7 @@ public class CodeReviewService {
      * {@code passed} field is retained only inside {@code rawJson} for auditability; it is
      * never trusted as workflow state.
      */
-    CodeReviewResult parseReviewResponse(ClaudeCodeResult result,
+    CodeReviewResult parseReviewResponse(HarnessExecutionResult result,
                                          double reviewPassThreshold,
                                          boolean securityReview) {
         String output = result.getOutput();

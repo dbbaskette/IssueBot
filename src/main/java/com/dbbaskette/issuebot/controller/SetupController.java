@@ -5,7 +5,7 @@ import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
@@ -29,7 +29,7 @@ public class SetupController {
     private static final DateTimeFormatter DELIVERY_TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
 
-    private final ClaudeCodeService claudeCodeService;
+    private final CodingHarnessService harnessService;
     private final IssueBotProperties properties;
     private final IssuePollingService pollingService;
     private final TrackedIssueRepository issueRepository;
@@ -39,7 +39,7 @@ public class SetupController {
     private final WebhookDeliveryLog webhookDeliveryLog;
     private final NotificationRepository notificationRepository;
 
-    public SetupController(ClaudeCodeService claudeCodeService,
+    public SetupController(CodingHarnessService harnessService,
                             IssueBotProperties properties,
                             IssuePollingService pollingService,
                             TrackedIssueRepository issueRepository,
@@ -48,7 +48,7 @@ public class SetupController {
                             WebhookController webhookController,
                             WebhookDeliveryLog webhookDeliveryLog,
                             NotificationRepository notificationRepository) {
-        this.claudeCodeService = claudeCodeService;
+        this.harnessService = harnessService;
         this.properties = properties;
         this.pollingService = pollingService;
         this.issueRepository = issueRepository;
@@ -78,7 +78,7 @@ public class SetupController {
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
-        addProviderAttributes(model);
+        addHarnessAttributes(model);
 
         model.addAttribute("webhookPath", "/webhooks/github");
         model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());
@@ -138,16 +138,15 @@ public class SetupController {
      */
     @GetMapping("/setup/prereqs")
     public String prereqs(Model model) {
-        addProviderAttributes(model);
+        addHarnessAttributes(model);
         // Fresh CLI check (don't rely on stale cache)
-        boolean cliAvailable = claudeCodeService.checkCliAvailable();
+        boolean cliAvailable = harnessService.checkCliAvailable();
         model.addAttribute("cliAvailable", cliAvailable);
 
-        // Fresh auth check (clear cache so we re-verify)
+        // Explicit readiness action: verify the selected adapter's subscription credentials.
         boolean cliAuthenticated = false;
         if (cliAvailable) {
-            claudeCodeService.clearAuthCache();
-            cliAuthenticated = claudeCodeService.checkAuthentication();
+            cliAuthenticated = harnessService.checkSubscriptionAuthentication(properties.getAgentProvider());
         }
         model.addAttribute("cliAuthenticated", cliAuthenticated);
 
@@ -189,10 +188,8 @@ public class SetupController {
         return "setup :: prereqs";
     }
 
-    private void addProviderAttributes(Model model) {
-        model.addAttribute("agentProvider", properties.getAgentProvider());
-        model.addAttribute("agentProviderName", properties.getAgentProvider().getDisplayName());
-        model.addAttribute("codexProvider",
-                properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX);
+    private void addHarnessAttributes(Model model) {
+        model.addAttribute("effectiveHarnessId", properties.getAgentProvider());
+        model.addAttribute("effectiveHarnessName", harnessService.displayName());
     }
 }

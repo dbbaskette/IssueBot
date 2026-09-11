@@ -56,19 +56,10 @@ class SettingsPageRenderTest {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("config", config);
         context.setVariable("agentRunning", true);
-        context.setVariable("modelCatalog", List.of());
-        context.setVariable("claudeModelCatalog", List.of());
-        context.setVariable("codexModelCatalog", List.of(
-                new com.dbbaskette.issuebot.service.codex.CodexModelCatalog.ModelInfo(
-                        "gpt-6-astra", "GPT-6-Astra", "Frontier", "medium",
-                        List.of("low", "medium", "high", "xhigh", "max", "ultra"))));
-        context.setVariable("agentProvider", IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        context.setVariable("claudeImplementationModel", "claude-sonnet-5");
-        context.setVariable("claudeReviewModel", "claude-sonnet-5");
-        context.setVariable("claudeUtilityModel", "claude-haiku-4-5");
-        context.setVariable("codexImplementationModel", "gpt-5.6-sol");
-        context.setVariable("codexReviewModel", "gpt-5.6-terra");
-        context.setVariable("codexUtilityModel", "gpt-5.6-luna");
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var advice = new HarnessCatalogAdvice(fixture.registry, new com.fasterxml.jackson.databind.ObjectMapper(), config);
+        context.setVariable("harnessCatalog", advice.harnessCatalog());
+        context.setVariable("harnessId", "claude");
         context.setVariable("implementationReasoningEffort", "low");
         context.setVariable("reviewReasoningEffort", "medium");
         context.setVariable("utilityReasoningEffort", "medium");
@@ -87,6 +78,15 @@ class SettingsPageRenderTest {
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    @Test
+    void settingsRendersEveryRoleFromTheSameHarnessCapabilities() {
+        String html = render();
+        assertThat(html).contains("data-harness-id=\"claude\"", "data-model-id=\"gpt-6-astra\"",
+                "data-model-id=\"claude-opus-4-8\"", "data-default-reasoning=\"high\"",
+                "data-reasoning-picker", "Coding harness");
+        assertThat(html).doesNotContain("data-codex-", "data-provider=", "CLAUDE_CODE", "__custom__");
     }
 
     @Test
@@ -111,8 +111,8 @@ class SettingsPageRenderTest {
     void providerAndCodexSubscriptionModelsAreRendered() {
         String html = render();
 
-        assertThat(html).contains("name=\"agentProvider\"");
-        assertThat(html).contains("Codex CLI (ChatGPT subscription)");
+        assertThat(html).contains("name=\"harnessId\"");
+        assertThat(html).contains("Codex CLI");
         assertThat(html).contains("value=\"gpt-6-astra\"");
         assertThat(html).contains("name=\"implementationReasoningEffort\"");
         assertThat(html).contains("data-reasoning-levels=\"low,medium,high,xhigh,max,ultra\"");

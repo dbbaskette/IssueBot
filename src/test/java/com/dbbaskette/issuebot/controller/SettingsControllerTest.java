@@ -19,14 +19,87 @@ import static org.mockito.Mockito.mock;
 
 class SettingsControllerTest {
 
+    @Test void legacyBlankReasoningDisplaysTheSelectedModelsDefault() {
+        var props = new IssueBotProperties();
+        props.getClaudeCode().setImplementationModel("claude-haiku-4-5");
+        props.getClaudeCode().setImplementationReasoningEffort("");
+        var controller = controller(props, tempDir.resolve("config.yml"));
+        var model = new ExtendedModelMap();
+        controller.settings(model, null);
+        assertThat(model.get("implementationReasoningEffort")).isEqualTo("default");
+    }
+
+    @Test void missingHarnessCannotSilentlySelectTheGlobalDefault() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        Files.writeString(configFile, "issuebot: {}\n");
+        var props = new IssueBotProperties();
+        var controller = controller(props, configFile);
+        var redirect = new RedirectAttributesModelMap();
+        controller.saveModels(" ", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5",
+                "high", "high", "default", redirect);
+        assertThat(redirect.getFlashAttributes()).containsKey("error");
+        assertThat(Files.readString(configFile)).isEqualTo("issuebot: {}\n");
+    }
+
+    @Test void invalidSettingsPreserveAllSubmittedRoleValuesForRedisplay() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        Files.writeString(configFile, "issuebot: {}\n");
+        var controller = controller(new IssueBotProperties(), configFile);
+        var redirect = new RedirectAttributesModelMap();
+        controller.saveModels("claude",
+                "claude-opus-4-8", "claude-haiku-4-5", "claude-haiku-4-5", "", "ultra", "default", redirect);
+        assertThat(new java.util.HashMap<String, Object>(redirect.getFlashAttributes())).containsEntry("harnessId", "claude")
+                .containsEntry("implementationModel", "claude-opus-4-8")
+                .containsEntry("implementationReasoningEffort", "")
+                .containsEntry("reviewModel", "claude-haiku-4-5")
+                .containsEntry("reviewReasoningEffort", "ultra")
+                .containsEntry("utilityModel", "claude-haiku-4-5")
+                .containsEntry("utilityReasoningEffort", "default");
+        assertThat(Files.readString(configFile)).isEqualTo("issuebot: {}\n");
+    }
+
+    @Test void invalidClaudeTupleCannotChangeConfigOrRuntimeDefaults() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        Files.writeString(configFile, "issuebot: {}\n");
+        IssueBotProperties properties = new IssueBotProperties();
+        SettingsController controller = controller(properties, configFile);
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "reasoning", fixture.selections);
+        var redirect = new RedirectAttributesModelMap();
+        controller.saveModels("claude",
+                "claude-haiku-4-5", "claude-sonnet-5", "claude-haiku-4-5", "max", "high", "default", redirect);
+        assertThat(redirect.getFlashAttributes().get("error")).asString().contains("max");
+        assertThat(properties.getClaudeCode().getImplementationModel()).isEqualTo("claude-opus-4-8");
+        assertThat(Files.readString(configFile)).isEqualTo("issuebot: {}\n");
+    }
+
+    @Test void blankSettingsReasoningUsesEachSelectedModelsDefaultAndPersistsIt() throws Exception {
+        Path configFile = tempDir.resolve("config.yml");
+        IssueBotProperties properties = new IssueBotProperties();
+        properties.getClaudeCode().setImplementationReasoningEffort("max");
+        SettingsController controller = controller(properties, configFile);
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "reasoning", fixture.selections);
+        var redirect = new RedirectAttributesModelMap();
+        controller.saveModels("claude",
+                "claude-haiku-4-5", "claude-sonnet-5", "claude-haiku-4-5", "", null, " ", redirect);
+        assertThat(redirect.getFlashAttributes().get("error")).isNull();
+        assertThat(properties.getClaudeCode().getImplementationReasoningEffort()).isEqualTo("default");
+        assertThat(properties.getClaudeCode().getReviewReasoningEffort()).isEqualTo("high");
+        assertThat(properties.getClaudeCode().getUtilityReasoningEffort()).isEqualTo("default");
+        assertThat(Files.readString(configFile)).contains("implementation-reasoning-effort: default");
+    }
+
     @TempDir
     Path tempDir;
 
     private SettingsController controller(IssueBotProperties properties, Path configFile) {
         SettingsController controller = new SettingsController(properties,
                 mock(IssuePollingService.class), mock(TrackedIssueRepository.class),
-                mock(NotificationRepository.class), mock(CodexModelCatalog.class));
+                mock(NotificationRepository.class), new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().registry);
         controller.setConfigPathForTests(configFile);
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "reasoning", fixture.selections);
         return controller;
     }
 
@@ -73,12 +146,12 @@ class SettingsControllerTest {
         SettingsController controller = controller(properties, configFile);
 
         RedirectAttributesModelMap redirectAttributes = new RedirectAttributesModelMap();
-        String view = controller.saveModels(IssueBotProperties.AgentProvider.CODEX,
+        String view = controller.saveModels("codex",
                 "gpt-6-astra", "gpt-5.6-terra", "gpt-5.6-luna",
                 "ultra", "high", "low", redirectAttributes);
 
         assertThat(view).isEqualTo("redirect:/settings");
-        assertThat(properties.getAgentProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+        assertThat(properties.getAgentProvider()).isEqualTo("codex");
         assertThat(properties.getCodexCli().getImplementationModel()).isEqualTo("gpt-6-astra");
         assertThat(properties.getCodexCli().getImplementationReasoningEffort()).isEqualTo("ultra");
         String written = Files.readString(configFile);
@@ -149,7 +222,7 @@ class SettingsControllerTest {
 
         assertThat(redirectAttributes.getFlashAttributes().get("error"))
                 .isNotNull()
-                .asString().contains("custom model ID");
+                .asString().contains("listed model");
     }
 
     @Test

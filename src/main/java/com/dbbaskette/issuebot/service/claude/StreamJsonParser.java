@@ -1,5 +1,7 @@
 package com.dbbaskette.issuebot.service.claude;
 
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -23,8 +25,8 @@ public class StreamJsonParser {
         this.objectMapper = objectMapper;
     }
 
-    public ClaudeCodeResult parse(String rawOutput) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    public HarnessExecutionResult parse(String rawOutput) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         List<String> filesChanged = new ArrayList<>();
         StringBuilder fullOutput = new StringBuilder();
         long inputTokens = 0;

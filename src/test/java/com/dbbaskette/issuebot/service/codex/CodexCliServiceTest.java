@@ -15,6 +15,14 @@ import static org.mockito.Mockito.*;
 class CodexCliServiceTest {
 
     @Test
+    void planningCommandRetainsExplicitReasoningAndNeverResumes() {
+        assertThat(service.buildPlanningCommand("gpt-6-astra", "xhigh"))
+                .containsSubsequence("--config", "model_reasoning_effort=\"xhigh\"", "exec")
+                .contains("read-only", "--ephemeral")
+                .doesNotContain("resume");
+    }
+
+    @Test
     void managedAuthRequiresUnambiguousChatGptSubscriptionStatus() {
         assertThat(CodexCliService.isSubscriptionAuthentication("Logged in using ChatGPT\n")).isTrue();
         assertThat(CodexCliService.isSubscriptionAuthentication("Logged in using an API key")).isFalse();

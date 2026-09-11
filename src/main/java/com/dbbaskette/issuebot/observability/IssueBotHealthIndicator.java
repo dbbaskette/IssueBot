@@ -1,7 +1,7 @@
 package com.dbbaskette.issuebot.observability;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
@@ -11,12 +11,12 @@ import java.io.File;
 @Component("issueBot")
 public class IssueBotHealthIndicator implements HealthIndicator {
 
-    private final ClaudeCodeService claudeCodeService;
+    private final CodingHarnessService harnessService;
     private final IssueBotProperties properties;
 
-    public IssueBotHealthIndicator(ClaudeCodeService claudeCodeService,
+    public IssueBotHealthIndicator(CodingHarnessService harnessService,
                                     IssueBotProperties properties) {
-        this.claudeCodeService = claudeCodeService;
+        this.harnessService = harnessService;
         this.properties = properties;
     }
 
@@ -25,8 +25,8 @@ public class IssueBotHealthIndicator implements HealthIndicator {
         Health.Builder builder = Health.up();
 
         // Selected coding-agent CLI
-        boolean cliAvailable = claudeCodeService.isCliAvailable();
-        builder.withDetail("agentProvider", claudeCodeService.providerDisplayName());
+        boolean cliAvailable = harnessService.isCliAvailable();
+        builder.withDetail("agentProvider", harnessService.displayName());
         builder.withDetail("agentCli", cliAvailable ? "available" : "unavailable");
 
         // GitHub token configured

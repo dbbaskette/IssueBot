@@ -4,8 +4,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ModelCatalog;
-import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessRegistry;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +21,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 
 @Controller
@@ -35,19 +33,19 @@ public class SettingsController {
     private final IssuePollingService pollingService;
     private final TrackedIssueRepository issueRepository;
     private final NotificationRepository notificationRepository;
-    private final CodexModelCatalog codexModelCatalog;
+    private final CodingHarnessRegistry registry;
     private Path configPath = Path.of(System.getProperty("user.home"), ".issuebot", "config.yml");
 
     public SettingsController(IssueBotProperties properties,
                                IssuePollingService pollingService,
                                TrackedIssueRepository issueRepository,
                                NotificationRepository notificationRepository,
-                               CodexModelCatalog codexModelCatalog) {
+                               CodingHarnessRegistry registry) {
         this.properties = properties;
         this.pollingService = pollingService;
         this.issueRepository = issueRepository;
         this.notificationRepository = notificationRepository;
-        this.codexModelCatalog = codexModelCatalog;
+        this.registry = registry;
     }
 
     @GetMapping
@@ -88,7 +86,7 @@ public class SettingsController {
     static final String CUSTOM_SENTINEL = "__custom__";
 
     @PostMapping("/models")
-    public String saveModels(@RequestParam IssueBotProperties.AgentProvider agentProvider,
+    public String saveModels(@RequestParam String harnessId,
                               @RequestParam String implementationModel,
                               @RequestParam String reviewModel,
                               @RequestParam String utilityModel,
@@ -96,49 +94,45 @@ public class SettingsController {
                               @RequestParam(required = false) String reviewReasoningEffort,
                               @RequestParam(required = false) String utilityReasoningEffort,
                               RedirectAttributes redirectAttributes) {
+        // Flash exact input before validation, including values preceding the failing role.
+        redirectAttributes.addFlashAttribute("harnessId", harnessId);
+        redirectAttributes.addFlashAttribute("implementationModel", implementationModel);
+        redirectAttributes.addFlashAttribute("reviewModel", reviewModel);
+        redirectAttributes.addFlashAttribute("utilityModel", utilityModel);
+        redirectAttributes.addFlashAttribute("implementationReasoningEffort", implementationReasoningEffort);
+        redirectAttributes.addFlashAttribute("reviewReasoningEffort", reviewReasoningEffort);
+        redirectAttributes.addFlashAttribute("utilityReasoningEffort", utilityReasoningEffort);
         implementationModel = implementationModel == null ? null : implementationModel.trim();
         reviewModel = reviewModel == null ? null : reviewModel.trim();
         utilityModel = utilityModel == null ? null : utilityModel.trim();
-        implementationReasoningEffort = normalizeReasoningEffort(implementationReasoningEffort,
-                properties.getCodexCli().getImplementationReasoningEffort());
-        reviewReasoningEffort = normalizeReasoningEffort(reviewReasoningEffort,
-                properties.getCodexCli().getReviewReasoningEffort());
-        utilityReasoningEffort = normalizeReasoningEffort(utilityReasoningEffort,
-                properties.getCodexCli().getUtilityReasoningEffort());
 
         if (isInvalidModelId(implementationModel) || isInvalidModelId(reviewModel)
                 || isInvalidModelId(utilityModel)) {
-            redirectAttributes.addFlashAttribute("error", "Choose a model or enter a custom model ID.");
+            redirectAttributes.addFlashAttribute("error", "Choose a listed model for each role.");
             return "redirect:/settings";
         }
 
-        if (agentProvider == IssueBotProperties.AgentProvider.CODEX
-                && (!CodexModelCatalog.REASONING_LEVELS.contains(implementationReasoningEffort)
-                || !CodexModelCatalog.REASONING_LEVELS.contains(reviewReasoningEffort)
-                || !CodexModelCatalog.REASONING_LEVELS.contains(utilityReasoningEffort))) {
-            redirectAttributes.addFlashAttribute("error", "Choose a valid Codex reasoning level.");
-            return "redirect:/settings";
-        }
-
-        if (reasoning != null && agentProvider == IssueBotProperties.AgentProvider.CODEX) {
-            try {
-                reasoning.validate(implementationModel, implementationReasoningEffort);
-                reasoning.validate(reviewModel, reviewReasoningEffort);
-                reasoning.validate(utilityModel, utilityReasoningEffort);
-            } catch (IllegalArgumentException ex) {
-                redirectAttributes.addFlashAttribute("error", ex.getMessage());
-                return "redirect:/settings";
+        try {
+            harnessId = registry.require(harnessId).id();
+            if (!java.util.Set.of("claude", "codex").contains(harnessId)) {
+                throw new IllegalArgumentException("No settings section is configured for this coding harness.");
             }
+            implementationReasoningEffort = reasoning.resolve(harnessId, implementationModel, implementationReasoningEffort).reasoningLevel();
+            reviewReasoningEffort = reasoning.resolve(harnessId, reviewModel, reviewReasoningEffort).reasoningLevel();
+            utilityReasoningEffort = reasoning.resolve(harnessId, utilityModel, utilityReasoningEffort).reasoningLevel();
+        } catch (IllegalArgumentException ex) {
+            redirectAttributes.addFlashAttribute("error", ex.getMessage());
+            return "redirect:/settings";
         }
-        if (!writeModelsToConfig(agentProvider, implementationModel, reviewModel, utilityModel,
+        if (!writeModelsToConfig(harnessId, implementationModel, reviewModel, utilityModel,
                 implementationReasoningEffort, reviewReasoningEffort, utilityReasoningEffort)) {
             redirectAttributes.addFlashAttribute("error",
                     "Could not parse " + configPath + " — fix the YAML in the editor below, then try again.");
             return "redirect:/settings";
         }
 
-        properties.setAgentProvider(agentProvider);
-        if (agentProvider == IssueBotProperties.AgentProvider.CODEX) {
+        properties.setAgentProvider(harnessId);
+        if ("codex".equals(harnessId)) {
             properties.getCodexCli().setImplementationModel(implementationModel);
             properties.getCodexCli().setReviewModel(reviewModel);
             properties.getCodexCli().setUtilityModel(utilityModel);
@@ -149,39 +143,37 @@ public class SettingsController {
             properties.getClaudeCode().setImplementationModel(implementationModel);
             properties.getClaudeCode().setReviewModel(reviewModel);
             properties.getClaudeCode().setUtilityModel(utilityModel);
+            properties.getClaudeCode().setImplementationReasoningEffort(implementationReasoningEffort);
+            properties.getClaudeCode().setReviewReasoningEffort(reviewReasoningEffort);
+            properties.getClaudeCode().setUtilityReasoningEffort(utilityReasoningEffort);
         }
 
+        for (String key : java.util.List.of("harnessId", "implementationModel", "reviewModel", "utilityModel",
+                "implementationReasoningEffort", "reviewReasoningEffort", "utilityReasoningEffort")) {
+            redirectAttributes.getFlashAttributes().remove(key);
+        }
         redirectAttributes.addFlashAttribute("success",
-                agentProvider.getDisplayName() + " selected — applies to the next issue picked up (no restart needed)");
+                registry.require(harnessId).displayName() + " selected — applies to the next issue picked up (no restart needed)");
         return "redirect:/settings";
     }
 
     /** Backward-compatible direct-call overload retained for controller unit tests and callers. */
-    String saveModels(IssueBotProperties.AgentProvider agentProvider,
+    String saveModels(String harnessId,
                       String implementationModel, String reviewModel, String utilityModel,
                       RedirectAttributes redirectAttributes) {
-        return saveModels(agentProvider, implementationModel, reviewModel, utilityModel,
-                properties.getCodexCli().getImplementationReasoningEffort(),
-                properties.getCodexCli().getReviewReasoningEffort(),
-                properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
+        return saveModels(harnessId, implementationModel, reviewModel, utilityModel,
+                null, null, null, redirectAttributes);
     }
 
     /** Backward-compatible direct-call overload retained for controller unit tests and callers. */
     String saveModels(String implementationModel, String reviewModel, String utilityModel,
                       RedirectAttributes redirectAttributes) {
         return saveModels(properties.getAgentProvider(), implementationModel, reviewModel,
-                utilityModel,
-                properties.getCodexCli().getImplementationReasoningEffort(),
-                properties.getCodexCli().getReviewReasoningEffort(),
-                properties.getCodexCli().getUtilityReasoningEffort(), redirectAttributes);
+                utilityModel, null, null, null, redirectAttributes);
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
-
-    private static String normalizeReasoningEffort(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value.trim().toLowerCase(Locale.ROOT);
-    }
+    private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
     private static boolean isInvalidModelId(String modelId) {
         return modelId == null || modelId.isBlank() || CUSTOM_SENTINEL.equals(modelId);
@@ -192,22 +184,20 @@ public class SettingsController {
      * maps, sets the three model keys, and delegates to
      * {@link #writeConfigValues(Map)} to merge and persist them.
      */
-    private boolean writeModelsToConfig(IssueBotProperties.AgentProvider provider,
+    private boolean writeModelsToConfig(String harnessId,
                                         String implementationModel, String reviewModel,
                                         String utilityModel, String implementationReasoningEffort,
                                         String reviewReasoningEffort, String utilityReasoningEffort) {
-        String section = provider == IssueBotProperties.AgentProvider.CODEX ? "codex-cli" : "claude-code";
+        String section = "codex".equals(harnessId) ? "codex-cli" : "claude-code";
         Map<String, Object> providerSettings = new LinkedHashMap<>();
         providerSettings.put("implementation-model", implementationModel);
         providerSettings.put("review-model", reviewModel);
         providerSettings.put("utility-model", utilityModel);
-        if (provider == IssueBotProperties.AgentProvider.CODEX) {
-            providerSettings.put("implementation-reasoning-effort", implementationReasoningEffort);
-            providerSettings.put("review-reasoning-effort", reviewReasoningEffort);
-            providerSettings.put("utility-reasoning-effort", utilityReasoningEffort);
-        }
+        providerSettings.put("implementation-reasoning-effort", implementationReasoningEffort);
+        providerSettings.put("review-reasoning-effort", reviewReasoningEffort);
+        providerSettings.put("utility-reasoning-effort", utilityReasoningEffort);
         return writeConfigValues(Map.of(
-                "agent-provider", provider.getConfigValue(),
+                "agent-provider", harnessId,
                 section, providerSettings));
     }
 
@@ -340,42 +330,20 @@ public class SettingsController {
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
-        IssueBotProperties.AgentProvider provider = properties.getAgentProvider();
-        String implementationModel = provider == IssueBotProperties.AgentProvider.CODEX
-                ? properties.getCodexCli().getImplementationModel()
-                : properties.getClaudeCode().getImplementationModel();
-        String reviewModel = provider == IssueBotProperties.AgentProvider.CODEX
-                ? properties.getCodexCli().getReviewModel()
-                : properties.getClaudeCode().getReviewModel();
-        String utilityModel = provider == IssueBotProperties.AgentProvider.CODEX
-                ? properties.getCodexCli().getUtilityModel()
-                : properties.getClaudeCode().getUtilityModel();
-        model.addAttribute("agentProvider", provider);
-        model.addAttribute("claudeModelCatalog", ModelCatalog.MODELS);
-        model.addAttribute("codexModelCatalog", codexModelCatalog.models());
-        model.addAttribute("claudeImplementationModel", properties.getClaudeCode().getImplementationModel());
-        model.addAttribute("claudeReviewModel", properties.getClaudeCode().getReviewModel());
-        model.addAttribute("claudeUtilityModel", properties.getClaudeCode().getUtilityModel());
-        model.addAttribute("codexImplementationModel", properties.getCodexCli().getImplementationModel());
-        model.addAttribute("codexReviewModel", properties.getCodexCli().getReviewModel());
-        model.addAttribute("codexUtilityModel", properties.getCodexCli().getUtilityModel());
-        model.addAttribute("implementationReasoningEffort",
-                properties.getCodexCli().getImplementationReasoningEffort());
-        model.addAttribute("reviewReasoningEffort", properties.getCodexCli().getReviewReasoningEffort());
-        model.addAttribute("utilityReasoningEffort", properties.getCodexCli().getUtilityReasoningEffort());
-        model.addAttribute("codexReasoningLevels", CodexModelCatalog.REASONING_LEVELS);
-        model.addAttribute("implementationModel", implementationModel);
-        model.addAttribute("reviewModel", reviewModel);
-        model.addAttribute("utilityModel", utilityModel);
-        // Whether the current value isn't in the catalog — drives the "Custom…" option/input
-        // (implementation/review) and the synthetic preserve-current option (utility).
-        boolean codex = provider == IssueBotProperties.AgentProvider.CODEX;
-        model.addAttribute("implementationModelCustom", codex
-                ? !codexModelCatalog.contains(implementationModel) : ModelCatalog.find(implementationModel).isEmpty());
-        model.addAttribute("reviewModelCustom", codex
-                ? !codexModelCatalog.contains(reviewModel) : ModelCatalog.find(reviewModel).isEmpty());
-        model.addAttribute("utilityModelCustom", codex
-                ? !codexModelCatalog.contains(utilityModel) : ModelCatalog.find(utilityModel).isEmpty());
+        boolean codex = "codex".equals(properties.getAgentProvider());
+        putDefault(model, "harnessId", properties.getAgentProvider());
+        putDefault(model, "implementationModel", codex ? properties.getCodexCli().getImplementationModel()
+                : properties.getClaudeCode().getImplementationModel());
+        putDefault(model, "reviewModel", codex ? properties.getCodexCli().getReviewModel()
+                : properties.getClaudeCode().getReviewModel());
+        putDefault(model, "utilityModel", codex ? properties.getCodexCli().getUtilityModel()
+                : properties.getClaudeCode().getUtilityModel());
+        putReasoningDefault(model, "implementationReasoningEffort", "implementationModel", codex ? properties.getCodexCli().getImplementationReasoningEffort()
+                : properties.getClaudeCode().getImplementationReasoningEffort());
+        putReasoningDefault(model, "reviewReasoningEffort", "reviewModel", codex ? properties.getCodexCli().getReviewReasoningEffort()
+                : properties.getClaudeCode().getReviewReasoningEffort());
+        putReasoningDefault(model, "utilityReasoningEffort", "utilityModel", codex ? properties.getCodexCli().getUtilityReasoningEffort()
+                : properties.getClaudeCode().getUtilityReasoningEffort());
 
         Path configPath = getConfigPath();
         model.addAttribute("configPath", configPath.toString());
@@ -388,6 +356,22 @@ public class SettingsController {
 
         if (message != null) model.addAttribute("message", message);
         if (error != null) model.addAttribute("error", error);
+    }
+
+    private void putReasoningDefault(Model model, String key, String modelKey, String value) {
+        if (model.containsAttribute(key)) return; // Flash values must remain exact, even when blank.
+        if (value == null || value.isBlank()) {
+            value = registry.adapters().stream().filter(h -> h.id().equals(properties.getAgentProvider()))
+                    .flatMap(h -> h.models().stream())
+                    .filter(m -> m.id().equals(model.getAttribute(modelKey)))
+                    .map(com.dbbaskette.issuebot.service.harness.HarnessModel::defaultReasoningLevel)
+                    .findFirst().orElse(value);
+        }
+        model.addAttribute(key, value);
+    }
+
+    private static void putDefault(Model model, String key, Object value) {
+        if (!model.containsAttribute(key)) model.addAttribute(key, value);
     }
 
     private Path getConfigPath() {

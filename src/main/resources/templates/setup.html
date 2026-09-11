@@ -6,6 +6,7 @@
 
     <div class="page-header">
         <h2>Setup Wizard</h2>
+        <p class="text-sm">Coding harness: <span th:text="${effectiveHarnessName}">Selected harness</span> · <a href="/settings">Model and reasoning settings</a></p>
     </div>
 
     <div class="glass-card mb-3">
@@ -28,12 +29,12 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td th:text="${agentProviderName}">Agent CLI</td>
+                        <td th:text="${effectiveHarnessName}">Agent CLI</td>
                         <td><span class="status status-queued">CHECKING</span></td>
                         <td style="color: var(--text-tertiary)">Verifying CLI installation...</td>
                     </tr>
                     <tr>
-                        <td th:text="${agentProviderName + ' Auth'}">Agent CLI Auth</td>
+                        <td th:text="${effectiveHarnessName + ' Auth'}">Agent CLI Auth</td>
                         <td><span class="status status-queued">CHECKING</span></td>
                         <td style="color: var(--text-tertiary)">Verifying authentication...</td>
                     </tr>
@@ -176,27 +177,13 @@
         </div>
         <p class="text-sm text-muted mb-2">
             IssueBot looks for a config file at <code>~/.issuebot/config.yml</code>.
-            Below is an example configuration:
+            Choose your coding harness, models, and reasoning in <a href="/settings">Settings</a>.
+            Below is an example of the other configuration values:
         </p>
         <pre id="example-config" class="diff-viewer">issuebot:
-  agent-provider: claude-code # or: codex
   poll-interval-seconds: 60
   max-concurrent-issues: 3
   work-directory: ${user.home}/.issuebot/repos
-  claude-code:
-    implementation-model: claude-opus-4-6
-    review-model: claude-sonnet-4-6
-    max-turns-per-invocation: 30
-    timeout-minutes: 45
-    review-max-turns: 15
-    review-timeout-minutes: 20
-  codex-cli:
-    implementation-model: gpt-5.6-sol
-    implementation-reasoning-effort: low
-    review-model: gpt-5.6-terra
-    review-reasoning-effort: medium
-    utility-model: gpt-5.6-luna
-    utility-reasoning-effort: medium
   github:
     token: ${GITHUB_TOKEN}
   notifications:
@@ -228,34 +215,22 @@
         </thead>
         <tbody>
             <tr>
-                <td th:text="${agentProviderName}">Agent CLI</td>
+                <td th:text="${effectiveHarnessName}">Agent CLI</td>
                 <td>
                     <span class="status" th:classappend="${cliAvailable ? 'status-completed' : 'status-failed'}"
                           th:text="${cliAvailable ? 'OK' : 'MISSING'}">OK</span>
                 </td>
-                <td th:if="${cliAvailable}" th:text="${agentProviderName + ' is installed and accessible.'}">Agent CLI is installed.</td>
-                <td th:if="${!cliAvailable and !codexProvider}">
-                    Install Claude Code: <code>npm install -g @anthropic-ai/claude-code</code>
-                </td>
-                <td th:if="${!cliAvailable and codexProvider}">
-                    Install Codex CLI, then run <code>codex login</code> and choose ChatGPT login.
-                </td>
+                <td th:if="${cliAvailable}" th:text="${effectiveHarnessName + ' is installed and accessible.'}">Agent CLI is installed.</td>
+                <td th:if="${!cliAvailable}" th:text="${'Install ' + effectiveHarnessName + ' and make it available on PATH.'}"></td>
             </tr>
             <tr>
-                <td th:text="${agentProviderName + ' Auth'}">Agent CLI Auth</td>
+                <td th:text="${effectiveHarnessName + ' Auth'}">Agent CLI Auth</td>
                 <td>
                     <span class="status" th:classappend="${cliAuthenticated ? 'status-completed' : 'status-failed'}"
                           th:text="${cliAuthenticated ? 'OK' : 'FAILED'}">OK</span>
                 </td>
-                <td th:if="${cliAuthenticated}" th:text="${codexProvider ? 'ChatGPT subscription login verified.' : 'Claude subscription login verified.'}">
-                    Subscription authentication verified.
-                </td>
-                <td th:if="${!cliAuthenticated and !codexProvider}">
-                    Run <code>claude</code> in a terminal and complete login.
-                </td>
-                <td th:if="${!cliAuthenticated and codexProvider}">
-                    Run <code>codex login</code> and choose ChatGPT login. API-key login is not used by IssueBot.
-                </td>
+                <td th:if="${cliAuthenticated}">Subscription authentication verified.</td>
+                <td th:if="${!cliAuthenticated}" th:text="${'Complete the subscription login for ' + effectiveHarnessName + ', then re-check.'}"></td>
             </tr>
             <tr>
                 <td>GitHub Token</td>

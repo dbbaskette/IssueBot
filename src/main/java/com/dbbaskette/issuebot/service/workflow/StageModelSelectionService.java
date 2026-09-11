@@ -1,82 +1,41 @@
 package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WorkflowStage;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
-import com.dbbaskette.issuebot.service.claude.ModelCatalog;
-import com.dbbaskette.issuebot.service.claude.ModelResolver;
-import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
+import com.dbbaskette.issuebot.service.harness.*;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Map;
-
-/** Stage-local selection. Never changes defaults or substitutes an explicit model choice. */
+/** Separates new-stage defaults from explicit or persisted stage selections. */
 @Service
 public class StageModelSelectionService {
     private final IssueBotProperties properties;
-    private final ModelResolver resolver;
-    private final CodexModelCatalog codexModels;
-    private final ClaudeCodeService agent;
+    private final HarnessSelectionService selections;
 
-    public StageModelSelectionService(IssueBotProperties properties, ModelResolver resolver,
-                                      CodexModelCatalog codexModels, ClaudeCodeService agent) {
+    public StageModelSelectionService(IssueBotProperties properties, HarnessSelectionService selections) {
         this.properties = properties;
-        this.resolver = resolver;
-        this.codexModels = codexModels;
-        this.agent = agent;
+        this.selections = selections;
     }
 
-    public record Selection(AgentProvider provider, String model) { }
+    public HarnessSelection defaults(TrackedIssue issue, WorkflowStage stage) {
+        return stage.modelDriven() ? selections.forStage(issue, properties.getAgentProvider(), stage)
+                : new HarnessSelection(null, null, null);
+    }
 
-    public Selection resolve(TrackedIssue issue, WorkflowStage stage, String provider, String model) {
+    public HarnessSelection resolve(TrackedIssue issue, WorkflowStage stage, String harnessId, String model, String reasoning) {
         if (!stage.modelDriven()) {
-            if (present(provider) || present(model)) {
-                throw new IllegalArgumentException(stage + " does not accept provider or model selections");
+            if (harnessId != null || model != null || reasoning != null) {
+                throw new HarnessSelectionException(HarnessSelectionException.Problem.DETERMINISTIC_STAGE,
+                        stage + " does not accept harness, model, or reasoning selections");
             }
-            return new Selection(null, null);
+            return new HarnessSelection(null, null, null);
         }
-        AgentProvider selected = properties.getAgentProvider();
-        if (present(provider)) {
-            try {
-                selected = AgentProvider.valueOf(provider.trim());
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("Choose a supported CLI provider", e);
-            }
-        }
-        String selectedModel = present(model) ? model.trim()
-                : stage == WorkflowStage.REVIEW ? resolver.reviewModel(issue, selected)
-                : resolver.implementationModel(issue, selected);
-        if (present(model) && !modelsByProvider().get(selected.name()).contains(selectedModel)) {
-            throw new IllegalArgumentException("Model " + selectedModel + " is not available in the "
-                    + selected.getDisplayName() + " catalog; choose a listed model");
-        }
-        return new Selection(selected, selectedModel);
+        return selections.resolve(harnessId, model, reasoning);
     }
 
-    public void validate(Selection selection) {
-        if (selection.provider() == null && selection.model() == null) return;
-        if (selection.provider() == null || !present(selection.model())) {
-            throw new IllegalArgumentException("A provider and model are required for this stage");
-        }
-        if (!agent.checkCliAvailable(selection.provider())) {
-            throw new IllegalStateException(selection.provider().getDisplayName()
-                    + " is not installed or available on PATH. Install that CLI before approving this stage.");
-        }
-        if (!agent.checkSubscriptionAuthentication(selection.provider())) {
-            String command = selection.provider() == AgentProvider.CODEX ? "codex login" : "claude auth login";
-            throw new IllegalStateException(selection.provider().getDisplayName()
-                    + " subscription authentication is unavailable. Run " + command
-                    + " with your subscription account, then retry. API-key billing is not permitted.");
-        }
+    public void validate(HarnessSelection selection) {
+        if (selection.harnessId() == null && selection.modelId() == null && selection.reasoningLevel() == null) return;
+        selections.validateReady(selection);
     }
 
-    public Map<String, List<String>> modelsByProvider() {
-        return Map.of(AgentProvider.CLAUDE_CODE.name(), ModelCatalog.MODELS.stream().map(ModelCatalog.ModelInfo::id).toList(),
-                AgentProvider.CODEX.name(), codexModels.models().stream().map(CodexModelCatalog.ModelInfo::id).toList());
-    }
-
-    private static boolean present(String value) { return value != null && !value.isBlank(); }
 }

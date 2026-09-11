@@ -151,23 +151,16 @@
                             <input type="number" id="issue-budget-usd" name="issueBudgetUsd"
                                    step="0.50" min="0" placeholder="unlimited">
                         </div>
-                        <div class="field-group">
-                            <label for="implementation-model">Implementation model (blank = inherit global)</label>
-                            <select id="implementation-model" name="implementationModel">
-                                <option value="">Inherit global</option>
-                                <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                            </select>
-                            <div th:replace="~{fragments/reasoning :: picker('implementation-model', 'implementationReasoningEffort', null)}"></div>
+                        <div class="field-group" style="grid-column:1/-1">
+                            <h4>Implementation defaults</h4>
+                            <div th:replace="~{fragments/reasoning :: selection('implementation-model', 'implementationModel', ${repositorySelection?.implementationModel}, 'implementationReasoningEffort', ${repositorySelection?.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${globalImplementationModel})}"></div>
+                        </div>
+                        <div class="field-group" style="grid-column:1/-1">
+                            <h4>Review defaults</h4>
+                            <div th:replace="~{fragments/reasoning :: selection('review-model', 'reviewModel', ${repositorySelection?.reviewModel}, 'reviewReasoningEffort', ${repositorySelection?.reviewReasoningEffort}, ${effectiveHarnessId}, null, true, ${globalReviewModel})}"></div>
+                            <small class="text-muted">Blank model and reasoning inherit global defaults. Change the coding harness in Settings.</small>
                         </div>
                         <div class="field-group">
-                            <label for="review-model">Review model (blank = inherit global)</label>
-                            <select id="review-model" name="reviewModel">
-                                <option value="">Inherit global</option>
-                                <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                            </select>
-                        </div>
-                        <div class="field-group">
-                            <div th:replace="~{fragments/reasoning :: picker('review-model', 'reviewReasoningEffort', null)}"></div>
                             <label for="follow-up-mode">Review findings handling</label>
                             <select id="follow-up-mode" name="followUpMode">
                                 <option value="ROLLING_BACKLOG">Rolling backlog issue (recommended)</option>

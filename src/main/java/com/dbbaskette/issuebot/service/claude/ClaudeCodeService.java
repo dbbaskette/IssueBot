@@ -1,14 +1,14 @@
 package com.dbbaskette.issuebot.service.claude;
 
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -29,98 +29,83 @@ public class ClaudeCodeService {
     private final IssueBotProperties properties;
     private final StreamJsonParser parser;
     private final WorkflowCancellationService cancellationService;
-    private final CodexCliService codexCliService;
-    private final ThreadLocal<IssueBotProperties.AgentProvider> pinnedProvider = new ThreadLocal<>();
     private final ThreadLocal<Boolean> subscriptionOnly = new ThreadLocal<>();
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
-    @Autowired
     public ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
-                              WorkflowCancellationService cancellationService,
-                              CodexCliService codexCliService) {
+                              WorkflowCancellationService cancellationService) {
         this.properties = properties;
         this.parser = parser;
         this.cancellationService = cancellationService;
-        this.codexCliService = codexCliService;
     }
 
-    /** Unit-test convenience constructor; production injection always supplies the Codex runner. */
-    ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
-                      WorkflowCancellationService cancellationService) {
-        this(properties, parser, cancellationService, null);
-    }
-
-    /**
-     * Execute implementation with the resolved model. {@code resumeSessionId}, when non-blank,
-     * resumes the given Claude session instead of starting cold (issue #67 — session
-     * continuity). Pass null for a fresh session.
-     */
-    public ClaudeCodeResult executeImplementation(String prompt, Path workingDirectory,
-                                                    String model, String resumeSessionId,
-                                                    Long issueId, Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executeImplementation(prompt, workingDirectory, model,
-                    resumeSessionId, issueId, lineCallback);
+    /** Apply managed credential settings only while this adapter invocation runs. */
+    public HarnessExecutionResult withSubscriptionSettings(java.util.function.Supplier<HarnessExecutionResult> execution) {
+        Boolean previous = subscriptionOnly.get();
+        subscriptionOnly.set(true);
+        try {
+            return execution.get();
+        } finally {
+            if (previous == null) subscriptionOnly.remove();
+            else subscriptionOnly.set(previous);
         }
+    }
+
+    /** Claude-only entry point; model, effort and session are already resolved by the caller. */
+    public HarnessExecutionResult executeImplementation(String prompt, Path workingDirectory,
+                                                        String model, String reasoningLevel,
+                                                        String resumeSessionId, Long issueId,
+                                                        Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, model,
+        return executeTask(prompt, workingDirectory, model, reasoningLevel,
                 config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
                 null, resumeSessionId, issueId, lineCallback);
     }
 
-    /**
-     * Execute independent review with the resolved model. Never resumes a session —
-     * the reviewer must stay independent of the implementer's context by design.
-     */
-    public ClaudeCodeResult executeReview(String prompt, Path workingDirectory,
-                                            String model, Long issueId, Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executeReview(prompt, workingDirectory, model, issueId, lineCallback);
-        }
+    /** Review always starts a fresh Claude session. */
+    public HarnessExecutionResult executeReview(String prompt, Path workingDirectory,
+                                                String model, String reasoningLevel,
+                                                Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, model,
+        return executeTask(prompt, workingDirectory, model, reasoningLevel,
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
                 null, null, issueId, lineCallback);
     }
 
-    /**
-     * Pre-screen / decomposition analysis on the cheap utility model (review budgets).
-     * Never resumes a session.
-     */
-    public ClaudeCodeResult executeUtility(String prompt, Path workingDirectory,
-                                             Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executeUtility(prompt, workingDirectory, lineCallback);
-        }
+    public HarnessExecutionResult executeUtility(String prompt, Path workingDirectory,
+                                                 String model, String reasoningLevel,
+                                                 Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getUtilityModel(),
+        return executeTask(prompt, workingDirectory, model, reasoningLevel,
                 config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
                 null, null, null, lineCallback);
     }
 
-    /**
-     * Design/spec + implementation-plan pass (superpowers methodology). Runs on the given
-     * (strong) implementation model — a good spec needs it — but makes no code changes, and
-     * never resumes a session. Uses the implementation budget so it has room to read the
-     * codebase and write a thorough plan.
-     */
-    public ClaudeCodeResult executePlanning(String prompt, Path workingDirectory,
-                                             String model, Long issueId, Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executePlanning(prompt, workingDirectory, model, issueId, lineCallback);
-        }
+    public HarnessExecutionResult executePlanning(String prompt, Path workingDirectory,
+                                                  String model, String reasoningLevel,
+                                                  Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeCommand(buildPlanningCommand(prompt, model, config.getMaxTurnsPerInvocation()),
+        return executeCommand(buildPlanningCommand(prompt, model, reasoningLevel, config.getMaxTurnsPerInvocation()),
                 prompt, workingDirectory, model, config.getMaxTurnsPerInvocation(),
                 config.getTimeoutMinutes(), null, issueId, lineCallback, true);
+    }
+
+    public HarnessExecutionResult executeTask(String prompt, Path workingDirectory,
+                                              String model, String reasoningLevel,
+                                              int maxTurns, int timeoutMinutes,
+                                              String systemPrompt, String resumeSessionId,
+                                              Long issueId, Consumer<String> lineCallback) {
+        return executeCommand(buildCommand(prompt, model, reasoningLevel, maxTurns, systemPrompt, resumeSessionId),
+                prompt, workingDirectory, model, maxTurns, timeoutMinutes, resumeSessionId,
+                issueId, lineCallback, false);
     }
 
     /**
      * Execute a Claude Code task with explicit model configuration. {@code resumeSessionId}
      * is optional (null/blank means a fresh session) — see {@link #buildCommand}.
      */
-    public ClaudeCodeResult executeTask(String prompt, Path workingDirectory,
+    public HarnessExecutionResult executeTask(String prompt, Path workingDirectory,
                                          String model, int maxTurns, int timeoutMinutes,
                                          String systemPrompt, String resumeSessionId,
                                          Long issueId, Consumer<String> lineCallback) {
@@ -129,7 +114,7 @@ public class ClaudeCodeService {
                 issueId, lineCallback, false);
     }
 
-    private ClaudeCodeResult executeCommand(List<String> command, String prompt,
+    private HarnessExecutionResult executeCommand(List<String> command, String prompt,
                                              Path workingDirectory, String model,
                                              int maxTurns, int timeoutMinutes,
                                              String resumeSessionId, Long issueId,
@@ -236,7 +221,7 @@ public class ClaudeCodeService {
                 }
 
                 int exitCode = process.exitValue();
-                ClaudeCodeResult result = parser.parse(stdout.toString());
+                HarnessExecutionResult result = parser.parse(stdout.toString());
                 result.setDurationMs(duration);
 
                 if (exitCode != 0) {
@@ -269,6 +254,10 @@ public class ClaudeCodeService {
      * shell or mutation tool. Safe mode also prevents repository hooks/plugins from running code.
      */
     List<String> buildPlanningCommand(String prompt, String model, int maxTurns) {
+        return buildPlanningCommand(prompt, model, null, maxTurns);
+    }
+
+    List<String> buildPlanningCommand(String prompt, String model, String reasoningLevel, int maxTurns) {
         List<String> command = new ArrayList<>();
         command.add("claude");
         command.add("-p");
@@ -279,6 +268,7 @@ public class ClaudeCodeService {
         command.add(String.valueOf(maxTurns));
         command.add("--model");
         command.add(model);
+        addEffort(command, model, reasoningLevel);
         command.add("--verbose");
         command.add("--permission-mode");
         command.add("plan");
@@ -309,6 +299,11 @@ public class ClaudeCodeService {
      */
     List<String> buildCommand(String prompt, String model, int maxTurns,
                                String systemPrompt, String resumeSessionId) {
+        return buildCommand(prompt, model, null, maxTurns, systemPrompt, resumeSessionId);
+    }
+
+    List<String> buildCommand(String prompt, String model, String reasoningLevel, int maxTurns,
+                              String systemPrompt, String resumeSessionId) {
         List<String> command = new ArrayList<>();
         command.add("claude");
         command.add("-p");
@@ -319,6 +314,8 @@ public class ClaudeCodeService {
         command.add(String.valueOf(maxTurns));
         command.add("--model");
         command.add(model);
+
+        addEffort(command, model, reasoningLevel);
 
         if (resumeSessionId != null && !resumeSessionId.isBlank()) {
             command.add("--resume");
@@ -348,13 +345,21 @@ public class ClaudeCodeService {
         return command;
     }
 
+    private static void addEffort(List<String> command, String model, String reasoningLevel) {
+        if (reasoningLevel == null || reasoningLevel.isBlank()) return;
+        ModelCatalog.find(model).filter(ModelCatalog.ModelInfo::supportsEffort).ifPresent(metadata -> {
+            command.add("--effort");
+            command.add(reasoningLevel);
+        });
+    }
+
     /**
      * Mark a (partially parsed) run as timed out WITHOUT discarding what it produced. Those tokens
      * were billed whether or not we killed the process, so zeroing them — as a fresh
      * {@code failedResult} does — silently under-counts the issue's cost and its budget, and throws
      * away the session id a retry could resume from. Package-private + static for unit testing.
      */
-    static ClaudeCodeResult timedOutResult(ClaudeCodeResult parsed, long durationMs,
+    static HarnessExecutionResult timedOutResult(HarnessExecutionResult parsed, long durationMs,
                                             int timeoutMinutes, String stderr) {
         parsed.setDurationMs(durationMs);
         parsed.setSuccess(false);
@@ -392,8 +397,8 @@ public class ClaudeCodeService {
         return "Claude Code exited with code " + exitCode + (detail.isEmpty() ? "" : ": " + detail);
     }
 
-    private ClaudeCodeResult failedResult(long durationMs, String errorMessage) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult failedResult(long durationMs, String errorMessage) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setDurationMs(durationMs);
         result.setErrorMessage(errorMessage);
@@ -418,25 +423,8 @@ public class ClaudeCodeService {
         }
     }
 
-    /** Explicit selection check without disturbing an enclosing workflow's provider pin. */
-    public boolean checkCliAvailable(IssueBotProperties.AgentProvider provider) {
-        if (provider == IssueBotProperties.AgentProvider.CODEX) {
-            return codexCliService != null && codexCliService.checkCliAvailable();
-        }
-        IssueBotProperties.AgentProvider previous = pinnedProvider.get();
-        pinnedProvider.set(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        try {
-            return checkCliAvailable();
-        } finally {
-            pinProvider(previous);
-        }
-    }
-
-    /** Fresh, fail-closed check used only by managed stages; never logs account details. */
-    public boolean checkSubscriptionAuthentication(IssueBotProperties.AgentProvider provider) {
-        if (provider == IssueBotProperties.AgentProvider.CODEX) {
-            return codexCliService != null && codexCliService.checkSubscriptionAuthentication();
-        }
+    /** Fresh Claude-only subscription authentication check for the harness adapter. */
+    public boolean checkSubscriptionAuthentication() {
         try {
             ProcessBuilder builder = new ProcessBuilder(buildSubscriptionAuthCommand()).redirectErrorStream(true);
             stripNestedSessionEnv(builder);
@@ -486,7 +474,6 @@ public class ClaudeCodeService {
      * Check if the Claude Code CLI is installed and accessible.
      */
     public boolean checkCliAvailable() {
-        if (useCodex()) return codexCliService.checkCliAvailable();
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "--version");
             pb.redirectErrorStream(true);
@@ -514,7 +501,6 @@ public class ClaudeCodeService {
      * Result is cached after first check.
      */
     public boolean checkAuthentication() {
-        if (useCodex()) return codexCliService.checkAuthentication();
         if (cliAuthenticated != null) {
             return cliAuthenticated;
         }
@@ -551,57 +537,14 @@ public class ClaudeCodeService {
     }
 
     public boolean isCliAvailable() {
-        return useCodex() ? codexCliService.isCliAvailable() : cliAvailable;
+        return cliAvailable;
     }
 
     /**
      * Clear the cached auth result so the next checkAuthentication() call re-verifies.
      */
     public void clearAuthCache() {
-        if (useCodex()) {
-            codexCliService.clearAuthCache();
-            return;
-        }
         cliAuthenticated = null;
     }
 
-    public String providerDisplayName() {
-        return effectiveProvider().getDisplayName();
-    }
-
-    public IssueBotProperties.AgentProvider provider() {
-        return properties.getAgentProvider();
-    }
-
-    /** Pin every invocation on the current workflow thread to one persisted provider. */
-    public void pinProvider(IssueBotProperties.AgentProvider provider) {
-        if (provider == null) pinnedProvider.remove();
-        else pinnedProvider.set(provider);
-    }
-
-    /** Managed stage invocations must not load repository or user API credential helpers. */
-    public void pinSubscriptionProvider(IssueBotProperties.AgentProvider provider) {
-        if (provider == null) throw new IllegalArgumentException("Managed stages require a provider");
-        pinProvider(provider);
-        subscriptionOnly.set(true);
-    }
-
-    public void clearPinnedProvider() {
-        pinnedProvider.remove();
-        subscriptionOnly.remove();
-    }
-
-    private IssueBotProperties.AgentProvider effectiveProvider() {
-        IssueBotProperties.AgentProvider pinned = pinnedProvider.get();
-        return pinned != null ? pinned : properties.getAgentProvider();
-    }
-
-    private boolean useCodex() {
-        if (Boolean.TRUE.equals(subscriptionOnly.get())
-                && effectiveProvider() == IssueBotProperties.AgentProvider.CODEX && codexCliService == null) {
-            throw new IllegalStateException("Codex CLI runner is unavailable; provider fallback is not permitted");
-        }
-        return effectiveProvider() == IssueBotProperties.AgentProvider.CODEX
-                && codexCliService != null;
-    }
 }

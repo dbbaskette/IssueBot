@@ -49,6 +49,88 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class IssueControllerTest {
 
+    @Test void rejectedStartAndRetryPreserveExactModelAndReasoningInputs() {
+        for (boolean retry : new boolean[] {false, true}) {
+            Fixture f = new Fixture(retry ? IssueStatus.FAILED : IssueStatus.QUEUED);
+            var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+            org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+            var flash = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+            if (retry) f.controller.retry(1L, "fix it", "claude-opus-4-8", "claude-haiku-4-5", null, null,
+                    false, "", "ultra", flash);
+            else f.controller.start(1L, "claude-opus-4-8", "claude-haiku-4-5", null, null, "", "ultra", flash);
+            org.assertj.core.api.Assertions.assertThat(new java.util.HashMap<String, Object>(flash.getFlashAttributes()))
+                    .containsEntry("submittedImplModel", "claude-opus-4-8")
+                    .containsEntry("submittedReviewModel", "claude-haiku-4-5")
+                    .containsEntry("submittedImplementationReasoning", "")
+                    .containsEntry("submittedReviewReasoning", "ultra");
+            verifyNoInteractions(f.workflowService);
+        }
+    }
+
+    private enum SelectionRoute { START, ROW_START, BULK_START, RETRY, QUICK_RETRY, BULK_RETRY }
+
+    @ParameterizedTest
+    @EnumSource(SelectionRoute.class)
+    void everyStartAndRetryRouteRejectsInheritedInvalidTupleBeforeMutation(SelectionRoute route) throws Exception {
+        boolean retry = route.name().contains("RETRY");
+        IssueStatus initialStatus = retry ? IssueStatus.FAILED : IssueStatus.QUEUED;
+        Fixture f = new Fixture(initialStatus);
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+        f.issue.getRepo().setImplementationModel("claude-haiku-4-5");
+        f.issue.getRepo().setImplementationReasoningEffort("max");
+        f.issue.setCurrentIteration(2);
+        f.issue.setClaudeSessionId("saved-session");
+        f.issue.setBranchName("issuebot/issue-42");
+        f.issue.setPrNumber(99);
+        if (retry) {
+            var pr = new ObjectMapper().createObjectNode().put("number", 99);
+            pr.putObject("head").put("ref", "issuebot/issue-42");
+            when(f.gitHubApiClient.listOpenPullRequests("acme", "widgets", GitOperationsService.BRANCH_PREFIX))
+                    .thenReturn(List.of(pr));
+        }
+
+        invokeSelectionRoute(route, f);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(initialStatus);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getCurrentIteration()).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getClaudeSessionId()).isEqualTo("saved-session");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPrNumber()).isEqualTo(99);
+        verify(f.issues, never()).save(any());
+        verify(f.dispatchService, never()).claimStart(anyLong(), any());
+        verify(f.dispatchService, never()).claimReadyStart(anyLong(), any());
+        verify(f.dispatchService, never()).claimRetry(anyLong(), any(),
+                any(com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager.RetryMutation.class));
+        verifyNoInteractions(f.gitHubApiClient, f.workflowService);
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+    }
+
+    private void invokeSelectionRoute(SelectionRoute route, Fixture f) {
+        switch (route) {
+            case START -> f.controller.start(1L, null, null, null, null, null, null, f.redirectAttributes);
+            // The queue row uses the same /{id}/start endpoint with omitted overrides.
+            case ROW_START -> f.controller.start(1L, null, null, null, null, f.redirectAttributes);
+            case BULK_START -> f.controller.bulkStart(List.of(1L), null, null, null, null, f.redirectAttributes);
+            case RETRY -> f.controller.retry(1L, null, null, null, null, null, false, null, null, f.redirectAttributes);
+            case QUICK_RETRY -> f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
+            case BULK_RETRY -> f.controller.bulkRetry(List.of(1L), null, null, null, null, f.redirectAttributes);
+        }
+    }
+
+    @Test void startRejectsReasoningUnsupportedByInheritedRepositoryModelBeforeClaim() {
+        Fixture f = new Fixture(IssueStatus.QUEUED);
+        f.issue.getRepo().setImplementationModel("claude-haiku-4-5");
+        var selections = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections;
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", selections);
+
+        f.controller.start(1L, null, null, null, null, "max", null, f.redirectAttributes);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getImplementationReasoningEffort()).isNull();
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("claude-haiku-4-5"));
+        verifyNoInteractions(f.workflowService);
+    }
+
     private static IssueDispatchService dispatch(TrackedIssueRepository issues) {
         ProcessingControlService control = mock(ProcessingControlService.class);
         when(control.isRunning()).thenReturn(true);
@@ -301,14 +383,20 @@ class IssueControllerTest {
     }
 
     @Test
-    void liveStatusExposesModelCatalogForRecoveryOobControls() {
+    void liveStatusPublishesTheSameHarnessCatalogForRecoveryAsTheFullPage() throws Exception {
         Fixture f = new Fixture(IssueStatus.FAILED);
-        org.springframework.ui.Model liveModel = new org.springframework.ui.ExtendedModelMap();
-
-        f.controller.liveStatus(liveModel, 1L);
-
-        org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("modelCatalog"))
-                .isSameAs(ModelCatalog.MODELS);
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var mvc = MockMvcBuilders.standaloneSetup(f.controller)
+                .setControllerAdvice(new HarnessCatalogAdvice(harnesses.registry, new ObjectMapper(), harnesses.properties))
+                .build();
+        for (String endpoint : List.of("/issues/1", "/issues/1/live-status")) {
+            var model = mvc.perform(get(endpoint)).andExpect(status().isOk())
+                    .andExpect(model().attributeExists("harnessCatalog", "harnessCatalogJson"))
+                    .andReturn().getModelAndView().getModel();
+            org.assertj.core.api.Assertions.assertThat(model.get("harnessCatalogJson").toString())
+                    .contains("claude-opus-4-8", "gpt-6-astra", "ultra");
+        }
+        verifyNoInteractions(harnesses.claude, harnesses.codex);
     }
 
     /**
@@ -341,7 +429,7 @@ class IssueControllerTest {
         Fixture(IssueStatus initialStatus) {
             when(control.isRunning()).thenReturn(true);
             when(properties.getMaxConcurrentIssues()).thenReturn(5);
-            when(properties.getAgentProvider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+            when(properties.getAgentProvider()).thenReturn("claude");
             WatchedRepo repo = new WatchedRepo("acme", "widgets");
             issue = new TrackedIssue(repo, 42, "Test issue");
             issue.setId(1L);
@@ -523,7 +611,7 @@ class IssueControllerTest {
 
         f.controller.retry(1L, null, null, null, null, null, true, f.redirectAttributes);
 
-        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("belongs to Codex CLI"));
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("belongs to codex"));
         verify(f.issues, never()).save(any());
     }
 

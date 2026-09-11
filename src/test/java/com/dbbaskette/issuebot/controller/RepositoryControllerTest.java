@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.controller;
 import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.FollowUpMode;
 import com.dbbaskette.issuebot.model.RepoLesson;
+import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.model.WorkflowPolicy;
 import com.dbbaskette.issuebot.repository.*;
@@ -21,6 +22,44 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class RepositoryControllerTest {
+
+    @Test void nonModelValidationErrorsRedisplayExactUnresolvedRoleInputs() throws Exception {
+        Fixture f = new Fixture();
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+        var result = MockMvcBuilders.standaloneSetup(f.controller).build().perform(baseRequest()
+                .param("workflowPolicy", "invalid")
+                .param("implementationModel", "claude-haiku-4-5")
+                .param("implementationReasoningEffort", "")
+                .param("reviewModel", "claude-opus-4-8")
+                .param("reviewReasoningEffort", "xhigh")).andReturn();
+        var values = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+                result.getModelAndView().getModel().get("repositoryFormValues").toString());
+        assertThat(values.path("implementationModel").asText()).isEqualTo("claude-haiku-4-5");
+        assertThat(values.path("implementationReasoningEffort").asText()).isEmpty();
+        assertThat(values.path("reviewModel").asText()).isEqualTo("claude-opus-4-8");
+        assertThat(values.path("reviewReasoningEffort").asText()).isEqualTo("xhigh");
+        verify(f.repos, never()).save(any());
+    }
+
+    @Test
+    void savingModelWithOmittedReasoningPersistsDefaultUsedByTheNextStage() {
+        Fixture f = new Fixture();
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+
+        WatchedRepo saved = f.addOrUpdate("claude-haiku-4-5", "claude-sonnet-5");
+
+        assertThat(saved.getImplementationReasoningEffort()).isEqualTo("default");
+        assertThat(saved.getReviewReasoningEffort()).isEqualTo("high");
+        var stages = new com.dbbaskette.issuebot.service.workflow.StageModelSelectionService(
+                harnesses.properties, harnesses.selections);
+        var issue = new TrackedIssue(saved, 1, "Saved repository issue");
+        assertThat(stages.defaults(issue, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION))
+                .isEqualTo(new com.dbbaskette.issuebot.service.harness.HarnessSelection("claude", "claude-haiku-4-5", "default"));
+        assertThat(stages.defaults(issue, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW))
+                .isEqualTo(new com.dbbaskette.issuebot.service.harness.HarnessSelection("claude", "claude-sonnet-5", "high"));
+    }
 
     private static final class Fixture {
         final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);

@@ -2,7 +2,7 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.AfterEach;
@@ -114,7 +114,7 @@ class WorkflowCheckpointTransactionManagerTest {
     @Test
     void successfulImplementationResultAndNextPhaseCommitBeforeEffects() {
         Baseline baseline = seed();
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("implementation completed");
         result.setSessionId("session-42");
@@ -135,7 +135,7 @@ class WorkflowCheckpointTransactionManagerTest {
     void implementationCheckpointLocksRepositoryBeforeJoinedIssueQuery() {
         Baseline baseline = seed();
         Long repoId = issues.findRepoIdByIssueId(baseline.issueId()).orElseThrow();
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("implementation completed");
         clearInvocations(issues, repos);
@@ -153,7 +153,7 @@ class WorkflowCheckpointTransactionManagerTest {
     void concurrentApprovalAndImplementationCheckpointSerializeWithoutDeadlock()
             throws Exception {
         CheckpointRaceSeed seed = seedCheckpointRace();
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("implementation completed during approval race");
 
@@ -215,7 +215,7 @@ class WorkflowCheckpointTransactionManagerTest {
     @Test
     void implementationCheckpointFaultRollsBackResultAndPhase() {
         Baseline baseline = seed();
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("must roll back");
         doThrow(new IllegalStateException("implementation checkpoint fault"))
@@ -260,7 +260,7 @@ class WorkflowCheckpointTransactionManagerTest {
     @Test
     void globalPauseAfterImplementationPreservesExactResumeCheckpoint() {
         Baseline baseline = seed();
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("done");
         checkpoints.persistImplementationComplete(

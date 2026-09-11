@@ -25,7 +25,7 @@ public class IssueBotProperties {
     private ClaudeCodeConfig claudeCode = new ClaudeCodeConfig();
 
     @NotNull
-    private AgentProvider agentProvider = AgentProvider.CLAUDE_CODE;
+    private String agentProvider = com.dbbaskette.issuebot.service.harness.HarnessIds.CLAUDE;
 
     @Valid
     private CodexCliConfig codexCli = new CodexCliConfig();
@@ -52,9 +52,9 @@ public class IssueBotProperties {
     public ClaudeCodeConfig getClaudeCode() { return claudeCode; }
     public void setClaudeCode(ClaudeCodeConfig claudeCode) { this.claudeCode = claudeCode; }
 
-    public AgentProvider getAgentProvider() { return agentProvider; }
-    public void setAgentProvider(AgentProvider agentProvider) {
-        this.agentProvider = agentProvider == null ? AgentProvider.CLAUDE_CODE : agentProvider;
+    public String getAgentProvider() { return agentProvider; }
+    public void setAgentProvider(String agentProvider) {
+        this.agentProvider = com.dbbaskette.issuebot.service.harness.HarnessIds.normalize(agentProvider);
     }
 
     public CodexCliConfig getCodexCli() { return codexCli; }
@@ -85,6 +85,10 @@ public class IssueBotProperties {
         private String reviewModel = "claude-sonnet-5";
         // Cheap model for pre-screen / decomposition analysis
         private String utilityModel = "claude-haiku-4-5";
+        // Missing legacy values resolve from the selected model's catalog default.
+        private String implementationReasoningEffort;
+        private String reviewReasoningEffort;
+        private String utilityReasoningEffort;
         @Min(1)
         private int reviewMaxTurns = 15;
         /**
@@ -106,12 +110,20 @@ public class IssueBotProperties {
         public void setReviewModel(String reviewModel) { this.reviewModel = reviewModel; }
         public String getUtilityModel() { return utilityModel; }
         public void setUtilityModel(String utilityModel) { this.utilityModel = utilityModel; }
+        public String getImplementationReasoningEffort() { return implementationReasoningEffort; }
+        public void setImplementationReasoningEffort(String value) { this.implementationReasoningEffort = value; }
+        public String getReviewReasoningEffort() { return reviewReasoningEffort; }
+        public void setReviewReasoningEffort(String value) { this.reviewReasoningEffort = value; }
+        public String getUtilityReasoningEffort() { return utilityReasoningEffort; }
+        public void setUtilityReasoningEffort(String value) { this.utilityReasoningEffort = value; }
         public int getReviewMaxTurns() { return reviewMaxTurns; }
         public void setReviewMaxTurns(int v) { this.reviewMaxTurns = v; }
         public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
         public void setReviewTimeoutMinutes(int v) { this.reviewTimeoutMinutes = v; }
     }
 
+    /** Persistence and legacy HTTP compatibility only. New execution code uses stable harness IDs. */
+    @Deprecated
     public enum AgentProvider {
         CLAUDE_CODE("Claude Code", "claude"),
         CODEX("Codex CLI", "codex");

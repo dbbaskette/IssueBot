@@ -6,8 +6,8 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -43,7 +43,7 @@ public class IssueDecompositionService {
     static final String DECOMPOSED_LABEL = "issuebot-decomposed";
     static final int MAX_OPEN_SUB_ISSUES = 10;
 
-    private final ClaudeCodeService claudeCode;
+    private final CodingHarnessService harnessService;
     private final GitHubApiClient gitHubApi;
     private final TrackedIssueRepository issueRepository;
     private final EventService eventService;
@@ -54,14 +54,14 @@ public class IssueDecompositionService {
     private DecompositionGroupService groupService;
     private DecompositionChildRepository decompositionChildren;
 
-    public IssueDecompositionService(ClaudeCodeService claudeCode,
+    public IssueDecompositionService(CodingHarnessService harnessService,
                                       GitHubApiClient gitHubApi,
                                       TrackedIssueRepository issueRepository,
                                       EventService eventService,
                                       NotificationService notificationService,
                                       ObjectMapper objectMapper,
                                       IterationManager iterationManager) {
-        this.claudeCode = claudeCode;
+        this.harnessService = harnessService;
         this.gitHubApi = gitHubApi;
         this.issueRepository = issueRepository;
         this.eventService = eventService;
@@ -410,7 +410,7 @@ public class IssueDecompositionService {
         String prompt = buildPreScreenPrompt(issueDetails);
 
         try {
-            ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
+            HarnessExecutionResult result = harnessService.executeUtility(prompt, repoPath, null);
 
             if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
                 log.warn("Pre-screen returned empty response, allowing implementation");
@@ -430,7 +430,7 @@ public class IssueDecompositionService {
     List<SubIssue> analyzeAndDecompose(JsonNode issueDetails, Path repoPath) {
         String prompt = buildDecompositionPrompt(issueDetails);
 
-        ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
+        HarnessExecutionResult result = harnessService.executeUtility(prompt, repoPath, null);
 
         if (result == null || result.getOutput() == null || result.getOutput().isBlank()) {
             throw new RuntimeException("Claude returned empty response for decomposition");

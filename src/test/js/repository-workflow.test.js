@@ -44,6 +44,13 @@ test('automatic policy summary describes uninterrupted workflow', () => {
     'IssueBot runs planning, implementation, verification, review and merge without routine approval checkpoints.');
 });
 
+test('repository role summary includes the selected reasoning next to its model', () => {
+  const doc = domFixture();
+  doc.elements['implementation-model-reasoning'] = { value: 'xhigh' };
+  workflow.sync(doc);
+  assert.equal(doc.elements.implementationSummary.textContent, 'impl-default · xhigh');
+});
+
 test('staged policy summary names selected checkpoints in workflow order', () => {
   assert.equal(workflow.summary('STAGED', ['MERGE', 'PLANNING', 'REVIEW']),
     'IssueBot pauses for approval before planning, review, merge. Other stages continue automatically.');

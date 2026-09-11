@@ -1,74 +1,62 @@
 package com.dbbaskette.issuebot.service.workflow;
 
-import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
-import com.dbbaskette.issuebot.model.TrackedIssue;
-import com.dbbaskette.issuebot.model.WatchedRepo;
-import com.dbbaskette.issuebot.model.WorkflowStage;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
-import com.dbbaskette.issuebot.service.claude.ModelResolver;
-import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
+import com.dbbaskette.issuebot.model.*;
+import com.dbbaskette.issuebot.service.harness.*;
 import org.junit.jupiter.api.Test;
-
+import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class StageModelSelectionServiceTest {
-    private final IssueBotProperties properties = new IssueBotProperties();
-    private final ClaudeCodeService agent = mock(ClaudeCodeService.class);
-    private final CodexModelCatalog catalog = mock(CodexModelCatalog.class);
-    private final StageModelSelectionService service = new StageModelSelectionService(
-            properties, new ModelResolver(properties), catalog, agent);
-
-    private TrackedIssue issue() {
-        TrackedIssue issue = new TrackedIssue();
-        issue.setRepo(new WatchedRepo());
-        when(catalog.models()).thenReturn(CodexModelCatalog.fallbackModels());
-        return issue;
-    }
+    final HarnessSelectionFixture fixture = new HarnessSelectionFixture();
+    final StageModelSelectionService service = new StageModelSelectionService(fixture.properties, fixture.selections);
+    final TrackedIssue issue = new TrackedIssue(new WatchedRepo(), 1, "issue");
 
     @Test void defaultsUseRepositoryRoleWithoutMutatingIt() {
-        TrackedIssue issue = issue();
         issue.getRepo().setImplementationModel("claude-opus-4-6");
         issue.getRepo().setReviewModel("claude-sonnet-5");
-        assertThat(service.resolve(issue, WorkflowStage.PLANNING, null, null).model()).isEqualTo("claude-opus-4-6");
-        assertThat(service.resolve(issue, WorkflowStage.REVIEW, null, null).model()).isEqualTo("claude-sonnet-5");
-        assertThat(service.resolve(issue, WorkflowStage.IMPLEMENTATION, "CODEX", "gpt-5.6-sol"))
-                .isEqualTo(new StageModelSelectionService.Selection(AgentProvider.CODEX, "gpt-5.6-sol"));
-        assertThat(properties.getAgentProvider()).isEqualTo(AgentProvider.CLAUDE_CODE);
+        assertThat(service.defaults(issue, WorkflowStage.PLANNING).modelId()).isEqualTo("claude-opus-4-6");
+        assertThat(service.defaults(issue, WorkflowStage.REVIEW).modelId()).isEqualTo("claude-sonnet-5");
+        assertThat(service.resolve(issue, WorkflowStage.IMPLEMENTATION, "CODEX", "gpt-6-astra", "ultra"))
+                .isEqualTo(new HarnessSelection("codex", "gpt-6-astra", "ultra"));
+        assertThat(fixture.properties.getAgentProvider()).isEqualTo("claude");
         assertThat(issue.getRepo().getImplementationModel()).isEqualTo("claude-opus-4-6");
     }
 
-    @Test void rejectsExplicitUnknownOrCrossProviderChoice() {
-        TrackedIssue issue = issue();
-        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "CODEX", "claude-sonnet-5"))
+    @Test void explicitSelectionsFailClosedForBlankIdentityModelAndUnsupportedReasoning() {
+        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, " ", "claude-sonnet-5", "high"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "claude", "", "high"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "claude", "claude-haiku-4-5", "max"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("max");
+        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "CODEX", "claude-sonnet-5", "high"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("catalog");
-        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "OTHER", "gpt-5.6-sol"))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "CLAUDE_CODE", "invented"))
+        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.REVIEW, "future", "invented", "high"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
-    @Test void deterministicStagesDoNotInvokeModelsOrAuthentication() {
-        TrackedIssue issue = issue();
-        var selection = service.resolve(issue, WorkflowStage.VERIFICATION, null, null);
+    @Test void deterministicStagesRejectEveryTupleFieldAndDoNotAuthenticate() {
+        var selection = service.resolve(issue, WorkflowStage.VERIFICATION, null, null, null);
         service.validate(selection);
-        assertThat(selection).isEqualTo(new StageModelSelectionService.Selection(null, null));
-        verifyNoInteractions(agent);
-        assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.MERGE, "CODEX", null))
-                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(selection).isEqualTo(new HarnessSelection(null, null, null));
+        for (String[] fields : List.of(new String[]{"codex", null, null}, new String[]{null, "gpt-6-astra", null},
+                new String[]{null, null, "ultra"}, new String[]{"", null, null})) {
+            assertThatThrownBy(() -> service.resolve(issue, WorkflowStage.MERGE, fields[0], fields[1], fields[2]))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        verifyNoInteractions(fixture.claude, fixture.codex);
     }
 
-    @Test void rejectsMissingCliAndUnavailableSubscriptionWithoutFallback() {
-        var selection = new StageModelSelectionService.Selection(AgentProvider.CODEX, "gpt-5.6-sol");
-        assertThatThrownBy(() -> service.validate(selection)).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Install");
-        verify(agent, never()).checkSubscriptionAuthentication(any());
-        when(agent.checkCliAvailable(AgentProvider.CODEX)).thenReturn(true);
-        assertThatThrownBy(() -> service.validate(selection)).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("codex login").hasMessageContaining("API-key billing is not permitted");
-        when(agent.checkSubscriptionAuthentication(AgentProvider.CODEX)).thenReturn(true);
-        assertThatCode(() -> service.validate(selection)).doesNotThrowAnyException();
-        verify(agent, never()).checkCliAvailable(AgentProvider.CLAUDE_CODE);
+    @Test void missingCliAndUnavailableSubscriptionNeverFallBack() {
+        var selected = new HarnessSelection("codex", "gpt-6-astra", "ultra");
+        when(fixture.codex.checkCliAvailable()).thenReturn(false);
+        assertThatThrownBy(() -> service.validate(selected)).hasMessageContaining("Install");
+        when(fixture.codex.checkCliAvailable()).thenReturn(true);
+        when(fixture.codex.checkSubscriptionAuthentication()).thenReturn(false);
+        assertThatThrownBy(() -> service.validate(selected)).hasMessageContaining("codex login");
+        when(fixture.codex.checkSubscriptionAuthentication()).thenReturn(true);
+        service.validate(selected);
+        verifyNoInteractions(fixture.claude);
     }
 }

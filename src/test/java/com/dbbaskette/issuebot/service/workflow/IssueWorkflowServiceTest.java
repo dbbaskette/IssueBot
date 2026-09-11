@@ -13,8 +13,8 @@ import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -55,7 +55,7 @@ class IssueWorkflowServiceTest {
     private FollowUpService followUpService;
     private CodeReviewService codeReviewService;
     private CostTrackingRepository costRepository;
-    private ClaudeCodeService claudeCode;
+    private CodingHarnessService harnessService;
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
@@ -86,7 +86,7 @@ class IssueWorkflowServiceTest {
         issue.setId(1L);
         Iteration iteration = new Iteration(issue, 1);
         iteration.setId(2L);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput("done");
         result.setModel("gpt-5.6-sol");
@@ -138,7 +138,8 @@ class IssueWorkflowServiceTest {
         followUpService = mock(FollowUpService.class);
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
-        claudeCode = mock(ClaudeCodeService.class);
+        harnessService = mock(CodingHarnessService.class);
+        when(harnessService.harnessId()).thenReturn("claude");
         eventService = mock(EventService.class);
         cancellationService = new WorkflowCancellationService();
         sseService = mock(SseService.class);
@@ -146,7 +147,7 @@ class IssueWorkflowServiceTest {
         workflowService = new IssueWorkflowService(
                 gitOps,
                 gitHubApi,
-                claudeCode,
+                harnessService,
                 codeReviewService,
                 ciTemplateService,
                 mock(LocalVerificationService.class),
@@ -161,7 +162,8 @@ class IssueWorkflowServiceTest {
                 planFirstService,
                 followUpService,
                 new com.dbbaskette.issuebot.service.claude.ModelResolver(
-                        new com.dbbaskette.issuebot.config.IssueBotProperties()),
+                        new com.dbbaskette.issuebot.config.IssueBotProperties(),
+                        new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 cancellationService,
                 mock(com.dbbaskette.issuebot.repository.IssueGuidanceRepository.class),
                 mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class),
@@ -194,15 +196,15 @@ class IssueWorkflowServiceTest {
         issue.setId(1L);
         issue.setClaudeSessionId("claude-session");
         issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CODEX);
+        when(harnessService.harnessId()).thenReturn("codex");
 
         workflowService.processIssue(issue);
 
         assertNull(issue.getClaudeSessionId());
         assertEquals(IssueBotProperties.AgentProvider.CODEX, issue.getResolvedAgentProvider());
         assertEquals("gpt-5.6-sol", issue.getResolvedImplModel());
-        verify(claudeCode).pinProvider(IssueBotProperties.AgentProvider.CODEX);
-        verify(claudeCode).clearPinnedProvider();
+        verify(harnessService).pinHarness("codex");
+        verify(harnessService).clearPinnedHarness();
     }
 
     @Test
@@ -324,8 +326,109 @@ class IssueWorkflowServiceTest {
         workflowService.processIssue(issue);
 
         assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
-        verifyNoInteractions(stages, claudeCode, gitOps);
+        verifyNoInteractions(stages, harnessService, gitOps);
         verify(issueRepository, never()).save(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"authentication", "catalog-resolution", "catalog-readiness"})
+    void unavailableReviewSelectionPreservesClaimAndRecoveryDoesNotReimplement(String failure) throws Exception {
+        var issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.STAGED);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentIteration(2);
+        issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        issue.setBranchName("issuebot/issue-42");
+        issue.setPrNumber(42);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        issue.setClaudeSessionId("completed-implementation-session");
+        var version = PlanningVersion.pending(issue, 1, "spec", "plan", "CLAUDE_CODE", "claude-opus-4-8", null);
+        org.springframework.test.util.ReflectionTestUtils.setField(version, "id", 14L);
+        version.approve(java.time.LocalDateTime.now());
+        issue.setApprovedPlanningVersion(version);
+        var approvedPlan = new ApprovedPlanContext(14L, 1, "spec", "plan");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedPlan));
+        when(issueRepository.findById(1L)).thenReturn(Optional.of(issue));
+        Iteration completed = new Iteration(issue, 2);
+        completed.setId(9L);
+        completed.setDiff("completed diff");
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 2)).thenReturn(Optional.of(completed));
+        when(gitOps.openRepo("owner", "repo")).thenReturn(mock(Git.class));
+        when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("repo"));
+        when(costRepository.totalCostForIssue(issue)).thenReturn(java.math.BigDecimal.ZERO);
+        var stages = mock(StageApprovalService.class);
+        var decision = new com.dbbaskette.issuebot.model.StageApproval();
+        decision.setId(52L);
+        decision.setState(com.dbbaskette.issuebot.model.StageApproval.State.APPROVED);
+        decision.setApprovedAt(java.time.LocalDateTime.now());
+        decision.setProvider(IssueBotProperties.AgentProvider.CODEX);
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+        decision.setAttempt(2);
+        when(stages.beforeStage(issue, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW, 2)).thenReturn(decision);
+        org.mockito.stubbing.Answer<TrackedIssue> rearm = invocation -> {
+            issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+            issue.setCurrentPhase("STAGE_APPROVAL_REVIEW");
+            return issue;
+        };
+        doAnswer(rearm).when(stages).rearmAfterAuthenticationFailure(1L, 52L);
+        doAnswer(rearm).when(stages).rearmAfterSelectionFailure(eq(1L), eq(52L), any());
+        if (failure.equals("authentication")) {
+            doThrow(new IllegalStateException("subscription expired")).doNothing()
+                    .when(harnessService).pinSubscriptionHarness("codex");
+        }
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var adapter = mock(com.dbbaskette.issuebot.service.harness.CodingHarnessAdapter.class);
+        when(adapter.id()).thenReturn("codex");
+        when(adapter.displayName()).thenReturn("Codex CLI");
+        when(adapter.checkCliAvailable()).thenReturn(true);
+        when(adapter.checkSubscriptionAuthentication()).thenReturn(true);
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var refreshAt = new java.util.concurrent.atomic.AtomicInteger(switch (failure) {
+            case "catalog-resolution" -> 1;
+            case "catalog-readiness" -> 2;
+            default -> Integer.MAX_VALUE;
+        });
+        var availableModels = fixture.registry.require("codex").models();
+        when(adapter.models()).thenAnswer(call -> reads.incrementAndGet() >= refreshAt.get() ? List.of() : availableModels);
+        var selections = new com.dbbaskette.issuebot.service.harness.HarnessSelectionService(
+                new com.dbbaskette.issuebot.service.harness.CodingHarnessRegistry(List.of(adapter)),
+                fixture.properties, issueRepository, fixture.stages);
+        var coordinator = new StageWorkflowCoordinator(stages,
+                new StageModelSelectionService(fixture.properties, selections),
+                harnessService, issueRepository, mock(com.dbbaskette.issuebot.repository.PlanningVersionRepository.class),
+                mock(PlanFirstTransactionManager.class), mock(IssueDispatchService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", coordinator);
+        var guard = mock(ManagedMergeGuard.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "managedMergeGuard", guard);
+        var workflow = workflowSpyWithIssueDetails(issue);
+        doReturn(CodeReviewResult.failed("review boundary reached", 0, 0, "gpt-6-astra"))
+                .when(workflow).phaseIndependentReview(same(issue), any(), any(), anyString(), anyInt(), same(completed),
+                        anyList(), eq(approvedPlan), any());
+
+        workflow.processIssueAsync(issue);
+
+        assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
+        assertEquals("STAGE_APPROVAL_REVIEW", issue.getCurrentPhase());
+        assertEquals(2, issue.getCurrentIteration());
+        if (failure.equals("authentication")) verify(stages).rearmAfterAuthenticationFailure(1L, 52L);
+        verify(workflow, never()).phaseIndependentReview(any(), any(), any(), anyString(), anyInt(), any(), anyList(), any(), any());
+
+        // approveAndClaim restores this exact phase; the persistence test verifies that transaction.
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase("INDEPENDENT_REVIEW");
+        refreshAt.set(Integer.MAX_VALUE);
+        workflow.processIssueAsync(issue);
+
+        verify(workflow).phaseIndependentReview(same(issue), any(), any(), anyString(), eq(42), same(completed),
+                anyList(), eq(approvedPlan), any());
+        assertEquals("gpt-6-astra", issue.getResolvedReviewModel());
+        assertEquals("ultra", decision.getReasoningEffort());
+        assertEquals(2, issue.getCurrentIteration());
+        verify(harnessService, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(workflow, never()).phaseSetup(any());
+        verify(stages, times(2)).beforeStage(issue, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW, 2);
     }
 
     @Test
@@ -335,7 +438,7 @@ class IssueWorkflowServiceTest {
         issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CODEX);
         issue.setResolvedImplModel("chosen-model");
         issue.setClaudeSessionId("existing-codex-session");
-        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        when(harnessService.harnessId()).thenReturn("claude");
         StageWorkflowCoordinator stages = mock(StageWorkflowCoordinator.class);
         org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", stages);
 
@@ -359,7 +462,7 @@ class IssueWorkflowServiceTest {
 
         verify(stages).before(issue, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION, 1);
         verifyNoInteractions(gitOps);
-        verify(claudeCode, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(harnessService, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
     }
 
     @Test
@@ -399,7 +502,7 @@ class IssueWorkflowServiceTest {
 
         spy.processIssue(issue, null);
 
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
         verify(gitOps).prepareForPlanning("owner", "repo", "main");
         verify(spy, never()).phaseSetup(any());
@@ -438,7 +541,7 @@ class IssueWorkflowServiceTest {
 
         assertEquals(IssueStatus.FAILED, issue.getStatus());
         assertTrue(issue.getLastFailureReason().contains("approved planning version"));
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
         verify(planFirstService, never()).generateVersion(any(), any(), any());
     }
@@ -457,15 +560,15 @@ class IssueWorkflowServiceTest {
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
         when(issueRepository.findById(issue.getId())).thenReturn(Optional.empty());
-        ClaudeCodeResult success = new ClaudeCodeResult();
+        HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("implemented");
-        when(claudeCode.executeImplementation(
+        when(harnessService.executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any())).thenReturn(success);
 
         spy.processIssue(issue, null);
 
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 argThat(prompt -> prompt.contains("Legacy approved plan")
                         && prompt.contains("immutable legacy implementation plan")
                         && !prompt.contains("mutable plan that must be ignored")
@@ -493,7 +596,7 @@ class IssueWorkflowServiceTest {
         spy.processIssue(issue, null);
 
         verify(planFirstService).generateVersion(eq(issue), any(), any());
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
     }
 
@@ -794,20 +897,20 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult success = new ClaudeCodeResult();
+        HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("done");
         success.setSessionId("sess-new-1");
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(success);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertTrue(result.isSuccess());
         assertEquals("sess-new-1", issue.getClaudeSessionId());
         verify(issueRepository).save(issue);
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
     /**
@@ -827,14 +930,14 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details — must not appear in a resumed prompt");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult success = new ClaudeCodeResult();
+        HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("done");
         // No new session id returned this time — the stored one should remain.
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-prior"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-prior"), any(), any()))
                 .thenReturn(success);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertTrue(result.isSuccess());
@@ -842,7 +945,7 @@ class IssueWorkflowServiceTest {
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> resumeCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(1)).executeImplementation(
+        verify(harnessService, times(1)).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), resumeCaptor.capture(), any(), any());
         assertEquals("sess-prior", resumeCaptor.getValue());
         assertTrue(promptCaptor.getValue().contains("Continuing the same task"));
@@ -866,29 +969,29 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult failure = new ClaudeCodeResult();
+        HarnessExecutionResult failure = new HarnessExecutionResult();
         failure.setSuccess(false);
         failure.setErrorMessage("No conversation found with session ID: sess-stale");
 
-        ClaudeCodeResult coldSuccess = new ClaudeCodeResult();
+        HarnessExecutionResult coldSuccess = new HarnessExecutionResult();
         coldSuccess.setSuccess(true);
         coldSuccess.setOutput("done cold");
         coldSuccess.setSessionId("sess-fresh");
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
                 .thenReturn(failure);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(coldSuccess);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertTrue(result.isSuccess());
         assertEquals("done cold", result.getOutput());
         // Exactly two invocations for this single iteration: resumed (failed) + cold (succeeded)
-        verify(claudeCode, times(2)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any());
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any());
+        verify(harnessService, times(2)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any());
         // Final state: the new session from the successful cold retry, not the stale one
         assertEquals("sess-fresh", issue.getClaudeSessionId());
     }
@@ -913,22 +1016,22 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult killed = new ClaudeCodeResult();
+        HarnessExecutionResult killed = new HarnessExecutionResult();
         killed.setSuccess(false);
         killed.setErrorMessage("Claude Code exited with code 143"); // SIGTERM from cancel
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-live"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-live"), any(), any()))
                 .thenReturn(killed);
 
         cancellationService.requestCancel(1L);
 
-        ClaudeCodeResult result = workflowService.phaseImplementation(
+        HarnessExecutionResult result = workflowService.phaseImplementation(
                 issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
 
         assertFalse(result.isSuccess());
         assertSame(killed, result, "the failed result must be returned untouched");
         // Exactly ONE invocation — the cold fallback must not spawn a second process
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         // No resume-failed event, no session clear — the failure wasn't the session's fault
         verify(eventService, never()).log(eq("SESSION_RESUME_FAILED"), anyString(), any(), any());
         assertEquals("sess-live", issue.getClaudeSessionId());
@@ -972,20 +1075,20 @@ class IssueWorkflowServiceTest {
         issueDetails.put("body", "Details");
         issueDetails.putArray("labels");
 
-        ClaudeCodeResult failure = new ClaudeCodeResult();
+        HarnessExecutionResult failure = new HarnessExecutionResult();
         failure.setSuccess(false);
         failure.setErrorMessage("session crashed mid-run");
         failure.setInputTokens(5000);
         failure.setOutputTokens(2000);
         failure.setModel("claude-opus-4-8");
 
-        ClaudeCodeResult coldSuccess = new ClaudeCodeResult();
+        HarnessExecutionResult coldSuccess = new HarnessExecutionResult();
         coldSuccess.setSuccess(true);
         coldSuccess.setOutput("done cold");
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
                 .thenReturn(failure);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(coldSuccess);
 
         workflowService.phaseImplementation(
@@ -1218,7 +1321,7 @@ class IssueWorkflowServiceTest {
         when(issueRepository.findById(anyLong())).thenReturn(Optional.empty());
 
         // Stub phaseImplementation to return a successful result (skips real Claude invocation)
-        ClaudeCodeResult successResult = new ClaudeCodeResult();
+        HarnessExecutionResult successResult = new HarnessExecutionResult();
         successResult.setSuccess(true);
         successResult.setOutput("Implementation complete");
         doReturn(successResult).when(spy).phaseImplementation(

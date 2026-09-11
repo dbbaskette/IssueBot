@@ -16,116 +16,23 @@
 
         <div class="alert alert-info" style="margin-bottom:1rem">
             <i class="ti ti-info-circle" aria-hidden="true"></i>
-            Applies immediately to newly started issues. Codex CLI uses your local ChatGPT subscription login;
-            IssueBot never asks for or stores an OpenAI API key.
+            Applies immediately to newly started issues. The selected coding harness uses your local subscription login.
         </div>
 
-        <form th:action="@{/settings/models}" method="post" data-provider-model-form>
-            <div class="form-grid">
-                <div class="field-group">
-                    <label for="agent-provider">Execution Provider</label>
-                    <select id="agent-provider" name="agentProvider">
-                        <option value="CLAUDE_CODE" th:selected="${agentProvider.name() == 'CLAUDE_CODE'}">
-                            Claude Code (Claude subscription)
-                        </option>
-                        <option value="CODEX" th:selected="${agentProvider.name() == 'CODEX'}">
-                            Codex CLI (ChatGPT subscription)
-                        </option>
-                    </select>
-                    <span class="field-hint">The selected CLI must be logged in on this host.</span>
-                </div>
-                <div class="field-group">
-                    <label for="implementation-model">Implementation Model</label>
-                    <select id="implementation-model" name="implementationModel" class="model-select provider-model-select"
-                            th:attr="data-claude-default=${claudeImplementationModel},data-codex-default=${codexImplementationModel}">
-                        <option th:each="m : ${claudeModelCatalog}" th:value="${m.id}" data-provider="CLAUDE_CODE"
-                                th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
-                                th:selected="${m.id == implementationModel}">Model</option>
-                        <option th:each="m : ${codexModelCatalog}" th:value="${m.id}" data-provider="CODEX"
-                                th:text="${m.displayName + ' — ' + m.description}"
-                                th:attr="data-reasoning-levels=${m.reasoningLevelsCsv},data-default-reasoning=${m.defaultReasoningLevel}"
-                                th:selected="${m.id == implementationModel}">Codex model</option>
-                        <option value="__custom__" th:selected="${implementationModelCustom}">Custom&hellip;</option>
-                    </select>
-                    <input type="text" id="implementation-model-custom" name="implementationModelCustom"
-                           class="custom-model-input" placeholder="Custom model ID"
-                           th:value="${implementationModelCustom ? implementationModel : ''}"
-                           th:hidden="${!implementationModelCustom}"
-                           th:required="${implementationModelCustom}">
-                </div>
-                <div class="field-group" data-codex-reasoning-group
-                     th:hidden="${agentProvider.name() != 'CODEX'}">
-                    <label for="implementation-reasoning-effort">Implementation Reasoning</label>
-                    <select id="implementation-reasoning-effort" name="implementationReasoningEffort"
-                            class="codex-reasoning-select" data-model-select-id="implementation-model">
-                        <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
-                                th:text="${level}" th:selected="${level == implementationReasoningEffort}">medium</option>
-                    </select>
-                    <span class="field-hint">Also used for planning.</span>
-                </div>
-                <div class="field-group">
-                    <label for="review-model">Review Model</label>
-                    <select id="review-model" name="reviewModel" class="model-select provider-model-select"
-                            th:attr="data-claude-default=${claudeReviewModel},data-codex-default=${codexReviewModel}">
-                        <option th:each="m : ${claudeModelCatalog}" th:value="${m.id}" data-provider="CLAUDE_CODE"
-                                th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
-                                th:selected="${m.id == reviewModel}">Model</option>
-                        <option th:each="m : ${codexModelCatalog}" th:value="${m.id}" data-provider="CODEX"
-                                th:text="${m.displayName + ' — ' + m.description}"
-                                th:attr="data-reasoning-levels=${m.reasoningLevelsCsv},data-default-reasoning=${m.defaultReasoningLevel}"
-                                th:selected="${m.id == reviewModel}">Codex model</option>
-                        <option value="__custom__" th:selected="${reviewModelCustom}">Custom&hellip;</option>
-                    </select>
-                    <input type="text" id="review-model-custom" name="reviewModelCustom"
-                           class="custom-model-input" placeholder="Custom model ID"
-                           th:value="${reviewModelCustom ? reviewModel : ''}"
-                           th:hidden="${!reviewModelCustom}"
-                           th:required="${reviewModelCustom}">
-                </div>
-                <div class="field-group" data-codex-reasoning-group
-                     th:hidden="${agentProvider.name() != 'CODEX'}">
-                    <label for="review-reasoning-effort">Review Reasoning</label>
-                    <select id="review-reasoning-effort" name="reviewReasoningEffort"
-                            class="codex-reasoning-select" data-model-select-id="review-model">
-                        <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
-                                th:text="${level}" th:selected="${level == reviewReasoningEffort}">medium</option>
-                    </select>
-                </div>
-                <div class="field-group">
-                    <label for="utility-model">Utility Model</label>
-                    <select id="utility-model" name="utilityModel" class="provider-model-select"
-                            th:attr="data-claude-default=${claudeUtilityModel},data-codex-default=${codexUtilityModel}">
-                        <!-- Preserve a configured value that isn't in the catalog rather than
-                             silently swapping it to the first catalog entry on render/save. -->
-                        <option th:if="${utilityModelCustom}" th:value="${utilityModel}"
-                                th:text="${utilityModel + ' (custom)'}" selected>current (custom)</option>
-                        <option th:each="m : ${claudeModelCatalog}" th:value="${m.id}" data-provider="CLAUDE_CODE"
-                                th:text="${m.displayName + ' — $' + #numbers.formatDecimal(m.inputPerMTok, 1, 2) + '/$' + #numbers.formatDecimal(m.outputPerMTok, 1, 2) + ' per MTok'}"
-                                th:selected="${m.id == utilityModel}">Model</option>
-                        <option th:each="m : ${codexModelCatalog}" th:value="${m.id}" data-provider="CODEX"
-                                th:text="${m.displayName + ' — ' + m.description}"
-                                th:attr="data-reasoning-levels=${m.reasoningLevelsCsv},data-default-reasoning=${m.defaultReasoningLevel}"
-                                th:selected="${m.id == utilityModel}">Codex model</option>
-                    </select>
-                </div>
-                <div class="field-group" data-codex-reasoning-group
-                     th:hidden="${agentProvider.name() != 'CODEX'}">
-                    <label for="utility-reasoning-effort">Utility Reasoning</label>
-                    <select id="utility-reasoning-effort" name="utilityReasoningEffort"
-                            class="codex-reasoning-select" data-model-select-id="utility-model">
-                        <option th:each="level : ${codexReasoningLevels}" th:value="${level}"
-                                th:text="${level}" th:selected="${level == utilityReasoningEffort}">medium</option>
-                    </select>
-                </div>
-            </div>
+        <form th:action="@{/settings/models}" method="post" data-shared-harness-form>
+            <h4>Implementation and planning</h4>
+            <div th:replace="~{fragments/reasoning :: selection('implementation-model', 'implementationModel', ${implementationModel}, 'implementationReasoningEffort', ${implementationReasoningEffort}, ${harnessId}, 'harnessId', false, null)}"></div>
+            <h4>Review</h4>
+            <div th:replace="~{fragments/reasoning :: selection('review-model', 'reviewModel', ${reviewModel}, 'reviewReasoningEffort', ${reviewReasoningEffort}, ${harnessId}, null, false, null)}"></div>
+            <h4>Utility</h4>
+            <div th:replace="~{fragments/reasoning :: selection('utility-model', 'utilityModel', ${utilityModel}, 'utilityReasoningEffort', ${utilityReasoningEffort}, ${harnessId}, null, false, null)}"></div>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary">
                     <i class="ti ti-device-floppy" aria-hidden="true"></i> Save Models
                 </button>
             </div>
             <div class="text-sm text-muted" style="margin-top:0.5rem">
-                Model choices and supported reasoning levels are discovered from the installed Codex CLI.
-                GPT-6-Astra is always available as an explicit choice. Saving rewrites config.yml
+                Model and reasoning choices come from the selected coding harness. Saving rewrites config.yml
                 (comments are not preserved). Per-repo and per-issue overrides still take precedence when compatible.
             </div>
         </form>

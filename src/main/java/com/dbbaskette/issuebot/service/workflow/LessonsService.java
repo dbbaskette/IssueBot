@@ -4,8 +4,8 @@ import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.RepoLessonRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,13 +37,13 @@ public class LessonsService {
     static final int MAX_LESSON_CHARS = 1000;
     static final int MAX_LESSONS_PER_CAPTURE = 3;
 
-    private final ClaudeCodeService claudeCode;
+    private final CodingHarnessService harnessService;
     private final RepoLessonRepository lessonRepository;
     private final EventService eventService;
 
-    public LessonsService(ClaudeCodeService claudeCode, RepoLessonRepository lessonRepository,
+    public LessonsService(CodingHarnessService harnessService, RepoLessonRepository lessonRepository,
                            EventService eventService) {
-        this.claudeCode = claudeCode;
+        this.harnessService = harnessService;
         this.lessonRepository = lessonRepository;
         this.eventService = eventService;
     }
@@ -67,7 +67,7 @@ public class LessonsService {
 
         try {
             String prompt = buildPrompt(issue.getIssueNumber(), outcome, contextSummary);
-            ClaudeCodeResult result = claudeCode.executeUtility(prompt, repoPath, null);
+            HarnessExecutionResult result = harnessService.executeUtility(prompt, repoPath, null);
             if (result == null || !result.isSuccess()) {
                 log.warn("Lessons capture: utility call failed for {} #{}: {}",
                         repo.fullName(), issue.getIssueNumber(),

@@ -1,6 +1,6 @@
 package com.dbbaskette.issuebot.service.workflow;
 
-import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
@@ -85,14 +85,14 @@ public class PlanFirstTransactionManager {
         if (model == null) {
             throw new IllegalStateException("Resolved implementation model is required for planning");
         }
-        AgentProvider provider = issue.getResolvedAgentProvider();
-        if (provider == null) {
+        String harnessId = issue.getResolvedHarnessId();
+        if (harnessId == null) {
             throw new IllegalStateException("Resolved implementation provider is required for planning");
         }
         PreviousVersion previous = latest == null ? null : new PreviousVersion(
                 latest.getId(), latest.getVersionNumber(), latest.getDesignSpec(),
                 latest.getImplementationPlan());
-        return new GenerationContext(issue.getId(), model, provider, feedback, previous);
+        return new GenerationContext(issue.getId(), model, harnessId, feedback, previous);
     }
 
     /** Atomically inserts the immutable version and advances its owning issue. */
@@ -106,7 +106,7 @@ public class PlanFirstTransactionManager {
 
         int nextNumber = latest == null ? 1 : latest.getVersionNumber() + 1;
         PlanningVersion version = PlanningVersion.pending(issue, nextNumber,
-                designSpec, implementationPlan, expected.provider().name(), expected.model(),
+                designSpec, implementationPlan, expected.legacyProviderName(), expected.model(),
                 expected.feedback());
         versions.save(version);
         versions.flush();
@@ -326,7 +326,7 @@ public class PlanFirstTransactionManager {
                     && previous.versionNumber() == latest.getVersionNumber();
         boolean sameFeedback = Objects.equals(expected.feedback(), normalize(issue.getPlanFeedback()));
         boolean sameRouting = Objects.equals(expected.model(), normalize(issue.getResolvedImplModel()))
-                && expected.provider() == issue.getResolvedAgentProvider();
+                && Objects.equals(expected.harnessId(), issue.getResolvedHarnessId());
         return sameLatest && sameFeedback && sameRouting;
     }
 
@@ -344,8 +344,17 @@ public class PlanFirstTransactionManager {
     public record PreviousVersion(Long id, int versionNumber,
                                   String designSpec, String implementationPlan) {}
 
-    public record GenerationContext(Long issueId, String model, AgentProvider provider,
-                                    String feedback, PreviousVersion previous) {}
+    public record GenerationContext(Long issueId, String model, String harnessId,
+                                    String feedback, PreviousVersion previous) {
+        // PlanningVersion.provider is historical provenance; preserve its existing representation.
+        private String legacyProviderName() {
+            return switch (harnessId) {
+                case HarnessIds.CLAUDE -> "CLAUDE_CODE";
+                case HarnessIds.CODEX -> "CODEX";
+                default -> harnessId;
+            };
+        }
+    }
 
     public record GenerationCommit(TrackedIssue issue, PlanningVersion version,
                                    boolean revision) {}

@@ -86,8 +86,9 @@ class IssueDetailReadyToStartRenderTest {
         assertThat(startModal)
                 .contains("aria-modal=\"true\"")
                 .contains("aria-labelledby=\"start-modal-title\"")
-                .contains("Implementation model for this run")
-                .contains("Review model for this run")
+                .contains("Implementation for this run")
+                .contains("Review for this run")
+                .contains("name=\"implementationReasoningEffort\"", "name=\"reviewReasoningEffort\"")
                 .contains("name=\"budgetOverrideUsd\"")
                 .doesNotContain("startPlanFirstOverride")
                 .doesNotContain("name=\"planFirstOverride\"");
@@ -96,6 +97,77 @@ class IssueDetailReadyToStartRenderTest {
                 .contains("aria-labelledby=\"release-ready-modal-title\"")
                 .contains("The approved plan will be preserved and this repository slot will be released. "
                         + "Normal automatic processing may start this issue later.");
+    }
+
+    @Test
+    void startModalFitsAllControlsAndKeepsModelReasoningTogetherWhenNarrow() throws Exception {
+        String modal = slice(renderReadyIssue(), "id=\"start-modal\"", "id=\"release-ready-modal\"");
+        assertThat(occurrences(modal, "class=\"harness-selection\""))
+                .as("both rendered roles use the responsive selection layout").isEqualTo(2);
+        var pairs = java.util.regex.Pattern.compile(
+                "(?s)<div class=\"model-reasoning-pair\">(.*?)</select>\\s*</div>\\s*</div>")
+                .matcher(modal).results().map(java.util.regex.MatchResult::group).toList();
+        assertThat(pairs).as("each run role keeps Model and Reasoning in one wrapping unit").hasSize(2);
+        for (int i = 0; i < 2; i++) {
+            String id = i == 0 ? "startImplModel" : "startReviewModel";
+            assertThat(pairs.get(i)).contains("id=\"" + id + "\"", "id=\"" + id + "-reasoning\"")
+                    .doesNotContain("data-harness-select");
+            assertThat(occurrences(pairs.get(i), "class=\"field-group\"")).isEqualTo(2);
+        }
+
+        String css;
+        try (var input = getClass().getClassLoader().getResourceAsStream("static/css/style.css")) {
+            assertThat(input).isNotNull();
+            css = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        double root = cssPixels(cssProperty(cssRule(css, "html"), "font-size"), 1);
+        double modalMax = cssPixels(cssProperty(cssRule(css, ".modal"), "max-width"), root);
+        double modalInsets = 2 * (cssPixels(cssProperty(cssRule(css, ".modal"), "padding"), root)
+                + cssPixels(cssProperty(cssRule(css, ".glass-card"), "border"), root));
+        double backdropInsets = 2 * cssPixels(cssProperty(cssRule(css, ".modal-backdrop"), "padding"), root);
+        double normalContent = modalMax - modalInsets;
+        double narrowContent = Math.min(modalMax, 320 - backdropInsets) - modalInsets;
+        assertThat(normalContent).as("actual 520px modal, including 15px-root padding and borders").isEqualTo(473);
+        assertThat(narrowContent).as("actual modal content in a 320px viewport").isEqualTo(243);
+
+        String row = cssRule(css, ".harness-selection");
+        String harness = cssRule(css, ".harness-selection > .field-group");
+        String pair = cssRule(css, ".model-reasoning-pair");
+        assertThat(cssProperty(row, "display")).isEqualTo("flex");
+        assertThat(cssProperty(row, "flex-wrap")).isEqualTo("wrap");
+        double gap = cssPixels(cssProperty(row, "column-gap"), root);
+        double harnessBasis = cssPixels(cssProperty(harness, "flex").split("\\s+")[2], root);
+        String[] pairFlex = cssProperty(pair, "flex").split("\\s+");
+        double pairBasis = cssPixels(pairFlex[2], root);
+        double unwrappedWidth = harnessBasis + gap + pairBasis;
+        assertThat(unwrappedWidth).as("all three controls fit the normal modal").isLessThanOrEqualTo(normalContent);
+        assertThat(unwrappedWidth).as("narrow layout wraps the pair as a unit").isGreaterThan(narrowContent);
+        assertThat(pairFlex[1]).as("the pair may shrink below its preferred width on narrow screens").isEqualTo("1");
+        assertThat(cssProperty(pair, "min-width")).isEqualTo("0");
+        assertThat(cssProperty(pair, "display")).isEqualTo("grid");
+        assertThat(cssProperty(pair, "grid-template-columns")).isEqualTo("repeat(2, minmax(0, 1fr))");
+        assertThat(cssProperty(cssRule(css, ".harness-selection .field-group"), "min-width")).isEqualTo("0");
+        assertThat(cssProperty(cssRule(css, ".harness-selection select"), "min-width")).isEqualTo("0");
+    }
+
+    private static String cssRule(String css, String selector) {
+        var rule = java.util.regex.Pattern.compile("(?m)^" + java.util.regex.Pattern.quote(selector)
+                + "\\s*\\{([^}]*)}").matcher(css);
+        assertThat(rule.find()).as("CSS layout rule %s", selector).isTrue();
+        return rule.group(1);
+    }
+
+    private static String cssProperty(String rule, String property) {
+        var value = java.util.regex.Pattern.compile("(?:^|;)\\s*" + java.util.regex.Pattern.quote(property)
+                + ":\\s*([^;]+)").matcher(rule);
+        assertThat(value.find()).as("CSS layout property %s", property).isTrue();
+        return value.group(1).trim();
+    }
+
+    private static double cssPixels(String value, double root) {
+        var length = java.util.regex.Pattern.compile("^([0-9.]+)(rem|px)").matcher(value);
+        assertThat(length.find()).as("CSS length %s", value).isTrue();
+        return Double.parseDouble(length.group(1)) * (length.group(2).equals("rem") ? root : 1);
     }
 
     @Test

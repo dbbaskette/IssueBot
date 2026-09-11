@@ -3,8 +3,12 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
+import com.dbbaskette.issuebot.service.harness.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 import java.util.Optional;
 import static org.assertj.core.api.Assertions.*;
@@ -12,12 +16,53 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class StageApprovalServiceTest {
+    @Test void approvedLegacyBlankReasoningIsResolvedAndStoredBeforeResume() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setReasoningEffort(null);
+        decision.setState(StageApproval.State.APPROVED);
+        decision.setApprovedAt(java.time.LocalDateTime.now());
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        when(approvals.findByIssueIdAndRunNumberAndStageAndAttemptAndArtifactVersionId(2L, 0, WorkflowStage.REVIEW, 1, 0L))
+                .thenReturn(Optional.of(decision));
+        fixture.properties.getCodexCli().setReviewReasoningEffort("low");
+
+        service.beforeStage(issue, WorkflowStage.REVIEW, 1);
+
+        assertThat(decision.getReasoningEffort()).isEqualTo("medium");
+        assertThat(decision.getModel()).isEqualTo("gpt-6-astra");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.APPROVED);
+    }
+    @Test void claudeStagePersistsAndRetainsItsExactReasoningTuple() {
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        selection = new StageModelSelectionService(properties, fixture.selections);
+        service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        assertThat(decision.getHarnessId()).isEqualTo("claude");
+        assertThat(decision.getReasoningEffort()).isEqualTo("high");
+        service.approveAndClaim(2L, 3L, "claude", "claude-opus-4-8", "alice", "xhigh");
+        assertThat(decision.getModel()).isEqualTo("claude-opus-4-8");
+        assertThat(decision.getReasoningEffort()).isEqualTo("xhigh");
+    }
+
+    @Test void unsupportedSelectionDoesNotMutateWaitingApprovalOrIssue() {
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        selection = new StageModelSelectionService(properties, fixture.selections);
+        service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, "claude", "claude-haiku-4-5", "alice", "max"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("max");
+        assertThat(decision.getModel()).isEqualTo("claude-sonnet-5");
+        assertThat(decision.getReasoningEffort()).isEqualTo("high");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+    }
     TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
     StageApprovalRepository approvals = mock(StageApprovalRepository.class);
     ProcessingControlRepository controls = mock(ProcessingControlRepository.class);
     DecompositionReservationService reservations = mock(DecompositionReservationService.class);
-    StageModelSelectionService selection = mock(StageModelSelectionService.class);
+    HarnessSelectionFixture fixture = new HarnessSelectionFixture();
+    StageModelSelectionService selection = spy(new StageModelSelectionService(fixture.properties, fixture.selections));
     IssueBotProperties properties = new IssueBotProperties();
     StageApprovalService service = new StageApprovalService(issues, repos, approvals, controls,
             reservations, selection, properties);
@@ -34,8 +79,9 @@ class StageApprovalServiceTest {
         when(issues.findById(2L)).thenReturn(Optional.of(issue));
         when(issues.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         when(approvals.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
-        when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(null, null));
+        fixture.properties.setAgentProvider("codex");
+        fixture.properties.getCodexCli().setReviewModel("gpt-6-astra");
+        fixture.properties.getCodexCli().setReviewReasoningEffort("high");
         when(controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID)).thenReturn(
                 Optional.of(new ProcessingControl(ProcessingState.RUNNING)));
         when(reservations.evaluate(issue)).thenReturn(
@@ -96,16 +142,89 @@ class StageApprovalServiceTest {
     }
 
     @Test void stageReasoningIsValidatedAndSaved() {
-        var reasoning = mock(com.dbbaskette.issuebot.service.codex.ReasoningSelectionService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "reasoning", reasoning);
-        when(selection.resolve(any(), any(), any(), any())).thenReturn(
-                new StageModelSelectionService.Selection(IssueBotProperties.AgentProvider.CODEX, "gpt-6-astra"));
-        when(reasoning.resolve(2L, "gpt-6-astra", WorkflowStage.REVIEW)).thenReturn("high");
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThat(decision.getReasoningEffort()).isEqualTo("high");
-        when(reasoning.validate("gpt-6-astra", "ultra")).thenReturn("ultra");
+        assertThat(decision.getHarnessId()).isEqualTo("codex");
         service.approveAndClaim(2L, 3L, "CODEX", "gpt-6-astra", "alice", "ultra");
         assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+        assertThat(decision.getHarnessId()).isEqualTo("codex");
+    }
+
+    @Test void existingApprovalRetainsNeutralIdentityModelAndReasoningWhenClaimed() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setHarnessId("CODEX");
+        decision.setModel("gpt-6-astra");
+        decision.setReasoningEffort("ultra");
+
+        service.approveAndClaim(2L, 3L, null, null, "alice");
+
+        assertThat(decision.getHarnessId()).isEqualTo("codex");
+        assertThat(decision.getProvider()).isEqualTo(IssueBotProperties.AgentProvider.CODEX);
+        assertThat(decision.getModel()).isEqualTo("gpt-6-astra");
+        assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.APPROVED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankHarnessWritesCannotSelectDefaultProvider(String blank) {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setHarnessId(blank);
+        assertThat(decision.getHarnessId()).isNull();
+        assertThat(decision.getProvider()).isNull();
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankAuthoritativeIdentityCannotUseConflictingLegacyCodex(String blank) {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        ReflectionTestUtils.setField(decision, "harnessId", blank);
+        clearInvocations(selection);
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
+        assertThat(decision.getHarnessId()).isNull();
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        verifyNoInteractions(selection);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankLegacyIdentityCannotSelectDefaultProvider(String blank) {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        ReflectionTestUtils.setField(decision, "harnessId", null);
+        ReflectionTestUtils.setField(decision, "provider", blank);
+        clearInvocations(selection);
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
+        assertThat(decision.getHarnessId()).isNull();
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        verifyNoInteractions(selection);
+    }
+
+    @Test void missingPersistedIdentityRequiresExplicitChoiceInsteadOfDefaultProvider() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setHarnessId(null);
+        clearInvocations(selection);
+
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("harness");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
+        verifyNoInteractions(selection);
+    }
+
+    @Test void missingPersistedModelRequiresExplicitChoiceInsteadOfDefaultModel() {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setModel(null);
+        clearInvocations(selection);
+
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(HarnessSelectionException.class).hasMessageContaining("model");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        verifyNoInteractions(selection);
     }
 
     private StageApproval waiting(WorkflowStage stage) {

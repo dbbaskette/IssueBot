@@ -4,7 +4,7 @@ import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -207,7 +207,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_timedOut_allowsRetryOnFirstIteration() {
         TrackedIssue issue = createIssue(1);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setTimedOut(true);
         result.setSuccess(false);
 
@@ -218,7 +218,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_timedOut_skipsOnSecondIteration() {
         TrackedIssue issue = createIssue(2);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setTimedOut(true);
         result.setSuccess(false);
 
@@ -230,7 +230,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_excessiveTokens_allowsRetryOnFirstIteration() {
         TrackedIssue issue = createIssue(1);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setOutputTokens(200_000);
 
@@ -241,7 +241,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_excessiveTokens_skipsOnSecondIteration() {
         TrackedIssue issue = createIssue(2);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setOutputTokens(200_000);
 
@@ -253,7 +253,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_allowsRetryOnFirstNormalFailure() {
         TrackedIssue issue = createIssue(1);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setOutputTokens(10_000);
 
@@ -264,7 +264,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_repeatedImplFailure() {
         TrackedIssue issue = createIssue(2);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setOutputTokens(10_000);
         result.setFilesChanged(java.util.List.of("src/Foo.java")); // made some progress but still failed
@@ -279,7 +279,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_repeatedCodexFailure() {
         TrackedIssue issue = createIssue(2);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setOutputTokens(10_000);
         result.setFilesChanged(java.util.List.of("src/Foo.java"));
@@ -293,7 +293,7 @@ class IterationManagerTest {
     @Test
     void shouldSkipRetry_allowsRetryWithReviewFeedback() {
         TrackedIssue issue = createIssue(2);
-        ClaudeCodeResult result = new ClaudeCodeResult();
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(false);
         result.setOutputTokens(10_000);
         result.setFilesChanged(java.util.List.of("src/Foo.java"));

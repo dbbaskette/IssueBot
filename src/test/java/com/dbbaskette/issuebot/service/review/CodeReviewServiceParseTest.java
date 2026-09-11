@@ -1,7 +1,7 @@
 package com.dbbaskette.issuebot.service.review;
 
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,14 +22,14 @@ class CodeReviewServiceParseTest {
     @BeforeEach
     void setUp() {
         service = new CodeReviewService(
-                mock(ClaudeCodeService.class),
+                mock(CodingHarnessService.class),
                 new ReviewPromptBuilder(),
                 mock(GitOperationsService.class),
                 new ObjectMapper());
     }
 
-    private ClaudeCodeResult resultWithOutput(String json) {
-        ClaudeCodeResult result = new ClaudeCodeResult();
+    private HarnessExecutionResult resultWithOutput(String json) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
         result.setSuccess(true);
         result.setOutput(json);
         result.setInputTokens(100);

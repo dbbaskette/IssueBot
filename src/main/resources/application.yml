@@ -24,7 +24,7 @@ spring:
     locations: classpath:db/migration
 # IssueBot defaults (overridden by ~/.issuebot/config.yml)
 issuebot:
-  agent-provider: claude-code
+  agent-provider: claude # claude or codex; legacy claude-code remains accepted
   poll-interval-seconds: 60
   max-concurrent-issues: 3
   work-directory: ${user.home}/.issuebot/repos
@@ -38,6 +38,8 @@ issuebot:
     implementation-model: claude-opus-4-8
     review-model: claude-sonnet-5
     utility-model: claude-haiku-4-5
+    # Omitted reasoning uses the exact selected model's catalog default. Settings saves
+    # explicit reasoning with each model; keep omission compatible with pre-0.6 config.
     review-max-turns: 15
     # Review/utility: smaller than implementation (it only reads a diff and returns a verdict),
     # but 5 minutes was too tight for large diffs — the real cause of "Review Could Not Run".

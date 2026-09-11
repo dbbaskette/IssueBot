@@ -3,7 +3,9 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessSelection;
+import com.dbbaskette.issuebot.service.harness.HarnessSelectionException;
 import org.springframework.stereotype.Service;
 
 /** Adapts durable stage decisions to the existing workflow and versioned-plan lifecycle. */
@@ -11,7 +13,7 @@ import org.springframework.stereotype.Service;
 public class StageWorkflowCoordinator {
     private final StageApprovalService stages;
     private final StageModelSelectionService models;
-    private final ClaudeCodeService agent;
+    private final CodingHarnessService agent;
     private final TrackedIssueRepository issues;
     private final PlanningVersionRepository versions;
     private final PlanFirstTransactionManager plans;
@@ -21,7 +23,7 @@ public class StageWorkflowCoordinator {
     private com.dbbaskette.issuebot.service.event.EventService events;
 
     public StageWorkflowCoordinator(StageApprovalService stages, StageModelSelectionService models,
-            ClaudeCodeService agent, TrackedIssueRepository issues, PlanningVersionRepository versions,
+            CodingHarnessService agent, TrackedIssueRepository issues, PlanningVersionRepository versions,
             PlanFirstTransactionManager plans, IssueDispatchService dispatch) {
         this.stages = stages;
         this.models = models;
@@ -52,24 +54,42 @@ public class StageWorkflowCoordinator {
                     issue.getRepo(), issue);
             return false;
         }
+        HarnessSelection chosen;
+        try {
+            chosen = models.resolve(issue, stage, decision.getHarnessId(), decision.getModel(), decision.getReasoningEffort());
+            if (stage.modelDriven()) {
+                // Both catalog refreshes and subscription changes can invalidate the committed claim.
+                models.validate(chosen);
+                agent.pinSubscriptionHarness(chosen.harnessId());
+            }
+        } catch (HarnessSelectionException unavailable) {
+            copyWaitingState(stages.rearmAfterSelectionFailure(issue.getId(), decision.getId(), unavailable), issue);
+            return false;
+        } catch (IllegalStateException unavailable) {
+            copyWaitingState(stages.rearmAfterAuthenticationFailure(issue.getId(), decision.getId()), issue);
+            return false;
+        }
         if (stage.modelDriven()) {
-            var selection = new StageModelSelectionService.Selection(decision.getProvider(), decision.getModel());
-            // The transactional decision validates authentication before approval. Execution
-            // remains subscription-pinned; do not introduce a second post-claim failure gate.
-            agent.pinSubscriptionProvider(selection.provider());
+            String executionHarness = chosen.harnessId();
             if (stage == WorkflowStage.REVIEW) {
-                issue.setResolvedReviewModel(selection.model());
+                issue.setResolvedReviewModel(chosen.modelId());
             } else {
                 if (stage == WorkflowStage.IMPLEMENTATION
-                        && issue.getResolvedAgentProvider() != selection.provider()) {
+                        && !java.util.Objects.equals(issue.getResolvedHarnessId(), executionHarness)) {
                     issue.setClaudeSessionId(null);
                 }
-                issue.setResolvedAgentProvider(selection.provider());
-                issue.setResolvedImplModel(selection.model());
+                issue.setResolvedHarnessId(executionHarness);
+                issue.setResolvedImplModel(chosen.modelId());
             }
             issues.save(issue);
         }
         return true;
+    }
+
+    private static void copyWaitingState(TrackedIssue waiting, TrackedIssue issue) {
+        issue.setStatus(waiting.getStatus());
+        issue.setCurrentPhase(waiting.getCurrentPhase());
+        issue.setLastFailureReason(waiting.getLastFailureReason());
     }
 
     /** System-accept the immutable plan; any implementation approval is a separate stage gate. */

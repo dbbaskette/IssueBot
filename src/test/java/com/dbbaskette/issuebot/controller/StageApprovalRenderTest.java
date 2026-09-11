@@ -13,20 +13,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class StageApprovalRenderTest {
+    @Test void legacyPendingStageShowsItsSelectedModelsDeclaredDefaultReasoning() {
+        String html = render(WorkflowStage.IMPLEMENTATION);
+        String selected = java.util.regex.Pattern.compile("<option[^>]*selected[^>]*>").matcher(html)
+                .results().map(java.util.regex.MatchResult::group).collect(java.util.stream.Collectors.joining());
+        assertThat(selected).contains("value=\"medium\"");
+    }
+    @Test
+    void approvalUsesSeparateStableHarnessModelAndReasoningControls() {
+        assertThat(render(WorkflowStage.IMPLEMENTATION)).contains("name=\"harnessId\"", "name=\"model\"",
+                "name=\"reasoningEffort\"", "data-harness-select", "data-model-select", "data-reasoning-select")
+                .doesNotContain("name=\"selection\"", "CODEX:", "data-codex-");
+    }
     @Test
     void modelDrivenStageRendersSingleApprovalActionAndSelectedModel() {
         String html = render(WorkflowStage.IMPLEMENTATION);
-        assertThat(html).contains("name=\"selection\"", "CODEX:gpt-5.5", "selected=\"selected\"", "Approve implementation", "#plan-first");
+        assertThat(html).contains("name=\"harnessId\"", "gpt-5.5", "selected=\"selected\"", "Approve implementation", "#plan-first");
         assertThat(html.split("Approve implementation", -1)).hasSize(2);
         assertThat(html).contains("Starts implementation.", "approval is required for verification.",
                 "action=\"/issues/1/stages/2/approve\"", "id=\"stage-approval-form-2\" hx-preserve=\"true\"");
     }
 
-    @Test
-    void deterministicStageDoesNotRenderModelSelector() {
-        assertThat(render(WorkflowStage.MERGE)).contains("Approve merge", "#iteration-history",
-                        "No further approval checkpoints; continues automatically to completion.")
-                .doesNotContain("name=\"selection\"");
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("deterministicStages")
+    void deterministicStageDoesNotRenderTupleControls(WorkflowStage stage) {
+        assertThat(render(stage)).contains("Approve " + stage.name().toLowerCase(java.util.Locale.ROOT), "#iteration-history")
+                .doesNotContain("name=\"harnessId\"", "name=\"model\"", "name=\"reasoningEffort\"",
+                        "data-reasoning-picker", "data-harness-select", "data-model-select", "data-reasoning-select");
+        if (stage == WorkflowStage.MERGE) {
+            assertThat(render(stage)).contains("No further approval checkpoints; continues automatically to completion.");
+        }
+    }
+
+    static java.util.stream.Stream<WorkflowStage> deterministicStages() {
+        return java.util.Arrays.stream(WorkflowStage.values()).filter(stage -> !stage.modelDriven());
     }
 
     @Test
@@ -63,7 +83,7 @@ class StageApprovalRenderTest {
         when(approval.getStage()).thenReturn(stage);
         when(approval.getAttempt()).thenReturn(1);
         when(approval.getState()).thenReturn(StageApproval.State.WAITING);
-        when(approval.getProvider()).thenReturn(com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider.CODEX);
+        when(approval.getHarnessId()).thenReturn("codex");
         when(approval.getModel()).thenReturn("gpt-5.5");
         when(approval.getArtifactVersionId()).thenReturn(3L);
         var issue = new TrackedIssue();
@@ -73,7 +93,9 @@ class StageApprovalRenderTest {
         context.setVariable("issue", issue);
         context.setVariable("pendingStageApproval", approval);
         context.setVariable("stageApprovalHistory", List.of(approval));
-        context.setVariable("stageModels", Map.of("CODEX", List.of("gpt-5.5")));
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var advice = new HarnessCatalogAdvice(fixture.registry, new com.fasterxml.jackson.databind.ObjectMapper(), fixture.properties);
+        context.setVariable("harnessCatalog", advice.harnessCatalog());
         context.setVariable("processingMode", ProcessingState.RUNNING);
         if (decisionRegion) return engine.process(new org.thymeleaf.TemplateSpec("issue-detail",
                 java.util.Set.of("approval-decision-region"), org.thymeleaf.templatemode.TemplateMode.HTML, null), context);

@@ -3,6 +3,8 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
+import com.dbbaskette.issuebot.service.harness.HarnessSelectionException;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -14,9 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 /** Durable stage decisions, serialized with all dispatchers by control, repository, then issue. */
 @Service
 public class StageApprovalService {
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
-
     private static final String PREFIX = "STAGE_APPROVAL_";
     private static final List<IssueStatus> RESERVATIONS = List.of(IssueStatus.IN_PROGRESS,
             IssueStatus.AWAITING_APPROVAL, IssueStatus.AWAITING_PLAN_APPROVAL,
@@ -74,6 +73,18 @@ public class StageApprovalService {
                 saved.getId(), saved.getWorkflowRun(), stage, attempt, artifact)
                 .orElse(null);
         if (decision != null) {
+            if (decision.getState() == StageApproval.State.APPROVED) {
+                try {
+                    var retained = selection.resolve(saved, stage, decision.getHarnessId(), decision.getModel(), decision.getReasoningEffort());
+                    if (!Objects.equals(retained.reasoningLevel(), decision.getReasoningEffort())) {
+                        decision.setReasoningEffort(retained.reasoningLevel());
+                        approvals.saveAndFlush(decision);
+                    }
+                } catch (HarnessSelectionException unavailable) {
+                    rearmLocked(saved, decision, unavailable.safeMessage());
+                    issue.setLastFailureReason(saved.getLastFailureReason());
+                }
+            }
             if (decision.getState() == StageApproval.State.WAITING) {
                 if (saved.getStatus() != IssueStatus.IN_PROGRESS
                         && !(saved.getStatus() == IssueStatus.AWAITING_APPROVAL
@@ -93,17 +104,20 @@ public class StageApprovalService {
         decision.setStage(stage);
         decision.setAttempt(attempt);
         decision.setArtifactVersionId(artifact);
-        var chosen = selection.resolve(saved, stage, null, null);
-        decision.setProvider(chosen.provider());
-        decision.setModel(chosen.model());
-        if (reasoning != null && chosen.provider() == IssueBotProperties.AgentProvider.CODEX)
-            decision.setReasoningEffort(reasoning.resolve(saved.getId(), chosen.model(), stage));
+        var chosen = selection.defaults(saved, stage);
+        decision.setHarnessId(chosen.harnessId());
+        decision.setModel(chosen.modelId());
+        decision.setReasoningEffort(chosen.reasoningLevel());
         if (requiresApproval(saved, stage)) {
             waitAt(saved, issue, stage);
         } else {
             try {
                 selection.validate(chosen);
                 approve(decision, "system");
+            } catch (HarnessSelectionException unavailable) {
+                saved.setLastFailureReason(unavailable.safeMessage());
+                waitAt(saved, issue, stage);
+                issue.setLastFailureReason(saved.getLastFailureReason());
             } catch (IllegalStateException unavailable) {
                 // Preserve successful prior stages while subscription access is repaired.
                 saved.setLastFailureReason("Stage execution requires available CLI subscription authentication; repair access and approve this stage.");
@@ -119,6 +133,44 @@ public class StageApprovalService {
         return issues.findById(issueId).flatMap(issue -> approvals
                 .findFirstByIssueIdAndRunNumberAndStateOrderByIdDesc(
                         issueId, issue.getWorkflowRun(), StageApproval.State.WAITING));
+    }
+
+    /** Release the execution slot while retaining the exact approval tuple and stage identity. */
+    @Transactional
+    public TrackedIssue rearmAfterAuthenticationFailure(Long issueId, Long approvalId) {
+        return rearm(issueId, approvalId,
+                "Stage execution requires available CLI subscription authentication; repair access and approve this stage.");
+    }
+
+    @Transactional
+    public TrackedIssue rearmAfterSelectionFailure(Long issueId, Long approvalId, HarnessSelectionException failure) {
+        return rearm(issueId, approvalId, failure.safeMessage());
+    }
+
+    private TrackedIssue rearm(Long issueId, Long approvalId, String safeMessage) {
+        TrackedIssue saved = lockIssue(issueId);
+        StageApproval decision = approvals.findById(approvalId)
+                .orElseThrow(() -> new IllegalStateException("Stage approval no longer exists"));
+        rearmLocked(saved, decision, safeMessage);
+        return saved;
+    }
+
+    private void rearmLocked(TrackedIssue saved, StageApproval decision, String safeMessage) {
+        Long artifact = saved.getApprovedPlanningVersion() == null ? 0L
+                : saved.getApprovedPlanningVersion().getId();
+        // A delayed worker must not move another run or an externally stopped issue backward.
+        if (!Objects.equals(decision.getIssue().getId(), saved.getId())
+                || decision.getRunNumber() != saved.getWorkflowRun()
+                || !Objects.equals(decision.getArtifactVersionId(), artifact)
+                || decision.getState() != StageApproval.State.APPROVED
+                || saved.getStatus() != IssueStatus.IN_PROGRESS) {
+            return;
+        }
+        decision.setState(StageApproval.State.WAITING);
+        decision.setApprovedAt(null);
+        approvals.saveAndFlush(decision);
+        saved.setLastFailureReason(safeMessage);
+        waitAt(saved, saved, decision.getStage());
     }
 
     @Transactional(readOnly = true)
@@ -176,20 +228,22 @@ public class StageApprovalService {
                 throw new IllegalStateException("Issue #" + number + " must complete first");
             }
         }
-        String selectedProvider = provider == null || provider.isBlank()
-                ? decision.getProvider() == null ? null : decision.getProvider().name() : provider;
-        String selectedModel = model == null || model.isBlank() ? decision.getModel() : model;
-        var chosen = selection.resolve(issue, decision.getStage(), selectedProvider, selectedModel);
+        String selectedProvider = provider == null ? decision.getHarnessId() : provider;
+        String selectedModel = model == null ? decision.getModel() : model;
+        if (decision.getStage().modelDriven()
+                && (selectedProvider == null || selectedProvider.isBlank()
+                    || selectedModel == null || selectedModel.isBlank())) {
+            throw new HarnessSelectionException(HarnessSelectionException.Problem.TUPLE,
+                    "Choose an explicit harness and model for this stage approval");
+        }
+        boolean sameModel = Objects.equals(selectedModel, decision.getModel())
+                && Objects.equals(selectedProvider == null ? null : HarnessIds.normalize(selectedProvider), decision.getHarnessId());
+        String selectedReasoning = reasoningEffort == null && sameModel ? decision.getReasoningEffort() : reasoningEffort;
+        var chosen = selection.resolve(issue, decision.getStage(), selectedProvider, selectedModel, selectedReasoning);
         selection.validate(chosen);
-        if (reasoning != null && chosen.provider() == IssueBotProperties.AgentProvider.CODEX) {
-            String explicit = reasoning.validate(chosen.model(), reasoningEffort);
-            String retained = reasoningEffort == null && Objects.equals(chosen.model(), decision.getModel())
-                    ? decision.getReasoningEffort() : null;
-            decision.setReasoningEffort(explicit != null ? explicit : retained != null ? retained
-                    : reasoning.resolve(issueId, chosen.model(), decision.getStage()));
-        } else decision.setReasoningEffort(null);
-        decision.setProvider(chosen.provider());
-        decision.setModel(chosen.model());
+        decision.setReasoningEffort(chosen.reasoningLevel());
+        decision.setHarnessId(chosen.harnessId());
+        decision.setModel(chosen.modelId());
         approve(decision, actor == null || actor.isBlank() ? "operator" : actor);
         approvals.saveAndFlush(decision);
         issue.setStatus(IssueStatus.IN_PROGRESS);

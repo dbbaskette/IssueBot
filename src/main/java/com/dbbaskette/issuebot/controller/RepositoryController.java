@@ -17,8 +17,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -51,12 +49,6 @@ public class RepositoryController {
     private final NotificationRepository notificationRepository;
     private final PlanningVersionRepository planningVersionRepository;
     private final RepositoryDeletionTransactionManager deletionTransactions;
-
-    @Autowired(required = false)
-    private IssueBotProperties properties;
-
-    @Autowired(required = false)
-    private CodexModelCatalog codexModelCatalog;
 
     @Autowired
     public RepositoryController(WatchedRepoRepository repoRepository,
@@ -104,7 +96,7 @@ public class RepositoryController {
     }
 
     @Autowired(required = false)
-    private com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
+    private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
     @PostMapping
     @Transactional
@@ -139,6 +131,13 @@ public class RepositoryController {
                                @RequestParam(required = false) String implementationReasoningEffort,
                                @RequestParam(required = false) String reviewReasoningEffort,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
+        // Preserve raw fields before any resolution, including errors in other form sections.
+        preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
+                reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
+                implementationModel, reviewModel, followUpMode, decompositionMode,
+                preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
+                safeWorkflowPolicy(id, workflowPolicy), approvalStages, implementationReasoningEffort, reviewReasoningEffort);
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
                     "Invalid repository owner/name. Use letters, numbers, '.', '_', '-' only.");
@@ -146,15 +145,11 @@ public class RepositoryController {
         }
         if (reasoning != null) {
             try {
-                implementationReasoningEffort = reasoning.validate(implementationModel, implementationReasoningEffort);
-                reviewReasoningEffort = reasoning.validate(reviewModel, reviewReasoningEffort);
+                String resolvedImplementationEffort = reasoning.validateOverride(implementationModel, implementationReasoningEffort, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION);
+                String resolvedReviewEffort = reasoning.validateOverride(reviewModel, reviewReasoningEffort, com.dbbaskette.issuebot.model.WorkflowStage.REVIEW);
+                implementationReasoningEffort = resolvedImplementationEffort;
+                reviewReasoningEffort = resolvedReviewEffort;
             } catch (IllegalArgumentException ex) {
-                preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
-                    ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
-                    reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
-                    implementationModel, reviewModel, followUpMode, decompositionMode,
-                    preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
-                    safeWorkflowPolicy(id, workflowPolicy), approvalStages, implementationReasoningEffort, reviewReasoningEffort);
                 populateModel(model, null, ex.getMessage());
                 return ViewResolver.view("repositories", hx != null);
             }
@@ -163,13 +158,6 @@ public class RepositoryController {
         try {
             workflow = parseWorkflowSettings(workflowPolicy, approvalStages);
         } catch (IllegalArgumentException ex) {
-            String safeWorkflowPolicy = safeWorkflowPolicy(id, workflowPolicy);
-            preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
-                    ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations,
-                    reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
-                    implementationModel, reviewModel, followUpMode, decompositionMode,
-                    preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
-                    safeWorkflowPolicy, approvalStages, implementationReasoningEffort, reviewReasoningEffort);
             populateModel(model, null, "Choose a valid workflow policy and approval stages.");
             return ViewResolver.view("repositories", hx != null);
         }
@@ -238,6 +226,8 @@ public class RepositoryController {
         }
 
         repoRepository.save(repo);
+        model.asMap().remove("repositoryFormValues");
+        model.asMap().remove("repositorySelection");
         populateModel(model, "Repository " + repo.fullName() + " saved.", null);
         return ViewResolver.view("repositories", hx != null);
     }
@@ -340,6 +330,7 @@ public class RepositoryController {
         values.put("lessonsEnabled", lessonsEnabled);
         values.put("workflowPolicy", workflowPolicy);
         values.put("approvalStages", approvalStages == null ? "" : String.join(",", approvalStages));
+        model.addAttribute("repositorySelection", values);
         try {
             model.addAttribute("repositoryFormValues", new ObjectMapper().writeValueAsString(values));
         } catch (JsonProcessingException impossible) {
@@ -427,7 +418,6 @@ public class RepositoryController {
         model.addAttribute("issueCounts", issueCounts);
         model.addAttribute("totalIssueCounts", totalIssueCounts);
         model.addAttribute("lessonsByRepo", lessonsByRepo);
-        model.addAttribute("modelCatalog", selectedModelCatalog());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
@@ -435,11 +425,4 @@ public class RepositoryController {
         if (error != null) model.addAttribute("error", error);
     }
 
-    private List<?> selectedModelCatalog() {
-        if (properties != null && properties.getAgentProvider() == IssueBotProperties.AgentProvider.CODEX) {
-            return codexModelCatalog == null
-                    ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
-        }
-        return com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS;
-    }
 }
