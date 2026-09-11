@@ -80,7 +80,8 @@ class PlanFirstServiceTest {
         when(repos.findByIdForUpdate(1L)).thenReturn(Optional.of(repo));
         when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(issue));
         service = new PlanFirstService(agent, gitHub,
-                new PlanFirstTransactionManager(issues, versions, repos), new PlanArtifactParser(),
+                com.dbbaskette.issuebot.service.history.HistoryTestFixtures.withHistory(
+                        new PlanFirstTransactionManager(issues, versions, repos)), new PlanArtifactParser(),
                 planningWorkspaces, events, notifications, cancellations);
 
         details = new ObjectMapper().createObjectNode()

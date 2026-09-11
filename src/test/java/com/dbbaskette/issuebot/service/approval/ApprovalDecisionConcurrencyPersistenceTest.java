@@ -32,7 +32,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DataJpaTest
-@Import({ApprovalDecisionService.class, IterationManager.class})
+@Import({ApprovalDecisionService.class, ApprovalDecisionTransactionManager.class, IterationManager.class})
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @TestPropertySource(properties = {
         "issuebot.github.token=test-token",
         "spring.jpa.open-in-view=false"

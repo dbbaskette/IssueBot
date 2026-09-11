@@ -18,6 +18,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest(properties = {"issuebot.github.token=test-token", "spring.jpa.show-sql=false"})
 @Import(ProcessingControlService.class)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)

@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import static org.assertj.core.api.Assertions.*;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({QueueRecoveryService.class, ProcessingControlService.class, WorkflowCancellationService.class,
         DecompositionReservationService.class, QueueDependencyService.class, DecompositionGroupTransactionManager.class})

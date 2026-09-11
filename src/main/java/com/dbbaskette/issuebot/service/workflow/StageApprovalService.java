@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** Durable stage decisions, serialized with all dispatchers by control, repository, then issue. */
 @Service
 public class StageApprovalService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dbbaskette.issuebot.service.history.DecisionProducer decisions;
     private static final String PREFIX = "STAGE_APPROVAL_";
     private static final List<IssueStatus> RESERVATIONS = List.of(IssueStatus.IN_PROGRESS,
             IssueStatus.AWAITING_APPROVAL, IssueStatus.AWAITING_PLAN_APPROVAL,
@@ -125,7 +127,9 @@ public class StageApprovalService {
                 issue.setLastFailureReason(saved.getLastFailureReason());
             }
         }
-        return approvals.saveAndFlush(decision);
+        approvals.saveAndFlush(decision);
+        if (decision.getState() == StageApproval.State.APPROVED) recordDecision(saved, decision, true);
+        return decision;
     }
 
     @Transactional(readOnly = true)
@@ -254,7 +258,9 @@ public class StageApprovalService {
             case MERGE -> "COMPLETION";
             default -> null;
         });
-        return issues.saveAndFlush(issue);
+        issues.saveAndFlush(issue);
+        recordDecision(issue, decision, false);
+        return issue;
     }
 
     private TrackedIssue lockIssue(Long issueId) {
@@ -287,8 +293,22 @@ public class StageApprovalService {
     }
 
     private static void approve(StageApproval decision, String actor) {
+        decision.nextDecisionGeneration();
         decision.setState(StageApproval.State.APPROVED);
         decision.setActor(actor);
         decision.setApprovedAt(LocalDateTime.now());
+    }
+
+    private void recordDecision(TrackedIssue issue, StageApproval stage, boolean automatic) {
+        decisions.record(issue, "stage:" + stage.getId() + ":decision:" + stage.getDecisionGeneration(),
+                automatic ? com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.AUTOMATION
+                        : com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.OPERATOR,
+                automatic ? com.dbbaskette.issuebot.service.history.DecisionDraft.Action.AUTO_STAGE
+                        : com.dbbaskette.issuebot.service.history.DecisionDraft.Action.APPROVE,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Outcome.ACCEPTED,
+                automatic ? com.dbbaskette.issuebot.service.history.DecisionDraft.Reason.POLICY_AUTOMATIC
+                        : com.dbbaskette.issuebot.service.history.DecisionDraft.Reason.USER_REQUEST,
+                stage.getArtifactVersionId() == 0 ? null : stage.getArtifactVersionId(),
+                null, stage.getId(), null);
     }
 }

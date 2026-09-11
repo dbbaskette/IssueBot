@@ -69,6 +69,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({PlanFirstTransactionManager.class, PlanFirstService.class, PlanArtifactParser.class,
         DecompositionReservationService.class})

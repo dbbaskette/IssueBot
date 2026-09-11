@@ -16,13 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Serializes approval decisions for one issue and returns outcomes suitable for UI messaging.
  *
- * <p>The pessimistic issue lock is deliberately held through the GitHub operation. That makes
- * duplicate and competing human decisions observe the finalized local state instead of both
- * acting on the same {@link IssueStatus#AWAITING_APPROVAL} snapshot. GitHub cannot participate in
- * the database transaction, so uncertain merge responses are reconciled before local completion.
+ * <p>A durable local claim serializes competing decisions. GitHub executes without a database
+ * transaction, followed by a separate outcome transaction. Unknown effects are never replayed.
  */
 @Service
 public class ApprovalDecisionService {
+    @Autowired private ApprovalDecisionTransactionManager transactions;
+    @Autowired private com.dbbaskette.issuebot.service.history.DecisionProducer decisions;
 
     public enum Outcome {
         APPROVED,
@@ -67,20 +67,42 @@ public class ApprovalDecisionService {
         this(issues, iterations, gitHub, events, null);
     }
 
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public Decision approve(Long issueId, boolean merge) {
-        TrackedIssue issue = lockedIssue(issueId);
-        if (issue.getStatus() != IssueStatus.AWAITING_APPROVAL
-                || com.dbbaskette.issuebot.service.workflow.StageApprovalService.isStageWaiting(issue)) {
-            return Decision.of(Outcome.NOT_AWAITING_APPROVAL, issue);
+        if (repos == null || transactions == null)
+            throw new IllegalStateException("Repository locking is required for approval decisions");
+        var claim = transactions.begin(issueId, merge);
+        if (claim.rejected() != null) return Decision.of(claim.rejected(), claim.issue());
+        if (claim.intent().getState() == com.dbbaskette.issuebot.model.OperatorTransition.State.SUCCEEDED)
+            return Decision.of(Outcome.APPROVED, claim.issue());
+        if (!claim.execute()) {
+            if (claim.intent().getState() == com.dbbaskette.issuebot.model.OperatorTransition.State.IN_FLIGHT)
+                return new Decision(Outcome.MERGE_OUTCOME_UNKNOWN, claim.issue(),
+                        "A merge decision is already in progress; refresh after its outcome is known.");
+            // An uncertain prior request may only observe GitHub, never send the merge again.
+            var result = reconcileMerge(claim.issue(), claim.issue().getPrNumber(), null);
+            return finish(claim, result);
         }
-        if (!merge) {
-            return completeApproval(issue, null);
-        }
-        if (issue.getPrNumber() == null || issue.getPrNumber() <= 0) {
-            return Decision.of(Outcome.MISSING_PULL_REQUEST, issue);
-        }
+        return finish(claim, executeMerge(claim.issue()));
+    }
 
+    private Decision finish(ApprovalDecisionTransactionManager.Claim claim, Decision result) {
+        var outcome = switch (result.outcome()) {
+            case APPROVED -> com.dbbaskette.issuebot.service.history.DecisionDraft.Outcome.SUCCEEDED;
+            case MERGE_CONFIRMED_OPEN -> com.dbbaskette.issuebot.service.history.DecisionDraft.Outcome.FAILED;
+            default -> com.dbbaskette.issuebot.service.history.DecisionDraft.Outcome.UNKNOWN;
+        };
+        try {
+            return transactions.finish(claim, outcome, result.message());
+        } catch (RuntimeException persistenceFailure) {
+            // The accepted intent survives. Permit only read-only reconciliation, never replay.
+            try { transactions.recoverInterrupted(claim.intent().getId()); }
+            catch (RuntimeException unavailable) { persistenceFailure.addSuppressed(unavailable); }
+            throw persistenceFailure;
+        }
+    }
+
+    private Decision executeMerge(TrackedIssue issue) {
         WatchedRepo repo = issue.getRepo();
         int prNumber = issue.getPrNumber();
         JsonNode pullRequest;
@@ -134,11 +156,20 @@ public class ApprovalDecisionService {
         if (feedback == null || feedback.isBlank()) {
             return Decision.of(Outcome.FEEDBACK_REQUIRED, issue);
         }
+        if (transactions.pendingMerge(issue)) {
+            return new Decision(Outcome.MERGE_OUTCOME_UNKNOWN, issue,
+                    "A merge decision is pending; resolve its outcome before rejecting.");
+        }
 
         iterations.handleHumanRejection(issue, feedback);
         events.log("APPROVAL_REJECTED",
                 "Human rejected with feedback: " + feedback,
                 issue.getRepo(), issue);
+        decisions.accepted(issue, decisions.transitionKey(issue,
+                        com.dbbaskette.issuebot.service.history.DecisionDraft.Action.REJECT),
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.OPERATOR,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Action.REJECT,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Reason.USER_REQUEST);
         return Decision.of(Outcome.REJECTED, issue);
     }
 
@@ -188,15 +219,7 @@ public class ApprovalDecisionService {
     }
 
     private Decision completeApproval(TrackedIssue issue, String mergeEventMessage) {
-        issue.setStatus(IssueStatus.COMPLETED);
-        issues.saveAndFlush(issue);
-        if (mergeEventMessage != null) {
-            events.log("PR_MERGED_ON_APPROVAL", mergeEventMessage, issue.getRepo(), issue);
-        }
-        events.log("APPROVAL_APPROVED",
-                "Human approved PR for #" + issue.getIssueNumber(),
-                issue.getRepo(), issue);
-        return Decision.of(Outcome.APPROVED, issue);
+        return new Decision(Outcome.APPROVED, issue, mergeEventMessage);
     }
 
     private static boolean isMerged(JsonNode pullRequest) {

@@ -62,6 +62,8 @@ import java.util.function.Function;
 @Controller
 @RequestMapping("/issues")
 public class IssueController {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService operatorTransactions;
 
     private static final Logger log = LoggerFactory.getLogger(IssueController.class);
 
@@ -427,6 +429,8 @@ public class IssueController {
 
         // Enforce the same gating as the polling service (using filtered list)
         Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
+        String trimmedInstructions = (instructions != null && !instructions.isBlank())
+                ? instructions.trim() : null;
         IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(
                 issue.getId(), candidate -> checkGate(candidate, remainingPRs), candidate -> {
                     candidate.setCurrentIteration(0);
@@ -454,12 +458,9 @@ public class IssueController {
                         candidate.setPlanCorrectionPending(false);
                     }
                     if (!continueSession) candidate.setClaudeSessionId(null);
-                });
+                }, trimmedInstructions);
         if (!claim.claimed()) return claim.reason();
         issue = claim.issue();
-
-        String trimmedInstructions = (instructions != null && !instructions.isBlank())
-                ? instructions.trim() : null;
 
         String retryMessage = trimmedInstructions != null
                 ? "Manual retry with instructions: " + trimmedInstructions
@@ -888,21 +889,28 @@ public class IssueController {
 
     @PostMapping("/{id}/cancel")
     public String cancel(@PathVariable Long id, RedirectAttributes redirectAttributes) {
-        TrackedIssue issue = issueRepository.findById(id).orElse(null);
-        if (issue == null || issue.getStatus() != IssueStatus.IN_PROGRESS) {
+        TrackedIssue issue;
+        try {
+            issue = operatorTransactions.stop(id);
+        } catch (IllegalStateException | java.util.NoSuchElementException invalid) {
             redirectAttributes.addFlashAttribute("error", "Only running issues can be stopped");
             return "redirect:/issues/" + id;
         }
-        cancellationService.requestCancel(id);
         eventService.log("CANCEL_REQUESTED", "Operator requested stop", issue.getRepo(), issue);
         redirectAttributes.addFlashAttribute("success",
                 "Stop requested — the workflow halts at the next checkpoint");
         return "redirect:/issues/" + id;
     }
 
-    @PostMapping("/{id}/guide")
     public String guide(@PathVariable Long id,
                         @RequestParam String guidance,
+                        RedirectAttributes redirectAttributes) {
+        return guide(id, guidance, null, redirectAttributes);
+    }
+
+    @PostMapping("/{id}/guide")
+    public String guide(@PathVariable Long id, @RequestParam String guidance,
+                        @RequestParam(required = false) String requestToken,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);
         if (issue == null) {
@@ -929,14 +937,32 @@ public class IssueController {
         // Guidance is inserted as its own row, never written onto TrackedIssue —
         // the workflow's frequent full-entity saves from its in-memory copy would
         // silently revert any column the controller wrote mid-iteration.
-        guidanceRepository.save(new IssueGuidance(issue.getId(), text));
-
+        com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance accepted;
         try {
+            accepted = operatorTransactions.guide(id, text, requestToken);
+        } catch (IllegalArgumentException | IllegalStateException invalid) {
+            redirectAttributes.addFlashAttribute("error", "Guidance could not be accepted; refresh and try again.");
+            return "redirect:/issues/" + id;
+        }
+
+        boolean commentConfirmed = false;
+        try {
+            if (accepted.created())
             gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
                     issue.getIssueNumber(), "**Operator guidance (mid-run):** " + text);
+            commentConfirmed = true;
         } catch (Exception e) {
             log.warn("Failed to post guidance comment on #{}: {}",
                     issue.getIssueNumber(), e.getMessage());
+        }
+
+        if (accepted.created()) {
+            try {
+                operatorTransactions.guidanceCommentResult(id, accepted.guidance().getId(), commentConfirmed);
+            } catch (RuntimeException auditFailure) {
+                // Acceptance is already durable. Never resend the comment to repair an audit write.
+                log.warn("Guidance comment outcome could not be recorded for issue {}; accepted guidance remains queued", id);
+            }
         }
 
         eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + text,
@@ -1296,6 +1322,7 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        model.addAttribute("guidanceRequestToken", java.util.UUID.randomUUID().toString());
         model.addAttribute("nextAction", nextActionResolver.resolve(
                 issue, readyReservationFor(issue, readyReservationsByRepository())));
         model.addAttribute("latestFailureDiagnostic", failureDiagnosticService == null

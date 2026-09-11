@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({IssueDispatchTransactionManager.class, PlanFirstTransactionManager.class, ProcessingControlService.class, WorkflowCancellationService.class})
 @TestPropertySource(properties = {
@@ -351,6 +352,7 @@ class IssueDispatchTransactionManagerTest {
         IssueDispatchTransactionManager manager = new IssueDispatchTransactionManager(
                 mockIssues, mockRepos, mockControls, mock(IssueGuidanceRepository.class),
                 mock(IterationRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(manager, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
 
         IssueDispatchService.ClaimResult result = manager.claimStart(42L);
 
@@ -815,6 +817,7 @@ class IssueDispatchTransactionManagerTest {
         IssueDispatchTransactionManager manager = new IssueDispatchTransactionManager(
                 mockIssues, mockRepos, mockControls, mock(IssueGuidanceRepository.class),
                 mock(IterationRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(manager, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
 
         IssueDispatchService.ClaimResult duplicateResult = manager.claimReadyStart(143L);
         IssueDispatchService.ClaimResult ownerResult = manager.claimReadyStart(141L);

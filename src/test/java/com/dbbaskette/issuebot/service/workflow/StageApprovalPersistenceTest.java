@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest(properties = {"issuebot.github.token=test-token", "spring.jpa.open-in-view=false"})
 @Import({StageApprovalService.class, DecompositionReservationService.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -25,6 +26,7 @@ class StageApprovalPersistenceTest {
     @Autowired TrackedIssueRepository issues;
     @Autowired WatchedRepoRepository repos;
     @Autowired StageApprovalRepository approvals;
+    @Autowired com.dbbaskette.issuebot.service.history.DecisionHistoryService decisions;
     @Autowired PlanningVersionRepository versions;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockitoBean StageModelSelectionService selection;
@@ -117,7 +119,10 @@ class StageApprovalPersistenceTest {
                 assertThat(saved.getId()).isEqualTo(decision.getId());
                 assertThat(saved.getState()).isEqualTo(StageApproval.State.APPROVED);
                 assertThat(saved.getReasoningEffort()).isEqualTo("ultra");
+                assertThat(saved.getDecisionGeneration()).isEqualTo(2);
             });
+            assertThat(decisions.page(issue.getId(), org.springframework.data.domain.PageRequest.of(0, 25)))
+                    .hasSize(2);
         } finally {
             approvals.deleteAll();
             var saved = issues.findById(issue.getId()).orElseThrow();

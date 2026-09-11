@@ -12,9 +12,16 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.List;
+import com.dbbaskette.issuebot.model.TrackedIssue;
+import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
+import com.dbbaskette.issuebot.service.history.DecisionProducer;
+import static com.dbbaskette.issuebot.service.history.DecisionDraft.*;
 
 @Service
 public class ProcessingControlService {
+    @org.springframework.beans.factory.annotation.Autowired private WatchedRepoRepository repos;
+    @org.springframework.beans.factory.annotation.Autowired private DecisionProducer decisions;
 
     private final ProcessingControlRepository repository;
     private final TrackedIssueRepository issues;
@@ -46,13 +53,20 @@ public class ProcessingControlService {
 
     @Transactional
     public void pauseAfterCurrent() {
-        transitionTo(ProcessingState.PAUSE_AFTER_CURRENT);
+        var affected = lockAffected(false);
+        pauseAfterCurrentLocked(affected);
+    }
+
+    /** Used by enclosing mutations that obtained every global lock before their own issue lock. */
+    public void pauseAfterCurrentLocked(List<TrackedIssue> affected) {
+        transitionTo(ProcessingState.PAUSE_AFTER_CURRENT, affected, Action.PAUSE);
     }
 
     @Transactional
     public void stopNow() {
-        if (!transitionTo(ProcessingState.STOPPED)) return;
-        var activeIds = issues.findByStatus(IssueStatus.IN_PROGRESS).stream()
+        var active = lockAffected(true);
+        if (!transitionTo(ProcessingState.STOPPED, active, Action.STOP)) return;
+        var activeIds = active.stream()
                 .map(issue -> issue.getId()).toList();
         afterCommit(() -> activeIds.forEach(id ->
                 cancellationService.requestCancel(id, CancellationReason.OPERATOR_STOP)));
@@ -60,17 +74,41 @@ public class ProcessingControlService {
 
     @Transactional
     public void restart() {
-        transitionTo(ProcessingState.RUNNING);
+        var affected = lockAffected(false);
+        transitionTo(ProcessingState.RUNNING, affected, Action.RESUME);
     }
 
-    private boolean transitionTo(ProcessingState next) {
+    private boolean transitionTo(ProcessingState next, List<TrackedIssue> affected, Action action) {
         ProcessingControl control = repository.findByIdForUpdate(ProcessingControl.SINGLETON_ID)
                 .orElseGet(() -> new ProcessingControl(mode.get()));
         if (control.getState() == next) return false;
         control.setState(next);
+        control.nextTransitionGeneration();
         repository.save(control);
         afterCommit(() -> mode.set(next));
+        for (var issue : affected) {
+            decisions.accepted(issue, "control:" + control.getTransitionGeneration() + ":issue:" + issue.getId(),
+                    Actor.OPERATOR, action, Reason.GLOBAL_CONTROL);
+        }
         return true;
+    }
+
+    /** Lock controls, all repositories in ID order, then affected issues, before the ledger. */
+    public List<TrackedIssue> lockAffected(boolean activeOnly) {
+        repository.findByIdForUpdate(ProcessingControl.SINGLETON_ID).orElseThrow();
+        var orderedRepos = repos.findAll().stream()
+                .sorted(java.util.Comparator.comparing(com.dbbaskette.issuebot.model.WatchedRepo::getId)).toList();
+        orderedRepos.forEach(repo -> repos.findByIdForUpdate(repo.getId()).orElseThrow());
+        var affected = new java.util.ArrayList<TrackedIssue>();
+        for (var repo : orderedRepos) {
+            for (var issue : issues.findByRepoIdForUpdateOrderByIssueNumber(repo.getId())) {
+                if (activeOnly ? issue.getStatus() == IssueStatus.IN_PROGRESS
+                        : List.of(IssueStatus.PENDING, IssueStatus.QUEUED, IssueStatus.READY_TO_START,
+                                IssueStatus.FAILED, IssueStatus.COOLDOWN).contains(issue.getStatus())
+                            || StageApprovalService.isStageWaiting(issue)) affected.add(issue);
+            }
+        }
+        return affected;
     }
 
     /** External effects must not escape a transaction that can still roll back. */

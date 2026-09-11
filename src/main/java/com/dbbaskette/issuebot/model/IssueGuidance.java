@@ -16,6 +16,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "issue_guidance")
 public class IssueGuidance {
+    @Column(name = "request_token", length = 80)
+    private String requestToken;
+    public String getRequestToken() { return requestToken; }
+    public void setRequestToken(String value) { requestToken = value; }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

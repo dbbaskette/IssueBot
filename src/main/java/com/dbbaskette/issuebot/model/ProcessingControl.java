@@ -13,6 +13,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "processing_control")
 public class ProcessingControl {
+    @Column(name = "transition_generation", nullable = false)
+    private long transitionGeneration;
+    public long getTransitionGeneration() { return transitionGeneration; }
+    public void nextTransitionGeneration() { transitionGeneration++; }
 
     public static final long SINGLETON_ID = 1L;
 

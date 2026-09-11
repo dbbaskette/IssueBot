@@ -8,6 +8,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "stage_approvals", uniqueConstraints = @UniqueConstraint(columnNames = {"issue_id", "run_number", "stage", "attempt", "artifact_version_id"}))
 public class StageApproval {
+    @Column(name = "decision_generation", nullable = false)
+    private long decisionGeneration;
+    public long getDecisionGeneration() { return decisionGeneration; }
+    public void nextDecisionGeneration() { decisionGeneration++; }
     private String reasoningEffort;
     public String getReasoningEffort() { return reasoningEffort; }
     public void setReasoningEffort(String value) { reasoningEffort = value; }

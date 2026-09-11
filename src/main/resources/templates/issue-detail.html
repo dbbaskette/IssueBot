@@ -813,7 +813,9 @@
                     <span class="text-sm text-muted">Steer this run without stopping it</span>
                 </div>
                 <div class="panel-body">
-                    <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post">
+                    <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post"
+                          th:id="${'mid-run-guidance-' + issue.id}" hx-preserve="true">
+                        <input type="hidden" name="requestToken" th:value="${guidanceRequestToken}">
                         <textarea name="guidance" rows="3" class="modal-textarea" required
                                   placeholder="e.g. Check the retry logic in FooService — the bug is probably there"></textarea>
                         <p class="text-sm text-muted" style="margin:0.5rem 0 0">

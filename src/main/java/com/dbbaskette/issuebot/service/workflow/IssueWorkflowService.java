@@ -435,9 +435,9 @@ public class IssueWorkflowService {
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
                 trackedIssue.setPlanCorrectionPending(false);
             } else if (resumePhase == null) {
+                iteration = iterationManager.claimImplementationIteration(trackedIssue, iterationNum);
                 trackedIssue.setCurrentIteration(iterationNum);
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
-                issueRepository.save(trackedIssue);
             }
 
             if (resumePhase != null) {

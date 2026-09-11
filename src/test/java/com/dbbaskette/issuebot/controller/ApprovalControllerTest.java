@@ -52,8 +52,8 @@ class ApprovalControllerTest {
         locked.setId(1L);
         when(issues.findRepoIdByIssueId(anyLong())).thenReturn(java.util.Optional.of(1L));
         when(repos.findByIdForUpdate(1L)).thenReturn(java.util.Optional.of(locked));
-        return new ApprovalDecisionService(
-                issues, iterationManager, gitHubApi, eventService, repos);
+        return com.dbbaskette.issuebot.service.history.HistoryTestFixtures.approval(new ApprovalDecisionService(
+                issues, iterationManager, gitHubApi, eventService, repos), issues, repos, eventService);
     }
 
     private static ApprovalController controller(TrackedIssueRepository issues,

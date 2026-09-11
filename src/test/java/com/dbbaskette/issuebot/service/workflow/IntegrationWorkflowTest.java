@@ -1034,6 +1034,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1138,6 +1139,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1218,6 +1220,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1278,6 +1281,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1408,6 +1412,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1479,7 +1484,8 @@ class IntegrationWorkflowTest {
         when(planningWorkspace.path()).thenReturn(Path.of("/tmp/repo"));
         PlanFirstService authoritativePlanFirst = new PlanFirstService(
                 harnessService, gitHubApi,
-                new PlanFirstTransactionManager(issueRepository, lifecycleVersions, lifecycleRepos),
+                com.dbbaskette.issuebot.service.history.HistoryTestFixtures.withHistory(
+                        new PlanFirstTransactionManager(issueRepository, lifecycleVersions, lifecycleRepos)),
                 new PlanArtifactParser(), planningWorkspaces, eventService, notificationService,
                 new WorkflowCancellationService());
         when(harnessService.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
@@ -1533,6 +1539,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = spy(new IterationManager(
                 issueRepository, lifecycleRepos, iterationRepository,
                 gitHubApi, eventService, notificationService));
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
 
         IssueWorkflowService lifecycleWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,

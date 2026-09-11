@@ -7,9 +7,12 @@ import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.dbbaskette.issuebot.service.history.DecisionProducer;
+import static com.dbbaskette.issuebot.service.history.DecisionDraft.*;
 
 @Service
 public class DecompositionGroupTransactionManager {
+    @org.springframework.beans.factory.annotation.Autowired private DecisionProducer decisions;
     private static final List<IssueStatus> ACTIVE = List.of(
             IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
             IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START,
@@ -30,12 +33,20 @@ public class DecompositionGroupTransactionManager {
 
     @Transactional
     public DecompositionGroup beginGroup(Long parentIssueId, List<ChildIntent> intents) {
+        return beginGroup(parentIssueId, intents, Actor.AUTOMATION);
+    }
+
+    @Transactional
+    public DecompositionGroup beginGroup(Long parentIssueId, List<ChildIntent> intents, Actor actor) {
         Long repoId = issues.findRepoIdByIssueId(parentIssueId)
                 .orElseThrow(() -> new IllegalArgumentException("Parent issue not found"));
         repos.findByIdForUpdate(repoId).orElseThrow();
         TrackedIssue parent = issues.findByIdForDispatch(parentIssueId).orElseThrow();
         var existing = groups.findByParentIssue(parent);
         if (existing.isPresent()) return existing.orElseThrow();
+        if (actor == Actor.OPERATOR && (parent.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
+                || parent.getDecompositionProposal() == null))
+            throw new IllegalStateException("Decomposition proposal is stale or already decided");
         DecompositionGroup group = groups.saveAndFlush(
                 new DecompositionGroup(parent.getRepo(), parent, DecompositionGroupState.CREATING));
         for (ChildIntent intent : intents) {
@@ -43,6 +54,9 @@ public class DecompositionGroupTransactionManager {
                     intent.body(), group.getId() + ":" + intent.position()));
         }
         children.flush();
+        decisions.accepted(parent, "decomposition:" + group.getId() + ":accepted", actor,
+                actor == Actor.OPERATOR ? Action.APPROVE : Action.AUTO_STAGE,
+                actor == Actor.OPERATOR ? Reason.USER_REQUEST : Reason.POLICY_AUTOMATIC);
         return group;
     }
 
@@ -104,15 +118,38 @@ public class DecompositionGroupTransactionManager {
         issues.save(parent);
         lockedGroup.transitionTo(olderUnfinishedGroup || unrelatedActive
                 ? DecompositionGroupState.WAITING : DecompositionGroupState.ACTIVE);
-        return groups.saveAndFlush(lockedGroup);
+        groups.saveAndFlush(lockedGroup);
+        decisions.record(parent, "decomposition:" + group.getId() + ":result:SUCCEEDED",
+                Actor.AUTOMATION, Action.EXTERNAL_RESULT, Outcome.SUCCEEDED, Reason.EXTERNAL_CONFIRMED,
+                null, null, null, null);
+        return lockedGroup;
     }
 
     @Transactional
     public void recordError(Long groupId, String error) {
-        groups.findById(groupId).ifPresent(group -> {
-            group.setLastError(error);
-            groups.save(group);
-        });
+        var initial = groups.findById(groupId).orElseThrow();
+        repos.findByIdForUpdate(initial.getRepo().getId()).orElseThrow();
+        var group = groups.findByIdForUpdate(groupId).orElseThrow();
+        var parent = issues.findByIdForDispatch(group.getParentIssue().getId()).orElseThrow();
+        group.setLastError(error);
+        groups.saveAndFlush(group);
+        decisions.record(parent, "decomposition:" + groupId + ":result:UNKNOWN", Actor.AUTOMATION,
+                Action.EXTERNAL_RESULT, Outcome.UNKNOWN, Reason.EXTERNAL_UNCERTAIN, null, null, null, null);
+    }
+
+    @Transactional
+    public TrackedIssue rejectProposal(Long id) {
+        repos.findByIdForUpdate(issues.findRepoIdByIssueId(id).orElseThrow()).orElseThrow();
+        var issue = issues.findByIdForDispatch(id).orElseThrow();
+        if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION || issue.getDecompositionProposal() == null)
+            throw new IllegalStateException("Issue is not awaiting decomposition approval");
+        if (groups.findByParentIssue(issue).isPresent())
+            throw new IllegalStateException("Decomposition creation has already been accepted");
+        issue.setDecompositionProposal(null);
+        issue.setStatus(IssueStatus.FAILED);
+        issues.saveAndFlush(issue);
+        decisions.accepted(issue, decisions.transitionKey(issue, Action.REJECT), Actor.OPERATOR, Action.REJECT, Reason.USER_REQUEST);
+        return issue;
     }
 
     @Transactional
@@ -129,6 +166,8 @@ public class DecompositionGroupTransactionManager {
                 .map(DecompositionChild::getTrackedIssue).filter(Objects::nonNull)
                 .filter(issue -> issue.getStatus() == IssueStatus.IN_PROGRESS)
                 .map(TrackedIssue::getId).findFirst().orElse(null);
+        decisions.accepted(group.getParentIssue(), "decomposition:" + group.getId() + ":stop",
+                Actor.OPERATOR, Action.STOP, Reason.USER_REQUEST);
         return new AbandonPreparation(group.getId(), runningIssueId);
     }
 
@@ -159,6 +198,9 @@ public class DecompositionGroupTransactionManager {
         group.transitionTo(DecompositionGroupState.COMPLETED);
         groups.save(group);
         promoteWaiting(group.getRepo());
+        decisions.record(group.getParentIssue(), "decomposition:" + group.getId() + ":completion:SUCCEEDED",
+                Actor.AUTOMATION, Action.EXTERNAL_RESULT, Outcome.SUCCEEDED, Reason.EXTERNAL_CONFIRMED,
+                null, null, null, null);
         return true;
     }
 

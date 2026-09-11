@@ -97,6 +97,7 @@ public class ApprovalController {
                     "This issue is no longer awaiting approval. Refresh to see its current state.");
             case FEEDBACK_REQUIRED -> redirectAttributes.addFlashAttribute(
                     "error", "Rejection feedback is required.");
+            case MERGE_OUTCOME_UNKNOWN -> redirectAttributes.addFlashAttribute("error", decision.message());
             default -> redirectAttributes.addFlashAttribute("error",
                     "Rejection could not be processed. Refresh before retrying.");
         }

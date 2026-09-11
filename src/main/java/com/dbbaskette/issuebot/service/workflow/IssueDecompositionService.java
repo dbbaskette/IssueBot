@@ -302,7 +302,7 @@ public class IssueDecompositionService {
                 issue.getDecompositionProposal(), new TypeReference<List<SubIssue>>() {});
 
         if (groupService != null) {
-            if (!createDurableGroup(issue, subIssues)) {
+            if (!createDurableGroup(issue, subIssues, com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.OPERATOR)) {
                 throw new IllegalStateException("Could not finish creating the decomposition group; it will resume automatically");
             }
             return;
@@ -345,13 +345,18 @@ public class IssueDecompositionService {
     }
 
     private boolean createDurableGroup(TrackedIssue issue, List<SubIssue> subIssues) {
+        return createDurableGroup(issue, subIssues, com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.AUTOMATION);
+    }
+
+    private boolean createDurableGroup(TrackedIssue issue, List<SubIssue> subIssues,
+            com.dbbaskette.issuebot.service.history.DecisionDraft.Actor actor) {
         List<DecompositionGroupTransactionManager.ChildIntent> intents = new ArrayList<>();
         for (int index = 0; index < subIssues.size(); index++) {
             SubIssue sub = subIssues.get(index);
             intents.add(new DecompositionGroupTransactionManager.ChildIntent(
                     index + 1, sub.title(), buildSubIssueBody(sub, issue.getIssueNumber())));
         }
-        var group = groupTransactions.beginGroup(issue.getId(), intents);
+        var group = groupTransactions.beginGroup(issue.getId(), intents, actor);
         groupService.createOrResume(group.getId());
         var refreshed = groupTransactions == null ? group : group;
         boolean complete = decompositionChildren.findByGroupOrderBySequencePositionAsc(refreshed).stream()
@@ -381,6 +386,11 @@ public class IssueDecompositionService {
      * @throws IllegalStateException if the issue is not awaiting decomposition or has no proposal
      */
     public synchronized void rejectProposal(TrackedIssue trackedIssue) {
+        if (groupTransactions != null) {
+            var accepted = groupTransactions.rejectProposal(trackedIssue.getId());
+            iterationManager.handleProposalRejected(accepted);
+            return;
+        }
         TrackedIssue issue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
         if (issue.getStatus() != IssueStatus.AWAITING_DECOMPOSITION
                 || issue.getDecompositionProposal() == null) {

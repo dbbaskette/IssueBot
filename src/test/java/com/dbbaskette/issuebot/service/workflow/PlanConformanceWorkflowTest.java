@@ -78,6 +78,7 @@ class PlanConformanceWorkflowTest {
         iterationManager = new IterationManager(
                 issueRepository, repoRepository, iterationRepository, gitHubApi,
                 mock(EventService.class), mock(NotificationService.class));
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(iterationManager);
 
         cancellationService = new WorkflowCancellationService();
         workflow = new IssueWorkflowService(

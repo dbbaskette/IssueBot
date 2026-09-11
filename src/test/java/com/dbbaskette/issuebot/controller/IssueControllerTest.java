@@ -405,6 +405,8 @@ class IssueControllerTest {
      * for a FAILED issue on a fresh repo: no active issues, no open PRs.
      */
     private static final class Fixture {
+        final com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService operatorTransactions =
+                mock(com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.class);
         final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
         final GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
@@ -462,6 +464,14 @@ class IssueControllerTest {
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatchService,
                     planningVersions, approvalCardAssembler, new IssueNextActionResolver(),
                     notificationService, workflowStepperAssembler);
+            org.springframework.test.util.ReflectionTestUtils.setField(controller, "operatorTransactions", operatorTransactions);
+            when(operatorTransactions.stop(1L)).thenAnswer(call -> {
+                if (issue.getStatus() != IssueStatus.IN_PROGRESS) throw new IllegalStateException("Not running");
+                return issue;
+            });
+            when(operatorTransactions.guide(eq(1L), anyString(), nullable(String.class))).thenAnswer(call ->
+                    new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(
+                            issue, new IssueGuidance(1L, call.getArgument(1)), true));
         }
     }
 
@@ -809,7 +819,8 @@ class IssueControllerTest {
 
         String view = f.controller.cancel(1L, f.redirectAttributes);
 
-        verify(f.cancellationService).requestCancel(1L);
+        verify(f.operatorTransactions).stop(1L);
+        verifyNoInteractions(f.cancellationService);
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
     }
@@ -1742,14 +1753,8 @@ class IssueControllerTest {
 
         // Guidance is inserted as its own row — never written onto TrackedIssue,
         // where the workflow's frequent full-entity saves would silently revert it.
-        ArgumentCaptor<IssueGuidance> captor = ArgumentCaptor.forClass(IssueGuidance.class);
-        verify(f.guidanceRepository).save(captor.capture());
-        IssueGuidance saved = captor.getValue();
-        org.assertj.core.api.Assertions.assertThat(saved.getIssueId()).isEqualTo(1L);
-        org.assertj.core.api.Assertions.assertThat(saved.getGuidance())
-                .isEqualTo("Check the retry logic in FooService");
-        org.assertj.core.api.Assertions.assertThat(saved.getCreatedAt()).isNotNull();
-        org.assertj.core.api.Assertions.assertThat(saved.getConsumedAt()).isNull();
+        verify(f.operatorTransactions).guide(1L, "Check the retry logic in FooService", null);
+        verifyNoInteractions(f.guidanceRepository);
         verify(f.issues, never()).save(any());
 
         verify(f.gitHubApiClient).addComment(eq("acme"), eq("widgets"), eq(42),
@@ -1757,6 +1762,31 @@ class IssueControllerTest {
         verify(f.eventService).log(eq("GUIDANCE_RECEIVED"), anyString(), any(), eq(f.issue));
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test void repeatedGuidanceRequestTokenDoesNotRepeatComment() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        var row = new IssueGuidance(1L, "same guidance"); row.setId(17L);
+        when(f.operatorTransactions.guide(1L, "same guidance", "stable-token"))
+                .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, false));
+        f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
+        verify(f.operatorTransactions).guide(1L, "same guidance", "stable-token");
+        verify(f.gitHubApiClient, never()).addComment(any(), any(), anyInt(), any());
+        verify(f.operatorTransactions, never()).guidanceCommentResult(any(), any(), anyBoolean());
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+    }
+
+    @Test void guidanceOutcomeAuditFailureDoesNotInvalidateAcceptedGuidanceOrRepeatComment() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        var row = new IssueGuidance(1L, "same guidance"); row.setId(17L);
+        when(f.operatorTransactions.guide(1L, "same guidance", "stable-token"))
+                .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, true));
+        doThrow(new IllegalStateException("private database error"))
+                .when(f.operatorTransactions).guidanceCommentResult(1L, 17L, true);
+        f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
+        verify(f.gitHubApiClient, times(1)).addComment(any(), any(), anyInt(), any());
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+        verify(f.redirectAttributes, never()).addFlashAttribute(eq("error"), any());
     }
 
     @Test
@@ -1792,11 +1822,8 @@ class IssueControllerTest {
 
         // Each submission is its own row; ordering is carried by created_at,
         // so nothing is ever overwritten (append semantics by construction).
-        ArgumentCaptor<IssueGuidance> captor = ArgumentCaptor.forClass(IssueGuidance.class);
-        verify(f.guidanceRepository, times(2)).save(captor.capture());
-        org.assertj.core.api.Assertions.assertThat(captor.getAllValues())
-                .extracting(IssueGuidance::getGuidance)
-                .containsExactly("First instruction", "Second instruction");
+        verify(f.operatorTransactions).guide(1L, "First instruction", null);
+        verify(f.operatorTransactions).guide(1L, "Second instruction", null);
     }
 
     @Test
@@ -1807,7 +1834,7 @@ class IssueControllerTest {
 
         String view = f.controller.guide(1L, "Look at BarService", f.redirectAttributes);
 
-        verify(f.guidanceRepository).save(any(IssueGuidance.class));
+        verify(f.operatorTransactions).guide(1L, "Look at BarService", null);
         verify(f.eventService).log(eq("GUIDANCE_RECEIVED"), anyString(), any(), eq(f.issue));
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");

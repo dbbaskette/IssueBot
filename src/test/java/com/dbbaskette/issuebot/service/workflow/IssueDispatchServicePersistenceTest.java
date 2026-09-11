@@ -55,6 +55,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /** Real Hibernate exercise of retry claiming with OSIV/test transaction disabled. */
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({IssueDispatchTransactionManager.class, ProcessingControlService.class})
 @TestPropertySource(properties = {

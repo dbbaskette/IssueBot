@@ -36,6 +36,7 @@ class StageApprovalServiceTest {
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
         selection = new StageModelSelectionService(properties, fixture.selections);
         service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        ReflectionTestUtils.setField(service, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThat(decision.getHarnessId()).isEqualTo("claude");
         assertThat(decision.getReasoningEffort()).isEqualTo("high");
@@ -48,6 +49,7 @@ class StageApprovalServiceTest {
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
         selection = new StageModelSelectionService(properties, fixture.selections);
         service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        ReflectionTestUtils.setField(service, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, "claude", "claude-haiku-4-5", "alice", "max"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("max");
@@ -70,6 +72,7 @@ class StageApprovalServiceTest {
     TrackedIssue issue = new TrackedIssue(repo, 1, "Issue");
 
     @BeforeEach void setup() {
+        ReflectionTestUtils.setField(service, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
         repo.setId(1L);
         issue.setId(2L);
         issue.setStatus(IssueStatus.IN_PROGRESS);

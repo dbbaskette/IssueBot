@@ -920,6 +920,8 @@ class IssuePollingServiceTest {
         processingControl = new ProcessingControlService(
                 controlRepository, issueRepository, mock(
                         com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(processingControl, "repos", mock(WatchedRepoRepository.class));
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.withHistory(processingControl);
         processingControl.initialize();
         dispatchService = spy(new IssueDispatchService(
                 issueRepository, processingControl, mock(IterationRepository.class)));
