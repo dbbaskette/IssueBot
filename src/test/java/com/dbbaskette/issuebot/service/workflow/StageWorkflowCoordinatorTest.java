@@ -15,7 +15,7 @@ import static org.mockito.Mockito.*;
 class StageWorkflowCoordinatorTest {
     StageApprovalService stages = mock(StageApprovalService.class);
     HarnessSelectionFixture fixture = new HarnessSelectionFixture();
-    StageModelSelectionService models = spy(new StageModelSelectionService(fixture.properties, fixture.selections, fixture.registry));
+    StageModelSelectionService models = spy(new StageModelSelectionService(fixture.properties, fixture.selections));
     CodingHarnessService agent = mock(CodingHarnessService.class);
     TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     PlanningVersionRepository versions = mock(PlanningVersionRepository.class);

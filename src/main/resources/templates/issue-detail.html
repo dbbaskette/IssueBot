@@ -153,21 +153,13 @@
                                   th:placeholder="${reviewerInfrastructure ? 'Optional note after restoring the reviewer provider or CLI' : 'What should the agent do differently this time?'}"></textarea>
                         <details class="mt-1">
                             <summary>Advanced retry options</summary>
-                            <div class="field-group">
-                                <label for="recoveryImplModel">Implementation model</label>
-                                <select id="recoveryImplModel" name="implModelOverride">
-                                    <option value="" selected>Use repo/global setting</option>
-                                    <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                                </select>
-                    <div th:replace="~{fragments/reasoning :: picker('recoveryImplModel', 'implementationReasoningEffort', ${issue.implementationReasoningEffort})}"></div>
+                            <div class="field-group" role="group" aria-label="Implementation" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.implementationModel, globalImplementationModel)}">
+                                <h4>Implementation for this attempt</h4>
+                                <div th:replace="~{fragments/reasoning :: selection('recoveryImplModel', 'implModelOverride', ${selectionRejected == true ? submittedImplModel : issue.implModelOverride}, 'implementationReasoningEffort', ${selectionRejected == true ? submittedImplementationReasoning : issue.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
                             </div>
-                            <div class="field-group">
-                                <label for="recoveryReviewModel">Review model</label>
-                                <select id="recoveryReviewModel" name="reviewModelOverride">
-                                    <option value="" selected>Use repo/global setting</option>
-                                    <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                                </select>
-                    <div th:replace="~{fragments/reasoning :: picker('recoveryReviewModel', 'reviewReasoningEffort', ${issue.reviewReasoningEffort})}"></div>
+                            <div class="field-group" role="group" aria-label="Review" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.reviewModel, globalReviewModel)}">
+                                <h4>Review for this attempt</h4>
+                                <div th:replace="~{fragments/reasoning :: selection('recoveryReviewModel', 'reviewModelOverride', ${selectionRejected == true ? submittedReviewModel : issue.reviewModelOverride}, 'reviewReasoningEffort', ${selectionRejected == true ? submittedReviewReasoning : issue.reviewReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
                             </div>
                             <div class="field-group">
                                 <label for="recoveryBudget">Budget override (USD)</label>
@@ -181,13 +173,13 @@
                                     <option value="skip">Skip plan approval</option>
                                 </select>
                             </div>
-                            <label th:if="${issue.claudeSessionId != null and issue.resolvedAgentProvider != null and ((codexProvider == true and issue.resolvedAgentProvider.name() == 'CODEX') or (codexProvider != true and issue.resolvedAgentProvider.name() == 'CLAUDE_CODE'))}" class="check-row">
+                            <label th:if="${issue.claudeSessionId != null and issue.resolvedHarnessId != null and issue.resolvedHarnessId == effectiveHarnessId}" class="check-row">
                                 <input type="checkbox" name="continueSession" value="true">
                                 Continue previous agent session
                             </label>
                             <p class="text-sm text-muted"
-                               th:if="${issue.claudeSessionId != null and (issue.resolvedAgentProvider == null or not ((codexProvider == true and issue.resolvedAgentProvider.name() == 'CODEX') or (codexProvider != true and issue.resolvedAgentProvider.name() == 'CLAUDE_CODE')))}"
-                               th:text="${issue.resolvedAgentProvider != null ? 'Previous ' + issue.resolvedAgentProvider.displayName + ' session cannot continue with ' + (codexProvider == true ? 'Codex CLI' : 'Claude Code') + '.' : 'The previous session predates provider tracking and cannot be continued. Retry will start a fresh session.'}">
+                               th:if="${issue.claudeSessionId != null and (issue.resolvedHarnessId == null or issue.resolvedHarnessId != effectiveHarnessId)}"
+                               th:text="${issue.resolvedHarnessId != null ? 'Previous ' + issue.resolvedHarnessId + ' session cannot continue with ' + effectiveHarnessName + '.' : 'The previous session predates provider tracking and cannot be continued. Retry will start a fresh session.'}">
                                 The previous session cannot be continued with the selected provider.
                             </p>
                         </details>
@@ -587,7 +579,7 @@
                               th:text="${currentPlanningVersion.state}">PENDING</span>
                         <strong th:text="${'Current version ' + currentPlanningVersion.versionNumber}">Current version 3</strong>
                         <span th:text="${#temporals.format(currentPlanningVersion.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
-                        <span th:text="${(currentPlanningVersion.provider != null ? currentPlanningVersion.provider : 'Unknown provider') + ' · ' + (currentPlanningVersion.model != null ? currentPlanningVersion.model : 'Unknown model')}">CODEX · gpt-5.6</span>
+                        <span th:text="${(currentPlanningVersion.provider != null ? currentPlanningVersion.provider : 'Unknown provider') + ' · ' + (currentPlanningVersion.model != null ? currentPlanningVersion.model : 'Unknown model')}">Harness · model</span>
                     </div>
                 </header>
 
@@ -654,7 +646,7 @@
                                                   th:text="${version.state}">PENDING</span>
                                         </span>
                                         <span th:text="${#temporals.format(version.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
-                                        <span th:text="${(version.provider != null ? version.provider : 'Unknown provider') + ' · ' + (version.model != null ? version.model : 'Unknown model')}">CODEX · gpt-5.6</span>
+                                        <span th:text="${(version.provider != null ? version.provider : 'Unknown provider') + ' · ' + (version.model != null ? version.model : 'Unknown model')}">Harness · model</span>
                                     </a>
                                     <p th:if="${version.revisionFeedback != null and not #strings.isEmpty(version.revisionFeedback)}">
                                         <strong>Operator revision:</strong>
@@ -835,7 +827,7 @@
         <div class="detail-grid-right">
             <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3 live-terminal-panel" id="live-terminal-panel">
                 <div class="panel-header">
-                    <h3 th:text="${agentProviderName != null ? agentProviderName + ' Session' : 'Agent Session'}">Agent Session</h3>
+                    <h3 th:text="${effectiveHarnessName != null ? effectiveHarnessName + ' Session' : 'Agent Session'}">Agent Session</h3>
                     <div class="flex gap-1 terminal-toolbar" style="align-items:center;flex-wrap:wrap">
                         <span class="terminal-trim-note text-sm text-muted" id="terminal-trim-note" hidden></span>
                         <!--/* Filter box (#84): substring-hides non-matching lines live, both existing
@@ -952,21 +944,13 @@
                th:text="${issue.status.name() == 'READY_TO_START' ? 'Start implementation from the approved specification and plan?' : 'Start processing this issue now?'}">Start processing this issue now?</p>
             <p th:if="${processingMode?.name() == 'PAUSE_AFTER_CURRENT'}" class="text-sm text-muted">Only this issue will run. The automatic queue stays paused.</p>
             <form th:action="@{'/issues/' + ${issue.id} + ${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? '/start-manual' : '/start'}}" method="post">
-                <div class="field-group">
-                    <label for="startImplModel">Implementation model for this run (optional)</label>
-                    <select id="startImplModel" name="implModelOverride" data-modal-autofocus>
-                        <option value="" selected>Use repo/global setting</option>
-                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                    </select>
-                    <div th:replace="~{fragments/reasoning :: picker('startImplModel', 'implementationReasoningEffort', ${issue.implementationReasoningEffort})}"></div>
+                <div class="field-group" role="group" aria-label="Implementation" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.implementationModel, globalImplementationModel)}">
+                    <h4>Implementation for this run</h4>
+                    <div th:replace="~{fragments/reasoning :: selection('startImplModel', 'implModelOverride', ${selectionRejected == true ? submittedImplModel : issue.implModelOverride}, 'implementationReasoningEffort', ${selectionRejected == true ? submittedImplementationReasoning : issue.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
                 </div>
-                <div class="field-group">
-                    <label for="startReviewModel">Review model for this run (optional)</label>
-                    <select id="startReviewModel" name="reviewModelOverride">
-                        <option value="" selected>Use repo/global setting</option>
-                        <option th:each="m : ${modelCatalog}" th:value="${m.id}" th:text="${m.displayName}"></option>
-                    </select>
-                    <div th:replace="~{fragments/reasoning :: picker('startReviewModel', 'reviewReasoningEffort', ${issue.reviewReasoningEffort})}"></div>
+                <div class="field-group" role="group" aria-label="Review" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.reviewModel, globalReviewModel)}">
+                    <h4>Review for this run</h4>
+                    <div th:replace="~{fragments/reasoning :: selection('startReviewModel', 'reviewModelOverride', ${selectionRejected == true ? submittedReviewModel : issue.reviewModelOverride}, 'reviewReasoningEffort', ${selectionRejected == true ? submittedReviewReasoning : issue.reviewReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
                 </div>
                 <div class="field-group">
                     <label for="startBudgetOverride">Budget for this issue (USD, blank = use repo setting)</label>

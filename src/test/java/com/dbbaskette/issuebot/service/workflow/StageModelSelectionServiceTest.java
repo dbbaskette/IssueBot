@@ -9,7 +9,7 @@ import static org.mockito.Mockito.*;
 
 class StageModelSelectionServiceTest {
     final HarnessSelectionFixture fixture = new HarnessSelectionFixture();
-    final StageModelSelectionService service = new StageModelSelectionService(fixture.properties, fixture.selections, fixture.registry);
+    final StageModelSelectionService service = new StageModelSelectionService(fixture.properties, fixture.selections);
     final TrackedIssue issue = new TrackedIssue(new WatchedRepo(), 1, "issue");
 
     @Test void defaultsUseRepositoryRoleWithoutMutatingIt() {

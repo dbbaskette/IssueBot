@@ -375,7 +375,7 @@ class IssueWorkflowServiceTest {
                 .when(harnessService).pinSubscriptionHarness("codex");
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
         var coordinator = new StageWorkflowCoordinator(stages,
-                new StageModelSelectionService(fixture.properties, fixture.selections, fixture.registry),
+                new StageModelSelectionService(fixture.properties, fixture.selections),
                 harnessService, issueRepository, mock(com.dbbaskette.issuebot.repository.PlanningVersionRepository.class),
                 mock(PlanFirstTransactionManager.class), mock(IssueDispatchService.class));
         org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", coordinator);

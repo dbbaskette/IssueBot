@@ -49,6 +49,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class IssueControllerTest {
 
+    @Test void rejectedStartAndRetryPreserveExactModelAndReasoningInputs() {
+        for (boolean retry : new boolean[] {false, true}) {
+            Fixture f = new Fixture(retry ? IssueStatus.FAILED : IssueStatus.QUEUED);
+            var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+            org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+            var flash = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+            if (retry) f.controller.retry(1L, "fix it", "claude-opus-4-8", "claude-haiku-4-5", null, null,
+                    false, "", "ultra", flash);
+            else f.controller.start(1L, "claude-opus-4-8", "claude-haiku-4-5", null, null, "", "ultra", flash);
+            org.assertj.core.api.Assertions.assertThat(new java.util.HashMap<String, Object>(flash.getFlashAttributes()))
+                    .containsEntry("submittedImplModel", "claude-opus-4-8")
+                    .containsEntry("submittedReviewModel", "claude-haiku-4-5")
+                    .containsEntry("submittedImplementationReasoning", "")
+                    .containsEntry("submittedReviewReasoning", "ultra");
+            verifyNoInteractions(f.workflowService);
+        }
+    }
+
     private enum SelectionRoute { START, ROW_START, BULK_START, RETRY, QUICK_RETRY, BULK_RETRY }
 
     @ParameterizedTest
@@ -365,14 +383,20 @@ class IssueControllerTest {
     }
 
     @Test
-    void liveStatusExposesModelCatalogForRecoveryOobControls() {
+    void liveStatusPublishesTheSameHarnessCatalogForRecoveryAsTheFullPage() throws Exception {
         Fixture f = new Fixture(IssueStatus.FAILED);
-        org.springframework.ui.Model liveModel = new org.springframework.ui.ExtendedModelMap();
-
-        f.controller.liveStatus(liveModel, 1L);
-
-        org.assertj.core.api.Assertions.assertThat(liveModel.getAttribute("modelCatalog"))
-                .isSameAs(ModelCatalog.MODELS);
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var mvc = MockMvcBuilders.standaloneSetup(f.controller)
+                .setControllerAdvice(new HarnessCatalogAdvice(harnesses.registry, new ObjectMapper(), harnesses.properties))
+                .build();
+        for (String endpoint : List.of("/issues/1", "/issues/1/live-status")) {
+            var model = mvc.perform(get(endpoint)).andExpect(status().isOk())
+                    .andExpect(model().attributeExists("harnessCatalog", "harnessCatalogJson"))
+                    .andReturn().getModelAndView().getModel();
+            org.assertj.core.api.Assertions.assertThat(model.get("harnessCatalogJson").toString())
+                    .contains("claude-opus-4-8", "gpt-6-astra", "ultra");
+        }
+        verifyNoInteractions(harnesses.claude, harnesses.codex);
     }
 
     /**
@@ -587,7 +611,7 @@ class IssueControllerTest {
 
         f.controller.retry(1L, null, null, null, null, null, true, f.redirectAttributes);
 
-        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("belongs to Codex CLI"));
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), contains("belongs to codex"));
         verify(f.issues, never()).save(any());
     }
 

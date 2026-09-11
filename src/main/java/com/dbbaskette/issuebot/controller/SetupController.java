@@ -78,7 +78,7 @@ public class SetupController {
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
-        addProviderAttributes(model);
+        addHarnessAttributes(model);
 
         model.addAttribute("webhookPath", "/webhooks/github");
         model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());
@@ -138,16 +138,15 @@ public class SetupController {
      */
     @GetMapping("/setup/prereqs")
     public String prereqs(Model model) {
-        addProviderAttributes(model);
+        addHarnessAttributes(model);
         // Fresh CLI check (don't rely on stale cache)
         boolean cliAvailable = harnessService.checkCliAvailable();
         model.addAttribute("cliAvailable", cliAvailable);
 
-        // Fresh auth check (clear cache so we re-verify)
+        // Explicit readiness action: verify the selected adapter's subscription credentials.
         boolean cliAuthenticated = false;
         if (cliAvailable) {
-            harnessService.clearAuthCache();
-            cliAuthenticated = harnessService.checkAuthentication();
+            cliAuthenticated = harnessService.checkSubscriptionAuthentication(properties.getAgentProvider());
         }
         model.addAttribute("cliAuthenticated", cliAuthenticated);
 
@@ -189,10 +188,8 @@ public class SetupController {
         return "setup :: prereqs";
     }
 
-    private void addProviderAttributes(Model model) {
-        model.addAttribute("agentProvider", IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()));
-        model.addAttribute("agentProviderName", IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()).getDisplayName());
-        model.addAttribute("codexProvider",
-                "codex".equals(properties.getAgentProvider()));
+    private void addHarnessAttributes(Model model) {
+        model.addAttribute("effectiveHarnessId", properties.getAgentProvider());
+        model.addAttribute("effectiveHarnessName", harnessService.displayName());
     }
 }

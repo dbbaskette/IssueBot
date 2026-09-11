@@ -312,7 +312,8 @@ class IssueDetailGoalCardRenderTest {
         issue.setResolvedAgentProvider(com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider.CLAUDE_CODE);
 
         WebContext context = baseContext(issue, null);
-        context.setVariable("codexProvider", false);
+        context.setVariable("effectiveHarnessId", "claude");
+        context.setVariable("effectiveHarnessName", "Claude Code");
         String html = render(context);
 
         assertThat(html).contains("name=\"continueSession\"");
@@ -328,12 +329,13 @@ class IssueDetailGoalCardRenderTest {
         issue.setClaudeSessionId("sess-abcdef123456");
         issue.setResolvedAgentProvider(com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider.CODEX);
         WebContext context = baseContext(issue, null);
-        context.setVariable("codexProvider", false);
+        context.setVariable("effectiveHarnessId", "claude");
+        context.setVariable("effectiveHarnessName", "Claude Code");
 
         String html = render(context);
 
         assertThat(html).doesNotContain("name=\"continueSession\"");
-        assertThat(html).contains("Previous Codex CLI session cannot continue with Claude Code");
+        assertThat(html).contains("Previous codex session cannot continue with Claude Code");
     }
 
     @Test

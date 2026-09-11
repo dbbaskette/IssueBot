@@ -39,8 +39,8 @@
     );
   }
 
-  function modelLabel(value) {
-    return value ? value : 'global default';
+  function modelLabel(value, reasoning) {
+    return (value || 'global default') + (reasoning ? ' · ' + reasoning : '');
   }
 
   function sync(doc) {
@@ -56,8 +56,12 @@
     var review = doc.getElementById('review-model');
     var implementationOutput = doc.querySelector('[data-implementation-model-summary]');
     var reviewOutput = doc.querySelector('[data-review-model-summary]');
-    if (implementationOutput) { implementationOutput.textContent = modelLabel(implementation && implementation.value); }
-    if (reviewOutput) { reviewOutput.textContent = modelLabel(review && review.value); }
+    var implementationReasoning = doc.getElementById('implementation-model-reasoning');
+    var reviewReasoning = doc.getElementById('review-model-reasoning');
+    if (implementationOutput) { implementationOutput.textContent = modelLabel(implementation && implementation.value,
+      implementationReasoning && implementationReasoning.value); }
+    if (reviewOutput) { reviewOutput.textContent = modelLabel(review && review.value,
+      reviewReasoning && reviewReasoning.value); }
   }
 
   function load(doc, policy, csv) {

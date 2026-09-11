@@ -46,7 +46,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
@@ -109,9 +108,6 @@ public class IssueController {
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
-
-    @Autowired(required = false)
-    private CodexModelCatalog codexModelCatalog;
 
     @Autowired(required = false)
     private DecompositionGroupViewAssembler decompositionGroupViews;
@@ -263,7 +259,6 @@ public class IssueController {
                 "/issues", "Back to the queue"));
         populateDetailModel(model, issue, id, parseRequestedInteger(planVersion),
                 parseRequestedLong(reviewAttempt));
-        model.addAttribute("modelCatalog", selectedModelCatalog());
         return ViewResolver.view("issue-detail", hx != null);
     }
 
@@ -289,13 +284,6 @@ public class IssueController {
         }
     }
 
-    private List<?> selectedModelCatalog() {
-        if ("codex".equals(properties.getAgentProvider())) {
-            return codexModelCatalog == null
-                    ? CodexModelCatalog.fallbackModels() : codexModelCatalog.models();
-        }
-        return com.dbbaskette.issuebot.service.claude.ModelCatalog.MODELS;
-    }
 
     /**
      * HTMX fragment endpoint — returns just the status section (metrics + phase pipeline)
@@ -305,7 +293,6 @@ public class IssueController {
     public String liveStatus(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id, null, null);
-        model.addAttribute("modelCatalog", selectedModelCatalog());
         // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
         // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
         return "issue-detail :: live-status-poll";
@@ -340,6 +327,8 @@ public class IssueController {
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
+            preserveSelection(redirectAttributes, implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
         } else {
             redirectAttributes.addFlashAttribute("success", "Issue retry started");
         }
@@ -411,10 +400,10 @@ public class IssueController {
         if (selectionError != null) return selectionError;
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
                 && !java.util.Objects.equals(issue.getResolvedHarnessId(), properties.getAgentProvider())) {
-            String previousProvider = issue.getResolvedAgentProvider() == null
-                    ? "an unknown provider" : issue.getResolvedAgentProvider().getDisplayName();
-            return "The previous session belongs to " + previousProvider
-                    + " and cannot continue with " + IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()).getDisplayName()
+            String previousHarness = issue.getResolvedHarnessId() == null
+                    ? "an unknown coding harness" : issue.getResolvedHarnessId();
+            return "The previous session belongs to " + previousHarness
+                    + " and cannot continue with " + properties.getAgentProvider()
                     + ". Retry without continuing the previous session.";
         }
 
@@ -488,6 +477,16 @@ public class IssueController {
         return null;
     }
 
+    private void preserveSelection(RedirectAttributes redirect, String implementationModel, String reviewModel,
+            String implementationReasoning, String reviewReasoning) {
+        redirect.addFlashAttribute("selectionRejected", true);
+        redirect.addFlashAttribute("effectiveHarnessId", properties.getAgentProvider());
+        redirect.addFlashAttribute("submittedImplModel", implementationModel);
+        redirect.addFlashAttribute("submittedReviewModel", reviewModel);
+        redirect.addFlashAttribute("submittedImplementationReasoning", implementationReasoning);
+        redirect.addFlashAttribute("submittedReviewReasoning", reviewReasoning);
+    }
+
     /** Shared selection preflight: callers must run this before claims or PR cleanup. */
     private String selectionError(TrackedIssue issue, String implementationModel, String reviewModel,
                                   String implementationEffort, String reviewEffort) {
@@ -531,6 +530,8 @@ public class IssueController {
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
+            preserveSelection(redirectAttributes, implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
         } else {
             redirectAttributes.addFlashAttribute("success",
                     readyStart ? "Implementation started." : "Issue started");
@@ -642,6 +643,8 @@ public class IssueController {
                     implementationReasoningEffort, reviewReasoningEffort);
             if (selectionError != null) {
                 redirect.addFlashAttribute("error", selectionError);
+                preserveSelection(redirect, implModelOverride, reviewModelOverride,
+                        implementationReasoningEffort, reviewReasoningEffort);
                 return "redirect:/issues/" + id;
             }
             var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
@@ -655,14 +658,21 @@ public class IssueController {
                             candidate.setPlanFirstOverride(parsePlanFirstOverride(planFirstOverride));
                         candidate.setCurrentPhase(null);
                     });
-            if (!result.claimed()) redirect.addFlashAttribute("error", result.reason());
-            else {
+            if (!result.claimed()) {
+                redirect.addFlashAttribute("error", result.reason());
+                preserveSelection(redirect, implModelOverride, reviewModelOverride,
+                        implementationReasoningEffort, reviewReasoningEffort);
+            } else {
                 eventService.log("MANUAL_START", "Started only this issue while automatic processing remains paused",
                         result.issue().getRepo(), result.issue());
                 workflowService.processIssueAsync(result.issue());
                 redirect.addFlashAttribute("success", "Issue started manually. Automatic processing remains paused.");
             }
-        } catch (IllegalArgumentException ex) { redirect.addFlashAttribute("error", ex.getMessage()); }
+        } catch (IllegalArgumentException ex) {
+            redirect.addFlashAttribute("error", ex.getMessage());
+            preserveSelection(redirect, implModelOverride, reviewModelOverride,
+                    implementationReasoningEffort, reviewReasoningEffort);
+        }
         return "redirect:/issues/" + id;
     }
 

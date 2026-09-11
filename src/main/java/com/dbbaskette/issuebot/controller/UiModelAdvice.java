@@ -59,14 +59,6 @@ public class UiModelAdvice {
     @ModelAttribute("processingMode")
     public ProcessingState processingMode() { return processingControl.mode(); }
 
-    @ModelAttribute("agentProviderName")
-    public String agentProviderName() { return IssueBotProperties.AgentProvider.fromConfig(properties.getAgentProvider()).getDisplayName(); }
-
-    @ModelAttribute("codexProvider")
-    public boolean codexProvider() {
-        return "codex".equals(properties.getAgentProvider());
-    }
-
     /** Current local URL used to return operators to the same view after processing controls. */
     @ModelAttribute("currentPath")
     public String currentPath(HttpServletRequest request) {

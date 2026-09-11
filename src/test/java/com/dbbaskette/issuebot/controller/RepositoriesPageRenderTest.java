@@ -63,7 +63,12 @@ class RepositoriesPageRenderTest {
         context.setVariable("issueCounts", issueCounts);
         context.setVariable("totalIssueCounts", totalIssueCounts);
         context.setVariable("lessonsByRepo", Map.of());
-        context.setVariable("modelCatalog", List.of());
+        var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        var advice = new HarnessCatalogAdvice(fixture.registry, new com.fasterxml.jackson.databind.ObjectMapper(), fixture.properties);
+        context.setVariable("harnessCatalog", advice.harnessCatalog());
+        context.setVariable("effectiveHarnessId", "claude");
+        context.setVariable("globalImplementationModel", "claude-opus-4-8");
+        context.setVariable("globalReviewModel", "claude-sonnet-5");
         context.setVariable("repositoryFormValues", repositoryFormValues);
 
         TemplateSpec spec = new TemplateSpec("repositories", Set.of("content"),
@@ -71,6 +76,18 @@ class RepositoriesPageRenderTest {
         StringWriter writer = new StringWriter();
         templateEngine.process(spec, context, writer);
         return writer.toString();
+    }
+
+    @Test
+    void inheritedRepositoryRolesStillOfferReasoningFromTheirEffectiveModels() {
+        String html = render(List.of(), Map.of(), Map.of());
+        for (String role : List.of("implementation", "review")) {
+            String reasoning = html.substring(html.indexOf("id=\"" + role + "-model-reasoning\""));
+            reasoning = reasoning.substring(0, reasoning.indexOf("</select>"));
+            assertThat(reasoning).contains("value=\"xhigh\"", "Use inherited reasoning");
+        }
+        assertThat(html).contains("name=\"implementationModel\"", "name=\"implementationReasoningEffort\"",
+                "name=\"reviewModel\"", "name=\"reviewReasoningEffort\"");
     }
 
     @Test

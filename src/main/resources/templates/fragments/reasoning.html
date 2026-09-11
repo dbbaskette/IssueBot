@@ -1,15 +1,53 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="picker(modelId, fieldName, selected)" class="field-group"
-     data-reasoning-picker th:attr="data-reasoning-catalog=${reasoningCatalogJson},data-codex-active=${codexProvider}">
-    <label th:for="${modelId + '-reasoning'}">Reasoning level</label>
-    <select th:id="${modelId + '-reasoning'}" th:name="${fieldName}" th:attr="data-for-model=${modelId}">
-        <option value="">Use inherited reasoning</option>
-        <option th:each="level : ${#strings.arraySplit('low,medium,high,xhigh,max,ultra', ',')}"
-                th:value="${level}" th:text="${level}" th:selected="${level == selected}"></option>
-    </select>
-    <small class="text-muted">Codex only. Choices follow the selected model; blank inherits the configured effort.</small>
+<div th:fragment="selection(modelId, modelField, selectedModel, reasoningField, selectedReasoning, selectedHarness, harnessField, inherit, inheritedModel)"
+     class="form-grid" data-reasoning-picker style="grid-template-columns:repeat(auto-fit,minmax(min(100%, 11rem),1fr))"
+     th:attr="data-harness-catalog=${harnessCatalogJson},data-inherit=${inherit},data-inherited-model=${inheritedModel}"
+     th:with="models=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).models(harnessCatalog, selectedHarness)},
+              currentModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).model(models, selectedModel)},
+              effortModel=${currentModel != null ? currentModel : T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).model(models, inheritedModel)},
+              levels=${effortModel != null ? effortModel.supportedReasoningLevels : {}}">
+    <div class="field-group">
+        <label th:for="${modelId + '-harness'}">Coding harness</label>
+        <select th:if="${harnessField != null}" th:id="${modelId + '-harness'}" th:name="${harnessField}" data-harness-select required>
+            <option th:if="${#lists.isEmpty(models)}" th:value="${selectedHarness ?: ''}" th:text="${selectedHarness ?: 'Choose a coding harness'}" selected></option>
+            <option th:each="h : ${harnessCatalog}" th:value="${h.id}" th:text="${h.displayName}"
+                    th:attr="data-harness-id=${h.id}" th:selected="${h.id == selectedHarness}"></option>
+        </select>
+        <th:block th:if="${harnessField == null}">
+            <input type="text" th:id="${modelId + '-harness'}" readonly data-harness-display
+                   th:value="${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).displayName(harnessCatalog, selectedHarness)}">
+            <input type="hidden" data-harness-select th:value="${selectedHarness}">
+        </th:block>
+    </div>
+    <div class="field-group">
+        <label th:for="${modelId}">Model</label>
+        <select th:id="${modelId}" th:name="${modelField}" data-model-select th:required="${!inherit}"
+                th:attr="data-modal-autofocus=${modelId == 'startImplModel' ? '' : null}">
+            <option th:if="${inherit or selectedModel == null or selectedModel == ''}" value="" th:selected="${selectedModel == null or selectedModel == ''}"
+                    th:text="${inherit ? 'Use inherited model' : 'Choose a model'}"></option>
+            <optgroup th:each="h : ${harnessCatalog}" th:label="${h.displayName}" th:disabled="${h.id != selectedHarness}" th:hidden="${h.id != selectedHarness}">
+                <option th:each="m : ${h.models}" th:value="${m.id}" th:text="${m.displayName}"
+                        th:attr="data-harness-id=${h.id},data-model-id=${m.id},data-reasoning-levels=${m.reasoningLevelsCsv()},data-default-reasoning=${m.defaultReasoningLevel}"
+                        th:selected="${h.id == selectedHarness and m.id == selectedModel}"></option>
+            </optgroup>
+            <option th:if="${currentModel == null and selectedModel != null and selectedModel != ''}"
+                    th:value="${selectedModel}" th:text="${selectedModel + ' (unavailable)'}" selected></option>
+        </select>
+    </div>
+    <div class="field-group">
+        <label th:for="${modelId + '-reasoning'}">Reasoning</label>
+        <select th:id="${modelId + '-reasoning'}" th:name="${reasoningField}" data-reasoning-select th:required="${!inherit}">
+            <option th:if="${inherit or selectedReasoning == null or selectedReasoning == ''}" value=""
+                    th:selected="${selectedReasoning == null or selectedReasoning == ''}"
+                    th:text="${inherit ? 'Use inherited reasoning' : 'Use model default'}"></option>
+            <option th:each="level : ${levels}" th:value="${level}" th:text="${level}"
+                    th:selected="${level == selectedReasoning}"></option>
+            <option th:if="${selectedReasoning != null and selectedReasoning != '' and !#lists.contains(levels, selectedReasoning)}"
+                    th:value="${selectedReasoning}" th:text="${selectedReasoning + ' (unsupported)'}" selected></option>
+        </select>
+    </div>
 </div>
 </body>
 </html>

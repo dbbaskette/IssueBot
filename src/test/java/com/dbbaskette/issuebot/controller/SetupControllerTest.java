@@ -22,6 +22,40 @@ import static org.mockito.Mockito.*;
 
 class SetupControllerTest {
 
+    @Test void readinessCannotReportSubscriptionSuccessFromAGenericLogin() {
+        var harness = mock(CodingHarnessService.class);
+        when(harness.displayName()).thenReturn("Example Harness");
+        when(harness.checkCliAvailable()).thenReturn(true);
+        when(harness.checkAuthentication()).thenReturn(true);
+        when(harness.checkSubscriptionAuthentication("example")).thenReturn(false);
+        var props = new IssueBotProperties();
+        props.setAgentProvider("example");
+        var controller = new SetupController(harness, props, mock(IssuePollingService.class),
+                mock(TrackedIssueRepository.class), mock(GitHubApiClient.class), repoRepository,
+                webhookController, webhookDeliveryLog, mock(NotificationRepository.class));
+        var model = new ExtendedModelMap();
+        controller.prereqs(model);
+        assertThat(model.get("cliAvailable")).isEqualTo(true);
+        assertThat(model.get("cliAuthenticated")).isEqualTo(false);
+        verify(harness).checkSubscriptionAuthentication("example");
+    }
+
+    @Test void setupUsesSelectedHarnessMetadataWithoutRunningReadinessChecks() {
+        var harness = mock(CodingHarnessService.class);
+        when(harness.displayName()).thenReturn("Example Harness");
+        var props = new IssueBotProperties();
+        props.setAgentProvider("example");
+        var controller = new SetupController(harness, props, mock(IssuePollingService.class),
+                mock(TrackedIssueRepository.class), mock(GitHubApiClient.class), repoRepository,
+                webhookController, webhookDeliveryLog, mock(NotificationRepository.class));
+        var model = new ExtendedModelMap();
+        controller.setup(model, null);
+        assertThat(model.get("effectiveHarnessId")).isEqualTo("example");
+        assertThat(model.get("effectiveHarnessName")).isEqualTo("Example Harness");
+        verify(harness, never()).checkCliAvailable();
+        verify(harness, never()).checkAuthentication();
+    }
+
     private final WatchedRepoRepository repoRepository = mock(WatchedRepoRepository.class);
     private final WebhookDeliveryLog webhookDeliveryLog = new WebhookDeliveryLog();
     private final WebhookController webhookController = new WebhookController(
@@ -36,7 +70,7 @@ class SetupControllerTest {
         props.getGithub().setToken(token);
         CodingHarnessService claude = mock(CodingHarnessService.class);
         when(claude.checkCliAvailable()).thenReturn(true);
-        when(claude.checkAuthentication()).thenReturn(true);
+        when(claude.checkSubscriptionAuthentication("claude")).thenReturn(true);
         lenient().when(repoRepository.findAll()).thenReturn(List.of());
         return new SetupController(claude, props, mock(IssuePollingService.class),
                 mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks, webhookDeliveryLog,

@@ -86,8 +86,9 @@ class IssueDetailReadyToStartRenderTest {
         assertThat(startModal)
                 .contains("aria-modal=\"true\"")
                 .contains("aria-labelledby=\"start-modal-title\"")
-                .contains("Implementation model for this run")
-                .contains("Review model for this run")
+                .contains("Implementation for this run")
+                .contains("Review for this run")
+                .contains("name=\"implementationReasoningEffort\"", "name=\"reviewReasoningEffort\"")
                 .contains("name=\"budgetOverrideUsd\"")
                 .doesNotContain("startPlanFirstOverride")
                 .doesNotContain("name=\"planFirstOverride\"");

@@ -254,10 +254,15 @@ class IssueDetailLivePollRenderTest {
 
             issue.setStatus(terminalStatus);
             issue.setCurrentPhase(null);
-            ModelCatalog.ModelInfo model = new ModelCatalog.ModelInfo(
-                    "claude-live-recovery", "Claude Live Recovery", 1.0, 2.0, "default", List.of("default"));
+            var model = new com.dbbaskette.issuebot.service.harness.HarnessModel(
+                    "claude-live-recovery", "Claude Live Recovery", "", "default", List.of("default"));
             String terminalPoll = render(issue, "live-status-poll", -1, false,
-                    context -> context.setVariable("modelCatalog", List.of(model)));
+                    context -> {
+                        context.setVariable("effectiveHarnessId", "claude");
+                        context.setVariable("harnessCatalog", List.of(new HarnessCatalogAdvice.HarnessView(
+                                "claude", "Claude Code", "unchecked", "unchecked",
+                                new com.dbbaskette.issuebot.service.harness.HarnessCapabilities(false, true), List.of(model))));
+                    });
 
             assertThat(initiallyRunning)
                     .contains("id=\"recovery\"")
@@ -268,7 +273,7 @@ class IssueDetailLivePollRenderTest {
                     .contains("id=\"recovery\" hx-swap-oob=\"true\"")
                     .contains("action=\"/issues/36/retry\" method=\"post\"")
                     .contains("Guidance for the next attempt")
-                    .contains("value=\"claude-live-recovery\">Claude Live Recovery</option>");
+                    .contains("value=\"claude-live-recovery\"", "data-model-id=\"claude-live-recovery\"", "Claude Live Recovery</option>");
             assertThat(occurrences(terminalPoll, "value=\"claude-live-recovery\""))
                     .as(terminalStatus + " implementation and review selector choices")
                     .isEqualTo(2);

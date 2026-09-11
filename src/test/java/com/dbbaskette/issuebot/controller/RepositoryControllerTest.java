@@ -23,6 +23,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class RepositoryControllerTest {
 
+    @Test void nonModelValidationErrorsRedisplayExactUnresolvedRoleInputs() throws Exception {
+        Fixture f = new Fixture();
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+        var result = MockMvcBuilders.standaloneSetup(f.controller).build().perform(baseRequest()
+                .param("workflowPolicy", "invalid")
+                .param("implementationModel", "claude-haiku-4-5")
+                .param("implementationReasoningEffort", "")
+                .param("reviewModel", "claude-opus-4-8")
+                .param("reviewReasoningEffort", "xhigh")).andReturn();
+        var values = new com.fasterxml.jackson.databind.ObjectMapper().readTree(
+                result.getModelAndView().getModel().get("repositoryFormValues").toString());
+        assertThat(values.path("implementationModel").asText()).isEqualTo("claude-haiku-4-5");
+        assertThat(values.path("implementationReasoningEffort").asText()).isEmpty();
+        assertThat(values.path("reviewModel").asText()).isEqualTo("claude-opus-4-8");
+        assertThat(values.path("reviewReasoningEffort").asText()).isEqualTo("xhigh");
+        verify(f.repos, never()).save(any());
+    }
+
     @Test
     void savingModelWithOmittedReasoningPersistsDefaultUsedByTheNextStage() {
         Fixture f = new Fixture();
@@ -34,7 +53,7 @@ class RepositoryControllerTest {
         assertThat(saved.getImplementationReasoningEffort()).isEqualTo("default");
         assertThat(saved.getReviewReasoningEffort()).isEqualTo("high");
         var stages = new com.dbbaskette.issuebot.service.workflow.StageModelSelectionService(
-                harnesses.properties, harnesses.selections, harnesses.registry);
+                harnesses.properties, harnesses.selections);
         var issue = new TrackedIssue(saved, 1, "Saved repository issue");
         assertThat(stages.defaults(issue, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION))
                 .isEqualTo(new com.dbbaskette.issuebot.service.harness.HarnessSelection("claude", "claude-haiku-4-5", "default"));

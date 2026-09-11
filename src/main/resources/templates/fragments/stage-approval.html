@@ -20,16 +20,11 @@
             <p th:if="${pendingStageApproval.stage.name() != 'PLANNING'}"><a href="#iteration-history">Review iteration evidence</a></p>
             <form th:action="@{'/issues/' + ${issue.id} + '/stages/' + ${pendingStageApproval.id} + '/approve'}" method="post"
                   th:id="${'stage-approval-form-' + pendingStageApproval.id}" hx-preserve="true">
-                <div th:if="${pendingStageApproval.stage.modelDriven()}" class="form-group">
-                    <label for="stage-model">Provider and model for this stage</label>
-                    <select id="stage-model" name="selection" required>
-                        <optgroup th:each="catalog : ${stageModels}" th:label="${catalog.key}">
-                            <option th:each="model : ${catalog.value}" th:value="${catalog.key + ':' + model}"
-                                    th:selected="${catalog.key == pendingStageApproval.provider?.name() and model == pendingStageApproval.model}"
-                                    th:text="${catalog.key + ' · ' + model}">Model</option>
-                        </optgroup>
-                    </select>
-                    <div th:replace="~{fragments/reasoning :: picker('stage-model', 'reasoningEffort', ${pendingStageApproval.reasoningEffort})}"></div>
+                <div th:if="${pendingStageApproval.stage.modelDriven()}" class="form-group"
+                     th:with="submitted=${stageSelectionApprovalId == pendingStageApproval.id},
+                              savedModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).model(T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).models(harnessCatalog, pendingStageApproval.harnessId), pendingStageApproval.model)},
+                              savedReasoning=${#strings.isEmpty(pendingStageApproval.reasoningEffort) and savedModel != null ? savedModel.defaultReasoningLevel : pendingStageApproval.reasoningEffort}">
+                    <div th:replace="~{fragments/reasoning :: selection('stage-model', 'model', ${submitted ? stageModel : pendingStageApproval.model}, 'reasoningEffort', ${submitted ? stageReasoningEffort : savedReasoning}, ${submitted ? stageHarnessId : pendingStageApproval.harnessId}, 'harnessId', false, null)}"></div>
                     <small class="text-muted">Uses subscription CLI authentication. Repository defaults stay unchanged.</small>
                 </div>
                 <button type="submit" class="btn btn-primary" th:disabled="${processingMode?.name() != 'RUNNING' and not (processingMode?.name() == 'PAUSE_AFTER_CURRENT' and issue.manualDispatch)}"
@@ -46,7 +41,7 @@
         <ul class="panel-body">
             <li th:each="decision : ${stageApprovalHistory}">
                 <span th:text="${decision.stage + ' · run ' + (decision.runNumber + 1) + ' · attempt ' + decision.attempt + ' · ' + decision.state}"></span>
-                <span th:if="${decision.provider != null}" th:text="${' · ' + decision.provider + '/' + decision.model}"></span>
+                <span th:if="${decision.harnessId != null}" th:text="${' · ' + decision.harnessId + '/' + decision.model}"></span>
                 <span th:if="${decision.reasoningEffort != null}" th:text="${' · reasoning: ' + decision.reasoningEffort}"></span>
                 <span th:if="${decision.actor != null}" th:text="${' · ' + decision.actor}"></span>
                 <time th:if="${decision.approvedAt != null}" th:text="${decision.approvedAt}"></time>

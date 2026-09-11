@@ -1135,7 +1135,16 @@
   }
   function setValue(id, val) {
     var el = document.getElementById(id);
-    if (el) { el.value = (val == null ? '' : val); }
+    if (!el) return;
+    var value = val == null ? '' : String(val);
+    if (el.tagName === 'SELECT' && el.matches('[data-model-select], [data-reasoning-select]')
+        && !Array.from(el.options).some(function (item) { return item.value === value; })) {
+      var item = document.createElement('option');
+      item.value = value;
+      item.textContent = value;
+      el.appendChild(item);
+    }
+    el.value = value;
   }
 
   function syncPlanFirstSubmission() {
@@ -1285,23 +1294,11 @@
     if (e.target.id === 'plan-first') { syncPlanFirstSubmission(); }
     if (window.RepositoryWorkflow &&
         (e.target.name === 'workflowPolicy' || e.target.name === 'approvalStages' ||
-         e.target.id === 'implementation-model' || e.target.id === 'review-model')) {
+         e.target.id === 'implementation-model' || e.target.id === 'review-model' ||
+         e.target.id === 'implementation-model-reasoning' || e.target.id === 'review-model-reasoning')) {
       window.RepositoryWorkflow.sync(document);
     }
   });
-
-  // --- Models card (custom model select) -----------------------------------
-  // The Implementation/Review selects on the Settings page offer a
-  // "Custom…" option; picking it reveals a sibling .custom-model-input text
-  // field (scoped to the select's .field-group container). On submit, any
-  // .model-select still set to "__custom__" gets a new <option> appended
-  // whose value is the custom input's text, so the posted <select> param
-  // carries the real model ID. (The Utility select has no custom option and
-  // is untouched by either handler.)
-  function customModelInputFor(select) {
-    var group = select.closest('.field-group');
-    return group ? group.querySelector('.custom-model-input') : null;
-  }
 
   function revealQueueDependencies() {
     if (window.location.hash !== '#dependency-map') return;
@@ -1320,148 +1317,92 @@
     }
   });
 
+  function syncHarnessSelection(group, changed) {
+    var harnessSelect = group.querySelector('[data-harness-select]');
+    var modelSelect = group.querySelector('[data-model-select]');
+    var reasoningSelect = group.querySelector('[data-reasoning-select]');
+    if (!harnessSelect || !modelSelect || !reasoningSelect) return;
+    var catalog;
+    try { catalog = JSON.parse(group.dataset.harnessCatalog || '[]'); } catch (error) { return; }
+    var harness = catalog.find(function (entry) { return entry.id === harnessSelect.value; });
+    var models = harness ? harness.models : [];
+    var inherited = group.dataset.inherit === 'true';
+    var model = modelSelect.value;
+    var reasoning = reasoningSelect.value;
+    if (changed === 'harness') model = inherited ? '' : (models.length ? models[0].id : '');
+
+    function option(value, label) {
+      var item = document.createElement('option');
+      item.value = value;
+      item.textContent = label;
+      return item;
+    }
+    var modelOptions = [];
+    if (inherited || !model) modelOptions.push(option('', inherited ? 'Use inherited model' : 'Choose a model'));
+    models.forEach(function (entry) {
+      var item = option(entry.id, entry.displayName);
+      item.dataset.harnessId = harnessSelect.value;
+      item.dataset.modelId = entry.id;
+      item.dataset.reasoningLevels = entry.supportedReasoningLevels.join(',');
+      item.dataset.defaultReasoning = entry.defaultReasoningLevel;
+      modelOptions.push(item);
+    });
+    var info = models.find(function (entry) { return entry.id === model; });
+    if (model && !info) modelOptions.push(option(model, model + ' (unavailable)'));
+    modelSelect.replaceChildren.apply(modelSelect, modelOptions);
+    modelSelect.value = model;
+
+    if (!model && inherited) {
+      info = models.find(function (entry) { return entry.id === group.dataset.inheritedModel; });
+    }
+    var levels = info ? info.supportedReasoningLevels : [];
+    if (changed) {
+      if (!model && inherited) reasoning = '';
+      else if (info && (changed === 'harness' || levels.indexOf(reasoning) < 0)) reasoning = info.defaultReasoningLevel;
+    }
+    var reasoningOptions = [];
+    if ((inherited && !model) || !reasoning) {
+      reasoningOptions.push(option('', inherited ? 'Use inherited reasoning' : 'Use model default'));
+    }
+    levels.forEach(function (level) { reasoningOptions.push(option(level, level)); });
+    // Preserve initial or server-rejected values verbatim; only an operator change resets them.
+    if (reasoning && levels.indexOf(reasoning) < 0) {
+      reasoningOptions.push(option(reasoning, reasoning + ' (unsupported)'));
+    }
+    reasoningSelect.replaceChildren.apply(reasoningSelect, reasoningOptions);
+    reasoningSelect.value = reasoning;
+    group.dataset.harnessInitialized = 'true';
+  }
+
+  // Harness picker events
   function syncReasoningPickers() {
     document.querySelectorAll('[data-reasoning-picker]').forEach(function (group) {
-      var select = group.querySelector('select');
-      var modelSelect = document.getElementById(select.dataset.forModel);
-      if (!modelSelect) return;
-      var model = modelSelect.value;
-      var active = model.indexOf('CODEX:') === 0 ||
-        (model.indexOf(':') < 0 && group.dataset.codexActive === 'true');
-      group.hidden = !active;
-      select.disabled = !active;
-      if (!active) return;
-      model = model.replace(/^CODEX:/, '');
-      var catalog = [];
-      try { catalog = JSON.parse(group.dataset.reasoningCatalog || '[]'); } catch (e) {}
-      var info = catalog.find(function (item) { return item.id === model; });
-      Array.from(select.options).forEach(function (option) {
-        option.disabled = !!option.value && !!info &&
-          info.supportedReasoningLevels.indexOf(option.value) < 0;
-      });
-      if (select.selectedOptions.length && select.selectedOptions[0].disabled) select.value = '';
+      syncHarnessSelection(group);
     });
   }
-  document.addEventListener('DOMContentLoaded', syncReasoningPickers);
-  document.addEventListener('htmx:afterSwap', syncReasoningPickers);
+  function initializeHarnessPickers() {
+    document.querySelectorAll('[data-reasoning-picker]').forEach(function (group) {
+      if (group.dataset.harnessInitialized !== 'true') syncHarnessSelection(group);
+    });
+  }
+  document.addEventListener('DOMContentLoaded', initializeHarnessPickers);
+  document.addEventListener('htmx:afterSwap', initializeHarnessPickers);
   document.addEventListener('change', function (event) {
-    if (event.target.tagName === 'SELECT') syncReasoningPickers();
-  });
-
-  function syncProviderModelOptions(form, resetSelection) {
-    if (!form) { return; }
-    var providerSelect = form.querySelector('#agent-provider');
-    if (!providerSelect) { return; }
-    var provider = providerSelect.value;
-    var key = provider === 'CODEX' ? 'codexDefault' : 'claudeDefault';
-    var selects = form.querySelectorAll('.provider-model-select');
-    Array.prototype.forEach.call(selects, function (select) {
-      Array.prototype.forEach.call(select.options, function (option) {
-        var owner = option.getAttribute('data-provider');
-        option.disabled = !!owner && owner !== provider;
+    var target = event.target;
+    if (!target.matches('[data-harness-select], [data-model-select]')) return;
+    var group = target.closest('[data-reasoning-picker]');
+    if (!group) return;
+    var changed = target.matches('[data-harness-select]') ? 'harness' : 'model';
+    var sharedForm = group.closest('[data-shared-harness-form]');
+    if (changed === 'harness' && sharedForm) {
+      sharedForm.querySelectorAll('[data-reasoning-picker]').forEach(function (sibling) {
+        sibling.querySelector('[data-harness-select]').value = target.value;
+        var display = sibling.querySelector('[data-harness-display]');
+        if (display) display.value = target.selectedOptions[0].textContent;
+        syncHarnessSelection(sibling, 'harness');
       });
-      var selectedOwner = select.selectedOptions.length
-        ? select.selectedOptions[0].getAttribute('data-provider') : null;
-      if (resetSelection || (selectedOwner && selectedOwner !== provider)) {
-        var preferred = select.dataset[key];
-        var match = Array.prototype.find.call(select.options, function (option) {
-          return option.value === preferred && !option.disabled;
-        });
-        if (!match) {
-          match = Array.prototype.find.call(select.options, function (option) {
-            return !option.disabled && option.value !== '__custom__';
-          });
-        }
-        if (match) select.value = match.value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-    syncCodexReasoningControls(form);
-  }
-
-  function syncCodexReasoningControls(form) {
-    if (!form) { return; }
-    var providerSelect = form.querySelector('#agent-provider');
-    var codexActive = providerSelect && providerSelect.value === 'CODEX';
-    Array.prototype.forEach.call(form.querySelectorAll('[data-codex-reasoning-group]'), function (group) {
-      group.hidden = !codexActive;
-      var reasoningSelect = group.querySelector('.codex-reasoning-select');
-      if (!reasoningSelect) { return; }
-      reasoningSelect.disabled = !codexActive;
-      if (!codexActive) { return; }
-
-      var modelSelect = form.querySelector('#' + reasoningSelect.dataset.modelSelectId);
-      var modelOption = modelSelect && modelSelect.selectedIndex >= 0
-        ? modelSelect.options[modelSelect.selectedIndex] : null;
-      var supportedValue = modelOption ? modelOption.getAttribute('data-reasoning-levels') : null;
-      var supported = supportedValue ? supportedValue.split(',') : null;
-      Array.prototype.forEach.call(reasoningSelect.options, function (option) {
-        option.disabled = !!supported && supported.indexOf(option.value) < 0;
-      });
-      if (reasoningSelect.selectedOptions.length && reasoningSelect.selectedOptions[0].disabled) {
-        var preferred = modelOption ? modelOption.getAttribute('data-default-reasoning') : null;
-        var replacement = Array.prototype.find.call(reasoningSelect.options, function (option) {
-          return !option.disabled && option.value === preferred;
-        }) || Array.prototype.find.call(reasoningSelect.options, function (option) {
-          return !option.disabled;
-        });
-        if (replacement) reasoningSelect.value = replacement.value;
-      }
-    });
-  }
-
-  function initializeProviderModelForms(root) {
-    var scope = root && root.querySelectorAll ? root : document;
-    Array.prototype.forEach.call(scope.querySelectorAll('[data-provider-model-form]'), function (form) {
-      syncProviderModelOptions(form, false);
-    });
-  }
-
-  document.addEventListener('DOMContentLoaded', function () {
-    initializeProviderModelForms(document);
-  });
-
-  document.addEventListener('htmx:afterSwap', function (e) {
-    initializeProviderModelForms(e.target || document);
-  });
-
-  document.addEventListener('change', function (e) {
-    if (e.target && e.target.id === 'agent-provider') {
-      syncProviderModelOptions(e.target.closest('[data-provider-model-form]'), true);
-    } else if (e.target && e.target.classList
-        && e.target.classList.contains('provider-model-select')) {
-      syncCodexReasoningControls(e.target.closest('[data-provider-model-form]'));
-    }
-  });
-
-  document.addEventListener('change', function (e) {
-    var select = e.target;
-    if (!select.classList || !select.classList.contains('model-select')) { return; }
-    var input = customModelInputFor(select);
-    if (!input) { return; }
-    var custom = (select.value === '__custom__');
-    input.hidden = !custom;
-    // Required only while visible: blocks submitting an empty custom ID, but a
-    // hidden required input would invisibly wedge the form.
-    input.required = custom;
-  });
-
-  document.addEventListener('submit', function (e) {
-    var form = e.target;
-    if (!form || form.nodeName !== 'FORM') { return; }
-    var selects = form.querySelectorAll('.model-select');
-    Array.prototype.forEach.call(selects, function (select) {
-      if (select.value !== '__custom__') { return; }
-      var input = customModelInputFor(select);
-      var value = input ? input.value.trim() : '';
-      if (!value) { return; }
-      var opt = document.createElement('option');
-      opt.value = value;
-      opt.textContent = value;
-      opt.selected = true;
-      select.appendChild(opt);
-      select.value = value;
-    });
+    } else syncHarnessSelection(group, changed);
+    if (window.RepositoryWorkflow) window.RepositoryWorkflow.sync(document);
   });
 
   // --- Sortable tables ----------------------------------------------------

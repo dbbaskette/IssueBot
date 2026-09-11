@@ -34,7 +34,7 @@ class StageApprovalServiceTest {
     }
     @Test void claudeStagePersistsAndRetainsItsExactReasoningTuple() {
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
-        selection = new StageModelSelectionService(properties, fixture.selections, fixture.registry);
+        selection = new StageModelSelectionService(properties, fixture.selections);
         service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThat(decision.getHarnessId()).isEqualTo("claude");
@@ -46,7 +46,7 @@ class StageApprovalServiceTest {
 
     @Test void unsupportedSelectionDoesNotMutateWaitingApprovalOrIssue() {
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
-        selection = new StageModelSelectionService(properties, fixture.selections, fixture.registry);
+        selection = new StageModelSelectionService(properties, fixture.selections);
         service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, "claude", "claude-haiku-4-5", "alice", "max"))
@@ -62,7 +62,7 @@ class StageApprovalServiceTest {
     ProcessingControlRepository controls = mock(ProcessingControlRepository.class);
     DecompositionReservationService reservations = mock(DecompositionReservationService.class);
     HarnessSelectionFixture fixture = new HarnessSelectionFixture();
-    StageModelSelectionService selection = spy(new StageModelSelectionService(fixture.properties, fixture.selections, fixture.registry));
+    StageModelSelectionService selection = spy(new StageModelSelectionService(fixture.properties, fixture.selections));
     IssueBotProperties properties = new IssueBotProperties();
     StageApprovalService service = new StageApprovalService(issues, repos, approvals, controls,
             reservations, selection, properties);
