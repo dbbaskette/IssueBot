@@ -29,6 +29,37 @@ class StageApprovalPersistenceTest {
     @MockitoBean IssueBotProperties properties;
     @MockitoBean com.dbbaskette.issuebot.service.codex.ReasoningSelectionService reasoning;
 
+    @Test void physicallyBlankIdentityColumnsDoNotChooseClaudeOrFallBackToLegacyCodex() {
+        var repo = repos.saveAndFlush(new WatchedRepo("stage", "blank-identities"));
+        var issue = issues.saveAndFlush(new TrackedIssue(repo, 1, "blank approval identity"));
+        try {
+            jdbc.update("""
+                    INSERT INTO stage_approvals (issue_id, stage, attempt, state, model)
+                    VALUES (?, 'REVIEW', 1, 'WAITING', 'saved-model')
+                    """, issue.getId());
+            for (String[] identities : new String[][] {
+                    {"", "CODEX"}, {" \t ", "CODEX"}, {null, ""}, {null, " \t "}}) {
+                jdbc.update("UPDATE stage_approvals SET harness_id = ?, provider = ? WHERE issue_id = ?",
+                        identities[0], identities[1], issue.getId());
+                jdbc.update("UPDATE tracked_issues SET resolved_harness_id = ?, resolved_agent_provider = ? WHERE id = ?",
+                        identities[0], identities[1], issue.getId());
+                assertThat(service.history(issue.getId())).singleElement().satisfies(saved -> {
+                    assertThat(saved.getHarnessId()).isNull();
+                    assertThat(saved.getProvider()).isNull();
+                    assertThat(saved.getState()).isEqualTo(StageApproval.State.WAITING);
+                    assertThat(saved.getModel()).isEqualTo("saved-model");
+                });
+                var savedIssue = issues.findById(issue.getId()).orElseThrow();
+                assertThat(savedIssue.getResolvedHarnessId()).isNull();
+                assertThat(savedIssue.getResolvedAgentProvider()).isNull();
+            }
+        } finally {
+            approvals.deleteAll();
+            issues.deleteAll();
+            repos.deleteAll();
+        }
+    }
+
     @Test void legacyOnlyAndUnknownStageRowsHydrateWithoutChangingIdentity() {
         var repo = repos.saveAndFlush(new WatchedRepo("stage", "legacy-identities"));
         var issue = issues.saveAndFlush(new TrackedIssue(repo, 1, "legacy approval"));

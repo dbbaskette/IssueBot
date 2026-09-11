@@ -54,11 +54,12 @@ public class StageApproval {
     public State getState() { return state; }
     public void setState(State value) { state = value; }
     public String getHarnessId() {
+        // Only an absent neutral column may read legacy data; a present blank is missing identity.
         String value = harnessId != null ? harnessId : provider;
-        return value == null ? null : HarnessIds.normalize(value);
+        return value == null || value.isBlank() ? null : HarnessIds.normalize(value);
     }
     public void setHarnessId(String value) {
-        harnessId = value == null ? null : HarnessIds.normalize(value);
+        harnessId = value == null || value.isBlank() ? null : HarnessIds.normalize(value);
         provider = switch (harnessId) {
             case null -> null;
             case HarnessIds.CLAUDE -> "CLAUDE_CODE";

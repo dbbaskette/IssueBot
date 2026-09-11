@@ -2,6 +2,9 @@ package com.dbbaskette.issuebot.model;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -16,6 +19,35 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * both the workflow's overBudget checkpoint and the issue-detail view.
  */
 class TrackedIssueTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankHarnessWritesClearIdentityWithoutChoosingClaude(String blank) {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 1, "Test");
+        issue.setResolvedAgentProvider(AgentProvider.CODEX);
+        issue.setResolvedHarnessId(blank);
+        assertThat(issue.getResolvedHarnessId()).isNull();
+        assertThat(issue.getResolvedAgentProvider()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankAuthoritativeIdentityDoesNotFallBackToLegacyCodex(String blank) {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 1, "Test");
+        issue.setResolvedAgentProvider(AgentProvider.CODEX);
+        ReflectionTestUtils.setField(issue, "resolvedHarnessId", blank);
+        assertThat(issue.getResolvedHarnessId()).isNull();
+        assertThat(issue.getResolvedAgentProvider()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankLegacyIdentityDoesNotChooseClaude(String blank) {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 1, "Test");
+        ReflectionTestUtils.setField(issue, "resolvedAgentProvider", blank);
+        assertThat(issue.getResolvedHarnessId()).isNull();
+        assertThat(issue.getResolvedAgentProvider()).isNull();
+    }
 
     @Test
     void harnessIdentityNormalizesLegacyWritesAndClearsWithoutDefaulting() {

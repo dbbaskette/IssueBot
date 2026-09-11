@@ -5,6 +5,9 @@ import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 import java.util.Optional;
 import static org.assertj.core.api.Assertions.*;
@@ -129,6 +132,45 @@ class StageApprovalServiceTest {
         assertThat(decision.getModel()).isEqualTo("gpt-6-astra");
         assertThat(decision.getReasoningEffort()).isEqualTo("ultra");
         assertThat(decision.getState()).isEqualTo(StageApproval.State.APPROVED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankHarnessWritesCannotSelectDefaultProvider(String blank) {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        decision.setHarnessId(blank);
+        assertThat(decision.getHarnessId()).isNull();
+        assertThat(decision.getProvider()).isNull();
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankAuthoritativeIdentityCannotUseConflictingLegacyCodex(String blank) {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        ReflectionTestUtils.setField(decision, "harnessId", blank);
+        clearInvocations(selection);
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+        assertThat(decision.getHarnessId()).isNull();
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        verifyNoInteractions(selection);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " \t "})
+    void blankLegacyIdentityCannotSelectDefaultProvider(String blank) {
+        StageApproval decision = waiting(WorkflowStage.REVIEW);
+        ReflectionTestUtils.setField(decision, "harnessId", null);
+        ReflectionTestUtils.setField(decision, "provider", blank);
+        clearInvocations(selection);
+        assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, null, null, "alice"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("harness");
+        assertThat(decision.getHarnessId()).isNull();
+        assertThat(decision.getState()).isEqualTo(StageApproval.State.WAITING);
+        verifyNoInteractions(selection);
     }
 
     @Test void missingPersistedIdentityRequiresExplicitChoiceInsteadOfDefaultProvider() {

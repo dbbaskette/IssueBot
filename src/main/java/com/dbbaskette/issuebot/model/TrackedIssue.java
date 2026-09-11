@@ -232,11 +232,12 @@ public class TrackedIssue {
     public void setResolvedReviewModel(String resolvedReviewModel) { this.resolvedReviewModel = resolvedReviewModel; }
 
     public String getResolvedHarnessId() {
+        // Only an absent neutral column may read legacy data; a present blank is missing identity.
         String value = resolvedHarnessId != null ? resolvedHarnessId : resolvedAgentProvider;
-        return value == null ? null : HarnessIds.normalize(value);
+        return value == null || value.isBlank() ? null : HarnessIds.normalize(value);
     }
     public void setResolvedHarnessId(String value) {
-        resolvedHarnessId = value == null ? null : HarnessIds.normalize(value);
+        resolvedHarnessId = value == null || value.isBlank() ? null : HarnessIds.normalize(value);
         // Retain the legacy representation for old active-run consumers and rollback.
         resolvedAgentProvider = switch (resolvedHarnessId) {
             case null -> null;
