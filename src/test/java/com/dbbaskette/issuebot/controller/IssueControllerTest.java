@@ -49,6 +49,56 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class IssueControllerTest {
 
+    private enum SelectionRoute { START, ROW_START, BULK_START, RETRY, QUICK_RETRY, BULK_RETRY }
+
+    @ParameterizedTest
+    @EnumSource(SelectionRoute.class)
+    void everyStartAndRetryRouteRejectsInheritedInvalidTupleBeforeMutation(SelectionRoute route) throws Exception {
+        boolean retry = route.name().contains("RETRY");
+        IssueStatus initialStatus = retry ? IssueStatus.FAILED : IssueStatus.QUEUED;
+        Fixture f = new Fixture(initialStatus);
+        var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "reasoning", harnesses.selections);
+        f.issue.getRepo().setImplementationModel("claude-haiku-4-5");
+        f.issue.getRepo().setImplementationReasoningEffort("max");
+        f.issue.setCurrentIteration(2);
+        f.issue.setClaudeSessionId("saved-session");
+        f.issue.setBranchName("issuebot/issue-42");
+        f.issue.setPrNumber(99);
+        if (retry) {
+            var pr = new ObjectMapper().createObjectNode().put("number", 99);
+            pr.putObject("head").put("ref", "issuebot/issue-42");
+            when(f.gitHubApiClient.listOpenPullRequests("acme", "widgets", GitOperationsService.BRANCH_PREFIX))
+                    .thenReturn(List.of(pr));
+        }
+
+        invokeSelectionRoute(route, f);
+
+        org.assertj.core.api.Assertions.assertThat(f.issue.getStatus()).isEqualTo(initialStatus);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getCurrentIteration()).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(f.issue.getClaudeSessionId()).isEqualTo("saved-session");
+        org.assertj.core.api.Assertions.assertThat(f.issue.getPrNumber()).isEqualTo(99);
+        verify(f.issues, never()).save(any());
+        verify(f.dispatchService, never()).claimStart(anyLong(), any());
+        verify(f.dispatchService, never()).claimReadyStart(anyLong(), any());
+        verify(f.dispatchService, never()).claimRetry(anyLong(), any(),
+                any(com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager.RetryMutation.class));
+        verifyNoInteractions(f.gitHubApiClient, f.workflowService);
+        verify(f.redirectAttributes).addFlashAttribute(eq("error"), anyString());
+    }
+
+    private void invokeSelectionRoute(SelectionRoute route, Fixture f) {
+        switch (route) {
+            case START -> f.controller.start(1L, null, null, null, null, null, null, f.redirectAttributes);
+            // The queue row uses the same /{id}/start endpoint with omitted overrides.
+            case ROW_START -> f.controller.start(1L, null, null, null, null, f.redirectAttributes);
+            case BULK_START -> f.controller.bulkStart(List.of(1L), null, null, null, null, f.redirectAttributes);
+            case RETRY -> f.controller.retry(1L, null, null, null, null, null, false, null, null, f.redirectAttributes);
+            case QUICK_RETRY -> f.controller.retryQuick(1L, null, null, null, null, f.redirectAttributes);
+            case BULK_RETRY -> f.controller.bulkRetry(List.of(1L), null, null, null, null, f.redirectAttributes);
+        }
+    }
+
     @Test void startRejectsReasoningUnsupportedByInheritedRepositoryModelBeforeClaim() {
         Fixture f = new Fixture(IssueStatus.QUEUED);
         f.issue.getRepo().setImplementationModel("claude-haiku-4-5");

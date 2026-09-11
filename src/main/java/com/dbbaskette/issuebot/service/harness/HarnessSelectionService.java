@@ -75,7 +75,7 @@ public class HarnessSelectionService {
         String id = properties.getAgentProvider();
         if (!present(model) && !present(effort)) return null;
         HarnessSelection selected = resolve(id, present(model) ? model : globalModel(id, stage == WorkflowStage.REVIEW, false), effort);
-        return present(effort) ? selected.reasoningLevel() : null;
+        return selected.reasoningLevel();
     }
 
     /** Compatibility callers still execute the exact saved stage tuple, regardless of current defaults. */

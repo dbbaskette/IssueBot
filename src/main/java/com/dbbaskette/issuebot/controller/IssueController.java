@@ -335,7 +335,6 @@ public class IssueController {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         String error;
         try {
-            validateReasoning(issue, implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
             error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
                     budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
@@ -407,6 +406,9 @@ public class IssueController {
                 iterationRepository.findByIssueOrderByIterationNumAsc(issue))) {
             return "The second Plan First conformance miss requires the guided implementation retry";
         }
+        String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
+                implementationReasoningEffort, reviewReasoningEffort);
+        if (selectionError != null) return selectionError;
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
                 && !java.util.Objects.equals(issue.getResolvedHarnessId(), properties.getAgentProvider())) {
             String previousProvider = issue.getResolvedAgentProvider() == null
@@ -486,9 +488,11 @@ public class IssueController {
         return null;
     }
 
-    private void validateReasoning(TrackedIssue issue, String implementationModel, String reviewModel,
-                                   String implementationEffort, String reviewEffort) {
-        if (reasoning != null) {
+    /** Shared selection preflight: callers must run this before claims or PR cleanup. */
+    private String selectionError(TrackedIssue issue, String implementationModel, String reviewModel,
+                                  String implementationEffort, String reviewEffort) {
+        if (reasoning == null) return null;
+        try {
             // Validate proposed overrides against this repository before mutating the claimed issue.
             TrackedIssue proposed = new TrackedIssue(issue.getRepo(), issue.getIssueNumber(), issue.getIssueTitle());
             proposed.setImplModelOverride(implementationModel);
@@ -497,6 +501,9 @@ public class IssueController {
             proposed.setReviewReasoningEffort(reviewEffort);
             reasoning.forStage(proposed, properties.getAgentProvider(), WorkflowStage.IMPLEMENTATION);
             reasoning.forStage(proposed, properties.getAgentProvider(), WorkflowStage.REVIEW);
+            return null;
+        } catch (IllegalArgumentException invalidSelection) {
+            return invalidSelection.getMessage();
         }
     }
 
@@ -519,7 +526,6 @@ public class IssueController {
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
         String error;
         try {
-            validateReasoning(issue, implModelOverride, reviewModelOverride, implementationReasoningEffort, reviewReasoningEffort);
             error = claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
                     budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
@@ -567,6 +573,9 @@ public class IssueController {
     private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
             String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
             boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort) {
+        String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
+                implementationReasoningEffort, reviewReasoningEffort);
+        if (selectionError != null) return selectionError;
         // Enforce the same gating as the polling service
         String gateReason = checkGate(issue, null);
         if (gateReason != null) {
@@ -629,8 +638,12 @@ public class IssueController {
             @RequestParam(required = false) BigDecimal budgetOverrideUsd,
             @RequestParam(required = false) String planFirstOverride, RedirectAttributes redirect) {
         try {
-            validateReasoning(issueRepository.findById(id).orElseThrow(), implModelOverride, reviewModelOverride,
+            String selectionError = selectionError(issueRepository.findById(id).orElseThrow(), implModelOverride, reviewModelOverride,
                     implementationReasoningEffort, reviewReasoningEffort);
+            if (selectionError != null) {
+                redirect.addFlashAttribute("error", selectionError);
+                return "redirect:/issues/" + id;
+            }
             var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
                     candidate -> checkGate(candidate, null), candidate -> {
                         candidate.setImplModelOverride(normalize(implModelOverride));
