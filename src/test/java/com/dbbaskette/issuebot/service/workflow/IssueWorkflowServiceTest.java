@@ -14,7 +14,7 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -55,7 +55,7 @@ class IssueWorkflowServiceTest {
     private FollowUpService followUpService;
     private CodeReviewService codeReviewService;
     private CostTrackingRepository costRepository;
-    private ClaudeCodeService claudeCode;
+    private CodingHarnessService harnessService;
     private EventService eventService;
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
@@ -138,7 +138,7 @@ class IssueWorkflowServiceTest {
         followUpService = mock(FollowUpService.class);
         codeReviewService = mock(CodeReviewService.class);
         costRepository = mock(CostTrackingRepository.class);
-        claudeCode = mock(ClaudeCodeService.class);
+        harnessService = mock(CodingHarnessService.class);
         eventService = mock(EventService.class);
         cancellationService = new WorkflowCancellationService();
         sseService = mock(SseService.class);
@@ -146,7 +146,7 @@ class IssueWorkflowServiceTest {
         workflowService = new IssueWorkflowService(
                 gitOps,
                 gitHubApi,
-                claudeCode,
+                harnessService,
                 codeReviewService,
                 ciTemplateService,
                 mock(LocalVerificationService.class),
@@ -194,15 +194,15 @@ class IssueWorkflowServiceTest {
         issue.setId(1L);
         issue.setClaudeSessionId("claude-session");
         issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CODEX);
+        when(harnessService.harnessId()).thenReturn("codex");
 
         workflowService.processIssue(issue);
 
         assertNull(issue.getClaudeSessionId());
         assertEquals(IssueBotProperties.AgentProvider.CODEX, issue.getResolvedAgentProvider());
         assertEquals("gpt-5.6-sol", issue.getResolvedImplModel());
-        verify(claudeCode).pinProvider(IssueBotProperties.AgentProvider.CODEX);
-        verify(claudeCode).clearPinnedProvider();
+        verify(harnessService).pinHarness("codex");
+        verify(harnessService).clearPinnedHarness();
     }
 
     @Test
@@ -324,7 +324,7 @@ class IssueWorkflowServiceTest {
         workflowService.processIssue(issue);
 
         assertEquals(IssueStatus.AWAITING_APPROVAL, issue.getStatus());
-        verifyNoInteractions(stages, claudeCode, gitOps);
+        verifyNoInteractions(stages, harnessService, gitOps);
         verify(issueRepository, never()).save(any());
     }
 
@@ -335,7 +335,7 @@ class IssueWorkflowServiceTest {
         issue.setResolvedAgentProvider(IssueBotProperties.AgentProvider.CODEX);
         issue.setResolvedImplModel("chosen-model");
         issue.setClaudeSessionId("existing-codex-session");
-        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
+        when(harnessService.harnessId()).thenReturn("claude");
         StageWorkflowCoordinator stages = mock(StageWorkflowCoordinator.class);
         org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "stageWorkflow", stages);
 
@@ -359,7 +359,7 @@ class IssueWorkflowServiceTest {
 
         verify(stages).before(issue, com.dbbaskette.issuebot.model.WorkflowStage.IMPLEMENTATION, 1);
         verifyNoInteractions(gitOps);
-        verify(claudeCode, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+        verify(harnessService, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
     }
 
     @Test
@@ -399,7 +399,7 @@ class IssueWorkflowServiceTest {
 
         spy.processIssue(issue, null);
 
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
         verify(gitOps).prepareForPlanning("owner", "repo", "main");
         verify(spy, never()).phaseSetup(any());
@@ -438,7 +438,7 @@ class IssueWorkflowServiceTest {
 
         assertEquals(IssueStatus.FAILED, issue.getStatus());
         assertTrue(issue.getLastFailureReason().contains("approved planning version"));
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
         verify(planFirstService, never()).generateVersion(any(), any(), any());
     }
@@ -460,12 +460,12 @@ class IssueWorkflowServiceTest {
         HarnessExecutionResult success = new HarnessExecutionResult();
         success.setSuccess(true);
         success.setOutput("implemented");
-        when(claudeCode.executeImplementation(
+        when(harnessService.executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any())).thenReturn(success);
 
         spy.processIssue(issue, null);
 
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 argThat(prompt -> prompt.contains("Legacy approved plan")
                         && prompt.contains("immutable legacy implementation plan")
                         && !prompt.contains("mutable plan that must be ignored")
@@ -493,7 +493,7 @@ class IssueWorkflowServiceTest {
         spy.processIssue(issue, null);
 
         verify(planFirstService).generateVersion(eq(issue), any(), any());
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(), anyString(), any(), anyLong(), any());
     }
 
@@ -798,7 +798,7 @@ class IssueWorkflowServiceTest {
         success.setSuccess(true);
         success.setOutput("done");
         success.setSessionId("sess-new-1");
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(success);
 
         HarnessExecutionResult result = workflowService.phaseImplementation(
@@ -807,7 +807,7 @@ class IssueWorkflowServiceTest {
         assertTrue(result.isSuccess());
         assertEquals("sess-new-1", issue.getClaudeSessionId());
         verify(issueRepository).save(issue);
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
     /**
@@ -831,7 +831,7 @@ class IssueWorkflowServiceTest {
         success.setSuccess(true);
         success.setOutput("done");
         // No new session id returned this time — the stored one should remain.
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-prior"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-prior"), any(), any()))
                 .thenReturn(success);
 
         HarnessExecutionResult result = workflowService.phaseImplementation(
@@ -842,7 +842,7 @@ class IssueWorkflowServiceTest {
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> resumeCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(1)).executeImplementation(
+        verify(harnessService, times(1)).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), resumeCaptor.capture(), any(), any());
         assertEquals("sess-prior", resumeCaptor.getValue());
         assertTrue(promptCaptor.getValue().contains("Continuing the same task"));
@@ -875,9 +875,9 @@ class IssueWorkflowServiceTest {
         coldSuccess.setOutput("done cold");
         coldSuccess.setSessionId("sess-fresh");
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
                 .thenReturn(failure);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(coldSuccess);
 
         HarnessExecutionResult result = workflowService.phaseImplementation(
@@ -886,9 +886,9 @@ class IssueWorkflowServiceTest {
         assertTrue(result.isSuccess());
         assertEquals("done cold", result.getOutput());
         // Exactly two invocations for this single iteration: resumed (failed) + cold (succeeded)
-        verify(claudeCode, times(2)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any());
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any());
+        verify(harnessService, times(2)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any());
         // Final state: the new session from the successful cold retry, not the stale one
         assertEquals("sess-fresh", issue.getClaudeSessionId());
     }
@@ -917,7 +917,7 @@ class IssueWorkflowServiceTest {
         killed.setSuccess(false);
         killed.setErrorMessage("Claude Code exited with code 143"); // SIGTERM from cancel
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-live"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-live"), any(), any()))
                 .thenReturn(killed);
 
         cancellationService.requestCancel(1L);
@@ -928,7 +928,7 @@ class IssueWorkflowServiceTest {
         assertFalse(result.isSuccess());
         assertSame(killed, result, "the failed result must be returned untouched");
         // Exactly ONE invocation — the cold fallback must not spawn a second process
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         // No resume-failed event, no session clear — the failure wasn't the session's fault
         verify(eventService, never()).log(eq("SESSION_RESUME_FAILED"), anyString(), any(), any());
         assertEquals("sess-live", issue.getClaudeSessionId());
@@ -983,9 +983,9 @@ class IssueWorkflowServiceTest {
         coldSuccess.setSuccess(true);
         coldSuccess.setOutput("done cold");
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any()))
                 .thenReturn(failure);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(coldSuccess);
 
         workflowService.phaseImplementation(

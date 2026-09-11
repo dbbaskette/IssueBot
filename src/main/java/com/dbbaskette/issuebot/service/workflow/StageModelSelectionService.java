@@ -4,7 +4,8 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WorkflowStage;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
@@ -19,10 +20,10 @@ public class StageModelSelectionService {
     private final IssueBotProperties properties;
     private final ModelResolver resolver;
     private final CodexModelCatalog codexModels;
-    private final ClaudeCodeService agent;
+    private final CodingHarnessService agent;
 
     public StageModelSelectionService(IssueBotProperties properties, ModelResolver resolver,
-                                      CodexModelCatalog codexModels, ClaudeCodeService agent) {
+                                      CodexModelCatalog codexModels, CodingHarnessService agent) {
         this.properties = properties;
         this.resolver = resolver;
         this.codexModels = codexModels;
@@ -61,11 +62,11 @@ public class StageModelSelectionService {
         if (selection.provider() == null || !present(selection.model())) {
             throw new IllegalArgumentException("A provider and model are required for this stage");
         }
-        if (!agent.checkCliAvailable(selection.provider())) {
+        if (!agent.checkCliAvailable(HarnessIds.normalize(selection.provider().name()))) {
             throw new IllegalStateException(selection.provider().getDisplayName()
                     + " is not installed or available on PATH. Install that CLI before approving this stage.");
         }
-        if (!agent.checkSubscriptionAuthentication(selection.provider())) {
+        if (!agent.checkSubscriptionAuthentication(HarnessIds.normalize(selection.provider().name()))) {
             String command = selection.provider() == AgentProvider.CODEX ? "codex login" : "claude auth login";
             throw new IllegalStateException(selection.provider().getDisplayName()
                     + " subscription authentication is unavailable. Run " + command

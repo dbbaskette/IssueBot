@@ -2,7 +2,7 @@ package com.dbbaskette.issuebot.service.workflow;
 
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -154,7 +154,7 @@ class IssueDispatchTransactionManagerTest {
 
         IssueDispatchService.ClaimResult claim = dispatch.claimReadyStart(pending.issueId());
         PlanFirstService planFirst = new PlanFirstService(
-                mock(ClaudeCodeService.class), mock(GitHubApiClient.class), issues, versions,
+                mock(CodingHarnessService.class), mock(GitHubApiClient.class), issues, versions,
                 new PlanArtifactParser(), mock(PlanningWorkspaceService.class),
                 mock(EventService.class), mock(NotificationService.class));
         ApprovedPlanContext context = planFirst.approvedContext(claim.issue()).orElseThrow();

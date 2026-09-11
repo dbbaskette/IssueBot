@@ -6,7 +6,7 @@ import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
 class IssueDecompositionServiceTest {
 
     private IssueDecompositionService decompositionService;
-    private ClaudeCodeService claudeCode;
+    private CodingHarnessService harnessService;
     private GitHubApiClient gitHubApi;
     private TrackedIssueRepository issueRepository;
     private EventService eventService;
@@ -38,7 +38,7 @@ class IssueDecompositionServiceTest {
 
     @BeforeEach
     void setUp() {
-        claudeCode = mock(ClaudeCodeService.class);
+        harnessService = mock(CodingHarnessService.class);
         gitHubApi = mock(GitHubApiClient.class);
         issueRepository = mock(TrackedIssueRepository.class);
         eventService = mock(EventService.class);
@@ -47,7 +47,7 @@ class IssueDecompositionServiceTest {
         iterationManager = mock(IterationManager.class);
 
         decompositionService = new IssueDecompositionService(
-                claudeCode, gitHubApi, issueRepository, eventService,
+                harnessService, gitHubApi, issueRepository, eventService,
                 notificationService, objectMapper, iterationManager);
     }
 
@@ -178,7 +178,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
         qualifyLargeEpic();
 
         ObjectNode sub1 = objectMapper.createObjectNode();
@@ -215,7 +215,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
         qualifyLargeEpic();
 
         boolean result = decompositionService.decompose(issue, issueDetails,
@@ -235,7 +235,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(false);
         claudeResult.setOutput(null);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
         qualifyLargeEpic();
 
         boolean result = decompositionService.decompose(issue, issueDetails,
@@ -260,7 +260,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
         qualifyLargeEpic();
 
         when(gitHubApi.createIssue(anyString(), anyString(), anyString(), anyString(), anyList()))
@@ -294,7 +294,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
         qualifyLargeEpic();
 
         boolean result = decompositionService.decompose(issue, issueDetails,
@@ -462,7 +462,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -479,7 +479,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -489,7 +489,7 @@ class IssueDecompositionServiceTest {
 
     @Test
     void preScreen_claudeFailure_defaultsToFalse() {
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any()))
+        when(harnessService.executeUtility(anyString(), any(Path.class), any()))
                 .thenThrow(new RuntimeException("API error"));
 
         IssueDecompositionService.PreScreenResult result =
@@ -502,7 +502,7 @@ class IssueDecompositionServiceTest {
     void preScreen_emptyResponse_defaultsToFalse() {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setOutput("");
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -514,7 +514,7 @@ class IssueDecompositionServiceTest {
     void preScreen_invalidJson_defaultsToFalse() {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setOutput("Not JSON at all");
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         IssueDecompositionService.PreScreenResult result =
                 decompositionService.preScreen(createIssueDetails(), Path.of("/tmp/repo"));
@@ -561,7 +561,7 @@ class IssueDecompositionServiceTest {
 
         assertFalse(result);
         verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
-        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+        verify(harnessService, never()).executeUtility(anyString(), any(Path.class), any());
     }
 
     @Test
@@ -572,7 +572,7 @@ class IssueDecompositionServiceTest {
                 decompositionService.preScreen(issueDetails, Path.of("/tmp/repo"));
 
         assertFalse(result.tooLarge());
-        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+        verify(harnessService, never()).executeUtility(anyString(), any(Path.class), any());
     }
 
     @Test
@@ -591,7 +591,7 @@ class IssueDecompositionServiceTest {
         HarnessExecutionResult claudeResult = new HarnessExecutionResult();
         claudeResult.setSuccess(true);
         claudeResult.setOutput(claudeOutput);
-        when(claudeCode.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
+        when(harnessService.executeUtility(anyString(), any(Path.class), any())).thenReturn(claudeResult);
 
         when(gitHubApi.listIssues("owner", "repo", "issuebot-decomposed", "open"))
                 .thenReturn(createOpenSubIssueNodes(10));
@@ -601,7 +601,7 @@ class IssueDecompositionServiceTest {
 
         assertFalse(result);
         verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
-        verify(claudeCode, never()).executeUtility(anyString(), any(Path.class), any());
+        verify(harnessService, never()).executeUtility(anyString(), any(Path.class), any());
     }
 
     private List<JsonNode> createOpenSubIssueNodes(int count) {
@@ -620,7 +620,7 @@ class IssueDecompositionServiceTest {
                 {"too_large":true,"estimated_files":20,"independent_capabilities":2,
                  "estimated_complexity":"high","reason":"Two substantial end-to-end capabilities"}
                 """);
-        when(claudeCode.executeUtility(contains("complexity estimator"), any(Path.class), any()))
+        when(harnessService.executeUtility(contains("complexity estimator"), any(Path.class), any()))
                 .thenReturn(screen);
     }
 
@@ -629,14 +629,14 @@ class IssueDecompositionServiceTest {
         TrackedIssue issue = createIssue();
         issue.getRepo().setDecompositionMode(DecompositionMode.OFF);
         assertFalse(decompositionService.decompose(issue, createIssueDetails(), Path.of("/tmp/repo"), "timed out"));
-        verifyNoInteractions(claudeCode, gitHubApi, issueRepository);
+        verifyNoInteractions(harnessService, gitHubApi, issueRepository);
     }
 
     @Test
     void timeoutWithoutScopeEvidenceDoesNotSplit() {
         assertFalse(decompositionService.decompose(createIssue(), createIssueDetails(), Path.of("/tmp/repo"), "timed out"));
         verify(gitHubApi, never()).createIssue(anyString(), anyString(), anyString(), anyString(), anyList());
-        verify(claudeCode, times(1)).executeUtility(contains("complexity estimator"), any(Path.class), any());
+        verify(harnessService, times(1)).executeUtility(contains("complexity estimator"), any(Path.class), any());
     }
 
     @Test

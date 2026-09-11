@@ -11,5 +11,12 @@ public interface CodingHarnessAdapter {
     HarnessCapabilities capabilities();
     boolean checkCliAvailable();
     boolean checkSubscriptionAuthentication();
+    default boolean isCliAvailable() { return checkCliAvailable(); }
+    default boolean checkAuthentication() { return checkSubscriptionAuthentication(); }
+    default void clearAuthCache() { }
     HarnessExecutionResult execute(HarnessExecutionRequest request, Consumer<String> lineCallback);
+    /** Execute with subscription credential sources enforced for managed workflows. */
+    default HarnessExecutionResult executeSubscription(HarnessExecutionRequest request, Consumer<String> lineCallback) {
+        return execute(request, lineCallback);
+    }
 }

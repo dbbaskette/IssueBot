@@ -13,7 +13,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
 import com.dbbaskette.issuebot.service.git.GitOperationsService;
@@ -60,7 +60,7 @@ class IntegrationWorkflowTest {
     private IssueWorkflowService workflowService;
     private GitOperationsService gitOps;
     private GitHubApiClient gitHubApi;
-    private ClaudeCodeService claudeCode;
+    private CodingHarnessService harnessService;
     private CodeReviewService codeReviewService;
     private CiTemplateService ciTemplateService;
     private LocalVerificationService localVerificationService;
@@ -83,7 +83,7 @@ class IntegrationWorkflowTest {
     void setUp() {
         gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
-        claudeCode = mock(ClaudeCodeService.class);
+        harnessService = mock(CodingHarnessService.class);
         codeReviewService = mock(CodeReviewService.class);
         ciTemplateService = mock(CiTemplateService.class);
         localVerificationService = mock(LocalVerificationService.class);
@@ -103,7 +103,7 @@ class IntegrationWorkflowTest {
         objectMapper = new ObjectMapper();
 
         workflowService = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService,
                 issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, iterationManager,
@@ -213,7 +213,7 @@ class IntegrationWorkflowTest {
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
         // Implementation succeeds
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         // CI passes (CI disabled to skip polling)
@@ -252,7 +252,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -288,7 +288,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -340,7 +340,7 @@ class IntegrationWorkflowTest {
         when(lessonRepository.findByRepoIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(lesson1, lesson2));
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -354,7 +354,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("## Lessons from previous issues in this repo"));
         assertTrue(prompt.contains("Run tests with ./mvnw not mvn"));
@@ -370,7 +370,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -396,7 +396,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -410,7 +410,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         ArgumentCaptor<String> implPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(implPromptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService).executeImplementation(implPromptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(implPromptCaptor.getValue().contains("## Repository Instructions"));
         assertTrue(implPromptCaptor.getValue().contains("Always use constructor injection"));
 
@@ -441,7 +441,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -477,7 +477,7 @@ class IntegrationWorkflowTest {
         when(iterationManager.canReviewIterate(issue)).thenReturn(true);
 
         // Implementation succeeds both times
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         // PR creation (non-draft for autonomous mode)
@@ -511,7 +511,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -543,7 +543,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -561,7 +561,7 @@ class IntegrationWorkflowTest {
         // The REVIEW was retried (3 invocations) within ONE implementation attempt — not re-implemented.
         verify(codeReviewService, times(3)).reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).handleMaxReviewIterationsReached(any(), any(), any(), anyBoolean());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
@@ -574,7 +574,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -592,7 +592,7 @@ class IntegrationWorkflowTest {
         // Retried up to the cap (5), then escalated as "could not run" (invocationFailed=true) — NOT re-implemented.
         verify(codeReviewService, times(5)).reviewCode(any(Path.class), anyString(), anyString(),
                 anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any());
-        verify(claudeCode, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), eq(true));
     }
 
@@ -604,7 +604,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -657,7 +657,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         // CI fails
@@ -714,7 +714,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -743,7 +743,7 @@ class IntegrationWorkflowTest {
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -792,7 +792,7 @@ class IntegrationWorkflowTest {
 
         // Verify decomposition was called but implementation was NOT
         verify(decompositionService).decompose(eq(issue), any(), any(), contains("Pre-screen"));
-        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
     }
 
@@ -810,7 +810,7 @@ class IntegrationWorkflowTest {
         when(decompositionService.decompose(eq(issue), any(), any(), anyString())).thenReturn(false);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -824,7 +824,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         // Implementation still ran after decomposition failed
-        verify(claudeCode).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
 
@@ -850,7 +850,7 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.AWAITING_PLAN_APPROVAL, issue.getStatus());
         verify(planFirstService).generateVersion(eq(issue), any(), any());
         // No implementation tokens spent before approval
-        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
         verify(gitOps).prepareForPlanning("owner", "repo", "main");
         verify(gitOps, never()).createBranch(any(), anyInt(), anyString());
@@ -871,7 +871,7 @@ class IntegrationWorkflowTest {
 
         workflowService.processIssue(issue);
 
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager, never()).canIterate(any());
         verify(gitOps).prepareForPlanning("owner", "repo", "main");
@@ -891,7 +891,7 @@ class IntegrationWorkflowTest {
                         "1. Touch FooService\n2. Add FooServiceTest")));
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -905,7 +905,7 @@ class IntegrationWorkflowTest {
 
         verify(planFirstService, never()).generateVersion(any(), any(), any());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(promptCaptor.getValue().contains("## Approved Planning Contract — Version 4"));
         assertTrue(promptCaptor.getValue().contains("### Design Spec\nUse the existing service boundary"));
         assertTrue(promptCaptor.getValue().contains("1. Touch FooService"));
@@ -921,7 +921,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -935,7 +935,7 @@ class IntegrationWorkflowTest {
 
         verifyNoInteractions(planFirstService);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService).executeImplementation(promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertFalse(promptCaptor.getValue().contains("## Approved Planning Contract"));
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
     }
@@ -956,7 +956,7 @@ class IntegrationWorkflowTest {
 
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.empty());
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode().put("number", 403);
@@ -969,7 +969,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 prompt.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(prompt.getValue().contains("## Legacy approved plan"));
         assertTrue(prompt.getValue().contains("Keep the migrated transaction boundary"));
@@ -1032,7 +1032,7 @@ class IntegrationWorkflowTest {
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
@@ -1042,7 +1042,7 @@ class IntegrationWorkflowTest {
         recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
 
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode().put("number", 502);
@@ -1059,7 +1059,7 @@ class IntegrationWorkflowTest {
         assertEquals(2, issue.getPlanConformanceAttempt());
         assertFalse(issue.isPlanCorrectionPending());
         assertSame(approved, issue.getApprovedPlanningVersion());
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 argThat(prompt -> prompt.contains("missing rollback")
                         && prompt.contains("Approved Planning Contract — Version 2")),
                 any(Path.class), anyString(), any(), any(), any());
@@ -1136,7 +1136,7 @@ class IntegrationWorkflowTest {
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
@@ -1158,7 +1158,7 @@ class IntegrationWorkflowTest {
         assertEquals(2, issue.getCurrentIteration());
         assertEquals(2, issue.getPlanConformanceAttempt());
         assertSame(approved, issue.getApprovedPlanningVersion());
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(gitOps, never()).cloneOrPull(anyString(), anyString(), anyString());
         verify(gitOps, never()).createBranch(any(Git.class), anyInt(), anyString());
@@ -1216,7 +1216,7 @@ class IntegrationWorkflowTest {
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
@@ -1232,7 +1232,7 @@ class IntegrationWorkflowTest {
         assertEquals(2, issue.getCurrentIteration());
         assertEquals(1, issue.getPlanConformanceAttempt());
         assertSame(approved, issue.getApprovedPlanningVersion());
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
         verifyNoInteractions(codeReviewService);
     }
@@ -1276,7 +1276,7 @@ class IntegrationWorkflowTest {
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
@@ -1285,7 +1285,7 @@ class IntegrationWorkflowTest {
                 lessonsService, objectMapper);
         recoveredWorkflow.reviewRetryBackoffBaseMs = 0;
         when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         ObjectNode pr = objectMapper.createObjectNode().put("number", 507);
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString()))
@@ -1299,7 +1299,7 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertEquals(2, issue.getCurrentIteration());
         assertEquals(2, issue.getPlanConformanceAttempt());
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
@@ -1406,7 +1406,7 @@ class IntegrationWorkflowTest {
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, planFirstService, followUpService,
@@ -1425,7 +1425,7 @@ class IntegrationWorkflowTest {
         assertTrue(issue.getLastFailureReason().contains("review service unavailable"));
         assertFalse(issue.getLastFailureReason().contains("approved Plan v2"));
         verifyNoInteractions(codeReviewService);
-        verify(claudeCode, never()).executeImplementation(
+        verify(harnessService, never()).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
@@ -1441,8 +1441,8 @@ class IntegrationWorkflowTest {
         issue.setResolvedImplModel("claude-opus-4-8");
         ObjectNode issueDetails = createIssueDetails();
         setupCommonMocks(issue, issueDetails);
-        when(claudeCode.provider()).thenReturn(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        when(claudeCode.providerDisplayName()).thenReturn("Claude Code");
+        when(harnessService.harnessId()).thenReturn("claude");
+        when(harnessService.displayName()).thenReturn("Claude Code");
 
         List<PlanningVersion> storedVersions = new ArrayList<>();
         AtomicLong nextVersionId = new AtomicLong(100);
@@ -1475,11 +1475,11 @@ class IntegrationWorkflowTest {
         when(planningWorkspaces.open(any(Path.class))).thenReturn(planningWorkspace);
         when(planningWorkspace.path()).thenReturn(Path.of("/tmp/repo"));
         PlanFirstService authoritativePlanFirst = new PlanFirstService(
-                claudeCode, gitHubApi,
+                harnessService, gitHubApi,
                 new PlanFirstTransactionManager(issueRepository, lifecycleVersions, lifecycleRepos),
                 new PlanArtifactParser(), planningWorkspaces, eventService, notificationService,
                 new WorkflowCancellationService());
-        when(claudeCode.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
+        when(harnessService.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
                 .thenReturn(planningResult("first spec", "first plan"),
                         planningResult("second spec with rollback", "second plan with rollback test"));
 
@@ -1532,7 +1532,7 @@ class IntegrationWorkflowTest {
                 gitHubApi, eventService, notificationService));
 
         IssueWorkflowService lifecycleWorkflow = new IssueWorkflowService(
-                gitOps, gitHubApi, claudeCode, codeReviewService, ciTemplateService,
+                gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
                 eventService, sseService, notificationService, authoritativeIterations,
                 decompositionService, authoritativePlanFirst, followUpService,
@@ -1541,7 +1541,7 @@ class IntegrationWorkflowTest {
                 lessonsService, objectMapper);
         lifecycleWorkflow.reviewRetryBackoffBaseMs = 0;
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult(), successResult(), successResult());
         ObjectNode prNode = objectMapper.createObjectNode().put("number", 501);
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString()))
@@ -1602,7 +1602,7 @@ class IntegrationWorkflowTest {
         assertFalse(issue.isPlanCorrectionPending());
 
         ArgumentCaptor<String> implementationPrompts = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(3)).executeImplementation(
+        verify(harnessService, times(3)).executeImplementation(
                 implementationPrompts.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(implementationPrompts.getAllValues().get(1).contains("missing rollback"));
         assertTrue(implementationPrompts.getAllValues().get(2)
@@ -1642,7 +1642,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -1672,7 +1672,7 @@ class IntegrationWorkflowTest {
         // Two iterations: first local-check fails, second local-check passes (then CI runs)
         when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
@@ -1702,7 +1702,7 @@ class IntegrationWorkflowTest {
         // The failing command's output must be fed into the next iteration's prompt,
         // under the source-neutral verification-failure header.
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(2)).executeImplementation(
+        verify(harnessService, times(2)).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String secondPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(secondPrompt.contains("### Verification Failure Logs"));
@@ -1736,7 +1736,7 @@ class IntegrationWorkflowTest {
                 .thenReturn(List.of(queued))
                 .thenReturn(List.of());
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -1753,7 +1753,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(2)).executeImplementation(
+        verify(harnessService, times(2)).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String firstPrompt = promptCaptor.getAllValues().get(0);
         String secondPrompt = promptCaptor.getAllValues().get(1);
@@ -1796,7 +1796,7 @@ class IntegrationWorkflowTest {
                 .thenReturn(List.of(queued))
                 .thenReturn(List.of());
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -1813,7 +1813,7 @@ class IntegrationWorkflowTest {
         verify(issueRepository, atLeast(2)).save(any(TrackedIssue.class));
         // ...and could not touch the queued guidance: it reached the prompt and was consumed.
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         assertTrue(promptCaptor.getValue().contains("Focus on the token refresh path"));
         verify(guidanceRepository).markConsumed(eq(1L), any(LocalDateTime.class));
@@ -1843,7 +1843,7 @@ class IntegrationWorkflowTest {
                 .thenReturn(List.of(queued))
                 .thenReturn(List.of());
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
         ObjectNode prNode = objectMapper.createObjectNode();
@@ -1860,7 +1860,7 @@ class IntegrationWorkflowTest {
 
         // Iteration 2's prompt carries BOTH the review feedback and the guidance
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(2)).executeImplementation(
+        verify(harnessService, times(2)).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
         String secondPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(secondPrompt.contains("The independent code review found issues"),
@@ -1894,12 +1894,12 @@ class IntegrationWorkflowTest {
         when(costRepository.totalCostForIssue(issue))
                 .thenReturn(new BigDecimal("0.005"), new BigDecimal("0.50"));
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         workflowService.processIssue(issue);
 
-        verify(claudeCode, times(1)).executeImplementation(
+        verify(harnessService, times(1)).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
         verify(gitHubApi, never()).createPullRequest(any(), any(), any(), any(), any(), any(), anyBoolean());
@@ -1924,7 +1924,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         verify(iterationManager).handleBudgetExceeded(issue, new BigDecimal("0.50"), new BigDecimal("0.01"));
-        verify(claudeCode, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(harnessService, never()).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
     // === Test 14: An exception thrown by local verification is treated as a failed
@@ -1938,7 +1938,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
@@ -1970,7 +1970,7 @@ class IntegrationWorkflowTest {
         HarnessExecutionResult iter2Result = successResult();
         iter2Result.setSessionId("sess-iter2");
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(iter1Result, iter2Result);
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -1987,7 +1987,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         ArgumentCaptor<String> resumeCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode, times(2)).executeImplementation(
+        verify(harnessService, times(2)).executeImplementation(
                 anyString(), any(Path.class), anyString(), resumeCaptor.capture(), any(), any());
         assertNull(resumeCaptor.getAllValues().get(0), "iteration 1 must start cold — no stored session yet");
         assertEquals("sess-iter1", resumeCaptor.getAllValues().get(1),
@@ -2021,9 +2021,9 @@ class IntegrationWorkflowTest {
         HarnessExecutionResult coldRetrySuccess = successResult();
         coldRetrySuccess.setSessionId("sess-iter2-cold");
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(iter1Success, coldRetrySuccess);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
                 .thenReturn(resumedFailure);
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -2039,7 +2039,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         // Iteration 1 (cold) + iteration 2 resumed (fail) + iteration 2 cold retry (success) = 3 calls
-        verify(claudeCode, times(3)).executeImplementation(
+        verify(harnessService, times(3)).executeImplementation(
                 anyString(), any(Path.class), anyString(), any(), any(), any());
         // Only 2 iterations were actually consumed from the budget — the cold retry
         // did not bump currentIteration.
@@ -2073,9 +2073,9 @@ class IntegrationWorkflowTest {
 
         HarnessExecutionResult coldRetrySuccess = successResult(); // 1000/500 tokens
 
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), isNull(), any(), any()))
                 .thenReturn(iter1Success, coldRetrySuccess);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-iter1"), any(), any()))
                 .thenReturn(resumedFailure);
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -2131,7 +2131,7 @@ class IntegrationWorkflowTest {
         setupCommonMocks(issue, issueDetails);
 
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(claudeCode.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
                 .thenReturn(successResult());
 
         when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
@@ -2146,7 +2146,7 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue); // manual retry without instructions
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(claudeCode).executeImplementation(
+        verify(harnessService).executeImplementation(
                 promptCaptor.capture(), any(Path.class), anyString(), eq("sess-kept"), any(), any());
         String prompt = promptCaptor.getValue();
         assertTrue(prompt.contains("Continuing the same task"));

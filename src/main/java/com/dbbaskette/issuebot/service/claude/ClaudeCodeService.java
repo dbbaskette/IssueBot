@@ -3,14 +3,12 @@ package com.dbbaskette.issuebot.service.claude;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
-import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -31,95 +29,27 @@ public class ClaudeCodeService {
     private final IssueBotProperties properties;
     private final StreamJsonParser parser;
     private final WorkflowCancellationService cancellationService;
-    private final CodexCliService codexCliService;
-    private final ThreadLocal<IssueBotProperties.AgentProvider> pinnedProvider = new ThreadLocal<>();
     private final ThreadLocal<Boolean> subscriptionOnly = new ThreadLocal<>();
     private boolean cliAvailable = false;
     private Boolean cliAuthenticated = null;
 
-    @Autowired
     public ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
-                              WorkflowCancellationService cancellationService,
-                              CodexCliService codexCliService) {
+                              WorkflowCancellationService cancellationService) {
         this.properties = properties;
         this.parser = parser;
         this.cancellationService = cancellationService;
-        this.codexCliService = codexCliService;
     }
 
-    /** Unit-test convenience constructor; production injection always supplies the Codex runner. */
-    ClaudeCodeService(IssueBotProperties properties, StreamJsonParser parser,
-                      WorkflowCancellationService cancellationService) {
-        this(properties, parser, cancellationService, null);
-    }
-
-    /**
-     * Execute implementation with the resolved model. {@code resumeSessionId}, when non-blank,
-     * resumes the given Claude session instead of starting cold (issue #67 — session
-     * continuity). Pass null for a fresh session.
-     */
-    @Deprecated // Provider-routing compatibility until workflows use CodingHarnessService.
-    public HarnessExecutionResult executeImplementation(String prompt, Path workingDirectory,
-                                                    String model, String resumeSessionId,
-                                                    Long issueId, Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executeImplementation(prompt, workingDirectory, model,
-                    resumeSessionId, issueId, lineCallback);
+    /** Apply managed credential settings only while this adapter invocation runs. */
+    public HarnessExecutionResult withSubscriptionSettings(java.util.function.Supplier<HarnessExecutionResult> execution) {
+        Boolean previous = subscriptionOnly.get();
+        subscriptionOnly.set(true);
+        try {
+            return execution.get();
+        } finally {
+            if (previous == null) subscriptionOnly.remove();
+            else subscriptionOnly.set(previous);
         }
-        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, model,
-                config.getMaxTurnsPerInvocation(), config.getTimeoutMinutes(),
-                null, resumeSessionId, issueId, lineCallback);
-    }
-
-    /**
-     * Execute independent review with the resolved model. Never resumes a session —
-     * the reviewer must stay independent of the implementer's context by design.
-     */
-    @Deprecated // Provider-routing compatibility until workflows use CodingHarnessService.
-    public HarnessExecutionResult executeReview(String prompt, Path workingDirectory,
-                                            String model, Long issueId, Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executeReview(prompt, workingDirectory, model, issueId, lineCallback);
-        }
-        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, model,
-                config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
-                null, null, issueId, lineCallback);
-    }
-
-    /**
-     * Pre-screen / decomposition analysis on the cheap utility model (review budgets).
-     * Never resumes a session.
-     */
-    @Deprecated // Provider-routing compatibility until workflows use CodingHarnessService.
-    public HarnessExecutionResult executeUtility(String prompt, Path workingDirectory,
-                                             Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executeUtility(prompt, workingDirectory, lineCallback);
-        }
-        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, config.getUtilityModel(),
-                config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
-                null, null, null, lineCallback);
-    }
-
-    /**
-     * Design/spec + implementation-plan pass (superpowers methodology). Runs on the given
-     * (strong) implementation model — a good spec needs it — but makes no code changes, and
-     * never resumes a session. Uses the implementation budget so it has room to read the
-     * codebase and write a thorough plan.
-     */
-    @Deprecated // Provider-routing compatibility until workflows use CodingHarnessService.
-    public HarnessExecutionResult executePlanning(String prompt, Path workingDirectory,
-                                             String model, Long issueId, Consumer<String> lineCallback) {
-        if (useCodex()) {
-            return codexCliService.executePlanning(prompt, workingDirectory, model, issueId, lineCallback);
-        }
-        IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeCommand(buildPlanningCommand(prompt, model, config.getMaxTurnsPerInvocation()),
-                prompt, workingDirectory, model, config.getMaxTurnsPerInvocation(),
-                config.getTimeoutMinutes(), null, issueId, lineCallback, true);
     }
 
     /** Claude-only entry point; model, effort and session are already resolved by the caller. */
@@ -493,28 +423,6 @@ public class ClaudeCodeService {
         }
     }
 
-    /** Explicit selection check without disturbing an enclosing workflow's provider pin. */
-    public boolean checkCliAvailable(IssueBotProperties.AgentProvider provider) {
-        if (provider == IssueBotProperties.AgentProvider.CODEX) {
-            return codexCliService != null && codexCliService.checkCliAvailable();
-        }
-        IssueBotProperties.AgentProvider previous = pinnedProvider.get();
-        pinnedProvider.set(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        try {
-            return checkCliAvailable();
-        } finally {
-            pinProvider(previous);
-        }
-    }
-
-    /** Fresh, fail-closed check used only by managed stages; never logs account details. */
-    public boolean checkSubscriptionAuthentication(IssueBotProperties.AgentProvider provider) {
-        if (provider == IssueBotProperties.AgentProvider.CODEX) {
-            return codexCliService != null && codexCliService.checkSubscriptionAuthentication();
-        }
-        return checkSubscriptionAuthentication();
-    }
-
     /** Fresh Claude-only subscription authentication check for the harness adapter. */
     public boolean checkSubscriptionAuthentication() {
         try {
@@ -566,7 +474,6 @@ public class ClaudeCodeService {
      * Check if the Claude Code CLI is installed and accessible.
      */
     public boolean checkCliAvailable() {
-        if (useCodex()) return codexCliService.checkCliAvailable();
         try {
             ProcessBuilder pb = new ProcessBuilder("claude", "--version");
             pb.redirectErrorStream(true);
@@ -594,7 +501,6 @@ public class ClaudeCodeService {
      * Result is cached after first check.
      */
     public boolean checkAuthentication() {
-        if (useCodex()) return codexCliService.checkAuthentication();
         if (cliAuthenticated != null) {
             return cliAuthenticated;
         }
@@ -631,58 +537,14 @@ public class ClaudeCodeService {
     }
 
     public boolean isCliAvailable() {
-        return useCodex() ? codexCliService.isCliAvailable() : cliAvailable;
+        return cliAvailable;
     }
 
     /**
      * Clear the cached auth result so the next checkAuthentication() call re-verifies.
      */
     public void clearAuthCache() {
-        if (useCodex()) {
-            codexCliService.clearAuthCache();
-            return;
-        }
         cliAuthenticated = null;
     }
 
-    public String providerDisplayName() {
-        return effectiveProvider().getDisplayName();
-    }
-
-    public IssueBotProperties.AgentProvider provider() {
-        return properties.getAgentProvider();
-    }
-
-    /** Pin every invocation on the current workflow thread to one persisted provider. */
-    @Deprecated // Moves to CodingHarnessService when workflow callers migrate.
-    public void pinProvider(IssueBotProperties.AgentProvider provider) {
-        if (provider == null) pinnedProvider.remove();
-        else pinnedProvider.set(provider);
-    }
-
-    /** Managed stage invocations must not load repository or user API credential helpers. */
-    public void pinSubscriptionProvider(IssueBotProperties.AgentProvider provider) {
-        if (provider == null) throw new IllegalArgumentException("Managed stages require a provider");
-        pinProvider(provider);
-        subscriptionOnly.set(true);
-    }
-
-    public void clearPinnedProvider() {
-        pinnedProvider.remove();
-        subscriptionOnly.remove();
-    }
-
-    private IssueBotProperties.AgentProvider effectiveProvider() {
-        IssueBotProperties.AgentProvider pinned = pinnedProvider.get();
-        return pinned != null ? pinned : properties.getAgentProvider();
-    }
-
-    private boolean useCodex() {
-        if (Boolean.TRUE.equals(subscriptionOnly.get())
-                && effectiveProvider() == IssueBotProperties.AgentProvider.CODEX && codexCliService == null) {
-            throw new IllegalStateException("Codex CLI runner is unavailable; provider fallback is not permitted");
-        }
-        return effectiveProvider() == IssueBotProperties.AgentProvider.CODEX
-                && codexCliService != null;
-    }
 }

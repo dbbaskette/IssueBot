@@ -7,7 +7,8 @@ import com.dbbaskette.issuebot.repository.IterationRepository;
 import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.claude.StreamJsonParser;
@@ -64,7 +65,7 @@ public class IssueWorkflowService {
 
     private final GitOperationsService gitOps;
     private final GitHubApiClient gitHubApi;
-    private final ClaudeCodeService claudeCode;
+    private final CodingHarnessService harnessService;
     private final CodeReviewService codeReviewService;
     private final CiTemplateService ciTemplateService;
     private final LocalVerificationService localVerificationService;
@@ -105,7 +106,7 @@ public class IssueWorkflowService {
 
     public IssueWorkflowService(GitOperationsService gitOps,
                                  GitHubApiClient gitHubApi,
-                                 ClaudeCodeService claudeCode,
+                                 CodingHarnessService harnessService,
                                  CodeReviewService codeReviewService,
                                  CiTemplateService ciTemplateService,
                                  LocalVerificationService localVerificationService,
@@ -127,7 +128,7 @@ public class IssueWorkflowService {
                                  ObjectMapper objectMapper) {
         this.gitOps = gitOps;
         this.gitHubApi = gitHubApi;
-        this.claudeCode = claudeCode;
+        this.harnessService = harnessService;
         this.codeReviewService = codeReviewService;
         this.ciTemplateService = ciTemplateService;
         this.localVerificationService = localVerificationService;
@@ -186,8 +187,10 @@ public class IssueWorkflowService {
             if (StageApprovalService.isStageWaiting(fresh)) return;
             stageWorkflow.snapshot(trackedIssue);
         }
-        IssueBotProperties.AgentProvider executionProvider = claudeCode.provider();
-        claudeCode.pinProvider(executionProvider);
+        String executionHarness = harnessService.harnessId();
+        IssueBotProperties.AgentProvider executionProvider = HarnessIds.CODEX.equals(executionHarness)
+                ? IssueBotProperties.AgentProvider.CODEX : IssueBotProperties.AgentProvider.CLAUDE_CODE;
+        harnessService.pinHarness(executionHarness);
         try {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
@@ -212,7 +215,8 @@ public class IssueWorkflowService {
         IssueBotProperties.AgentProvider previousProvider = trackedIssue.getResolvedAgentProvider();
         boolean preserveStageRouting = StageWorkflowCoordinator.managed(trackedIssue);
         if (!preserveStageRouting && trackedIssue.getClaudeSessionId() != null && !trackedIssue.getClaudeSessionId().isBlank()
-                && previousProvider != executionProvider) {
+                && !java.util.Objects.equals(previousProvider == null ? null
+                        : HarnessIds.normalize(previousProvider.name()), executionHarness)) {
             trackedIssue.setClaudeSessionId(null);
             eventService.log("SESSION_PROVIDER_CHANGED",
                     "Previous agent session was discarded because the execution provider changed",
@@ -521,7 +525,7 @@ public class IssueWorkflowService {
             if (cancelled(trackedIssue) || overBudget(trackedIssue)) return;
 
             if (resumePhase == null && !implResult.isSuccess()) {
-                log.warn("{} returned failure for iteration {}", claudeCode.providerDisplayName(), iterationNum);
+                log.warn("{} returned failure for iteration {}", harnessService.displayName(), iterationNum);
                 iteration.setCompletedAt(LocalDateTime.now());
                 iterationRepository.save(iteration);
 
@@ -542,7 +546,7 @@ public class IssueWorkflowService {
                     return;
                 }
 
-                previousFeedback = claudeCode.providerDisplayName() + " failed: " + implResult.getErrorMessage();
+                previousFeedback = harnessService.displayName() + " failed: " + implResult.getErrorMessage();
                 reviewFeedback = false; // implementation-provider failure is not review feedback
                 continue;
             }
@@ -871,7 +875,7 @@ public class IssueWorkflowService {
         captureLessons(trackedIssue, "failed after max iterations", previousFeedback, previousCiLogs, repoPath);
         iterationManager.handleMaxIterationsReached(trackedIssue);
         } finally {
-            claudeCode.clearPinnedProvider();
+            harnessService.clearPinnedHarness();
         }
     }
 
@@ -1131,10 +1135,10 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
                 repoInstructions, lessons, legacyApprovedPlan);
 
-        sseService.broadcastClaudeLog(issueId, "[system] Launching " + claudeCode.providerDisplayName() + " ("
+        sseService.broadcastClaudeLog(issueId, "[system] Launching " + harnessService.displayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
                 + (resumed ? " (resuming session)" : "") + "...");
-        HarnessExecutionResult result = claudeCode.executeImplementation(prompt, repoPath,
+        HarnessExecutionResult result = harnessService.executeImplementation(prompt, repoPath,
                 trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
 
         if (!result.isSuccess() && resumed) {
@@ -1167,8 +1171,8 @@ public class IssueWorkflowService {
                     previousAssessment, previousCiLogs, false, null, approvedPlan,
                     repoInstructions, lessons, legacyApprovedPlan);
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
-                    + claudeCode.providerDisplayName() + " session...");
-            result = claudeCode.executeImplementation(coldPrompt, repoPath,
+                    + harnessService.displayName() + " session...");
+            result = harnessService.executeImplementation(coldPrompt, repoPath,
                     trackedIssue.getResolvedImplModel(), null, issueId, line -> streamClaudeLog(issueId, line));
         }
 

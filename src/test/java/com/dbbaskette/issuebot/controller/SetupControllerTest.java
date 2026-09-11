@@ -6,7 +6,7 @@ import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.security.WebhookSignatureVerifier;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient.TokenState;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient.TokenStatus;
@@ -34,7 +34,7 @@ class SetupControllerTest {
     private SetupController controller(GitHubApiClient gitHub, String token, WebhookController webhooks) {
         IssueBotProperties props = new IssueBotProperties();
         props.getGithub().setToken(token);
-        ClaudeCodeService claude = mock(ClaudeCodeService.class);
+        CodingHarnessService claude = mock(CodingHarnessService.class);
         when(claude.checkCliAvailable()).thenReturn(true);
         when(claude.checkAuthentication()).thenReturn(true);
         lenient().when(repoRepository.findAll()).thenReturn(List.of());

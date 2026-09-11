@@ -7,7 +7,8 @@ import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -54,7 +55,7 @@ public class PlanFirstService {
     @Deprecated
     public enum RejectOutcome { REGENERATING, ESCALATED }
 
-    private final ClaudeCodeService agent;
+    private final CodingHarnessService agent;
     private final GitHubApiClient gitHub;
     private final PlanFirstTransactionManager transactions;
     private final PlanArtifactParser parser;
@@ -64,7 +65,7 @@ public class PlanFirstService {
     private final WorkflowCancellationService cancellations;
 
     @Autowired
-    public PlanFirstService(ClaudeCodeService agent,
+    public PlanFirstService(CodingHarnessService agent,
                             GitHubApiClient gitHub,
                             PlanFirstTransactionManager transactions,
                             PlanArtifactParser parser,
@@ -87,7 +88,7 @@ public class PlanFirstService {
      * its repository-unaware transaction manager deliberately fail closed; Spring uses the
      * repository-aware proxied constructor above.
      */
-    PlanFirstService(ClaudeCodeService agent,
+    PlanFirstService(CodingHarnessService agent,
                      GitHubApiClient gitHub,
                      TrackedIssueRepository issues,
                      PlanningVersionRepository versions,
@@ -125,8 +126,9 @@ public class PlanFirstService {
 
             HarnessExecutionResult result;
             try (PlanningWorkspaceService.PlanningWorkspace workspace = planningWorkspaces.open(repoPath)) {
-                if (StageWorkflowCoordinator.managed(trackedIssue)) agent.pinSubscriptionProvider(context.provider());
-                else agent.pinProvider(context.provider());
+                String harnessId = HarnessIds.normalize(context.provider().name());
+                if (StageWorkflowCoordinator.managed(trackedIssue)) agent.pinSubscriptionHarness(harnessId);
+                else agent.pinHarness(harnessId);
                 try {
                     try {
                         result = agent.executePlanning(
@@ -135,7 +137,7 @@ public class PlanFirstService {
                         workspace.verifySourceUnchanged();
                     }
                 } finally {
-                    agent.clearPinnedProvider();
+                    agent.clearPinnedHarness();
                 }
             }
             if (cancellations.isCancelled(issueId)) {

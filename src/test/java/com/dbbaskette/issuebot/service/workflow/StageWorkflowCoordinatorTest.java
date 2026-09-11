@@ -3,7 +3,7 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,7 +15,7 @@ import static org.mockito.Mockito.*;
 class StageWorkflowCoordinatorTest {
     StageApprovalService stages = mock(StageApprovalService.class);
     StageModelSelectionService models = mock(StageModelSelectionService.class);
-    ClaudeCodeService agent = mock(ClaudeCodeService.class);
+    CodingHarnessService agent = mock(CodingHarnessService.class);
     TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     PlanningVersionRepository versions = mock(PlanningVersionRepository.class);
     PlanFirstTransactionManager plans = mock(PlanFirstTransactionManager.class);
@@ -55,7 +55,7 @@ class StageWorkflowCoordinatorTest {
             assertThat(issue.getResolvedImplModel()).isEqualTo("selected-model");
             if (stage == WorkflowStage.IMPLEMENTATION) assertThat(issue.getClaudeSessionId()).isNull();
         }
-        verify(agent, times(2)).pinSubscriptionProvider(AgentProvider.CODEX);
+        verify(agent, times(2)).pinSubscriptionHarness("codex");
         verify(models, never()).validate(any());
     }
 
@@ -69,7 +69,7 @@ class StageWorkflowCoordinatorTest {
         assertThat(issue.getResolvedImplModel()).isEqualTo("implementation-model");
         assertThat(issue.getResolvedAgentProvider()).isEqualTo(AgentProvider.CLAUDE_CODE);
         assertThat(issue.getClaudeSessionId()).isEqualTo("implementation-session");
-        verify(agent).pinSubscriptionProvider(AgentProvider.CODEX);
+        verify(agent).pinSubscriptionHarness("codex");
     }
 
     @Test void deterministicStagesDoNotPinModels() {

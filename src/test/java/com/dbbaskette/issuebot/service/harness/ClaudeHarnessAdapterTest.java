@@ -53,7 +53,7 @@ class ClaudeHarnessAdapterTest {
 
     @Test
     void delegatesAvailabilityAndSubscriptionChecks() {
-        when(runner.checkCliAvailable(com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider.CLAUDE_CODE)).thenReturn(true);
+        when(runner.checkCliAvailable()).thenReturn(true);
         when(runner.checkSubscriptionAuthentication()).thenReturn(true);
         assertThat(adapter.checkCliAvailable()).isTrue();
         assertThat(adapter.checkSubscriptionAuthentication()).isTrue();

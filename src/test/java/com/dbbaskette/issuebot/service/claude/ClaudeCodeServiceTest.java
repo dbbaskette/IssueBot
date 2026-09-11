@@ -4,7 +4,6 @@ import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
-import com.dbbaskette.issuebot.service.codex.CodexCliService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -23,13 +22,40 @@ import static org.mockito.Mockito.*;
 class ClaudeCodeServiceTest {
 
     @Test
+    void managedAdapterExecutionEnforcesSubscriptionSettingsOnlyDuringInvocation() {
+        ClaudeCodeService runner = spy(service);
+        var expected = new HarnessExecutionResult();
+        doAnswer(invocation -> {
+            assertTrue(runner.buildCommand("implement", "claude-opus-4-8", "high", 30, null, null)
+                    .contains("--settings"));
+            return expected;
+        }).when(runner).executeTask(anyString(), any(), anyString(), anyString(),
+                anyInt(), anyInt(), any(), any(), any(), any());
+        var adapter = new com.dbbaskette.issuebot.service.harness.ClaudeHarnessAdapter(runner);
+        var request = new com.dbbaskette.issuebot.service.harness.HarnessExecutionRequest(
+                com.dbbaskette.issuebot.service.harness.HarnessRole.IMPLEMENTATION,
+                "implement", java.nio.file.Path.of("."), "claude-opus-4-8", "high", null, 7L);
+        assertSame(expected, adapter.executeSubscription(request, null));
+        assertFalse(runner.buildCommand("implement", "claude-opus-4-8", "high", 30, null, null)
+                .contains("--settings"));
+    }
+
+    @Test
+    void subscriptionScopeRestoresLegacySettingsAfterFailure() {
+        assertThrows(IllegalStateException.class, () -> service.withSubscriptionSettings(() -> {
+            assertTrue(service.buildCommand("prompt", "claude-opus-4-8", 30, null, null).contains("--settings"));
+            throw new IllegalStateException("execution failed");
+        }));
+        assertTrue(service.buildCommand("prompt", "claude-opus-4-8", 30, null, null).contains("project,local"));
+    }
+
+    @Test
     void explicitEffortEntryPointsStayOnClaudeDespiteGlobalCodexSelection() {
         IssueBotProperties properties = new IssueBotProperties();
         properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
-        CodexCliService codex = mock(CodexCliService.class);
         ClaudeCodeService runner = spy(new ClaudeCodeService(properties,
                 new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new WorkflowCancellationService(), codex));
+                new WorkflowCancellationService()));
         var result = new com.dbbaskette.issuebot.service.harness.HarnessExecutionResult();
         doReturn(result).when(runner).executeTask(anyString(), any(), anyString(), anyString(),
                 anyInt(), anyInt(), any(), any(), any(), any());
@@ -48,7 +74,6 @@ class ClaudeCodeServiceTest {
         verify(runner).executeTask("classify", java.nio.file.Path.of("."), "claude-haiku-4-5", "default",
                 properties.getClaudeCode().getReviewMaxTurns(), properties.getClaudeCode().getReviewTimeoutMinutes(),
                 null, null, null, null);
-        verifyNoInteractions(codex);
     }
 
     @Test
@@ -69,31 +94,24 @@ class ClaudeCodeServiceTest {
     }
 
     @Test
-    void managedCommandsDisableCredentialHelpersAndClearRestoresLegacySettings() {
-        service.pinSubscriptionProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-        List<String> implementation = service.buildCommand("prompt", "claude-opus-4-8", 30, null, null);
-        List<String> planning = service.buildPlanningCommand("prompt", "claude-opus-4-8", 30);
-        List<String> authentication = ClaudeCodeService.buildSubscriptionAuthCommand();
-        for (List<String> command : List.of(implementation, planning, authentication)) {
-            int sources = command.indexOf("--setting-sources");
-            assertTrue(sources >= 0);
-            assertEquals("", command.get(sources + 1));
-            assertEquals("{\"apiKeyHelper\":\"\",\"forceLoginMethod\":\"claudeai\"}",
-                    command.get(command.indexOf("--settings") + 1));
-            assertFalse(command.contains("--bare"));
-            assertFalse(command.contains("project,local"));
-        }
-        service.clearPinnedProvider();
+    void managedCommandsDisableCredentialHelpersAndScopeRestoresLegacySettings() {
+        service.withSubscriptionSettings(() -> {
+            List<String> implementation = service.buildCommand("prompt", "claude-opus-4-8", 30, null, null);
+            List<String> planning = service.buildPlanningCommand("prompt", "claude-opus-4-8", 30);
+            List<String> authentication = ClaudeCodeService.buildSubscriptionAuthCommand();
+            for (List<String> command : List.of(implementation, planning, authentication)) {
+                int sources = command.indexOf("--setting-sources");
+                assertTrue(sources >= 0);
+                assertEquals("", command.get(sources + 1));
+                assertEquals("{\"apiKeyHelper\":\"\",\"forceLoginMethod\":\"claudeai\"}",
+                        command.get(command.indexOf("--settings") + 1));
+                assertFalse(command.contains("--bare"));
+                assertFalse(command.contains("project,local"));
+            }
+            return new HarnessExecutionResult();
+        });
         assertTrue(service.buildCommand("prompt", "claude-opus-4-8", 30, null, null).contains("project,local"));
         assertFalse(service.buildPlanningCommand("prompt", "claude-opus-4-8", 30).contains("--settings"));
-    }
-
-    @Test
-    void managedCodexNeverFallsBackToClaudeWhenRunnerMissing() {
-        service.pinSubscriptionProvider(IssueBotProperties.AgentProvider.CODEX);
-        assertThrows(IllegalStateException.class, () -> service.executeReview("prompt",
-                java.nio.file.Path.of("/tmp"), "gpt-5.6-sol", 1L, null));
-        service.clearPinnedProvider();
     }
 
     @Test
@@ -284,50 +302,6 @@ class ClaudeCodeServiceTest {
 
         assertTrue(msg.contains("REAL_ERROR_TAIL"), msg);
         assertFalse(msg.contains("INIT_HEAD_LINE"), "must use the tail (the error), not the init head");
-    }
-
-    @Test
-    void selectedCodexProviderRoutesExecutionAndAuthChecksToCodexCli() {
-        IssueBotProperties properties = new IssueBotProperties();
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
-        CodexCliService codex = mock(CodexCliService.class);
-        ClaudeCodeService facade = new ClaudeCodeService(properties,
-                new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new WorkflowCancellationService(), codex);
-        HarnessExecutionResult expected = new HarnessExecutionResult();
-        when(codex.executeImplementation(anyString(), any(), anyString(), any(), any(), any()))
-                .thenReturn(expected);
-        when(codex.checkCliAvailable()).thenReturn(true);
-        when(codex.checkAuthentication()).thenReturn(true);
-
-        assertSame(expected, facade.executeImplementation("prompt", java.nio.file.Path.of("."),
-                "gpt-5.6-sol", null, 1L, null));
-        assertTrue(facade.checkCliAvailable());
-        assertTrue(facade.checkAuthentication());
-        assertEquals("Codex CLI", facade.providerDisplayName());
-    }
-
-    @Test
-    void pinnedProviderRoutesCustomModelAcrossGlobalProviderSwitch() {
-        IssueBotProperties properties = new IssueBotProperties();
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CODEX);
-        CodexCliService codex = mock(CodexCliService.class);
-        ClaudeCodeService facade = new ClaudeCodeService(properties,
-                new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new WorkflowCancellationService(), codex);
-        HarnessExecutionResult expected = new HarnessExecutionResult();
-        when(codex.executeImplementation(anyString(), any(), anyString(), any(), any(), any()))
-                .thenReturn(expected);
-
-        facade.pinProvider(IssueBotProperties.AgentProvider.CODEX);
-        properties.setAgentProvider(IssueBotProperties.AgentProvider.CLAUDE_CODE);
-
-        assertSame(expected, facade.executeImplementation("prompt", java.nio.file.Path.of("."),
-                "codex-mini-latest", null, 1L, null));
-        verify(codex).executeImplementation("prompt", java.nio.file.Path.of("."),
-                "codex-mini-latest", null, 1L, null);
-
-        facade.clearPinnedProvider();
     }
 
     @Test

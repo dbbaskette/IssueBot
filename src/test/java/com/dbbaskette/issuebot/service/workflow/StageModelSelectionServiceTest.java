@@ -5,7 +5,7 @@ import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.model.WorkflowStage;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import org.junit.jupiter.api.Test;
@@ -15,7 +15,7 @@ import static org.mockito.Mockito.*;
 
 class StageModelSelectionServiceTest {
     private final IssueBotProperties properties = new IssueBotProperties();
-    private final ClaudeCodeService agent = mock(ClaudeCodeService.class);
+    private final CodingHarnessService agent = mock(CodingHarnessService.class);
     private final CodexModelCatalog catalog = mock(CodexModelCatalog.class);
     private final StageModelSelectionService service = new StageModelSelectionService(
             properties, new ModelResolver(properties), catalog, agent);
@@ -64,11 +64,11 @@ class StageModelSelectionServiceTest {
         assertThatThrownBy(() -> service.validate(selection)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Install");
         verify(agent, never()).checkSubscriptionAuthentication(any());
-        when(agent.checkCliAvailable(AgentProvider.CODEX)).thenReturn(true);
+        when(agent.checkCliAvailable("codex")).thenReturn(true);
         assertThatThrownBy(() -> service.validate(selection)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("codex login").hasMessageContaining("API-key billing is not permitted");
-        when(agent.checkSubscriptionAuthentication(AgentProvider.CODEX)).thenReturn(true);
+        when(agent.checkSubscriptionAuthentication("codex")).thenReturn(true);
         assertThatCode(() -> service.validate(selection)).doesNotThrowAnyException();
-        verify(agent, never()).checkCliAvailable(AgentProvider.CLAUDE_CODE);
+        verify(agent, never()).checkCliAvailable("claude");
     }
 }

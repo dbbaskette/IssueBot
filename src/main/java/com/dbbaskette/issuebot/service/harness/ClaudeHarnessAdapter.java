@@ -1,6 +1,5 @@
 package com.dbbaskette.issuebot.service.harness;
 
-import com.dbbaskette.issuebot.config.IssueBotProperties.AgentProvider;
 import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.claude.ModelCatalog;
 import org.springframework.stereotype.Component;
@@ -33,8 +32,14 @@ public final class ClaudeHarnessAdapter implements CodingHarnessAdapter {
         return new HarnessCapabilities(false, true);
     }
 
-    @Override public boolean checkCliAvailable() { return runner.checkCliAvailable(AgentProvider.CLAUDE_CODE); }
+    @Override public boolean checkCliAvailable() { return runner.checkCliAvailable(); }
     @Override public boolean checkSubscriptionAuthentication() { return runner.checkSubscriptionAuthentication(); }
+    @Override public boolean isCliAvailable() { return runner.isCliAvailable(); }
+    @Override public boolean checkAuthentication() { return runner.checkAuthentication(); }
+    @Override public void clearAuthCache() { runner.clearAuthCache(); }
+    @Override public HarnessExecutionResult executeSubscription(HarnessExecutionRequest request, Consumer<String> callback) {
+        return runner.withSubscriptionSettings(() -> execute(request, callback));
+    }
 
     @Override
     public HarnessExecutionResult execute(HarnessExecutionRequest request, Consumer<String> callback) {

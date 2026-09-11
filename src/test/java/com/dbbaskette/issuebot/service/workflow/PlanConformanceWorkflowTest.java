@@ -14,7 +14,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.claude.ModelResolver;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.event.SseService;
@@ -45,7 +45,7 @@ class PlanConformanceWorkflowTest {
 
     private GitOperationsService gitOps;
     private GitHubApiClient gitHubApi;
-    private ClaudeCodeService agent;
+    private CodingHarnessService agent;
     private CodeReviewService reviewer;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
@@ -62,7 +62,7 @@ class PlanConformanceWorkflowTest {
     void setUp() {
         gitOps = mock(GitOperationsService.class);
         gitHubApi = mock(GitHubApiClient.class);
-        agent = mock(ClaudeCodeService.class);
+        agent = mock(CodingHarnessService.class);
         reviewer = mock(CodeReviewService.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);

@@ -15,7 +15,7 @@ import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
 import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
@@ -88,7 +88,7 @@ class PlanFirstTransactionManagerTest {
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private EntityManager entityManager;
 
-    @MockitoBean private ClaudeCodeService agent;
+    @MockitoBean private CodingHarnessService agent;
     @MockitoBean private GitHubApiClient gitHub;
     @MockitoBean private EventService events;
     @MockitoBean private NotificationService notifications;

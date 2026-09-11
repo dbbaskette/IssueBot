@@ -3,7 +3,8 @@ package com.dbbaskette.issuebot.service.workflow;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.PlanningVersionRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
-import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
+import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessIds;
 import org.springframework.stereotype.Service;
 
 /** Adapts durable stage decisions to the existing workflow and versioned-plan lifecycle. */
@@ -11,7 +12,7 @@ import org.springframework.stereotype.Service;
 public class StageWorkflowCoordinator {
     private final StageApprovalService stages;
     private final StageModelSelectionService models;
-    private final ClaudeCodeService agent;
+    private final CodingHarnessService agent;
     private final TrackedIssueRepository issues;
     private final PlanningVersionRepository versions;
     private final PlanFirstTransactionManager plans;
@@ -21,7 +22,7 @@ public class StageWorkflowCoordinator {
     private com.dbbaskette.issuebot.service.event.EventService events;
 
     public StageWorkflowCoordinator(StageApprovalService stages, StageModelSelectionService models,
-            ClaudeCodeService agent, TrackedIssueRepository issues, PlanningVersionRepository versions,
+            CodingHarnessService agent, TrackedIssueRepository issues, PlanningVersionRepository versions,
             PlanFirstTransactionManager plans, IssueDispatchService dispatch) {
         this.stages = stages;
         this.models = models;
@@ -54,14 +55,15 @@ public class StageWorkflowCoordinator {
         }
         if (stage.modelDriven()) {
             var selection = new StageModelSelectionService.Selection(decision.getProvider(), decision.getModel());
-            // The transactional decision validates authentication before approval. Execution
-            // remains subscription-pinned; do not introduce a second post-claim failure gate.
-            agent.pinSubscriptionProvider(selection.provider());
+            // Recheck subscription authentication at execution time before replacing the thread pin.
+            String executionHarness = HarnessIds.normalize(selection.provider().name());
+            agent.pinSubscriptionHarness(executionHarness);
             if (stage == WorkflowStage.REVIEW) {
                 issue.setResolvedReviewModel(selection.model());
             } else {
                 if (stage == WorkflowStage.IMPLEMENTATION
-                        && issue.getResolvedAgentProvider() != selection.provider()) {
+                        && !java.util.Objects.equals(issue.getResolvedAgentProvider() == null ? null
+                                : HarnessIds.normalize(issue.getResolvedAgentProvider().name()), executionHarness)) {
                     issue.setClaudeSessionId(null);
                 }
                 issue.setResolvedAgentProvider(selection.provider());
