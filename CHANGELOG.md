@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- Wait for launchd to finish removing the prior IssueBot job before bootstrapping a replacement, preventing transient macOS error 5 during redeploys.
+
 ## 0.6.0
 
 - Route Claude Code and Codex through a shared coding harness registry with model and reasoning capabilities.
