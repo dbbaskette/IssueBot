@@ -16,7 +16,7 @@ Filing a good issue is the easy part; the work between a well-specified issue an
 
 ## How It Works
 
-IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. The execution provider is configurable as either Claude Code CLI or Codex CLI, and each role's model is configurable from the dashboard at the global, per-repo, and per-issue level. Defaults are provider-specific: Claude Code uses Opus 4.8 for implementation and Sonnet 5 for review; Codex CLI uses `gpt-5.6-sol` for implementation and `gpt-5.6-terra` for review.
+IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. The coding harness is configurable as either Claude Code CLI or Codex CLI, and each role's model and reasoning are configurable together from the dashboard at the global, per-repo, and per-issue level. Defaults depend on the coding harness: Claude Code uses Opus 4.8 for implementation and Sonnet 5 for review, both with high effort; Codex CLI uses `gpt-5.6-sol` with low reasoning for implementation and `gpt-5.6-terra` with medium reasoning for review.
 
 ```mermaid
 flowchart LR
@@ -24,7 +24,7 @@ flowchart LR
     B --> P[Plan First<br>Spec + Plan]
     P -->|Revise| P
     P -->|Approve both| C[Setup<br>Clone & Branch]
-    C --> D[Implement<br>Selected Provider]
+    C --> D[Implement<br>Selected Coding Harness]
     D --> E[CI Verify<br>Push & Check]
     E -->|Fail| F{Retry<br>Smart?}
     F -->|Skip| G[FAILED<br>needs-human]
@@ -42,10 +42,10 @@ flowchart LR
 | Phase | What Happens | Model |
 |-------|-------------|-------|
 | **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
-| **2. Implementation** | Selected agent CLI writes code based on issue spec | Implementation model (provider-specific default) |
+| **2. Implementation** | Selected agent CLI writes code based on issue spec | Implementation model (coding harness default) |
 | **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
 | **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
-| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (provider-specific default) |
+| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (coding harness default) |
 | **6. Completion** | Post review to PR, route non-blocking review findings per repo setting (default: deduplicated rolling backlog issue), auto-merge if configured | - |
 
 If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
@@ -60,7 +60,7 @@ Plan First review uses a fixed two-attempt conformance cycle. The first miss aut
 
 ## Key Features
 
-- **Dual-Provider CLI Support** - Choose Claude Code CLI with a Claude subscription login or Codex CLI with a ChatGPT subscription login from Settings; model choices update for the selected provider
+- **Coding Harness Support** - Choose Claude Code CLI with a Claude subscription login or Codex CLI with a ChatGPT subscription login from Settings; model and reasoning choices follow the selected adapter's capabilities
 - **Dual-Model Architecture** - Implementation and review use independently configurable models, settable at the global, per-repo, and per-issue level for checks and balances
 - **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
 - **Independent Code Review** - The configured review model evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
@@ -169,14 +169,17 @@ IssueBot can be configured via the dashboard UI or by editing `~/.issuebot/confi
 
 ```yaml
 issuebot:
-  agent-provider: claude-code # claude-code or codex
+  agent-provider: claude # claude or codex; legacy claude-code remains accepted
   poll-interval-seconds: 60
   max-concurrent-issues: 3
 
   claude-code:
     implementation-model: claude-opus-4-8
+    implementation-reasoning-effort: high  # also used for planning
     review-model: claude-sonnet-5
+    review-reasoning-effort: high
     utility-model: claude-haiku-4-5
+    utility-reasoning-effort: default      # model does not expose configurable effort
     max-turns-per-invocation: 30
     timeout-minutes: 45          # implementation/planning wall-clock cap
     review-max-turns: 15
@@ -210,8 +213,10 @@ issuebot:
       decomposition-mode: PROPOSE
       plan-first: true
       pre-screen-enabled: true
-      # implementation-model: claude-opus-4-8   # optional per-repo override; omit to inherit selected provider default
-      # review-model: claude-sonnet-5           # optional per-repo override; omit to inherit selected provider default
+      # implementation-model: claude-opus-4-8   # omit model/effort pair to inherit coding harness defaults
+      # implementation-reasoning-effort: high
+      # review-model: claude-sonnet-5
+      # review-reasoning-effort: high
       allowed-paths:
         - src/
         - test/
@@ -219,10 +224,14 @@ issuebot:
 
 ### Repository Settings
 
+The compatibility configuration key remains `agent-provider`, with stable values `claude` or `codex`. Existing `claude-code` configuration remains accepted; the `claude-code` and `codex-cli` configuration sections keep their names. Migration maps persisted `CLAUDE_CODE` and `CODEX` identities to `claude` and `codex` while retaining legacy columns, session IDs, and active workflow history.
+
+Every saved model selection now carries a compatible reasoning value. Models without configurable reasoning use the explicit value `default`; older model-only selections resolve the adapter's documented default when saved or dispatched. Settings, repository overrides, start/retry dialogs, and stage approvals expose paired model/reasoning controls from the coding harness catalog. Unsupported combinations are rejected before dispatch. Run overrides apply to that run without changing repository defaults.
+
 The Add/Edit Repository form contains one workflow editor and one save action for repository settings and approval policy:
 
 - **Existing settings** (`LEGACY`) preserves the existing autonomy settings and approval behavior, with the older controls available in advanced settings.
-- **Approval checkpoints** (`STAGED`) lets you require approval before planning, implementation, verification, independent review, and/or merge. On the issue page, one current-decision panel names the stage being approved, explains what starts and where execution next pauses, and offers provider/model selection for AI-driven stages. Verification and merge are deterministic and have no model picker.
+- **Approval checkpoints** (`STAGED`) lets you require approval before planning, implementation, verification, independent review, and/or merge. On the issue page, one current-decision panel names the stage being approved, explains what starts and where execution next pauses, and offers coding harness/model/reasoning selection for AI-driven stages. Verification and merge are deterministic and have no model picker.
 - **Automatic** (`AUTOMATED`) progresses end to end with an immutable plan, successful independent review, and merge checks. Authentication or verification problems still stop for attention; automation never bypasses safety checks.
 
 Policy is captured when an issue first enters the workflow; changing the repository does not rewrite active approvals. Stage decisions retain their model, actor, plan artifact, and execution-run history. Fresh retries require fresh approvals. Managed stages use Claude Code or Codex CLI subscription authentication without API-key fallback. Merges are conditional on the exact reviewed commit and current CI results.
@@ -243,7 +252,9 @@ The editor replaces the older autonomy presets and separate policy form. Existin
 | `plan-first` | `true` | Require a versioned Design Spec and Implementation Plan with one approval before implementation. Disable at repository level, or use the per-issue start/retry override, to opt out explicitly |
 | `pre-screen-enabled` | `true` | Run a cheap utility-model pass before implementation to catch oversized issues early |
 | `implementation-model` | inherit global | Per-repo override of the implementation model |
+| `implementation-reasoning-effort` | inherit global | Compatible reasoning paired with the implementation model |
 | `review-model` | inherit global | Per-repo override of the review model |
+| `review-reasoning-effort` | inherit global | Compatible reasoning paired with the review model |
 | `custom-instructions` | (none) | Free-text standing guidance injected into every implementation prompt (`## Repository Instructions`) and into the review prompt as reviewer context ("the repo owner requires...") |
 | `lessons-enabled` | `false` | When on, a completed (or iteration-exhausted) issue triggers a cheap utility-model call that distills 1-3 transferable lessons, stored per-repo (capped at 30, oldest evicted first) and injected into future implementation prompts (`## Lessons from previous issues in this repo`). Curate/delete lessons from the repo row on the dashboard |
 
@@ -356,12 +367,13 @@ src/main/java/com/dbbaskette/issuebot/
 ├── observability/       # Health indicators and Micrometer metrics
 ├── service/
 │   ├── ci/             # CI workflow template generation (Maven, Gradle, Node, Go)
-│   ├── claude/         # Agent CLI facade, Claude Code execution, stream-json parser
+│   ├── claude/         # Claude Code execution, stream-json parser
 │   ├── codex/          # Codex CLI execution, auth checks, model discovery
 │   ├── dependency/     # Issue dependency resolution (GitHub native + body-text fallback)
 │   ├── event/          # Event logging and SSE broadcasting
 │   ├── git/            # JGit operations (clone, branch, diff, commit, push)
 │   ├── github/         # GitHub API client (issues, PRs, CI checks, PR reviews)
+│   ├── harness/        # Coding harness adapters, registry, model/reasoning capabilities
 │   ├── notification/   # Desktop and dashboard notifications
 │   ├── orchestration/  # Spring AI ChatClient orchestration agent
 │   ├── polling/        # Scheduled issue detection and qualification
