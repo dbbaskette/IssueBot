@@ -261,6 +261,8 @@ public class IssueController {
                 "/issues", "Back to the queue"));
         populateDetailModel(model, issue, id, parseRequestedInteger(planVersion),
                 parseRequestedLong(reviewAttempt));
+        // Independent history loading leaves the live-status/draft preservation boundary intact.
+        model.addAttribute("decisionHistoryUrl", "/issues/" + id + "/decisions");
         return ViewResolver.view("issue-detail", hx != null);
     }
 

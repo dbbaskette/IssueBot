@@ -1063,6 +1063,17 @@
         </div>
     </div>
 
+    <!-- History owns its own page, outside live polling and all draft/form regions. -->
+    <details id="decision-history" class="panel mb-3 secondary-section history-section"
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':decision-history'}">
+        <summary class="panel-header"><h3>Decision history</h3></summary>
+        <div id="decision-history-page" class="panel-body"
+             th:hx-get="${decisionHistoryUrl != null ? decisionHistoryUrl : '/issues/' + issue.id + '/decisions'}"
+             hx-trigger="load" hx-swap="outerHTML">
+            <a th:href="@{'/issues/' + ${issue.id} + '/decisions'}">Load decision history</a>
+        </div>
+    </details>
+
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
     <details id="iteration-history" class="panel mb-3 secondary-section history-section"
              th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
@@ -1083,7 +1094,7 @@
             <ul class="iteration-timeline" th:if="${not #lists.isEmpty(iterationsNewestFirst)}">
                 <li th:each="iter : ${iterationsNewestFirst}"
                     th:classappend="${iter.ciResult == 'PASSED' ? 'passed' : (iter.completedAt != null ? 'failed' : 'active')}">
-                    <details class="iteration-entry"
+                    <details class="iteration-entry" th:id="${iter.id != null ? 'iteration-' + iter.id : null}"
                              th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id : null}">
                         <summary class="iteration-entry-summary">
                             <span class="iteration-entry-num" th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</span>
