@@ -101,12 +101,36 @@ class ReviewChangeAssemblerTest {
         assertThat(changes.explanation()).contains("completed verdict");
     }
 
+    @Test
+    void completeCollectionsRemainComparableWithoutNumericScores() {
+        ReviewScore previous = score(null,
+                List.of(criterion("AC-1", "Preserve state", "unmet")), true,
+                List.of(), true);
+        ReviewScore current = score(null,
+                List.of(criterion("AC-1", "Preserve state", "met")), true,
+                List.of(), true);
+
+        ReviewChanges changes = ReviewChangeAssembler.compare(previous, current);
+
+        assertThat(changes.comparable()).isTrue();
+        assertThat(changes.criteria()).extracting(ReviewChanges.Item::change)
+                .containsExactly(ReviewChanges.Change.NEWLY_MET);
+    }
+
     private static ReviewScore score(List<ReviewScore.Criterion> criteria,
                                      boolean criteriaAvailable,
                                      List<CodeReviewResult.ReviewFinding> findings,
                                      boolean findingsAvailable) {
-        return new ReviewScore(ReviewOutcome.FAILED, null, "summary", 0.7,
-                List.of(new ReviewScore.Dimension("correctness", "Correctness", 0.7)),
+        return score(0.7, criteria, criteriaAvailable, findings, findingsAvailable);
+    }
+
+    private static ReviewScore score(Double overall, List<ReviewScore.Criterion> criteria,
+                                     boolean criteriaAvailable,
+                                     List<CodeReviewResult.ReviewFinding> findings,
+                                     boolean findingsAvailable) {
+        return new ReviewScore(ReviewOutcome.FAILED, null, "summary", overall,
+                overall == null ? List.of()
+                        : List.of(new ReviewScore.Dimension("correctness", "Correctness", 0.7)),
                 findings.size(), "review-model",
                 criteria.stream().map(ReviewScore.Criterion::verdict).toList(), criteria,
                 criteriaAvailable, findings, findingsAvailable, true);

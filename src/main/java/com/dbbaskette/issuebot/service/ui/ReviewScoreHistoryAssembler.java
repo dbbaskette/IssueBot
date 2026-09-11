@@ -13,7 +13,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Builds the selected review attempt and its comparison with the nearest earlier scored review.
+ * Builds the selected review attempt and its comparison with the nearest earlier usable review.
  */
 public final class ReviewScoreHistoryAssembler {
 
@@ -147,14 +147,14 @@ public final class ReviewScoreHistoryAssembler {
         }
 
         Attempt latest = chronological.getLast();
-        Attempt latestScored = chronological.stream()
-                .filter(attempt -> attempt.score().overall() != null)
+        Attempt latestUsable = chronological.stream()
+                .filter(ReviewScoreHistoryAssembler::isComparableCompleted)
                 .reduce((first, second) -> second)
                 .orElse(latest);
-        Attempt selected = requestedAttemptId == null ? latestScored : chronological.stream()
+        Attempt selected = requestedAttemptId == null ? latestUsable : chronological.stream()
                 .filter(attempt -> requestedAttemptId.equals(attempt.iterationId()))
                 .findFirst()
-                .orElse(latestScored);
+                .orElse(latestUsable);
 
         Attempt previous = null;
         List<Attempt> skippedAttempts = new ArrayList<>();
@@ -203,9 +203,12 @@ public final class ReviewScoreHistoryAssembler {
     }
 
     private static boolean isComparableCompleted(Attempt attempt) {
-        return attempt.score().overall() != null && attempt.score().structuredEvidenceAvailable()
-                && (attempt.score().outcome() == ReviewOutcome.PASSED
-                || attempt.score().outcome() == ReviewOutcome.FAILED);
+        ReviewScore score = attempt.score();
+        boolean authoritativeVerdict = score.outcome() == ReviewOutcome.PASSED
+                || score.outcome() == ReviewOutcome.FAILED;
+        boolean usableEvidence = score.overall() != null || !score.dimensions().isEmpty()
+                || score.criteriaAvailable() || score.findingsAvailable();
+        return authoritativeVerdict && score.structuredEvidenceAvailable() && usableEvidence;
     }
 
     private static boolean sameIdentity(Attempt first, Attempt second) {
@@ -223,7 +226,7 @@ public final class ReviewScoreHistoryAssembler {
             return "Change comparison unavailable: this legacy review has no persisted workflow-run identity.";
         }
         if (!isComparableCompleted(selected)) {
-            return "Change comparison unavailable: the selected review has no completed structured score.";
+            return "Change comparison unavailable: the selected review has no completed usable review evidence.";
         }
         if (previous == null) {
             String reason = skipped.isEmpty()

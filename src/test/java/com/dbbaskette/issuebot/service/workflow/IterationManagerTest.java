@@ -10,11 +10,13 @@ import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
 import com.dbbaskette.issuebot.service.review.CodeReviewResult;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
+import com.dbbaskette.issuebot.service.history.DecisionProducer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -55,6 +57,7 @@ class IterationManagerTest {
 
         iterationManager = new IterationManager(issueRepository, repoRepository,
                 iterationRepository, gitHubApi, eventService, notificationService);
+        ReflectionTestUtils.setField(iterationManager, "decisions", mock(DecisionProducer.class));
     }
 
     @Test
@@ -112,6 +115,78 @@ class IterationManagerTest {
         issue.setPlanCorrectionPending(true);
 
         assertTrue(iterationManager.canIterate(issue));
+    }
+
+    @Test
+    void ordinaryClaimCreatesCurrentPlanRowInsteadOfReusingIncompletePriorPlanRow() {
+        TrackedIssue issue = claimIssue(4, 0, 20L);
+        Iteration stale = new Iteration(issue, 1, 4, 19L);
+        stale.setId(8L);
+        stubClaim(issue, 1, stale);
+
+        Iteration claimed = iterationManager.claimImplementationIteration(issue, 1);
+
+        assertNotSame(stale, claimed);
+        assertEquals(4, claimed.getWorkflowRunSnapshot());
+        assertEquals(20L, claimed.getApprovedPlanSnapshotId());
+        verify(iterationRepository).saveAndFlush(same(claimed));
+    }
+
+    @Test
+    void ordinaryClaimCreatesCurrentRunRowInsteadOfReusingIncompletePriorRunRow() {
+        TrackedIssue issue = claimIssue(5, 0, 20L);
+        Iteration stale = new Iteration(issue, 1, 4, 20L);
+        stale.setId(8L);
+        stubClaim(issue, 1, stale);
+
+        Iteration claimed = iterationManager.claimImplementationIteration(issue, 1);
+
+        assertNotSame(stale, claimed);
+        assertEquals(5, claimed.getWorkflowRunSnapshot());
+        assertEquals(20L, claimed.getApprovedPlanSnapshotId());
+        verify(iterationRepository).saveAndFlush(same(claimed));
+    }
+
+    @Test
+    void correctionClaimCreatesCurrentRunRowInsteadOfReusingIncompletePriorRunRow() {
+        TrackedIssue issue = claimIssue(5, 1, 20L);
+        issue.setPlanCorrectionPending(true);
+        Iteration stale = new Iteration(issue, 2, 4, 20L);
+        stale.setId(8L);
+        stubClaim(issue, 2, stale);
+        when(iterationRepository.save(any(Iteration.class))).thenAnswer(invocation -> {
+            Iteration saved = invocation.getArgument(0);
+            saved.setId(9L);
+            return saved;
+        });
+
+        Iteration claimed = iterationManager.claimPlanCorrectionIteration(issue, 2);
+
+        assertNotSame(stale, claimed);
+        assertEquals(5, claimed.getWorkflowRunSnapshot());
+        assertEquals(20L, claimed.getApprovedPlanSnapshotId());
+        verify(iterationRepository).save(same(claimed));
+    }
+
+    @Test
+    void correctionClaimCreatesCurrentPlanRowInsteadOfReusingIncompletePriorPlanRow() {
+        TrackedIssue issue = claimIssue(5, 1, 21L);
+        issue.setPlanCorrectionPending(true);
+        Iteration stale = new Iteration(issue, 2, 5, 20L);
+        stale.setId(8L);
+        stubClaim(issue, 2, stale);
+        when(iterationRepository.save(any(Iteration.class))).thenAnswer(invocation -> {
+            Iteration saved = invocation.getArgument(0);
+            saved.setId(9L);
+            return saved;
+        });
+
+        Iteration claimed = iterationManager.claimPlanCorrectionIteration(issue, 2);
+
+        assertNotSame(stale, claimed);
+        assertEquals(5, claimed.getWorkflowRunSnapshot());
+        assertEquals(21L, claimed.getApprovedPlanSnapshotId());
+        verify(iterationRepository).save(same(claimed));
     }
 
     @Test
@@ -310,6 +385,28 @@ class IterationManagerTest {
         issue.setCurrentIteration(currentIteration);
         issue.setBranchName("issuebot/issue-1-test");
         return issue;
+    }
+
+    private TrackedIssue claimIssue(int workflowRun, int currentIteration, long planId) {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setId(2L);
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Claim");
+        issue.setId(1L);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setWorkflowRun(workflowRun);
+        issue.setCurrentIteration(currentIteration);
+        PlanningVersion plan = mock(PlanningVersion.class);
+        when(plan.getId()).thenReturn(planId);
+        issue.setApprovedPlanningVersion(plan);
+        return issue;
+    }
+
+    private void stubClaim(TrackedIssue issue, int number, Iteration candidate) {
+        when(repoRepository.findByIdForUpdate(issue.getRepo().getId()))
+                .thenReturn(Optional.of(issue.getRepo()));
+        when(issueRepository.findByIdForDispatch(issue.getId())).thenReturn(Optional.of(issue));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                issue.getId(), number)).thenReturn(Optional.of(candidate));
     }
 
     @Test

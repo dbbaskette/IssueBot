@@ -453,7 +453,9 @@ public class IssueWorkflowService {
                 return;
             }
             if (iteration == null) {
-                iteration = reusableImplementationIteration(trackedIssue.getId(), iterationNum);
+                iteration = reusableImplementationIteration(trackedIssue.getId(), iterationNum,
+                        trackedIssue.getWorkflowRun(),
+                        approvedPlan == null ? null : approvedPlan.id());
             }
             if (iteration == null) {
                 iteration = new Iteration(trackedIssue, iterationNum,
@@ -932,11 +934,13 @@ public class IssueWorkflowService {
     }
 
     /** Reuses the row rearmed after a crash so its exact prepared prompt is not lost. */
-    Iteration reusableImplementationIteration(Long issueId, int iterationNum) {
+    Iteration reusableImplementationIteration(Long issueId, int iterationNum,
+                                               int workflowRun, Long approvedPlanId) {
         return iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
                         issueId, iterationNum)
                 .filter(candidate -> candidate.getCompletedAt() == null
-                        && candidate.getImplementationCompletedAt() == null)
+                        && candidate.getImplementationCompletedAt() == null
+                        && candidate.matchesAttemptIdentity(workflowRun, approvedPlanId))
                 .orElse(null);
     }
 

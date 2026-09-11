@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.model;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Entity
 @Table(name = "iterations")
@@ -119,6 +120,16 @@ public class Iteration {
 
     public Integer getWorkflowRunSnapshot() { return workflowRunSnapshot; }
     public Long getApprovedPlanSnapshotId() { return approvedPlanSnapshotId; }
+
+    /**
+     * Returns whether this row belongs to the exact immutable attempt identity. Legacy rows with
+     * no workflow-run snapshot never match, including when the current issue has no plan.
+     */
+    public boolean matchesAttemptIdentity(int workflowRun, Long approvedPlanId) {
+        return workflowRunSnapshot != null
+                && workflowRunSnapshot == workflowRun
+                && Objects.equals(approvedPlanSnapshotId, approvedPlanId);
+    }
 
     public String getClaudeOutput() { return claudeOutput; }
     public void setClaudeOutput(String claudeOutput) { this.claudeOutput = claudeOutput; }

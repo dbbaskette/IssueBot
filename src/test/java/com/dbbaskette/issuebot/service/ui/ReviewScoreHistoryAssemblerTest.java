@@ -39,6 +39,41 @@ class ReviewScoreHistoryAssemblerTest {
     }
 
     @Test
+    void completedStructuredReviewWithoutNumericScoresIsSelectedAndCompared() {
+        Iteration previous = review(10L, 1, false, """
+                {"specComplianceScore":0.60,
+                 "criteria":[{"id":"AC-1","text":"Preserve state","verdict":"unmet"}],
+                 "findings":[]}
+                """);
+        Iteration current = review(20L, 2, true, """
+                {"criteria":[{"id":"AC-1","text":"Preserve state","verdict":"met"}],
+                 "findings":[]}
+                """);
+
+        History history = ReviewScoreHistoryAssembler.assemble(List.of(previous, current), null);
+
+        assertThat(history.selected().iterationId()).isEqualTo(20L);
+        assertThat(history.previous().iterationId()).isEqualTo(10L);
+        assertThat(history.selected().overallPercent()).isNull();
+        assertThat(history.overallDelta()).isNull();
+        assertThat(history.changes().criteria()).extracting(ReviewChanges.Item::change)
+                .containsExactly(ReviewChanges.Change.NEWLY_MET);
+    }
+
+    @Test
+    void completedVerdictWithoutAnyUsableEvidenceDoesNotReplaceUsableSelection() {
+        Iteration usable = review(10L, 1, false, """
+                {"specComplianceScore":0.60,"criteria":[],"findings":[]}
+                """);
+        Iteration noEvidence = review(20L, 2, true, "{\"summary\":\"No fields\"}");
+
+        History history = ReviewScoreHistoryAssembler.assemble(List.of(usable, noEvidence), null);
+
+        assertThat(history.selected().iterationId()).isEqualTo(10L);
+        assertThat(history.latest().iterationId()).isEqualTo(20L);
+    }
+
+    @Test
     void unavailableMiddleAttemptIsNamedAndSkippedForSameIdentityBaseline() {
         Iteration first = review(10L, 1, false,
                 "{\"specComplianceScore\":0.60,\"criteria\":[],\"findings\":[]}");

@@ -6,7 +6,7 @@ Implemented exact review-change comparison without changing the existing review 
 New iterations persist immutable nullable workflow-run and approved-plan identity snapshots;
 legacy rows remain unknown and cannot be compared against mutable current issue state. The review
 parser now preserves criterion source IDs, full finding identity data, and absent-versus-empty
-collection state. History selects the prior completed scored review only within the same persisted
+collection state. History selects the prior completed usable review only within the same persisted
 issue/run/plan identity, names skipped attempts, and leaves unavailable data neutral.
 
 The issue-detail review card now leads with a compact verdict/overall change sentence and uses
@@ -57,3 +57,65 @@ text is rendered through escaped Thymeleaf text bindings.
   light/dark browser evidence remain for the coordinated final verification task as directed.
 - No version/changelog change was made because the approved design groups all tasks into one
   coordinated feature release.
+
+## Review fix round 1 — exact reuse identity and scoreless structured evidence
+
+### Result
+
+- Added one shared `Iteration.matchesAttemptIdentity(...)` guard. The crash-rearm workflow,
+  ordinary iteration claim, and plan-correction claim now reuse an incomplete row only when both
+  immutable workflow-run and approved-plan snapshots match exactly. A known no-plan row matches
+  only the same known run with no plan; a legacy row with an unknown run never matches.
+- When the newest incomplete row has a different run or plan, the claim paths create a new row
+  carrying the current immutable snapshots, including when retrying the current iteration number.
+- Review history now selects and baselines authoritative PASSED/FAILED reviews with usable
+  structured evidence even when all numeric scores are absent. Numeric deltas remain null.
+  Authoritative verdicts with no score, dimension, criterion collection, or finding collection
+  remain in history but do not replace the latest usable default selection or become baselines.
+
+### Verification
+
+- Red reproduction:
+  `./mvnw -q -Dtest=ReviewScoreHistoryAssemblerTest,ReviewChangeAssemblerTest test`
+  - Exit 1; 27 tests ran with 1 expected failure: the scoreless completed structured review was
+    not selected (`expected: 20`, `actual: 10`).
+- Implementation milestone:
+  `./mvnw -q -Dtest=ReviewScoreHistoryAssemblerTest,ReviewChangeAssemblerTest,IterationManagerTest,IssueWorkflowServiceTest test`
+  - Exit 0; all selected tests passed.
+- Focused render and persistence milestone:
+  `./mvnw -q -Dtest=ReviewScoreHistoryAssemblerTest,ReviewChangeAssemblerTest,IterationManagerTest,IssueWorkflowServiceTest,IterationReviewSnapshotPersistenceTest,IssueDetailPlanReviewRenderTest,ReviewScoreResponsiveCssTest test`
+  - Exit 0; all selected tests passed.
+- Workflow recovery milestone:
+  `./mvnw -q -Dtest=CorrectionClaimTransactionTest,DecisionProducerIntegrationTest,IntegrationWorkflowTest,IterationRepositoryCurrentRowTest test`
+  - Exit 0; all selected tests passed.
+- Final focused verification:
+  `./mvnw -q -Dtest=ReviewScoreParserTest,ReviewScoreHistoryAssemblerTest,ReviewChangeAssemblerTest,IterationManagerTest,IssueWorkflowServiceTest,CorrectionClaimTransactionTest,IterationReviewSnapshotPersistenceTest,IssueDetailPlanReviewRenderTest,ReviewScoreResponsiveCssTest,IntegrationWorkflowTest,DecisionProducerIntegrationTest,IterationRepositoryCurrentRowTest test`
+  - Exit 0; 247 tests passed, 0 failures, 0 errors, 0 skipped.
+- `git diff --check`
+  - Exit 0; no whitespace errors.
+
+### Fix-round files
+
+- `.superpowers/sdd/2026-09-11-operator-flow/task-5-report.md`
+- `src/main/java/com/dbbaskette/issuebot/model/Iteration.java`
+- `src/main/java/com/dbbaskette/issuebot/service/ui/ReviewScoreHistoryAssembler.java`
+- `src/main/java/com/dbbaskette/issuebot/service/workflow/IssueWorkflowService.java`
+- `src/main/java/com/dbbaskette/issuebot/service/workflow/IterationManager.java`
+- `src/test/java/com/dbbaskette/issuebot/controller/IssueDetailPlanReviewRenderTest.java`
+- `src/test/java/com/dbbaskette/issuebot/repository/IterationReviewSnapshotPersistenceTest.java`
+- `src/test/java/com/dbbaskette/issuebot/service/ui/ReviewChangeAssemblerTest.java`
+- `src/test/java/com/dbbaskette/issuebot/service/ui/ReviewScoreHistoryAssemblerTest.java`
+- `src/test/java/com/dbbaskette/issuebot/service/workflow/IssueWorkflowServiceTest.java`
+- `src/test/java/com/dbbaskette/issuebot/service/workflow/IterationManagerTest.java`
+
+### Fix-round self-review and concerns
+
+- All three reuse decisions delegate to the same exact snapshot predicate; none infer identity from
+  mutable issue values for legacy rows.
+- The history eligibility change uses the existing persisted outcome and parser evidence flags; it
+  introduces no second verdict policy and does not manufacture zero scores or resolved findings.
+- Existing exact-identity reuse remains covered by the crash-rearm test and transactional retry
+  integration test. New tests cover changed run, changed plan, legacy unknown versus known no-plan,
+  scoreless complete collections, no-evidence classification, null deltas, and server rendering.
+- No unresolved fix-round concern. The full combined suite and broad browser verification remain
+  assigned to the coordinated final verification task.

@@ -102,7 +102,9 @@ public class IterationManager {
         Iteration authoritative = iterationRepository
                 .findFirstByIssueIdAndIterationNumOrderByIdDesc(
                         claimTarget.getId(), iterationNum)
-                .filter(candidate -> candidate.getCompletedAt() == null)
+                .filter(candidate -> candidate.getCompletedAt() == null
+                        && candidate.matchesAttemptIdentity(claimTarget.getWorkflowRun(),
+                        approvedPlanId(claimTarget)))
                 .orElse(null);
 
         claimTarget.setCurrentIteration(iterationNum);
@@ -115,7 +117,8 @@ public class IterationManager {
             recordRetry(claimTarget, authoritative);
             return authoritative;
         }
-        Iteration iteration = new Iteration(claimTarget, iterationNum);
+        Iteration iteration = new Iteration(claimTarget, iterationNum,
+                claimTarget.getWorkflowRun(), approvedPlanId(claimTarget));
         iteration.setImplModel(claimTarget.getResolvedImplModel());
         iterationRepository.save(iteration);
         iterationRepository.flush();
@@ -131,17 +134,30 @@ public class IterationManager {
         if (issue.getWorkflowRun() != expected.getWorkflowRun() || issue.getStatus() != IssueStatus.IN_PROGRESS)
             throw new IllegalStateException("Iteration claim is stale");
         var existing = iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), number)
-                .filter(i -> i.getCompletedAt() == null && i.getImplementationCompletedAt() == null).orElse(null);
+                .filter(i -> i.getCompletedAt() == null
+                        && i.getImplementationCompletedAt() == null
+                        && i.matchesAttemptIdentity(issue.getWorkflowRun(), approvedPlanId(issue)))
+                .orElse(null);
         if (number == issue.getCurrentIteration() && existing != null) return existing;
-        if (number != issue.getCurrentIteration() + 1) throw new IllegalStateException("Iteration must advance by one");
+        if (number != issue.getCurrentIteration()
+                && number != issue.getCurrentIteration() + 1) {
+            throw new IllegalStateException("Iteration must be current or advance by one");
+        }
         issue.setCurrentIteration(number);
         issue.setCurrentPhase("IMPLEMENTATION");
         issueRepository.saveAndFlush(issue);
-        var iteration = existing == null ? new Iteration(issue, number) : existing;
+        var iteration = existing == null
+                ? new Iteration(issue, number, issue.getWorkflowRun(), approvedPlanId(issue))
+                : existing;
         iteration.setImplModel(issue.getResolvedImplModel());
         iterationRepository.saveAndFlush(iteration);
         if (number > 1) recordRetry(issue, iteration);
         return iteration;
+    }
+
+    private Long approvedPlanId(TrackedIssue issue) {
+        return issue.getApprovedPlanningVersion() == null
+                ? null : issue.getApprovedPlanningVersion().getId();
     }
 
     private void recordRetry(TrackedIssue issue, Iteration iteration) {

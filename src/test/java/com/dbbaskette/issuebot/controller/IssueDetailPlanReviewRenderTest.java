@@ -693,6 +693,32 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void completedStructuredReviewWithoutNumericScoreRendersAsSelectedComparison() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":0.60,
+                 "criteria":[{"id":"AC-1","text":"Preserve state","verdict":"unmet"}],
+                 "findings":[]}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"criteria":[{"id":"AC-1","text":"Preserve state","verdict":"met"}],
+                 "findings":[]}
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("Implementation review · Attempt 2")
+                .contains("Conforms to plan")
+                .contains("Verdict changed from changes requested to passed.")
+                .contains("Compared with review 1 (attempt 1).")
+                .contains("Newly met")
+                .contains("unmet → met")
+                .contains("review-model · 0 findings")
+                .doesNotContain("class=\"review-score-overview\"");
+    }
+
+    @Test
     void outOfRangeScoresRenderBoundedRailWidthsAndUnboundedRawDelta() {
         TrackedIssue issue = issueAwaitingApproval();
         PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);

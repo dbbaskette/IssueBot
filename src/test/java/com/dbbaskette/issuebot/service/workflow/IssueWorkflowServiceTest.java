@@ -119,10 +119,54 @@ class IssueWorkflowServiceTest {
         when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 1))
                 .thenReturn(Optional.of(durable));
 
-        Iteration reused = workflowService.reusableImplementationIteration(1L, 1);
+        Iteration reused = workflowService.reusableImplementationIteration(1L, 1, 0, null);
 
         assertSame(durable, reused);
         assertEquals("exact guidance prepared before the crash", reused.getImplementationContext());
+    }
+
+    @Test
+    void rearmedImplementationDoesNotReuseIncompleteRowFromDifferentWorkflowRun() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Resume");
+        issue.setId(1L);
+        Iteration stale = new Iteration(issue, 1, 3, 10L);
+        stale.setId(9L);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 1))
+                .thenReturn(Optional.of(stale));
+
+        Iteration reused = workflowService.reusableImplementationIteration(1L, 1, 4, 10L);
+
+        assertNull(reused);
+    }
+
+    @Test
+    void rearmedImplementationDoesNotReuseIncompleteRowFromDifferentApprovedPlan() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Resume");
+        issue.setId(1L);
+        Iteration stale = new Iteration(issue, 1, 4, 10L);
+        stale.setId(9L);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 1))
+                .thenReturn(Optional.of(stale));
+
+        Iteration reused = workflowService.reusableImplementationIteration(1L, 1, 4, 11L);
+
+        assertNull(reused);
+    }
+
+    @Test
+    void rearmedImplementationDoesNotTreatLegacyUnknownIdentityAsKnownNoPlan() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Resume");
+        issue.setId(1L);
+        Iteration legacy = new Iteration();
+        legacy.setIssue(issue);
+        legacy.setIterationNum(1);
+        legacy.setId(9L);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(1L, 1))
+                .thenReturn(Optional.of(legacy));
+
+        Iteration reused = workflowService.reusableImplementationIteration(1L, 1, 4, null);
+
+        assertNull(reused);
     }
 
     @BeforeEach

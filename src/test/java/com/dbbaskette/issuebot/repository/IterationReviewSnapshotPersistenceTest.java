@@ -47,6 +47,8 @@ class IterationReviewSnapshotPersistenceTest {
         Iteration reloaded = iterations.findById(id).orElseThrow();
         assertThat(reloaded.getWorkflowRunSnapshot()).isEqualTo(7);
         assertThat(reloaded.getApprovedPlanSnapshotId()).isEqualTo(plan.getId());
+        assertThat(reloaded.matchesAttemptIdentity(7, plan.getId())).isTrue();
+        assertThat(reloaded.matchesAttemptIdentity(8, plan.getId())).isFalse();
     }
 
     @Test
@@ -62,6 +64,16 @@ class IterationReviewSnapshotPersistenceTest {
         Iteration reloaded = iterations.findById(saved.getId()).orElseThrow();
         assertThat(reloaded.getWorkflowRunSnapshot()).isEqualTo(2);
         assertThat(reloaded.getApprovedPlanSnapshotId()).isNull();
+        assertThat(reloaded.matchesAttemptIdentity(2, null)).isTrue();
+        assertThat(reloaded.matchesAttemptIdentity(2, 99L)).isFalse();
+        assertThat(reloaded.matchesAttemptIdentity(3, null)).isFalse();
+    }
+
+    @Test
+    void legacyUnknownIdentityNeverMatchesKnownNoPlan() {
+        Iteration legacy = new Iteration();
+
+        assertThat(legacy.matchesAttemptIdentity(0, null)).isFalse();
     }
 
     @Test
