@@ -29,6 +29,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -247,7 +249,10 @@ class PlanConformanceWorkflowTest {
         issue.setPlanConformanceAttempt(1);
         issue.setPlanCorrectionPending(true);
         arrangeWorkflow(issue);
-        Iteration prior = new Iteration(issue, 1);
+        // approvedContext is mocked independently of the issue's entity pointer. Persist
+        // the same immutable plan/run identity that a real approved iteration captures.
+        Iteration prior = new Iteration(issue, 1, issue.getWorkflowRun(), approvedPlan.id());
+        assertThat(prior.matchesAttemptIdentity(issue.getWorkflowRun(), approvedPlan.id())).isTrue();
         String persistedVerdict = "{\"passed\":false,\"summary\":\"persisted conformance miss\","
                 + "\"findings\":[{\"finding\":\"stored missing deliverable\"}]}";
         prior.setReviewJson(persistedVerdict);
@@ -267,6 +272,41 @@ class PlanConformanceWorkflowTest {
                 .contains(persistedVerdict)
                 .contains("Keep the public API stable");
         assertThat(issue.isPlanCorrectionPending()).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"different-run", "different-plan", "legacy-unknown"})
+    void restartedCorrectionNeverReusesReviewOutsideApprovedAttemptIdentity(String mismatch) throws Exception {
+        TrackedIssue issue = planFirstIssue();
+        issue.setCurrentIteration(1);
+        issue.setPlanConformanceAttempt(1);
+        issue.setPlanCorrectionPending(true);
+        arrangeWorkflow(issue);
+        Integer run = switch (mismatch) {
+            case "different-run" -> issue.getWorkflowRun() + 1;
+            case "legacy-unknown" -> null;
+            default -> issue.getWorkflowRun();
+        };
+        Long planId = switch (mismatch) {
+            case "different-plan" -> approvedPlan.id() + 1;
+            case "legacy-unknown" -> null;
+            default -> approvedPlan.id();
+        };
+        Iteration prior = new Iteration(issue, 1, run, planId);
+        prior.setReviewJson("{\"passed\":false,\"summary\":\"unrelated persisted conformance feedback\"}");
+        prior.setReviewPassed(false);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(prior));
+        when(reviewer.reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
+                anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan), any(), any()))
+                .thenReturn(passedConformance());
+
+        workflow.processIssue(issue, "Keep the public API stable");
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(agent).executeImplementation(prompt.capture(), any(), anyString(), any(), anyLong(), any());
+        assertThat(prompt.getValue()).contains("Keep the public API stable")
+                .doesNotContain("unrelated persisted conformance feedback");
     }
 
     private TrackedIssue planFirstIssue() {

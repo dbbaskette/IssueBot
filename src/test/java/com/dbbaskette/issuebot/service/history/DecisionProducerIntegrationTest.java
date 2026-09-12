@@ -61,6 +61,7 @@ class DecisionProducerIntegrationTest {
     @MockitoBean NotificationService notifications;
     @MockitoBean WorkflowCancellationService cancellation;
     @MockitoBean StageModelSelectionService selections;
+    @MockitoBean PrerequisiteStatusService prerequisites;
     @MockitoBean com.dbbaskette.issuebot.config.IssueBotProperties properties;
     final ObjectMapper json = new ObjectMapper();
     TrackedIssue issue;

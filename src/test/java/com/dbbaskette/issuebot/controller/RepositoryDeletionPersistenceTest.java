@@ -65,6 +65,7 @@ class RepositoryDeletionPersistenceTest {
 
     @MockitoBean private IssuePollingService pollingService;
     @MockitoBean private com.dbbaskette.issuebot.service.workflow.ProcessingControlService processingControl;
+    @MockitoBean private com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService prerequisites;
 
     @Test
     void deletionClearsApprovedPointerAndRemovesPendingAndApprovedVersionsBeforeIssues() {
