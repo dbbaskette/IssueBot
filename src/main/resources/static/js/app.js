@@ -724,6 +724,7 @@
 
   var IssueBotTerminal = {
     es: null,
+    element: null,
     issueId: null,
     follow: true,
     lineCount: 0,
@@ -736,6 +737,8 @@
     init: function (issueId) {
       var terminal = document.getElementById('live-terminal');
       if (!terminal) { return; }
+      if (this.element === terminal && this.issueId === issueId && this.es) { return; }
+      this.element = terminal;
       this.issueId = issueId;
       this.lineCount = 0;
       this.trimmed = 0;
@@ -1001,6 +1004,16 @@
     }
   };
   window.IssueBotTerminal = IssueBotTerminal;
+
+  // A direct issue-page load runs inline template scripts before this deferred
+  // app.js exists. Start the stream from the same DOM-ready/HTMX lifecycle as
+  // every other enhanced widget, and do not reconnect on unrelated live polls.
+  function initLiveTerminal() {
+    var terminal = document.getElementById('live-terminal');
+    if (!terminal) { return; }
+    var issueId = Number(terminal.dataset.issueId);
+    if (Number.isSafeInteger(issueId) && issueId > 0) { IssueBotTerminal.init(issueId); }
+  }
 
   // --- Accessible modal dialogs ------------------------------------------
   var FOCUSABLE = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
@@ -1734,6 +1747,7 @@
       // subtree is idempotent for everything already wired up correctly, so this is a
       // safe no-op everywhere else.
       if (window.htmx && typeof window.htmx.process === 'function') { window.htmx.process(target); }
+      initLiveTerminal();
       UpdateStamps.markAllVisible();
     } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
       markUpdated(SWAP_TARGET_STAMPS[target.id]);
@@ -1742,6 +1756,8 @@
       syncNotifBadge(target);
     }
   });
+
+  document.body.addEventListener('htmx:historyRestore', initLiveTerminal);
 
   // Close the live-terminal EventSource when navigating away (registered once).
   document.addEventListener('htmx:beforeSwap', function (evt) {
@@ -1888,6 +1904,7 @@
     updateBulkActionBar();
     restoreSubmittedRepoForm();
     initNavigationContext(document);
+    initLiveTerminal();
     UpdateStamps.markAllVisible();
     document.querySelectorAll('[data-plan-revision-guidance]').forEach(syncPlanRevisionButton);
   }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0 — 2026-09-12
+
+- Start the issue terminal on direct page loads, refreshes, and HTMX navigation instead of relying on an inline script that could run before deferred JavaScript; avoid reconnecting on unrelated polls.
+- Make the planning contract collapsible, open it by default only when approval is needed, and collapse the legacy plan, Goal, and Guide panels during active work.
+
 ## 0.11.0 — 2026-09-12
 
 - Put issue state, next action, latest activity, and the last agent output together at the top of the issue page; collapse detailed progress and history by default.
