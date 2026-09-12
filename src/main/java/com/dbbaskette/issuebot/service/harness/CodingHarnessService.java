@@ -16,6 +16,8 @@ public class CodingHarnessService {
     private final IssueBotProperties properties;
     private final HarnessSelectionService selections;
     private final PrerequisiteStatusService prerequisites;
+    // Eager validation during service construction prevents dispatch with corrupt/missing guidance.
+    private final ManagedSkillBundle skills = ManagedSkillBundle.bundled();
     private final ThreadLocal<String> pinnedHarness = new ThreadLocal<>();
     private final ThreadLocal<Boolean> subscriptionOnly = new ThreadLocal<>();
 
@@ -138,7 +140,7 @@ public class CodingHarnessService {
     private HarnessExecutionResult execute(CodingHarnessAdapter adapter, HarnessRole role, String prompt,
             Path directory, String model, String effort, String sessionId, Long issueId, Consumer<String> callback) {
         HarnessSelection selected = selections.resolve(adapter.id(), model, effort);
-        HarnessExecutionRequest request = new HarnessExecutionRequest(role, prompt, directory,
+        HarnessExecutionRequest request = new HarnessExecutionRequest(role, skills.project(role, prompt), directory,
                 selected.modelId(), selected.reasoningLevel(), sessionId, issueId);
         return Boolean.TRUE.equals(subscriptionOnly.get())
                 ? adapter.executeSubscription(request, callback) : adapter.execute(request, callback);

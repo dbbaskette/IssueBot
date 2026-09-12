@@ -353,6 +353,9 @@ class UiVisualFixturesTest {
         String setup = render(get("/setup"), 200);
         String setupFragment = render(hx(get("/setup")), 200);
         assertThat(setup).contains("Setup", "Prerequisites", "Not verified", "Optional: webhooks");
+        assertThat(setup).contains("Managed agent guidance", "6.3.0-custom.1", "stage-prompt-v1",
+                "Integrity verified", "setup:skill-provenance",
+                com.dbbaskette.issuebot.service.harness.ManagedSkillBundle.bundled().identity().digest());
         put(routes, "/setup", "setup", setup, setupFragment);
 
         String prereqs = render(get("/setup/prereqs"), 200);

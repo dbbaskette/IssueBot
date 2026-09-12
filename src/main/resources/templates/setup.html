@@ -10,6 +10,21 @@
     </div>
 
     <div class="glass-card inset-panel mb-3">
+        <h3>Managed agent guidance</h3>
+        <p class="text-sm" th:if="${managedSkillBundle != null}">
+            Superpowers <strong th:text="${managedSkillBundle.version}">version</strong>
+            · <span th:text="${managedSkillBundle.projection}">stage-prompt-v1</span> · Integrity verified
+        </p>
+        <p class="text-sm text-muted">Bundled with this IssueBot release for both Codex and Claude.
+            Isolated from personal plugins; IssueBot owns approvals and verification.</p>
+        <details class="skill-provenance" th:if="${managedSkillBundle != null}" data-ui-state-key="setup:skill-provenance">
+            <summary>Bundle provenance</summary>
+            <p class="text-sm">Source commit: <code th:text="${managedSkillBundle.commit}"></code></p>
+            <p class="text-sm">Manifest SHA-256: <code th:text="${managedSkillBundle.digest}"></code></p>
+        </details>
+    </div>
+
+    <div class="glass-card inset-panel mb-3">
         <div class="panel-header">
             <h3>Prerequisites</h3>
             <form th:action="@{/setup/prereqs}" method="post" hx-post="/setup/prereqs"

@@ -1740,6 +1740,7 @@ select {
 
 .review-change-label { white-space: nowrap; }
 .review-change-state { text-align: right; overflow-wrap: anywhere; }
+.skill-provenance code { overflow-wrap: anywhere; word-break: break-word; }
 
 .review-change-list strong {
     min-width: 0;

@@ -1008,6 +1008,7 @@ class IssueWorkflowServiceTest {
     @Test
     void phaseImplementation_resumedInvocationFails_retriesColdExactlyOnce_clearsSessionId() {
         WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setVerificationCommands("# final gate\n./mvnw verify -Poffline\n\nnode --test tests/check.cjs");
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
         issue.setId(1L);
         issue.setResolvedImplModel("claude-opus-4-8");
@@ -1036,6 +1037,14 @@ class IssueWorkflowServiceTest {
 
         assertTrue(result.isSuccess());
         assertEquals("done cold", result.getOutput());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(harnessService, times(2)).executeImplementation(prompts.capture(), any(Path.class),
+                anyString(), any(), any(), any());
+        for (String sent : prompts.getAllValues()) {
+            assertTrue(sent.contains("./mvnw verify -Poffline"));
+            assertTrue(sent.contains("node --test tests/check.cjs"));
+            assertFalse(sent.contains("# final gate"));
+        }
         // Exactly two invocations for this single iteration: resumed (failed) + cold (succeeded)
         verify(harnessService, times(2)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
         verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), eq("sess-stale"), any(), any());

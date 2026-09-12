@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 — 2026-09-12
+
+- Bundle integrity-pinned Superpowers Custom stage guidance for Codex and Claude, validate it before dispatch, and show provenance in Setup. No personal plugin installation or startup downloads are required.
+
+- Show implementation agents the actual configured local verification commands, including resumed and cold-fallback runs, so they can choose focused checks without guessing or bypassing trusted gates.
+
 ## 0.7.1 — 2026-09-12
 
 - Consolidate planning, implementation, and review guidance with explicit verification ownership, proportional skill use, and shared frontend design guidance for UI work.
