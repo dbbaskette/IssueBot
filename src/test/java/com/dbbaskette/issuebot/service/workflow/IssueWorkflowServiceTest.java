@@ -1746,6 +1746,18 @@ class IssueWorkflowServiceTest {
     }
 
     @Test
+    void streamClaudeLog_codexCommandShowsStartAndCapturedResult() {
+        workflowService.streamClaudeLog(7L,
+                "{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\",\"command\":\"mvn test\"}}");
+        workflowService.streamClaudeLog(7L,
+                "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"mvn test\",\"exit_code\":1,\"aggregated_output\":\"Tests failed\\nSee report\"}}");
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(sseService);
+        order.verify(sseService).broadcastClaudeLog(7L, "[running] mvn test");
+        order.verify(sseService).broadcastClaudeLog(7L, "[command] mvn test (exit 1)\nTests failed\nSee report");
+    }
+
+    @Test
     void streamClaudeLog_codexLifecycleNoiseIsSuppressed() {
         workflowService.streamClaudeLog(7L,
                 "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}");

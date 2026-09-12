@@ -1312,6 +1312,12 @@ public class IssueController {
         History reviewHistory = ReviewScoreHistoryAssembler.assemble(iterations, requestedReviewAttempt);
         BigDecimal totalCost = costRepository.totalCostForIssue(issue);
         List<Event> events = eventRepository.findByIssueOrderByCreatedAtDesc(issue, PageRequest.of(0, 30));
+        Event latestActivity = events.isEmpty() ? null : events.get(0);
+        Iteration latestCurrentRun = iterations.stream()
+                .filter(iteration -> (iteration.getWorkflowRunSnapshot() != null
+                        && iteration.getWorkflowRunSnapshot() == issue.getWorkflowRun())
+                        || (issue.getWorkflowRun() == 0 && iteration.getWorkflowRunSnapshot() == null))
+                .reduce((earlier, later) -> later).orElse(null);
 
         // Loop timeline (#88): needs the FULL per-issue event and cost history (one query each,
         // bounded — no per-iteration N+1) rather than the capped/desc "events" list above, which
@@ -1324,6 +1330,13 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        model.addAttribute("latestActivity", latestActivity);
+        model.addAttribute("latestActivityPreview", latestActivity == null ? null
+                : previewStart(latestActivity.getMessage(), 500));
+        model.addAttribute("recentLiveOutput", issue.getStatus() == IssueStatus.IN_PROGRESS && liveOutput != null
+                ? liveOutput.recentOutputText(id, 4, 900) : null);
+        model.addAttribute("latestAgentOutputPreview", latestCurrentRun == null ? null
+                : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 1400));
         model.addAttribute("localVerificationRequired", issue.effectivePlanFirst());
         model.addAttribute("localVerificationConfigured",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty());
@@ -1373,6 +1386,26 @@ public class IssueController {
                 model.addAttribute("decompositionProposal", proposal);
             }
         }
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.dbbaskette.issuebot.service.event.SseService liveOutput;
+
+    private static String previewStart(String value, int limit) {
+        if (value == null || value.isBlank()) return null;
+        String text = value.strip();
+        return text.length() <= limit ? text : text.substring(0, limit - 1) + "…";
+    }
+
+    private static String previewAgentOutput(String value, int limit) {
+        if (value == null || value.isBlank()) return null;
+        // The machine-readable implementation handoff belongs in the full transcript, not
+        // in the issue's compact human-facing summary.
+        int handoff = value.lastIndexOf("ISSUEBOT_IMPLEMENTATION_V1:");
+        if (handoff >= 0 && handoff > value.length() - 5000) value = value.substring(0, handoff);
+        String text = value.strip();
+        if (text.isEmpty()) return null;
+        return text.length() <= limit ? text : "…" + text.substring(text.length() - limit + 1);
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)

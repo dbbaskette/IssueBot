@@ -1157,6 +1157,7 @@ public class IssueWorkflowService {
      */
     void phaseSetup(TrackedIssue trackedIssue) throws Exception {
         WatchedRepo repo = trackedIssue.getRepo();
+        sseService.beginIssueRun(trackedIssue.getId());
         eventService.log("PHASE_SETUP", "Starting setup phase", repo, trackedIssue);
 
         // Clone or pull fresh copy
@@ -2491,12 +2492,24 @@ public class IssueWorkflowService {
                             : error.path("message").asText(node.path("message").asText("Agent turn failed"));
                     text = "[error] " + message;
                 }
+                case "item.started" -> {
+                    JsonNode item = node.path("item");
+                    if ("command_execution".equals(item.path("type").asText(""))) {
+                        text = "[running] " + item.path("command").asText("command");
+                    }
+                }
                 case "item.completed" -> {
                     JsonNode item = node.path("item");
                     String itemType = item.path("type").asText("");
                     text = switch (itemType) {
                         case "agent_message" -> item.path("text").asText("");
-                        case "command_execution" -> "[command] " + item.path("command").asText("");
+                        case "command_execution" -> {
+                            String output = item.path("aggregated_output").asText("").strip();
+                            String exit = item.hasNonNull("exit_code")
+                                    ? " (exit " + item.path("exit_code").asInt() + ")" : "";
+                            yield "[command] " + item.path("command").asText("") + exit
+                                    + (output.isEmpty() ? "" : "\n" + output);
+                        }
                         case "file_change" -> "[files] Changes applied";
                         default -> null;
                     };
