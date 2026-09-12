@@ -31,6 +31,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
+import com.dbbaskette.issuebot.service.workflow.LocalVerificationService;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
 import com.dbbaskette.issuebot.service.workflow.PlanRetryClassification;
@@ -633,7 +634,7 @@ public class IssueController {
         if (result.transitioned()) {
             eventService.log("RESET_AND_PAUSE", "Returned issue to queue and paused automatic processing; history and dependencies preserved",
                     result.issue().getRepo(), result.issue());
-            redirect.addFlashAttribute("success", "Reset to queued; automatic processing is paused. Open the prerequisite issue and choose Start manually while paused. Existing active work is allowed to finish.");
+            redirect.addFlashAttribute("success", "Fresh attempt queued; automatic processing is paused. Old history remains. Close any stale open PR, then choose Start manually while paused.");
         } else redirect.addFlashAttribute("error", result.reason());
         return "redirect:/issues/" + id;
     }
@@ -1323,6 +1324,9 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        model.addAttribute("localVerificationRequired", issue.effectivePlanFirst());
+        model.addAttribute("localVerificationConfigured",
+                !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty());
         model.addAttribute("guidanceRequestToken", java.util.UUID.randomUUID().toString());
         model.addAttribute("nextAction", nextActionResolver.resolve(
                 issue, readyReservationFor(issue, readyReservationsByRepository())));

@@ -18,6 +18,10 @@ public class IssueBotProperties {
     @Min(1)
     private int maxConcurrentIssues = 3;
 
+    /** Max CLI turns within one approved-plan implementation run, across restarts and local repairs. */
+    @Min(1)
+    private int maxImplementationTurns = 8;
+
     @NotNull
     private String workDirectory = System.getProperty("user.home") + "/.issuebot/repos";
 
@@ -45,6 +49,9 @@ public class IssueBotProperties {
 
     public int getMaxConcurrentIssues() { return maxConcurrentIssues; }
     public void setMaxConcurrentIssues(int maxConcurrentIssues) { this.maxConcurrentIssues = maxConcurrentIssues; }
+
+    public int getMaxImplementationTurns() { return maxImplementationTurns; }
+    public void setMaxImplementationTurns(int maxImplementationTurns) { this.maxImplementationTurns = maxImplementationTurns; }
 
     public String getWorkDirectory() { return workDirectory; }
     public void setWorkDirectory(String workDirectory) { this.workDirectory = workDirectory; }

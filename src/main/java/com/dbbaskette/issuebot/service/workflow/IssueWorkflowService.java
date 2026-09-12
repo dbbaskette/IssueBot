@@ -89,6 +89,12 @@ public class IssueWorkflowService {
     private WorkflowCheckpointTransactionManager workflowCheckpoints;
 
     @Autowired(required = false)
+    private ImplementationTurnCheckpointService implementationTurnCheckpoints;
+
+    @org.springframework.beans.factory.annotation.Value("${issuebot.max-implementation-turns:8}")
+    private int maxImplementationTurns = 8;
+
+    @Autowired(required = false)
     private StageWorkflowCoordinator stageWorkflow;
 
     @Autowired(required = false)
@@ -193,6 +199,21 @@ public class IssueWorkflowService {
         WatchedRepo repo = trackedIssue.getRepo();
         int issueNumber = trackedIssue.getIssueNumber();
         RecoveryResumePhase recoveryResumePhase = RecoveryResumePhase.from(trackedIssue);
+        final int recoveringWorkflowRun = trackedIssue.getWorkflowRun();
+        final Long recoveringPlanId = trackedIssue.getApprovedPlanningVersion() == null
+                ? null : trackedIssue.getApprovedPlanningVersion().getId();
+        boolean recoveringHarnessImplementation = "IMPLEMENTATION".equalsIgnoreCase(
+                trackedIssue.getCurrentPhase())
+                && recoveringPlanId != null
+                && trackedIssue.getCurrentIteration() > 0
+                && iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                        trackedIssue.getId(), trackedIssue.getCurrentIteration())
+                    .filter(candidate -> candidate.getImplementationTurnCount() > 0
+                            && candidate.getCompletedAt() == null
+                            && candidate.getImplementationCompletedAt() == null
+                            && candidate.matchesAttemptIdentity(recoveringWorkflowRun,
+                                    recoveringPlanId))
+                    .isPresent();
         if (recoveryResumePhase != null) {
             log.info("Resuming durable Plan First checkpoint for {} #{} from phase {}",
                     repo.fullName(), issueNumber, recoveryResumePhase);
@@ -225,7 +246,7 @@ public class IssueWorkflowService {
         // IN_PROGRESS itself before calling back in here, but this re-stamp is what actually
         // drives the dashboard's elapsed-time display — #86).
         trackedIssue.setStartedAt(LocalDateTime.now());
-        if (recoveryResumePhase == null) {
+        if (recoveryResumePhase == null && !recoveringHarnessImplementation) {
             trackedIssue.setCurrentPhase("SETUP");
         }
         trackedIssue.setLastFailureReason(null);
@@ -270,6 +291,14 @@ public class IssueWorkflowService {
             }
         }
 
+        // An approved plan is not a substitute for an operator-authorized command.
+        // Refuse to spend an implementation turn or publish unverified code when the
+        // repository has no executable local gate, even if CI is disabled or absent.
+        if (approvedPlan != null && !hasTrustedLocalVerification(repo)) {
+            failMissingVerificationConfiguration(trackedIssue);
+            return;
+        }
+
         String branchName;
         Path repoPath;
         JsonNode issueDetails;
@@ -300,10 +329,10 @@ public class IssueWorkflowService {
 
         // === Phase 1: Full implementation setup ===
         try {
-            if (recoveryResumePhase == null && stageWorkflow != null
+            if (recoveryResumePhase == null && !recoveringHarnessImplementation && stageWorkflow != null
                     && !stageWorkflow.before(trackedIssue, WorkflowStage.IMPLEMENTATION,
                             trackedIssue.getCurrentIteration() + 1)) return;
-            if (recoveryResumePhase == null && !(StageWorkflowCoordinator.managed(trackedIssue)
+            if (recoveryResumePhase == null && !recoveringHarnessImplementation && !(StageWorkflowCoordinator.managed(trackedIssue)
                     && trackedIssue.getCurrentIteration() > 0 && trackedIssue.getBranchName() != null)) {
                 phaseSetup(trackedIssue);
             } else {
@@ -321,7 +350,7 @@ public class IssueWorkflowService {
         List<String> criteria = AcceptanceCriteriaParser.parse(issueDetails.path("body").asText(""));
 
         // === Pre-Screen: Check if issue is too large before burning Opus tokens ===
-        if (recoveryResumePhase == null
+        if (recoveryResumePhase == null && !recoveringHarnessImplementation
                 && repo.isPreScreenEnabled() && repo.getDecompositionMode() != DecompositionMode.OFF) {
             try {
                 IssueDecompositionService.PreScreenResult screenResult =
@@ -397,9 +426,16 @@ public class IssueWorkflowService {
         }
         final Iteration authoritativeCurrentIteration = persistedCurrentIteration;
 
-        while (recoveryResumePhase != null || iterationManager.canIterate(trackedIssue)) {
+        boolean localRepairPending = false;
+        boolean recoveredHarnessPending = recoveringHarnessImplementation;
+        while (recoveryResumePhase != null || localRepairPending || recoveredHarnessPending
+                || iterationManager.canIterate(trackedIssue)) {
             RecoveryResumePhase resumePhase = recoveryResumePhase;
             recoveryResumePhase = null;
+            boolean repairingLocalCheck = localRepairPending;
+            localRepairPending = false;
+            boolean resumingHarness = recoveredHarnessPending;
+            recoveredHarnessPending = false;
             // Re-read entity from DB to pick up any external changes (e.g., maxIterations edits)
             trackedIssue = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
             repo = trackedIssue.getRepo();
@@ -428,13 +464,14 @@ public class IssueWorkflowService {
                         repo, trackedIssue);
             }
 
-            int iterationNum = resumePhase == null
+            int iterationNum = resumePhase == null && !repairingLocalCheck && !resumingHarness
                     ? trackedIssue.getCurrentIteration() + 1
                     : trackedIssue.getCurrentIteration();
-            if (resumePhase == null && stageWorkflow != null
+            if (resumePhase == null && !repairingLocalCheck && !resumingHarness && stageWorkflow != null
                     && !stageWorkflow.before(trackedIssue, WorkflowStage.IMPLEMENTATION, iterationNum)) return;
             int maxIterations = repo.getMaxIterations();
-            boolean correctionClaim = resumePhase == null && trackedIssue.isPlanCorrectionPending();
+            boolean correctionClaim = resumePhase == null && !repairingLocalCheck && !resumingHarness
+                    && trackedIssue.isPlanCorrectionPending();
             Iteration iteration = null;
             if (correctionClaim) {
                 // The separately proxied manager commits the issue claim and its authoritative
@@ -478,7 +515,8 @@ public class IssueWorkflowService {
                 iterationRepository.save(iteration);
             }
 
-            if (resumePhase == null && workflowCheckpoints != null) {
+            if (resumePhase == null && !repairingLocalCheck && !resumingHarness
+                    && workflowCheckpoints != null) {
                 WorkflowCheckpointTransactionManager.ImplementationContext context =
                         workflowCheckpoints.prepareImplementationContext(
                                 trackedIssue.getId(), iteration.getId(), previousFeedback);
@@ -498,14 +536,19 @@ public class IssueWorkflowService {
             HarnessExecutionResult implResult = null;
             if (resumePhase == null) {
                 try {
-                    implResult = phaseImplementation(trackedIssue, issueDetails, repoPath,
-                            previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
-                            approvedPlan, legacyApprovedPlan);
+                    implResult = approvedPlan != null && implementationTurnCheckpoints != null
+                            ? phaseHarnessOwnedImplementation(trackedIssue, iteration, issueDetails, repoPath,
+                                    previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
+                                    approvedPlan, legacyApprovedPlan)
+                            : phaseImplementation(trackedIssue, issueDetails, repoPath,
+                                    previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
+                                    approvedPlan, legacyApprovedPlan);
                     iteration.setClaudeOutput(implResult.getOutput());
                     if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
                         iteration.setClaudeSessionId(implResult.getSessionId());
                     }
-                    if (workflowCheckpoints == null || !implResult.isSuccess()) {
+                    if ((workflowCheckpoints == null || !implResult.isSuccess())
+                            && !(approvedPlan != null && implementationTurnCheckpoints != null)) {
                         trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
                     }
                 } catch (Exception e) {
@@ -514,6 +557,11 @@ public class IssueWorkflowService {
                     iterationRepository.save(iteration);
                     eventService.log("PHASE_IMPL_FAILED",
                             "Implementation failed: " + e.getMessage(), repo, trackedIssue);
+                    if (approvedPlan != null && implementationTurnCheckpoints != null) {
+                        iterationManager.handleHarnessBlocked(trackedIssue,
+                                "Coding harness could not checkpoint the approved-plan run: " + e.getMessage());
+                        return;
+                    }
                     previousFeedback = "Implementation failed: " + e.getMessage();
                     reviewFeedback = false; // impl exception is not review feedback
                     continue;
@@ -544,6 +592,12 @@ public class IssueWorkflowService {
                 iterationRepository.save(iteration);
 
                 // Check if retrying is worthwhile before burning more tokens
+                if (approvedPlan != null && implementationTurnCheckpoints != null) {
+                    iterationManager.handleHarnessBlocked(trackedIssue,
+                            implResult.getErrorMessage() == null ? "Implementation needs operator guidance"
+                                    : implResult.getErrorMessage());
+                    return;
+                }
                 String skipReason = iterationManager.shouldSkipRetry(
                         trackedIssue, implResult, null, previousFeedback);
                 if (skipReason != null) {
@@ -590,6 +644,15 @@ public class IssueWorkflowService {
                 if (!stageWorkflow.before(trackedIssue, WorkflowStage.VERIFICATION, iterationNum)) return;
             }
             List<String> verificationCommands = LocalVerificationService.parseCommands(repo.getVerificationCommands());
+            // Settings can change while a harness is working. Recheck immediately before
+            // publication so removing the gate mid-run cannot turn a required check into
+            // a silent SKIPPED outcome.
+            if (approvedPlan != null && verificationCommands.isEmpty()) {
+                iteration.setLocalCheckResult("NOT_RUN");
+                iterationRepository.save(iteration);
+                failMissingVerificationConfiguration(trackedIssue);
+                return;
+            }
             if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS)
                     && !verificationCommands.isEmpty()) {
                 trackedIssue.setCurrentPhase("LOCAL_CHECKS");
@@ -614,6 +677,26 @@ public class IssueWorkflowService {
                     log.info("Local verification failed for iteration {}: {}",
                             iterationNum, localResult.failedCommand());
                     iteration.setLocalCheckResult("FAILED");
+                    if (approvedPlan != null && implementationTurnCheckpoints != null) {
+                        String failure = "Trusted local verification failed: " + localResult.failedCommand()
+                                + "\n\n" + truncate(localResult.output(), 5000);
+                        implementationTurnCheckpoints.reopenForLocalRepair(
+                                trackedIssue.getId(), iteration.getId(), failure);
+                        iteration.setImplementationCompletedAt(null);
+                        iteration.setImplementationSucceeded(null);
+                        iteration.setLocalCheckFailure(failure);
+                        iteration.setImplementationOutcome(ImplementationOutcome.Status.CONTINUE.name());
+                        trackedIssue.setCurrentPhase("IMPLEMENTATION");
+                        previousDiff = null;
+                        previousCiLogs = failure;
+                        previousFeedback = null;
+                        reviewFeedback = false;
+                        localRepairPending = true;
+                        eventService.log("IMPLEMENTATION_REPAIR",
+                                "Returning trusted-check failure to the same coding session",
+                                repo, trackedIssue);
+                        continue;
+                    }
                     iteration.setCompletedAt(LocalDateTime.now());
                     iterationRepository.save(iteration);
                     eventService.log("PHASE_LOCAL_CHECKS_FAILED",
@@ -939,7 +1022,10 @@ public class IssueWorkflowService {
         WorkflowCheckpointTransactionManager.ImplementationCheckpoint checkpoint =
                 workflowCheckpoints.persistImplementationComplete(
                         issue.getId(), iteration.getId(), result, diff);
-        trackCost(checkpoint.issue(), iterationNum, result, "IMPLEMENTATION");
+        // Native turns were individually accounted in their atomic checkpoints.
+        if (checkpoint.iteration().getImplementationTurnCount() == 0) {
+            trackCost(checkpoint.issue(), iterationNum, result, "IMPLEMENTATION");
+        }
         eventService.log("PHASE_IMPLEMENTATION_COMPLETE",
                 "Implementation complete: " + result,
                 checkpoint.issue().getRepo(), checkpoint.issue());
@@ -1009,6 +1095,22 @@ public class IssueWorkflowService {
         eventService.log("PLAN_APPROVAL_INVARIANT_FAILED", reason, issue.getRepo(), issue);
     }
 
+    static boolean hasTrustedLocalVerification(WatchedRepo repo) {
+        return !LocalVerificationService.parseCommands(repo.getVerificationCommands()).isEmpty();
+    }
+
+    private void failMissingVerificationConfiguration(TrackedIssue issue) {
+        String reason = "Approved-plan implementation requires a configured local verification command; "
+                + "the approved plan's suggested commands are not an executable gate";
+        issue.setStatus(IssueStatus.FAILED);
+        issue.setCurrentPhase(null);
+        recordFailure(issue, FailureCategory.SETUP, reason, "LOCAL_CHECKS", reason,
+                "Add a trusted verification command in Repository settings, then retry this issue. "
+                        + "IssueBot will not advance this unverified run.",
+                FailureRetryability.OPERATOR_ACTION_REQUIRED);
+        eventService.log("LOCAL_VERIFICATION_NOT_CONFIGURED", reason, issue.getRepo(), issue);
+    }
+
     private JsonNode fetchIssueDetails(WatchedRepo repo, int issueNumber) {
         log.info("Fetching issue details from GitHub for {} #{}...", repo.fullName(), issueNumber);
         JsonNode issueDetails = gitHubApi.getIssue(repo.getOwner(), repo.getName(), issueNumber);
@@ -1060,8 +1162,11 @@ public class IssueWorkflowService {
         // Clone or pull fresh copy
         try (Git git = gitOps.cloneOrPull(repo.getOwner(), repo.getName(), repo.getBranch())) {
             // Create feature branch
-            String branchName = gitOps.createBranch(git, trackedIssue.getIssueNumber(),
-                    trackedIssue.getIssueTitle());
+            String branchName = trackedIssue.getWorkflowRun() > 0
+                    ? gitOps.createBranch(git, trackedIssue.getIssueNumber(),
+                            trackedIssue.getIssueTitle(), trackedIssue.getWorkflowRun())
+                    : gitOps.createBranch(git, trackedIssue.getIssueNumber(),
+                            trackedIssue.getIssueTitle());
             trackedIssue.setBranchName(branchName);
             issueRepository.save(trackedIssue);
 
@@ -1151,7 +1256,8 @@ public class IssueWorkflowService {
                 previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
                 repoInstructions, lessons, legacyApprovedPlan)
                 + com.dbbaskette.issuebot.service.prompt.PromptGuidance.configuredVerification(
-                        LocalVerificationService.parseCommands(repo.getVerificationCommands()));
+                        LocalVerificationService.parseCommands(repo.getVerificationCommands()))
+                + (approvedPlan == null ? "" : ImplementationOutcome.promptContract());
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching " + harnessService.displayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -1159,7 +1265,7 @@ public class IssueWorkflowService {
         HarnessExecutionResult result = harnessService.executeImplementation(prompt, repoPath,
                 trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
 
-        if (!result.isSuccess() && resumed) {
+        if (!result.isSuccess() && resumed && approvedPlan == null) {
             // An operator cancellation kills the CLI process, which surfaces here as a
             // failed invocation — that must NOT trigger the cold fallback (it would spawn
             // a brand-new process the operator just asked to stop). Return the failed
@@ -1189,7 +1295,8 @@ public class IssueWorkflowService {
                     previousAssessment, previousCiLogs, false, null, approvedPlan,
                     repoInstructions, lessons, legacyApprovedPlan)
                     + com.dbbaskette.issuebot.service.prompt.PromptGuidance.configuredVerification(
-                            LocalVerificationService.parseCommands(repo.getVerificationCommands()));
+                            LocalVerificationService.parseCommands(repo.getVerificationCommands()))
+                    + (approvedPlan == null ? "" : ImplementationOutcome.promptContract());
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
                     + harnessService.displayName() + " session...");
             result = harnessService.executeImplementation(coldPrompt, repoPath,
@@ -1207,6 +1314,98 @@ public class IssueWorkflowService {
                     "Implementation complete: " + result, repo, trackedIssue);
         }
         return result;
+    }
+
+    /** Native coding turns belong to one durable implementation iteration, not the review loop. */
+    HarnessExecutionResult phaseHarnessOwnedImplementation(TrackedIssue issue, Iteration iteration,
+            JsonNode details, Path repoPath, String previousDiff, String previousAssessment,
+            String previousCiLogs, String lastRunFailureReason,
+            ApprovedPlanContext approvedPlan, String legacyApprovedPlan) {
+        Iteration persisted = iterationRepository.findById(iteration.getId()).orElseThrow();
+        List<ImplementationTurnLedger.Turn> turns = new ArrayList<>(
+                ImplementationTurnLedger.read(persisted.getImplementationTurnsJson(), objectMapper));
+        if (persisted.getClaudeSessionId() != null && !persisted.getClaudeSessionId().isBlank()) {
+            issue.setClaudeSessionId(persisted.getClaudeSessionId());
+        }
+        if (!turns.isEmpty()) {
+            ImplementationTurnLedger.Turn last = turns.get(turns.size() - 1);
+            if (last.outcome().status() == ImplementationOutcome.Status.COMPLETE
+                    && (persisted.getLocalCheckFailure() == null
+                        || persisted.getLocalCheckFailure().isBlank())) {
+                return ImplementationTurnLedger.aggregate(turns, true, null);
+            }
+            if (last.outcome().status() == ImplementationOutcome.Status.BLOCKED) {
+                return ImplementationTurnLedger.aggregate(turns, false,
+                        "Coding harness blocked: " + last.outcome().summary());
+            }
+            if (persisted.getLocalCheckFailure() != null) {
+                previousCiLogs = persisted.getLocalCheckFailure();
+            } else {
+                previousAssessment = "Continue the approved plan in this same session. "
+                        + "Previous progress: " + last.outcome().summary();
+            }
+        }
+        while (turns.size() < maxImplementationTurns) {
+            BigDecimal budget = issue.effectiveBudgetUsd();
+            BigDecimal spent = budget == null ? null : costRepository.totalCostForIssue(issue);
+            if (cancellationService.isCancelled(issue.getId())
+                    || (spent != null && spent.compareTo(budget) > 0)) {
+                return ImplementationTurnLedger.aggregate(turns, false,
+                        "Implementation stopped by cancellation or budget limit");
+            }
+            if (!turns.isEmpty() && (issue.getClaudeSessionId() == null
+                    || issue.getClaudeSessionId().isBlank())) {
+                return ImplementationTurnLedger.aggregate(turns, false,
+                        "Coding harness did not provide a resumable session for CONTINUE");
+            }
+            HarnessExecutionResult turn = phaseImplementation(issue, details, repoPath,
+                    previousDiff, previousAssessment, previousCiLogs, lastRunFailureReason,
+                    approvedPlan, legacyApprovedPlan);
+            if (!turn.isSuccess()) {
+                String reason = turn.getErrorMessage() == null || turn.getErrorMessage().isBlank()
+                        ? "Coding harness invocation failed"
+                        : truncate(turn.getErrorMessage(), 1000);
+                ImplementationOutcome blocked = new ImplementationOutcome(
+                        ImplementationOutcome.Status.BLOCKED, reason, List.of(),
+                        "Resume or reset only after the harness environment is repaired.");
+                implementationTurnCheckpoints.record(issue.getId(), iteration.getId(),
+                        turns.size() + 1, blocked, turn);
+                turns.add(ImplementationTurnLedger.Turn.from(turns.size() + 1, blocked, turn));
+                return ImplementationTurnLedger.aggregate(turns, false, reason);
+            }
+            ImplementationOutcome outcome;
+            try {
+                outcome = ImplementationOutcome.parse(turn, objectMapper);
+            } catch (IllegalArgumentException invalid) {
+                outcome = new ImplementationOutcome(ImplementationOutcome.Status.BLOCKED,
+                        "Invalid implementation handoff: " + invalid.getMessage(), List.of(),
+                        "The coding harness must supply a valid ISSUEBOT_IMPLEMENTATION_V1 outcome.");
+            }
+            implementationTurnCheckpoints.record(issue.getId(), iteration.getId(),
+                    turns.size() + 1, outcome, turn);
+            turns.add(ImplementationTurnLedger.Turn.from(turns.size() + 1, outcome, turn));
+            if (turn.getSessionId() != null && !turn.getSessionId().isBlank()) {
+                issue.setClaudeSessionId(turn.getSessionId());
+            }
+            eventService.log("IMPLEMENTATION_TURN",
+                    "Coding turn " + turns.size() + ": " + outcome.status() + " — "
+                            + truncate(outcome.summary(), 300), issue.getRepo(), issue);
+            if (outcome.status() == ImplementationOutcome.Status.COMPLETE) {
+                return ImplementationTurnLedger.aggregate(turns, true, null);
+            }
+            if (outcome.status() == ImplementationOutcome.Status.BLOCKED) {
+                return ImplementationTurnLedger.aggregate(turns, false,
+                        "Coding harness blocked: " + outcome.summary());
+            }
+            previousDiff = null;
+            previousCiLogs = null;
+            previousAssessment = "Continue the approved plan in this same session. "
+                    + "Previous progress: " + outcome.summary();
+            lastRunFailureReason = null;
+        }
+        return ImplementationTurnLedger.aggregate(turns, false,
+                "Coding harness reached the " + maxImplementationTurns
+                        + "-turn limit before completing the approved plan");
     }
 
     /**

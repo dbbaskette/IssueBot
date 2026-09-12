@@ -106,6 +106,35 @@ class IssueDispatchTransactionManagerTest {
     }
 
     @Test
+    void explicitResetClearsSecondConformanceAttemptButKeepsReviewHistory() {
+        Long id = seedApprovedIssue(IssueStatus.COOLDOWN, 2);
+        seedReview(id, 2, false, "{\"summary\":\"missing verification\"}");
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            TrackedIssue issue = issues.findById(id).orElseThrow();
+            issue.setClaudeSessionId("old-session");
+            issue.setBranchName("issuebot/old-branch");
+            issue.setPrNumber(19);
+            issue.setPlanCorrectionPending(true);
+            issues.saveAndFlush(issue);
+        });
+        int reviewsBefore = iterations.findByIssueOrderByIterationNumAsc(
+                issues.findById(id).orElseThrow()).size();
+
+        var result = dispatch.resetAndPause(id);
+
+        assertThat(result.transitioned()).isTrue();
+        TrackedIssue reset = issues.findByIdWithApprovedPlanningVersion(id).orElseThrow();
+        assertThat(reset.getStatus()).isEqualTo(IssueStatus.QUEUED);
+        assertThat(reset.getPlanConformanceAttempt()).isZero();
+        assertThat(reset.isPlanCorrectionPending()).isFalse();
+        assertThat(reset.getClaudeSessionId()).isNull();
+        assertThat(reset.getBranchName()).isNull();
+        assertThat(reset.getPrNumber()).isNull();
+        assertThat(reset.getApprovedPlanningVersion()).isNotNull();
+        assertThat(iterations.findByIssueOrderByIterationNumAsc(reset)).hasSize(reviewsBefore);
+    }
+
+    @Test
     void resetRejectsActiveWorkWithoutPausing() {
         Long id = seedIssue(IssueStatus.IN_PROGRESS, 901, null);
         assertThat(dispatch.resetAndPause(id).transitioned()).isFalse();

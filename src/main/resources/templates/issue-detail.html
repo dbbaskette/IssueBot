@@ -137,7 +137,7 @@
     <section th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN' or issue.status.name() == 'BLOCKED'}" class="panel mb-3">
         <div class="panel-body">
             <h3>Recover blocked work</h3>
-            <p>Return this issue to the queue and pause automatic processing. History, approved plans, and dependencies stay intact; other active work can finish. Then open the prerequisite issue and start it manually while paused.</p>
+            <p>Start a fresh attempt with the approved plan while keeping old reviews and history. The coding session, PR link, and attempt counters are cleared. Automatic processing pauses; other active work can finish. Close any stale open PR before starting manually.</p>
             <form th:action="@{'/issues/' + ${issue.id} + '/reset-and-pause'}" method="post">
                 <button class="btn btn-warning" type="submit">Reset &amp; pause queue</button>
             </form>
@@ -672,6 +672,10 @@
                        th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">Return to current version</a>
                 </div>
 
+                <div class="alert alert-warning"
+                     th:if="${(localVerificationRequired != null ? localVerificationRequired : issue.effectivePlanFirst()) and (localVerificationConfigured != null ? not localVerificationConfigured : issue.repo.verificationCommands == null)}">
+                    Local verification is not configured. Add a trusted command in Repository settings before starting this approved plan; IssueBot will not publish unchecked changes.
+                </div>
                 <div class="plan-review-body">
                     <aside class="plan-version-rail" aria-label="Selected planning version">
                         <span class="plan-version-number" th:text="${'v' + selectedPlanningVersion.versionNumber}">v3</span>
@@ -772,14 +776,17 @@
                               th:classappend="${latestIteration != null and latestIteration.ciResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
                               th:text="${(latestIteration != null and latestIteration.ciResult != null) ? latestIteration.ciResult : '—'}">—</span>
                     </div>
-                    <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push only</div>
+                    <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push after any required local checks</div>
 
-                    <div class="flex-between mb-1" th:if="${issue.repo.verificationCommands != null}">
+                    <div class="flex-between mb-1"
+                         th:if="${localVerificationConfigured != null ? localVerificationConfigured : issue.repo.verificationCommands != null}">
                         <span class="text-sm">Local checks pass</span>
                         <span class="status"
                               th:classappend="${latestIteration != null and latestIteration.localCheckResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
                               th:text="${(latestIteration != null and latestIteration.localCheckResult != null) ? latestIteration.localCheckResult : '—'}">—</span>
                     </div>
+                    <div class="text-sm text-muted mb-1"
+                         th:if="${(localVerificationRequired != null ? localVerificationRequired : issue.effectivePlanFirst()) and (localVerificationConfigured != null ? not localVerificationConfigured : issue.repo.verificationCommands == null)}">Local checks required — configure a trusted command in Repository settings</div>
 
                     <div class="flex-between mb-1">
                         <span class="text-sm">Independent review passes
@@ -1180,6 +1187,13 @@
                             <span class="text-sm text-muted" th:if="${iter.implModel != null and not #strings.isEmpty(iter.implModel)}"
                                   th:text="${iter.implModel}">claude-opus-4-8</span>
 
+                            <span class="text-sm text-muted" th:if="${iter.implementationTurnCount > 0}"
+                                  th:text="${'Coding turns: ' + iter.implementationTurnCount}">Coding turns: 2</span>
+
+                            <span class="status" th:if="${iter.implementationOutcome != null}"
+                                  th:classappend="${iter.implementationOutcome == 'COMPLETE' ? 'status-completed' : (iter.implementationOutcome == 'BLOCKED' ? 'status-failed' : 'status-pending')}"
+                                  th:text="${'Coding: ' + iter.implementationOutcome}">Coding: COMPLETE</span>
+
                             <span class="status" th:if="${iter.localCheckResult != null}"
                                   th:classappend="${iter.localCheckResult == 'PASSED' ? 'status-completed' : 'status-failed'}"
                                   th:text="${'Local: ' + iter.localCheckResult}">Local: PASSED</span>
@@ -1206,6 +1220,7 @@
                         </summary>
 
                         <div class="iteration-entry-body">
+                            <p class="text-sm" th:if="${iter.localCheckFailure != null and not #strings.isEmpty(iter.localCheckFailure)}">Trusted local check failed; repair is returning to the same coding run.</p>
                             <details th:if="${iter.selfAssessment != null}"
                                      th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':self-assessment' : null}">
                                 <summary class="text-sm">Self-Assessment</summary>

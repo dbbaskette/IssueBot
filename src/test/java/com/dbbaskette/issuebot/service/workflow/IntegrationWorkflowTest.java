@@ -187,9 +187,17 @@ class IntegrationWorkflowTest {
     }
 
     private void setupCommonMocks(TrackedIssue issue, ObjectNode issueDetails) throws Exception {
+        if (issue.effectivePlanFirst()) {
+            issue.getRepo().setVerificationCommands("./mvnw -q verify");
+            when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
+                    .thenReturn(new LocalVerificationService.Result(true, null, ""));
+        }
         Git mockGit = mock(Git.class);
         when(gitOps.cloneOrPull("owner", "repo", "main")).thenReturn(mockGit);
         when(gitOps.createBranch(eq(mockGit), eq(42), anyString())).thenReturn("issuebot/issue-42-fix-login-bug");
+        when(gitOps.createBranch(eq(mockGit), eq(42), anyString(), anyInt()))
+                .thenAnswer(invocation -> "issuebot/issue-42-fix-login-bug-run-"
+                        + invocation.getArgument(3, Integer.class));
         when(gitHubApi.getIssue("owner", "repo", 42)).thenReturn(issueDetails);
         when(gitOps.repoLocalPath("owner", "repo")).thenReturn(Path.of("/tmp/repo"));
         when(gitOps.openRepo("owner", "repo")).thenReturn(mockGit);
@@ -832,6 +840,55 @@ class IntegrationWorkflowTest {
     }
 
     // === Plan-first mode (#64) ===
+
+    @Test
+    void approvedPlanWithoutTrustedVerificationStopsBeforeImplementationOrPublication() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(true);
+        setupCommonMocks(issue, createIssueDetails());
+        issue.getRepo().setVerificationCommands("# no executable command");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(7L, 1, "Approved spec", "Run ./mvnw verify")));
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueStatus.FAILED, issue.getStatus());
+        assertTrue(issue.getLastFailureReason().contains("configured local verification command"));
+        verify(gitOps, never()).cloneOrPull(anyString(), anyString(), anyString());
+        verify(harnessService, never()).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(gitOps, never()).push(any(), anyString());
+        verify(gitHubApi, never()).createPullRequest(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void removingApprovedPlanVerificationDuringImplementationStopsBeforePush() throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        setupCommonMocks(issue, createIssueDetails());
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
+                new ApprovedPlanContext(7L, 1, "Approved spec", "Approved plan")));
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(),
+                any(), any(), any())).thenAnswer(call -> {
+                    issue.getRepo().setVerificationCommands(null);
+                    return successResult();
+                });
+
+        workflowService.processIssue(issue);
+
+        assertEquals(IssueStatus.FAILED, issue.getStatus());
+        verify(harnessService).executeImplementation(anyString(), any(Path.class), anyString(),
+                any(), any(), any());
+        verify(localVerificationService, never()).run(any(), any(), anyInt(), any());
+        verify(gitOps, never()).push(any(), anyString());
+        verify(gitHubApi, never()).createPullRequest(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), anyBoolean());
+        verify(iterationRepository, atLeastOnce()).save(
+                argThat(iteration -> "NOT_RUN".equals(iteration.getLocalCheckResult())));
+    }
 
     @Test
     void planFirst_stopsAtAwaitingPlanApproval_withoutImplementation() throws Exception {

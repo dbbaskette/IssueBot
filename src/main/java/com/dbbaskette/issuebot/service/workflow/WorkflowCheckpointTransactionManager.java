@@ -116,6 +116,9 @@ public class WorkflowCheckpointTransactionManager {
             if (current != null && current.getImplementationCompletedAt() != null
                     && Boolean.TRUE.equals(current.getImplementationSucceeded())) {
                 issue.setCurrentPhase("LOCAL_CHECKS");
+            } else if (current != null && current.getImplementationTurnCount() > 0) {
+                // Keep the checkout, iteration identity and session for native-turn resume.
+                issue.setCurrentPhase("IMPLEMENTATION");
             } else {
                 issue.setCurrentIteration(issue.getCurrentIteration() - 1);
                 if (issue.getPlanConformanceAttempt() == 1 && !issue.isPlanCorrectionPending()) {
