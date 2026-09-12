@@ -2117,8 +2117,10 @@ public class IssueWorkflowService {
         prompt.append("1. Read the relevant source files to understand the codebase\n");
         prompt.append("2. Implement the changes described in the issue\n");
         prompt.append("3. Write or update tests as needed\n");
-        prompt.append("4. Ensure the code compiles and tests pass\n");
+        prompt.append("4. Verify the changes according to the ownership guidance below\n");
         prompt.append("5. Follow existing code style and conventions\n");
+        prompt.append(com.dbbaskette.issuebot.service.prompt.PromptGuidance.forStage(
+                com.dbbaskette.issuebot.service.prompt.PromptGuidance.Stage.IMPLEMENTATION));
 
         return prompt.toString();
     }

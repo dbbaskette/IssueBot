@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 — 2026-09-12
+
+- Consolidate planning, implementation, and review guidance with explicit verification ownership, proportional skill use, and shared frontend design guidance for UI work.
+- Preserve trusted local/CI gates and approval boundaries while removing redundant full-suite instructions and the assumption that independent review always uses a different model.
+
 ## 0.7.0 — 2026-09-12
 
 - Unify operator decisions and live-state presentation, with durable actor/action history and comparable review changes that preserve missing-data and attempt-identity boundaries.

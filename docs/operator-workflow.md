@@ -1,6 +1,6 @@
 # Operator workflow and testing ownership
 
-This describes the implemented runtime as of the operator-flow release, not the future cross-harness methodology design. Saved repository settings, rather than defaults alone, determine a particular run.
+This describes the implemented runtime including the 0.7.1 prompt refresh, not the future cross-harness methodology design. Saved repository settings, rather than defaults alone, determine a particular run.
 
 ## From `agent-ready` to completion
 
@@ -13,7 +13,7 @@ An open labeled issue in a watched repository is discovered by polling or the la
 | AUTOMATED | Require Plan First; system-accept the generated version and progress automatically when prerequisites and actual gates pass. |
 | STAGED | Require Plan First; pause before each configured stage, progressing automatically through other stages. A PLANNING approval precedes generation, not a second review of finished artifacts. |
 
-Planning uses a protected workspace before feature-branch setup, requests assumptions, alternatives, a simplest sufficient design, and small test-first tasks, and verifies the source was unchanged. Both artifacts are generated in one call. Revisions preserve previous versions and supply operator feedback. This is not a multi-turn design conversation or a durable per-plan-task execution ledger.
+Planning uses a protected workspace before feature-branch setup, requests assumptions, meaningful alternatives, a simplest sufficient design, and coherent implementation milestones, and verifies the source was unchanged. Both artifacts are generated in one call. Revisions preserve previous versions and supply operator feedback. This is not a multi-turn design conversation or a durable per-plan-task execution ledger.
 
 The implementation provider receives the whole issue and approved artifacts, repository custom instructions, optional lessons, and correction feedback. It implements one issue-level iteration. The normal order is:
 
@@ -36,9 +36,11 @@ Managed merge requires a passed review, the reviewed commit still matching the P
 | Merge freshness | IssueBot checks reviewed SHA and remote check status without rerunning tests. |
 | Correction | Changed code passes through the applicable gates again; prior success is not proof for a new tree. |
 
-The current implementation prompt asks for passing tests, so a harness run can overlap configured local verification. Review could choose to rerun the same command; this is a possibility, not evidence that it occurred in production. No exact-tree/command/environment reuse contract currently makes a model's bare `PASSED` safe grounds to skip IssueBot's trusted gate.
+The shared prompt bundle assigns focused development checks to implementation and configured final verification to IssueBot. Review is instructed to consume supplied evidence and avoid automatic full-suite reruns. A harness can still choose overlapping checks: prompts are not enforcement. Configured command details are not currently injected into implementation, and review summaries are not an exact-tree/command/environment ledger. A model's bare `PASSED` is never grounds to skip IssueBot's trusted gate.
 
-For repository development, use coherent increments and focused checks at milestones, then one combined relevant suite before release. Reviewers should consume exact supplied evidence and request only a justified focused check for a specific doubt. This is working guidance, not a claimed runtime enforcement feature. The bounded shared prompt-policy/frontend-guidance proposal remains awaiting approval; this release does not implement it.
+For repository development, use coherent increments and focused checks at milestones, then one combined relevant suite before release. Reviewers should consume supplied evidence and request only a justified focused check for a specific doubt. Evidence reuse requires an unchanged tree and relevant environment; changed corrections still go through applicable gates.
+
+The original, provider-neutral resources in `src/main/resources/prompts/guidance/` are bundled with the application. Each of planning, implementation, and review receives common guidance, its own role guidance, and conditional frontend guidance. UI work consults the existing design system, consistent controls/statuses, accessible mobile layouts, and state preservation during refresh. Backend-only changes do not trigger a browser pass. No third-party skill text is copied into this bundle.
 
 ## Skills are not yet a bundled runtime
 

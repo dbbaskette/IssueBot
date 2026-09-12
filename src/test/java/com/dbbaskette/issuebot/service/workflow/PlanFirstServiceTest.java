@@ -37,6 +37,16 @@ import static org.mockito.Mockito.*;
 
 class PlanFirstServiceTest {
 
+    @Test
+    void planningIncludesOnlyItsStageGuidanceAndRetainsIssue() {
+        String prompt = service.buildPlanningPrompt(details, null, null);
+        String guidance = com.dbbaskette.issuebot.service.prompt.PromptGuidance.forStage(
+                com.dbbaskette.issuebot.service.prompt.PromptGuidance.Stage.PLANNING);
+        assertThat(prompt).contains(guidance, details.path("title").asText());
+        assertThat(prompt.indexOf(guidance)).isEqualTo(prompt.lastIndexOf(guidance));
+        assertThat(prompt).doesNotContain("## Implementation verification ownership", "small test-first");
+    }
+
     private static final Path REPO_PATH = Path.of("/tmp/repo");
 
     private PlanFirstService service;

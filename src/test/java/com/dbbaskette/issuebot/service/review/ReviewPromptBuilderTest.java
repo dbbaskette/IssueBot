@@ -13,6 +13,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ReviewPromptBuilderTest {
 
+    @Test
+    void reviewUsesItsStageBundleWithoutAssumingADifferentModel() {
+        String prompt = builder.buildReviewPrompt("UI change", "Preserve expanded details",
+                List.of("view.html"), "diff", List.of(), false, 0.85);
+        String guidance = com.dbbaskette.issuebot.service.prompt.PromptGuidance.forStage(
+                com.dbbaskette.issuebot.service.prompt.PromptGuidance.Stage.REVIEW);
+        assertThat(prompt).contains(guidance).doesNotContain("DIFFERENT model",
+                "## Implementation verification ownership");
+        assertThat(prompt.indexOf(guidance)).isEqualTo(prompt.lastIndexOf(guidance));
+        assertThat(rulesSection(prompt)).contains("0.85");
+    }
+
     private final ReviewPromptBuilder builder = new ReviewPromptBuilder();
 
     /** Isolate the "Rules for pass/fail" section so assertions don't collide with

@@ -322,6 +322,10 @@ class IssueWorkflowServiceTest {
         assertTrue(prompt.contains("Add pagination"));
         assertTrue(prompt.contains("/users endpoint"));
         assertFalse(prompt.contains("Previous Iteration"));
+        String guidance = com.dbbaskette.issuebot.service.prompt.PromptGuidance.forStage(
+                com.dbbaskette.issuebot.service.prompt.PromptGuidance.Stage.IMPLEMENTATION);
+        assertTrue(prompt.contains(guidance));
+        assertEquals(prompt.indexOf(guidance), prompt.lastIndexOf(guidance));
     }
 
     @Test
