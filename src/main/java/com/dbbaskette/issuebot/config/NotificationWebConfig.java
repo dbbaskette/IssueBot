@@ -2,15 +2,23 @@ package com.dbbaskette.issuebot.config;
 
 import com.dbbaskette.issuebot.service.notification.*;
 import jakarta.servlet.http.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.servlet.*;
 import org.springframework.web.servlet.config.annotation.*;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /** Query rendered pages only, not webhook/SSE handlers. Reuse the panel/history snapshot. */
 @Configuration
 public class NotificationWebConfig implements WebMvcConfigurer {
+    private static final Logger log = LoggerFactory.getLogger(NotificationWebConfig.class);
+    private static final long DIAGNOSTIC_INTERVAL_MS = 60_000;
     private final NotificationTriageService triage;
+    private final AtomicLong nextDiagnosticAt = new AtomicLong();
     public NotificationWebConfig(NotificationTriageService triage) { this.triage = triage; }
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -30,8 +38,19 @@ public class NotificationWebConfig implements WebMvcConfigurer {
                 } catch (RuntimeException unavailable) {
                     view.addObject("unreadNotificationCount", null);
                     view.addObject("notificationStateAvailable", false);
+                    logSnapshotFailure(unavailable);
                 }
             }
         });
+    }
+
+    private void logSnapshotFailure(RuntimeException failure) {
+        long now = System.currentTimeMillis();
+        long next = nextDiagnosticAt.get();
+        if (now >= next && nextDiagnosticAt.compareAndSet(next, now + DIAGNOSTIC_INTERVAL_MS)) {
+            String classification = failure instanceof DataAccessException ? "DATA_ACCESS" : "UNEXPECTED";
+            // Never attach the exception: provider responses and query text can occur in its payload.
+            log.warn("Notification snapshot unavailable (classification={})", classification);
+        }
     }
 }

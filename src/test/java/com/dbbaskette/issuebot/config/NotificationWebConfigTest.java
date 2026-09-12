@@ -1,8 +1,13 @@
 package com.dbbaskette.issuebot.config;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.dbbaskette.issuebot.service.notification.*;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.domain.*;
 import org.springframework.mock.web.*;
 import org.springframework.web.servlet.*;
@@ -56,5 +61,27 @@ class NotificationWebConfigTest {
         render(interceptor, recovered);
         assertThat(recovered.getModel().get("notificationStateAvailable")).isEqualTo(true);
         assertThat(recovered.getModel().get("unreadNotificationCount")).isEqualTo(3L);
+    }
+
+    @Test void degradationLogsOneBoundedClassificationWithoutExceptionPayload() throws Exception {
+        var service = mock(NotificationTriageService.class);
+        when(service.snapshot("", null, "ALL", "ALL", false, PageRequest.of(0, 10)))
+                .thenThrow(new DataAccessResourceFailureException("secret-token-in-query"));
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationWebConfig.class);
+        ListAppender<ILoggingEvent> events = new ListAppender<>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            var interceptor = interceptor(service);
+            for (int index = 0; index < 3; index++) render(interceptor, new ModelAndView("layout"));
+            assertThat(events.list).hasSize(1);
+            assertThat(events.list.getFirst().getFormattedMessage())
+                    .isEqualTo("Notification snapshot unavailable (classification=DATA_ACCESS)")
+                    .doesNotContain("secret-token-in-query");
+            assertThat(events.list.getFirst().getThrowableProxy()).isNull();
+        } finally {
+            logger.detachAppender(events);
+            events.stop();
+        }
     }
 }

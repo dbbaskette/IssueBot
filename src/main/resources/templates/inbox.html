@@ -102,9 +102,9 @@
                         <span class="status"
                               th:classappend="${rev.passed == null ? 'status-pending' : (rev.passed ? 'status-completed' : 'status-failed')}"
                               th:text="${rev.passed == null ? 'REVIEW UNAVAILABLE' : (rev.passed ? 'REVIEW PASSED' : 'REVIEW FAILED')}">RESULT</span>
-                        <span class="badge" th:if="${rev.overall != null}"
+                        <span class="review-stat review-score" th:if="${rev.overall != null}"
                               th:text="${'Overall ' + rev.overallPercent + '%'}">Overall 0%</span>
-                        <span class="badge" th:if="${rev.findingCount > 0}"
+                        <span class="review-stat review-finding-count" th:if="${rev.findingCount > 0}"
                               th:text="${rev.findingCount + (rev.findingCount == 1 ? ' finding' : ' findings')}">0 findings</span>
                         <span th:if="${rev.failureReason != null}" class="text-muted"
                               th:text="${rev.failureReason}">Review unavailable</span>

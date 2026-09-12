@@ -3934,6 +3934,8 @@ button.glass-pill, a.glass-pill, .toast-dismiss, .notif-bell-btn, .mobile-menu-b
 .notification-history .filter-bar { flex-wrap: wrap; align-items: end; }
 .notification-history .filter-bar label { display: grid; gap: 4px; min-width: 0; }
 .notification-history .filter-bar input, .notification-history .filter-bar select { max-width: 100%; }
+.notification-history .filter-bar .notification-actions-only { display: inline-flex; align-items: center; gap: 8px; min-height: var(--control-height); cursor: pointer; }
+.notification-history .filter-bar input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }
 .notification-history .notif-list { max-height: none; overflow: visible; }
 .notification-history .notification-groups { margin: 16px 0; }
 .notification-history .notification-entry-page ol { padding-left: 24px; }
@@ -3953,6 +3955,9 @@ button.glass-pill, a.glass-pill, .toast-dismiss, .notif-bell-btn, .mobile-menu-b
 .toast-dismiss { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 1.3rem; cursor: pointer; }
 #content h1, #content h2, #content [id] { scroll-margin-top: 112px; }
 
+/* Native hidden must win over author-level flex/grid rules on controls and panels. */
+[hidden] { display: none !important; }
+
 @media (max-width: 640px) {
     :root { --control-height: 44px; --panel-padding: 16px; }
     #content h1, #content h2, #content [id] { scroll-margin-top: 176px; }
@@ -3968,6 +3973,11 @@ button.glass-pill, a.glass-pill, .toast-dismiss, .notif-bell-btn, .mobile-menu-b
     .repos-table .repo-lessons-row td { display: block; padding: 16px; }
     .notif-panel { left: 16px; right: 16px; width: auto; }
     .toast { max-width: 100%; }
+    .notification-history .filter-bar { flex-direction: column; align-items: stretch; }
+    .notification-history .filter-bar label:not(.notification-actions-only),
+    .notification-history .filter-bar label:not(.notification-actions-only) > input,
+    .notification-history .filter-bar label:not(.notification-actions-only) > select,
+    .notification-history .filter-bar > button { width: 100%; }
 }
 
 @media (max-width: 768px) {

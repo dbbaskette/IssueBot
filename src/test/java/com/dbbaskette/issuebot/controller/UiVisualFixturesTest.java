@@ -439,8 +439,19 @@ class UiVisualFixturesTest {
         notifications.flush();
         page(routes, "/notifications", "notifications-grouped");
         page(routes, "/notifications?page=1", "notifications-page-1");
+        // Thymeleaf pager links include every filter, including empty/default values.
+        // Only these two exact, exported filter states are valid fixture aliases.
+        String defaultFilters = "?query=&repoId=&category=ALL&readFilter=ALL&actionsOnly=false&page=";
+        routes.put("/notifications" + defaultFilters + "0", routes.get("/notifications"));
+        routes.put("/notifications" + defaultFilters + "1", routes.get("/notifications?page=1"));
         page(routes, "/notifications?query=Approval", "notifications-search");
         page(routes, "/notifications?actionsOnly=true", "notifications-actions");
+        String filterForm = "?query=&repoId=&category=ALL&readFilter=ALL";
+        routes.put("/notifications" + filterForm, routes.get("/notifications"));
+        routes.put("/notifications?query=Approval&repoId=&category=ALL&readFilter=ALL",
+                routes.get("/notifications?query=Approval"));
+        routes.put("/notifications" + filterForm + "&actionsOnly=true",
+                routes.get("/notifications?actionsOnly=true"));
         for (int page = 0; page < 2; page++) {
             String route = "/notifications/group?groupKey=" + groupKey + "&page=" + page;
             putFragment(routes, route, "notification-group-page-" + page, render(get(route), 200));

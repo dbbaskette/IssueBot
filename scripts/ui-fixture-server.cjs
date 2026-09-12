@@ -72,6 +72,33 @@ function fixtureRouteKey(pathname, rawSearch) {
   return `${pathname}${remaining ? `?${remaining}` : ''}`;
 }
 
+// Optional browser-review controls are inserted only into synthetic exported pages.
+// They issue GETs for existing snapshots; the application templates remain unchanged.
+function interactiveControls(html, routeKey) {
+  if (['/issues/6?fixture=unverified', '/issues/6', '/issues/6?fixture=verified-ready'].includes(routeKey)) {
+    const controls = `<aside data-fixture-controls="recovery" class="glass-card" style="padding:1rem;margin:1rem 0" aria-label="Synthetic recovery updates">
+      <strong>Synthetic recovery updates</strong><p class="text-muted">GET-only exported snapshots; no retry or prerequisite probe runs.</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" hx-get="/issues/6/live-status" hx-target="#live-status" hx-swap="morph:outerHTML">Load known unmet</button>
+        <button type="button" class="btn btn-ghost" hx-get="/issues/6/live-status?fixture=verified-ready" hx-target="#live-status" hx-swap="morph:outerHTML">Load verified ready</button>
+      </div></aside>`;
+    return html.replace(/(<div\b[^>]*\bid="live-status"[^>]*>)/, `${controls}$1`);
+  }
+  if (['/notifications', '/notifications?fixture=read', '/notifications?fixture=arrival', '/notifications?fixture=muted-critical'].includes(routeKey)) {
+    const controls = `<aside data-fixture-controls="notifications" class="glass-card" style="padding:1rem;margin:1rem 0" aria-label="Synthetic notification updates">
+      <strong>Synthetic notification updates</strong><p class="text-muted">GET-only exported panel snapshots update the bell; unavailable simulates an HTTP failure.</p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" hx-get="/notifications/panel?fixture=grouped" hx-target="#notif-panel" hx-swap="innerHTML">Grouped</button>
+        <button type="button" class="btn btn-ghost" hx-get="/notifications/panel?fixture=read" hx-target="#notif-panel" hx-swap="innerHTML">Read</button>
+        <button type="button" class="btn btn-ghost" hx-get="/notifications/panel?fixture=arrival" hx-target="#notif-panel" hx-swap="innerHTML">New arrival</button>
+        <button type="button" class="btn btn-ghost" hx-get="/fixtures/interactive/notification-unavailable" hx-target="#notif-panel" hx-swap="innerHTML">Unavailable</button>
+        <button type="button" class="btn btn-ghost" hx-get="/notifications/panel?fixture=arrival" hx-target="#notif-panel" hx-swap="innerHTML">Recover</button>
+      </div></aside>`;
+    return html.replace(/(<section\b[^>]*\bclass="[^"]*notification-history[^"]*"[^>]*>)/, `$1${controls}`);
+  }
+  return html;
+}
+
 function send(res, req, status, body, contentType = 'text/plain; charset=utf-8', extra = {}) {
   const bytes = Buffer.from(body);
   res.writeHead(status, {
@@ -82,7 +109,7 @@ function send(res, req, status, body, contentType = 'text/plain; charset=utf-8',
   res.end(req.method === 'HEAD' ? undefined : bytes);
 }
 
-function createFixtureServer({ root = '/tmp/issuebot-ui-consistency', host = '127.0.0.1' } = {}) {
+function createFixtureServer({ root = '/tmp/issuebot-ui-consistency', host = '127.0.0.1', interactive = false } = {}) {
   if (!LOOPBACK_HOSTS.has(host)) throw new Error(`Fixture server host must be loopback, got: ${host}`);
   const fixtureRoot = path.resolve(root);
   const manifest = loadManifest(fixtureRoot);
@@ -116,8 +143,14 @@ function createFixtureServer({ root = '/tmp/issuebot-ui-consistency', host = '12
       return;
     }
 
-    const route = manifest.routes[`${pathname}${rawSearch}`]
-      || manifest.routes[fixtureRouteKey(pathname, rawSearch)];
+    if (interactive && `${pathname}${rawSearch}` === '/fixtures/interactive/notification-unavailable') {
+      send(res, req, 503, 'Synthetic notification snapshot unavailable.\n');
+      return;
+    }
+
+    const routeKey = manifest.routes[`${pathname}${rawSearch}`] ? `${pathname}${rawSearch}`
+      : fixtureRouteKey(pathname, rawSearch);
+    const route = manifest.routes[routeKey];
     let relative;
     if (route) {
       const wantsFragment = req.headers['hx-request'] === 'true';
@@ -135,7 +168,11 @@ function createFixtureServer({ root = '/tmp/issuebot-ui-consistency', host = '12
     const extension = path.extname(file).toLowerCase();
     const contentType = CONTENT_TYPES.get(extension) || 'application/octet-stream';
     let body = fs.readFileSync(file);
-    if (extension === '.html') body = cacheBustAssets(body.toString('utf8'), fixtureRoot);
+    if (extension === '.html') {
+      let html = body.toString('utf8');
+      if (interactive && route) html = interactiveControls(html, routeKey);
+      body = cacheBustAssets(html, fixtureRoot);
+    }
     send(res, req, 200, body, contentType);
   });
 }
@@ -144,8 +181,9 @@ function parseArgs(argv) {
   const options = { root: '/tmp/issuebot-ui-consistency', host: '127.0.0.1', port: 8092 };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === '--interactive') { options.interactive = true; continue; }
     if (!['--root', '--host', '--port'].includes(flag) || argv[index + 1] == null) {
-      throw new Error(`Usage: node scripts/ui-fixture-server.cjs [--root DIR] [--host 127.0.0.1] [--port 8092]`);
+      throw new Error(`Usage: node scripts/ui-fixture-server.cjs [--root DIR] [--host 127.0.0.1] [--port 8092] [--interactive]`);
     }
     const value = argv[++index];
     if (flag === '--root') options.root = value;

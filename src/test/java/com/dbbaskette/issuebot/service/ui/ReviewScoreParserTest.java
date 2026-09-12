@@ -8,6 +8,8 @@ import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ReviewScoreParserTest {
@@ -101,6 +103,68 @@ class ReviewScoreParserTest {
                         CodeReviewResult.ReviewFinding::line,
                         CodeReviewResult.ReviewFinding::finding)
                 .containsExactly("security", "src/View.java", 22, "Raw HTML");
+    }
+
+    @Test
+    void incompleteFindingItemsOnEitherSideNeverImplyNewOrResolved() {
+        String valid = "{\"category\":\"correctness\",\"file\":\"src/A.java\",\"finding\":\"Missing guard\",\"severity\":\"high\"}";
+        for (String incomplete : List.of("null", "\"scalar\"", "{}",
+                "{\"category\":\"correctness\",\"file\":\"src/A.java\"}")) {
+            ReviewScore before = ReviewScoreParser.parse(iteration(1, false, evidence("findings", valid)));
+            ReviewScore after = ReviewScoreParser.parse(iteration(2, false, evidence("findings", incomplete)));
+            assertThat(after.findingsAvailable()).isTrue();
+            ReviewChanges changes = ReviewChangeAssembler.compare(before, after);
+            assertThat(changes.comparable()).as("current item %s", incomplete).isFalse();
+            assertThat(changes.findings()).as("current item %s", incomplete)
+                    .allMatch(item -> item.change() == ReviewChanges.Change.NOT_COMPARABLE);
+
+            changes = ReviewChangeAssembler.compare(after, before);
+            assertThat(changes.comparable()).as("prior item %s", incomplete).isFalse();
+            assertThat(changes.findings()).as("prior item %s", incomplete)
+                    .allMatch(item -> item.change() == ReviewChanges.Change.NOT_COMPARABLE);
+        }
+    }
+
+    @Test
+    void incompleteCriterionItemsOnEitherSideNeverImplyAdditionOrRemoval() {
+        String valid = "{\"text\":\"Keep guard\",\"verdict\":\"met\"}";
+        for (String incomplete : List.of("null", "42", "{}", "{\"verdict\":\"met\"}")) {
+            ReviewScore before = ReviewScoreParser.parse(iteration(1, false, evidence("criteria", valid)));
+            ReviewScore after = ReviewScoreParser.parse(iteration(2, false, evidence("criteria", incomplete)));
+            assertThat(after.criteriaAvailable()).isTrue();
+            ReviewChanges changes = ReviewChangeAssembler.compare(before, after);
+            assertThat(changes.comparable()).as("current item %s", incomplete).isFalse();
+            assertThat(changes.criteria()).as("current item %s", incomplete)
+                    .allMatch(item -> item.change() == ReviewChanges.Change.NOT_COMPARABLE);
+
+            changes = ReviewChangeAssembler.compare(after, before);
+            assertThat(changes.comparable()).as("prior item %s", incomplete).isFalse();
+            assertThat(changes.criteria()).as("prior item %s", incomplete)
+                    .allMatch(item -> item.change() == ReviewChanges.Change.NOT_COMPARABLE);
+        }
+    }
+
+    @Test
+    void exactFindingMatchRemainsPersistentAlongsideUnidentifiedItem() {
+        String matched = "{\"category\":\"correctness\",\"file\":\"src/A.java\",\"finding\":\"Keep guard\",\"severity\":\"medium\"}";
+        String unmatched = "{\"category\":\"security\",\"file\":\"src/B.java\",\"finding\":\"Escape output\",\"severity\":\"high\"}";
+        ReviewScore before = ReviewScoreParser.parse(iteration(1, false,
+                "{\"criteria\":[],\"findings\":[" + matched + "," + unmatched + "]}"));
+        ReviewScore after = ReviewScoreParser.parse(iteration(2, false,
+                "{\"criteria\":[],\"findings\":[" + matched + ",null]}"));
+
+        ReviewChanges changes = ReviewChangeAssembler.compare(before, after);
+
+        assertThat(changes.comparable()).isFalse();
+        assertThat(changes.findings()).extracting(ReviewChanges.Item::change)
+                .containsExactly(ReviewChanges.Change.PERSISTENT,
+                        ReviewChanges.Change.NOT_COMPARABLE,
+                        ReviewChanges.Change.NOT_COMPARABLE);
+    }
+
+    private String evidence(String collection, String item) {
+        String other = collection.equals("findings") ? "\"criteria\":[]" : "\"findings\":[]";
+        return "{\"" + collection + "\":[" + item + "]," + other + "}";
     }
 
     private Iteration iteration(int number, Boolean reviewPassed, String reviewJson) {

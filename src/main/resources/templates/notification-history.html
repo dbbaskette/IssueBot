@@ -12,7 +12,7 @@
             th:value="${value}" th:text="${#strings.capitalize(#strings.toLowerCase(value))}" th:selected="${value == category}"></option></select></label>
         <label>Read state <select name="readFilter"><option th:each="value : ${ {'ALL','UNREAD','READ'} }"
             th:value="${value}" th:text="${#strings.capitalize(#strings.toLowerCase(value))}" th:selected="${value == readFilter}"></option></select></label>
-        <label><input type="checkbox" name="actionsOnly" value="true" th:checked="${actionsOnly}"> Actions only</label>
+        <label class="notification-actions-only"><input type="checkbox" name="actionsOnly" value="true" th:checked="${actionsOnly}"> Actions only</label>
         <button type="submit" class="btn">Filter history</button>
     </form>
     <details data-ui-state-key="notification:shared-mutes">

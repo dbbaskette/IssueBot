@@ -116,11 +116,16 @@ public final class ReviewChangeAssembler {
             ItemFactory<T> itemFactory) {
         Map<String, List<Identity<T>>> priorByKey = group(previous);
         Map<String, List<Identity<T>>> currentByKey = group(current);
+        // An unidentified entry on either side may be the apparent absence of any
+        // otherwise valid identity. Exact matches remain safe, but an unmatched
+        // identity cannot honestly be called new, resolved, added, or removed.
+        boolean unidentified = previous.stream().anyMatch(identity -> !identity.valid())
+                || current.stream().anyMatch(identity -> !identity.valid());
         Set<String> keys = new LinkedHashSet<>(currentByKey.keySet());
         keys.addAll(priorByKey.keySet());
 
         List<ReviewChanges.Item> items = new ArrayList<>();
-        boolean comparable = true;
+        boolean comparable = !unidentified;
         for (String key : keys) {
             List<Identity<T>> prior = priorByKey.getOrDefault(key, List.of());
             List<Identity<T>> now = currentByKey.getOrDefault(key, List.of());
@@ -141,7 +146,9 @@ public final class ReviewChangeAssembler {
             }
             T priorValue = prior.isEmpty() ? null : prior.getFirst().value();
             T currentValue = now.isEmpty() ? null : now.getFirst().value();
-            items.add(itemFactory.create(currentValue, priorValue, null, key));
+            ReviewChanges.Change forced = unidentified && (priorValue == null || currentValue == null)
+                    ? ReviewChanges.Change.NOT_COMPARABLE : null;
+            items.add(itemFactory.create(currentValue, priorValue, forced, key));
         }
         return new Comparison(comparable, List.copyOf(items));
     }
