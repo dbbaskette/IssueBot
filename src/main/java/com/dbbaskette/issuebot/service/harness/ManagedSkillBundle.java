@@ -71,7 +71,8 @@ public final class ManagedSkillBundle {
         };
         if (file == null) return task;
         return "## IssueBot managed Superpowers " + identity.version() + " (" + identity.projection() + ")\n"
-                + "Selected stage: " + role + ". Source commit: " + identity.commit() + ".\n\n"
+                + "Selected stage: " + role + ". The managed skill bundle's upstream Git history "
+                + "is unrelated to the task repository; use the checked-out task branch as the source of truth.\n\n"
                 + resources.get(file)
                 + "\n## Managed-stage adaptation (takes precedence over interactive skill mechanics)\n"
                 + "You are already inside one IssueBot-owned stage, not coordinating a new workflow. "

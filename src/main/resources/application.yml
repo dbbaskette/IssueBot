@@ -46,6 +46,8 @@ issuebot:
     # but 5 minutes was too tight for large diffs — the real cause of "Review Could Not Run".
     review-timeout-minutes: 20
   codex-cli:
+    # Exact owner/repo allowlist; outbound network is off for other coding sessions.
+    network-allowed-repositories: ${ISSUEBOT_CODEX_NETWORK_ALLOWED_REPOSITORIES:}
     implementation-model: gpt-5.6-sol
     implementation-reasoning-effort: low
     review-model: gpt-5.6-terra
