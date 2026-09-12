@@ -247,9 +247,8 @@ public class IssueDispatchTransactionManager {
         if (!List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN, IssueStatus.BLOCKED).contains(issue.getStatus())) {
             return IssueDispatchService.TransitionResult.rejected("Only failed, cooldown, or blocked issues can be reset", issue);
         }
-        if (PlanRetryClassification.isSecondPlanFirstMiss(issue, reviewIterations(issue))) {
-            return IssueDispatchService.TransitionResult.rejected("Use the guided implementation retry for this conformance failure", issue);
-        }
+        // Explicit reset starts a new workflow run, unlike a generic retry. The old
+        // iterations and conformance verdicts remain in history under their old run id.
         issue.setStatus(IssueStatus.QUEUED);
         issue.setCurrentPhase(null);
         issue.setCooldownUntil(null);
@@ -257,6 +256,12 @@ public class IssueDispatchTransactionManager {
         issue.setManualDispatch(false);
         issue.setCurrentIteration(0);
         issue.setCurrentReviewIteration(0);
+        issue.setPlanConformanceAttempt(0);
+        issue.setPlanCorrectionPending(false);
+        issue.setClaudeSessionId(null);
+        issue.setBranchName(null);
+        issue.setPrNumber(null);
+        issue.setLastFailureReason(null);
         issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         issues.saveAndFlush(issue);
         String key = decisions.transitionKey(issue, Action.PAUSE);

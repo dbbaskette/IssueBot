@@ -98,6 +98,29 @@ public class RepositoryController {
     @Autowired(required = false)
     private com.dbbaskette.issuebot.service.harness.HarnessSelectionService reasoning;
 
+    /** Change only the trusted gate; automation must not round-trip the entire repository form. */
+    @PostMapping("/{id}/verification-commands")
+    @Transactional
+    public String saveVerificationCommands(@PathVariable Long id,
+                                           @RequestParam String verificationCommands,
+                                           RedirectAttributes redirects) {
+        WatchedRepo repo = repoRepository.findById(id).orElse(null);
+        if (repo == null) {
+            redirects.addFlashAttribute("error", "Repository not found");
+            return "redirect:/repositories";
+        }
+        String normalized = normalize(verificationCommands);
+        if (normalized == null || com.dbbaskette.issuebot.service.workflow.LocalVerificationService
+                .parseCommands(normalized).isEmpty()) {
+            redirects.addFlashAttribute("error", "Enter at least one executable verification command");
+            return "redirect:/repositories";
+        }
+        repo.setVerificationCommands(normalized);
+        repoRepository.saveAndFlush(repo);
+        redirects.addFlashAttribute("success", "Trusted verification commands saved for " + repo.fullName());
+        return "redirect:/repositories";
+    }
+
     @PostMapping
     @Transactional
     public String addOrUpdate(Model model,

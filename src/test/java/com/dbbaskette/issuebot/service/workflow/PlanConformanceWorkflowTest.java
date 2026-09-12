@@ -72,6 +72,8 @@ class PlanConformanceWorkflowTest {
         costRepository = mock(CostTrackingRepository.class);
         planFirstService = mock(PlanFirstService.class);
         localVerificationService = mock(LocalVerificationService.class);
+        when(localVerificationService.run(any(), anyList(), anyInt(), any()))
+                .thenReturn(new LocalVerificationService.Result(true, null, "passed"));
         objectMapper = new ObjectMapper();
         approvedPlan = new ApprovedPlanContext(4L, 2, "spec contract", "plan contract");
 
@@ -315,6 +317,7 @@ class PlanConformanceWorkflowTest {
         repo.setBranch("main");
         repo.setMode(RepoMode.AUTONOMOUS);
         repo.setPlanFirst(true);
+        repo.setVerificationCommands("verify");
         repo.setPreScreenEnabled(false);
         repo.setCiEnabled(false);
         repo.setMaxIterations(1);

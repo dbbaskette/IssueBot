@@ -173,6 +173,35 @@ class OrphanedRunRecoveryTest {
     }
 
     @Test
+    void interruptedHarnessTurnKeepsSessionBranchAndIterationForResume() {
+        TrackedIssue orphan = new TrackedIssue(repo, 104, "Native coding loop");
+        orphan.setId(104L);
+        orphan.setStatus(IssueStatus.IN_PROGRESS);
+        orphan.setCurrentIteration(1);
+        orphan.setCurrentPhase("IMPLEMENTATION");
+        orphan.setBranchName("issuebot/issue-104-native");
+        orphan.setClaudeSessionId("native-session");
+        PlanningVersion approved = PlanningVersion.pending(
+                orphan, 1, "spec", "plan", "CODEX", "gpt-6-astra", null);
+        approved.approve(java.time.LocalDateTime.now());
+        orphan.setApprovedPlanningVersion(approved);
+        Iteration partial = new Iteration(orphan, 1);
+        partial.setImplementationTurnCount(1);
+        partial.setClaudeSessionId("native-session");
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(orphan));
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(104L, 1))
+                .thenReturn(Optional.of(partial));
+
+        recovery.requeueOrphanedRuns();
+
+        assertEquals(IssueStatus.PENDING, orphan.getStatus());
+        assertEquals(1, orphan.getCurrentIteration());
+        assertEquals("IMPLEMENTATION", orphan.getCurrentPhase());
+        assertEquals("issuebot/issue-104-native", orphan.getBranchName());
+        assertEquals("native-session", orphan.getClaudeSessionId());
+    }
+
+    @Test
     void completedCorrectionImplementationIsNotRearmedWhenTerminalHandlingWasInterrupted() {
         TrackedIssue orphan = claimedCorrection(102, "IMPLEMENTATION");
         Iteration completedClaim = new Iteration(orphan, 2);

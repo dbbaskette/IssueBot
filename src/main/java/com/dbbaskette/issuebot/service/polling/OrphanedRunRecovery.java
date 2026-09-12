@@ -80,7 +80,8 @@ public class OrphanedRunRecovery {
                 issue.setPlanCorrectionPending(true);
             }
             issue.setStatus(recoveredStatus);
-            if (action != RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION) {
+            if (action != RecoveryAction.RESUME_POST_IMPLEMENTATION_CORRECTION
+                    && action != RecoveryAction.RESUME_HARNESS_IMPLEMENTATION) {
                 issue.setCurrentPhase(null);
             }
             issueRepository.save(issue);
@@ -105,6 +106,10 @@ public class OrphanedRunRecovery {
                     || (current.getCompletedAt() == null
                     && current.getImplementationCompletedAt() == null);
             if (incomplete) {
+                if (current != null && current.getImplementationTurnCount() > 0
+                        && issue.getApprovedPlanningVersion() != null) {
+                    return RecoveryAction.RESUME_HARNESS_IMPLEMENTATION;
+                }
                 // A claimed Plan First correction must also restore its one-shot eligibility.
                 // Every other implementation simply replays the same iteration number; the
                 // workflow reuses its incomplete row and byte-for-byte prepared context.
@@ -208,6 +213,7 @@ public class OrphanedRunRecovery {
         NONE,
         REQUEUE,
         RESTORE_INTERRUPTED_IMPLEMENTATION,
+        RESUME_HARNESS_IMPLEMENTATION,
         RESTORE_UNEXECUTED_CORRECTION,
         RESUME_POST_IMPLEMENTATION_CORRECTION,
         AWAITING_PLAN_APPROVAL

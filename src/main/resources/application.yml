@@ -27,6 +27,7 @@ issuebot:
   agent-provider: claude # claude or codex; legacy claude-code remains accepted
   poll-interval-seconds: 60
   max-concurrent-issues: 3
+  max-implementation-turns: 8
   work-directory: ${user.home}/.issuebot/repos
   claude-code:
     max-turns-per-invocation: 30

@@ -188,6 +188,19 @@ public class GitOperationsService {
     public String createBranch(Git git, int issueNumber, String issueTitle) throws GitAPIException, IOException {
         String slug = slugify(issueTitle);
         String branchName = String.format(BRANCH_PREFIX + "issue-%d-%s", issueNumber, slug);
+        return createNamedBranch(git, branchName);
+    }
+
+    /** A fresh workflow run gets a fresh remote branch, leaving old PRs recoverable. */
+    public String createBranch(Git git, int issueNumber, String issueTitle, int workflowRun)
+            throws GitAPIException, IOException {
+        if (workflowRun <= 0) return createBranch(git, issueNumber, issueTitle);
+        String branchName = String.format(BRANCH_PREFIX + "issue-%d-%s-run-%d",
+                issueNumber, slugify(issueTitle), workflowRun);
+        return createNamedBranch(git, branchName);
+    }
+
+    private String createNamedBranch(Git git, String branchName) throws GitAPIException, IOException {
         log.info("Creating branch: {}", branchName);
 
         // Delete existing local branch if it exists (e.g. from a previous run).

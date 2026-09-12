@@ -83,6 +83,21 @@ public class Iteration {
     @Column(name = "implementation_succeeded")
     private Boolean implementationSucceeded;
 
+    /** Durable inner harness turns; distinct from IssueBot's final-review iterations. */
+    @Column(name = "implementation_turn_count", nullable = false)
+    private int implementationTurnCount;
+
+    @Lob
+    @Column(name = "implementation_turns_json")
+    private String implementationTurnsJson;
+
+    @Column(name = "implementation_outcome", length = 16)
+    private String implementationOutcome;
+
+    @Lob
+    @Column(name = "local_check_failure")
+    private String localCheckFailure;
+
     @Column(name = "started_at", nullable = false, updatable = false)
     private LocalDateTime startedAt = LocalDateTime.now();
 
@@ -185,5 +200,22 @@ public class Iteration {
     public Boolean getImplementationSucceeded() { return implementationSucceeded; }
     public void setImplementationSucceeded(Boolean implementationSucceeded) {
         this.implementationSucceeded = implementationSucceeded;
+    }
+
+    public int getImplementationTurnCount() { return implementationTurnCount; }
+    public void setImplementationTurnCount(int implementationTurnCount) {
+        this.implementationTurnCount = implementationTurnCount;
+    }
+    public String getImplementationTurnsJson() { return implementationTurnsJson; }
+    public void setImplementationTurnsJson(String implementationTurnsJson) {
+        this.implementationTurnsJson = implementationTurnsJson;
+    }
+    public String getImplementationOutcome() { return implementationOutcome; }
+    public void setImplementationOutcome(String implementationOutcome) {
+        this.implementationOutcome = implementationOutcome;
+    }
+    public String getLocalCheckFailure() { return localCheckFailure; }
+    public void setLocalCheckFailure(String localCheckFailure) {
+        this.localCheckFailure = localCheckFailure;
     }
 }

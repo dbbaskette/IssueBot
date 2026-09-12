@@ -41,6 +41,155 @@ import static org.mockito.Mockito.*;
 
 class IssueWorkflowServiceTest {
 
+    private static final String OUTCOME_PREFIX = ImplementationOutcome.MARKER;
+
+    private HarnessExecutionResult ownedTurn(String status, String session, long tokens) {
+        HarnessExecutionResult result = new HarnessExecutionResult();
+        result.setSuccess(true);
+        result.setSessionId(session);
+        result.setModel("gpt-6-astra");
+        result.setInputTokens(tokens);
+        result.setOutputTokens(tokens / 2);
+        result.setFinalResult(OUTCOME_PREFIX + "{\"status\":\"" + status
+                + "\",\"summary\":\"progress\",\"checks\":[],\"limitations\":\"\"}");
+        return result;
+    }
+
+    @Test
+    void approvedImplementationContinuesSameSessionWithoutConsumingReviewIteration() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                workflowService, "implementationTurnCheckpoints", checkpoint);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setVerificationCommands("./mvnw verify");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Implement plan");
+        issue.setId(1L);
+        issue.setCurrentIteration(1);
+        issue.setResolvedImplModel("gpt-6-astra");
+        Iteration iteration = new Iteration(issue, 1, 0, 14L);
+        iteration.setId(2L);
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        when(harnessService.executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any()))
+                .thenReturn(ownedTurn("CONTINUE", "session-1", 100),
+                        ownedTurn("COMPLETE", "session-1", 200));
+        ObjectNode details = objectMapper.createObjectNode().put("title", "Implement plan")
+                .put("body", "Acceptance criteria");
+
+        HarnessExecutionResult result = workflowService.phaseHarnessOwnedImplementation(
+                issue, iteration, details, Path.of("repo"), null, null, null, null,
+                new ApprovedPlanContext(14L, 1, "spec", "plan"), null);
+
+        assertTrue(result.isSuccess());
+        assertEquals(300, result.getInputTokens());
+        assertEquals(1, issue.getCurrentIteration());
+        verify(checkpoint, times(2)).record(eq(1L), eq(2L), anyInt(), any(), any());
+        verify(harnessService).executeImplementation(anyString(), any(), anyString(),
+                eq("session-1"), eq(1L), any());
+    }
+
+    @Test
+    void approvedImplementationResumesPersistedTurnAfterRestart() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                workflowService, "implementationTurnCheckpoints", checkpoint);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Resume");
+        issue.setId(1L);
+        issue.setCurrentIteration(1);
+        issue.setResolvedImplModel("gpt-6-astra");
+        Iteration iteration = new Iteration(issue, 1, 0, 14L);
+        iteration.setId(2L);
+        iteration.setClaudeSessionId("persisted-session");
+        HarnessExecutionResult first = ownedTurn("CONTINUE", "persisted-session", 100);
+        iteration.setImplementationTurnCount(1);
+        iteration.setImplementationTurnsJson(ImplementationTurnLedger.append(null,
+                ImplementationTurnLedger.Turn.from(1,
+                        ImplementationOutcome.parse(first, objectMapper), first), objectMapper));
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        when(harnessService.executeImplementation(anyString(), any(), anyString(),
+                eq("persisted-session"), eq(1L), any()))
+                .thenReturn(ownedTurn("COMPLETE", "persisted-session", 200));
+
+        HarnessExecutionResult result = workflowService.phaseHarnessOwnedImplementation(
+                issue, iteration, objectMapper.createObjectNode().put("title", "Resume"),
+                Path.of("repo"), null, null, null, null,
+                new ApprovedPlanContext(14L, 1, "spec", "plan"), null);
+
+        assertTrue(result.isSuccess());
+        assertEquals(300, result.getInputTokens());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(), anyString(),
+                eq("persisted-session"), eq(1L), any());
+        verify(checkpoint).record(eq(1L), eq(2L), eq(2),
+                argThat(outcome -> outcome.status() == ImplementationOutcome.Status.COMPLETE), any());
+    }
+
+    @Test
+    void trustedLocalFailureResumesCompletedCodingTurnForRepair() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                workflowService, "implementationTurnCheckpoints", checkpoint);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Repair");
+        issue.setId(1L);
+        issue.setCurrentIteration(1);
+        issue.setResolvedImplModel("gpt-6-astra");
+        Iteration iteration = new Iteration(issue, 1, 0, 14L);
+        iteration.setId(2L);
+        iteration.setClaudeSessionId("repair-session");
+        iteration.setLocalCheckFailure("Trusted local verification failed: ./mvnw verify\n\nCompilation error");
+        HarnessExecutionResult first = ownedTurn("COMPLETE", "repair-session", 100);
+        iteration.setImplementationTurnCount(1);
+        iteration.setImplementationTurnsJson(ImplementationTurnLedger.append(null,
+                ImplementationTurnLedger.Turn.from(1,
+                        ImplementationOutcome.parse(first, objectMapper), first), objectMapper));
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        when(harnessService.executeImplementation(anyString(), any(), anyString(),
+                eq("repair-session"), eq(1L), any()))
+                .thenReturn(ownedTurn("COMPLETE", "repair-session", 200));
+
+        HarnessExecutionResult result = workflowService.phaseHarnessOwnedImplementation(
+                issue, iteration, objectMapper.createObjectNode().put("title", "Repair"),
+                Path.of("repo"), null, null, null, null,
+                new ApprovedPlanContext(14L, 1, "spec", "plan"), null);
+
+        assertTrue(result.isSuccess());
+        assertEquals(300, result.getInputTokens());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(harnessService).executeImplementation(prompts.capture(), any(), anyString(),
+                eq("repair-session"), eq(1L), any());
+        assertTrue(prompts.getValue().contains("Compilation error"));
+        verify(checkpoint).record(eq(1L), eq(2L), eq(2), any(), any());
+    }
+
+    @Test
+    void missingOutcomeFailsClosedBeforeLocalVerificationOrReview() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                workflowService, "implementationTurnCheckpoints", checkpoint);
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Incomplete");
+        issue.setId(1L);
+        issue.setResolvedImplModel("gpt-6-astra");
+        Iteration iteration = new Iteration(issue, 1, 0, 14L);
+        iteration.setId(2L);
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        HarnessExecutionResult plain = new HarnessExecutionResult();
+        plain.setSuccess(true);
+        plain.setFinalResult("I made some progress");
+        when(harnessService.executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any()))
+                .thenReturn(plain);
+
+        HarnessExecutionResult result = workflowService.phaseHarnessOwnedImplementation(
+                issue, iteration, objectMapper.createObjectNode().put("title", "Incomplete"),
+                Path.of("repo"), null, null, null, null,
+                new ApprovedPlanContext(14L, 1, "spec", "plan"), null);
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.getErrorMessage().contains("Invalid implementation handoff"));
+        verify(checkpoint).record(eq(1L), eq(2L), eq(1),
+                argThat(outcome -> outcome.status() == ImplementationOutcome.Status.BLOCKED), any());
+        verifyNoInteractions(codeReviewService);
+    }
+
     private IssueWorkflowService workflowService;
     private ObjectMapper objectMapper;
 
@@ -60,6 +209,16 @@ class IssueWorkflowServiceTest {
     private WorkflowCancellationService cancellationService;
     private SseService sseService;
     private CiTemplateService ciTemplateService;
+
+    @Test
+    void approvedPlanRequiresAnExecutableOperatorConfiguredLocalGate() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        assertFalse(IssueWorkflowService.hasTrustedLocalVerification(repo));
+        repo.setVerificationCommands("# comment only\n  ");
+        assertFalse(IssueWorkflowService.hasTrustedLocalVerification(repo));
+        repo.setVerificationCommands("./mvnw -B -ntp verify");
+        assertTrue(IssueWorkflowService.hasTrustedLocalVerification(repo));
+    }
 
     @Test
     void recordsStructuredFailureForRecoveryUi() {
@@ -597,6 +756,7 @@ class IssueWorkflowServiceTest {
     @Test
     void alreadyStartedLegacyApprovedIssueMayFinishWithoutPretendingItHasANewSpec() throws Exception {
         TrackedIssue issue = planFirstWorkflowIssue();
+        issue.getRepo().setVerificationCommands(null); // migration-only run predates the new gate
         issue.setCurrentIteration(1);
         issue.setPlanApproved(true);
         issue.setImplementationPlan("mutable plan that must be ignored");
@@ -700,6 +860,7 @@ class IssueWorkflowServiceTest {
         repo.setPlanFirst(true);
         repo.setPreScreenEnabled(false);
         repo.setCiEnabled(false);
+        repo.setVerificationCommands("./mvnw -q verify");
         TrackedIssue issue = new TrackedIssue(repo, 42, "Fix the bug");
         issue.setId(1L);
         return issue;

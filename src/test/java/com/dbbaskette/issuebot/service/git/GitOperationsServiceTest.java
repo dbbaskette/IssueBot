@@ -78,6 +78,25 @@ class GitOperationsServiceTest {
     }
 
     @Test
+    void freshWorkflowRunUsesDistinctBranchFromPriorAttempt(@TempDir Path tmp) throws Exception {
+        try (Git git = Git.init().setDirectory(tmp.toFile()).call()) {
+            Files.writeString(tmp.resolve("README.md"), "base");
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage("initial").call();
+            GitOperationsService service = newService();
+            String baseBranch = git.getRepository().getBranch();
+
+            String first = service.createBranch(git, 1, "Foundation");
+            git.checkout().setName(baseBranch).call();
+            String reset = service.createBranch(git, 1, "Foundation", 1);
+
+            assertEquals("issuebot/issue-1-foundation", first);
+            assertEquals("issuebot/issue-1-foundation-run-1", reset);
+            assertNotEquals(first, reset);
+        }
+    }
+
+    @Test
     void slugifySimpleTitle() {
         assertEquals("add-pagination-to-users-endpoint",
                 GitOperationsService.slugify("Add pagination to /users endpoint"));

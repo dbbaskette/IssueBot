@@ -23,6 +23,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class RepositoryControllerTest {
 
+    @Test
+    void targetedVerificationUpdateDoesNotRewriteOtherRepositorySettings() {
+        Fixture f = new Fixture();
+        WatchedRepo repo = new WatchedRepo("dbbaskette", "adksi");
+        repo.setId(36L);
+        repo.setFollowUpEnabled(false);
+        repo.setDecompositionMode(DecompositionMode.OFF);
+        when(f.repos.findById(36L)).thenReturn(Optional.of(repo));
+        var redirects = mock(org.springframework.web.servlet.mvc.support.RedirectAttributes.class);
+
+        String view = f.controller.saveVerificationCommands(
+                36L, "./mvnw -B -ntp -pl adksi-core -am verify", redirects);
+
+        assertThat(view).isEqualTo("redirect:/repositories");
+        assertThat(repo.getVerificationCommands()).isEqualTo("./mvnw -B -ntp -pl adksi-core -am verify");
+        assertThat(repo.isFollowUpEnabled()).isFalse();
+        assertThat(repo.getDecompositionMode()).isEqualTo(DecompositionMode.OFF);
+        verify(f.repos).saveAndFlush(same(repo));
+    }
+
     @Test void nonModelValidationErrorsRedisplayExactUnresolvedRoleInputs() throws Exception {
         Fixture f = new Fixture();
         var harnesses = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();

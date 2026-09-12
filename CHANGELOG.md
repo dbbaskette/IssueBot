@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0 — 2026-09-12
+
+- Give approved-plan implementation to one resumable coding-harness run with explicit complete, continue, and blocked handoffs, durable turn and cost checkpoints, and a bounded turn limit.
+- Return trusted local-check failures to the same coding session for repair without consuming an independent-review attempt; keep IssueBot's final verification and review gates.
+- Let an explicit Reset & pause start a fresh attempt after repeated conformance misses, preserving plan and review history while clearing the old session and attempt counters.
+- Allow an operator to save a repository's trusted verification command without round-tripping unrelated repository settings.
+
+## 0.8.1 — 2026-09-12
+
+- Stop approved-plan implementation before coding when no trusted local verification command is configured, and stop before publication if that command is removed mid-run. Show the requirement on issue and repository screens.
+- Record the proposed harness-owned implementation design separately from the current workflow.
+
 ## 0.8.0 — 2026-09-12
 
 - Bundle integrity-pinned Superpowers Custom stage guidance for Codex and Claude, validate it before dispatch, and show provenance in Setup. No personal plugin installation or startup downloads are required.
