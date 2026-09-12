@@ -34,13 +34,14 @@ public class PlanFirstService {
             You are producing a DESIGN SPEC and IMPLEMENTATION PLAN before any code is written.
             Make no code changes and create no files. Inspect the issue and relevant code, state
             assumptions, compare credible approaches, choose the simplest sufficient design, and
-            create small test-first implementation tasks with exact files and verification commands.
+            create coherent implementation milestones with relevant files and verification commands.
 
             Your final response must contain exactly these two top-level sections, in this order,
             with no text before, between, or after them except their content:
             # Design Spec
             # Implementation Plan
-            """;
+            """ + com.dbbaskette.issuebot.service.prompt.PromptGuidance.forStage(
+                    com.dbbaskette.issuebot.service.prompt.PromptGuidance.Stage.PLANNING);
 
     private static final Logger log = LoggerFactory.getLogger(PlanFirstService.class);
     private static final int MAX_FAILURE_REASON_CHARS = 2_000;

@@ -78,7 +78,7 @@ public class ReviewPromptBuilder {
         prompt.append("""
                 You are an independent code reviewer. Your job is to review code changes \
                 against the original issue specification and evaluate quality, correctness, \
-                and completeness. You are a DIFFERENT model from the one that wrote the code — \
+                and completeness. This is a separate review invocation — \
                 provide an honest, independent assessment.
 
                 ## Issue Specification (this is what the code SHOULD implement)
@@ -198,6 +198,8 @@ public class ReviewPromptBuilder {
             prompt.append("\nOmit securityScore from the response (set to 1.0) since security review is not enabled.\n");
         }
 
+        prompt.append(com.dbbaskette.issuebot.service.prompt.PromptGuidance.forStage(
+                com.dbbaskette.issuebot.service.prompt.PromptGuidance.Stage.REVIEW));
         return prompt.toString();
     }
 
