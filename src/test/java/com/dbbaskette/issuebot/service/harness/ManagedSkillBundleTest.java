@@ -24,7 +24,8 @@ class ManagedSkillBundleTest {
                 .contains("# Implementation plans").doesNotContain("# Execute the approved plan")
                 .endsWith("exact response contract");
         assertThat(bundle.project(HarnessRole.IMPLEMENTATION, "implement"))
-                .contains("# Execute the approved plan").doesNotContain("# Independent code review brief");
+                .contains("# Execute the approved plan", "use the checked-out task branch as the source of truth")
+                .doesNotContain("# Independent code review brief", "Source commit:", bundle.identity().commit());
         assertThat(bundle.project(HarnessRole.FINAL_REVIEW, "JSON only"))
                 .contains("# Independent code review brief", "do not delegate another review")
                 .doesNotContain("# Implementation plans").endsWith("JSON only");

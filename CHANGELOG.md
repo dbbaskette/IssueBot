@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.0 — 2026-09-12
+
+- Keep bundled Superpowers provenance in Setup but omit its unrelated upstream commit from coding prompts, so agents use the task checkout as their source of truth.
+- Permit outbound dependency downloads for explicitly allowlisted Codex implementation repositories, while keeping other stages restricted and removing inherited service credentials from coding subprocesses.
+
 ## 0.9.0 — 2026-09-12
 
 - Give approved-plan implementation to one resumable coding-harness run with explicit complete, continue, and blocked handoffs, durable turn and cost checkpoints, and a bounded turn limit.

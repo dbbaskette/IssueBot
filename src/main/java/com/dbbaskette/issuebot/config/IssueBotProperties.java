@@ -159,6 +159,8 @@ public class IssueBotProperties {
     }
 
     public static class CodexCliConfig {
+        /** Exact owner/repo allowlist for outbound access during implementation only. */
+        private List<String> networkAllowedRepositories = new ArrayList<>();
         private String implementationModel = "gpt-5.6-sol";
         private String reviewModel = "gpt-5.6-terra";
         private String utilityModel = "gpt-5.6-luna";
@@ -186,6 +188,10 @@ public class IssueBotProperties {
         public void setTimeoutMinutes(int value) { this.timeoutMinutes = value; }
         public int getReviewTimeoutMinutes() { return reviewTimeoutMinutes; }
         public void setReviewTimeoutMinutes(int value) { this.reviewTimeoutMinutes = value; }
+        public List<String> getNetworkAllowedRepositories() { return networkAllowedRepositories; }
+        public void setNetworkAllowedRepositories(List<String> value) {
+            this.networkAllowedRepositories = value == null ? new ArrayList<>() : new ArrayList<>(value);
+        }
     }
 
     public static class GitHubConfig {

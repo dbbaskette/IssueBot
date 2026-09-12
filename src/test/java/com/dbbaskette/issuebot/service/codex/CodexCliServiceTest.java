@@ -26,7 +26,8 @@ class CodexCliServiceTest {
         com.dbbaskette.issuebot.service.harness.ConcreteReadinessProbeAssertions.verify(
                 starter -> new com.dbbaskette.issuebot.service.harness.CodexHarnessAdapter(new CodexCliService(
                         new com.dbbaskette.issuebot.config.IssueBotProperties(), new CodexJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
-                        org.mockito.Mockito.mock(com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService.class)) {
+                        org.mockito.Mockito.mock(com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService.class),
+                        org.mockito.Mockito.mock(com.dbbaskette.issuebot.repository.TrackedIssueRepository.class)) {
                     @Override Process startReadinessProcess(ProcessBuilder builder) throws java.io.IOException { return starter.start(builder); }
                 }, catalog),
                 "Logged in using ChatGPT", "Not logged in");
@@ -50,7 +51,7 @@ class CodexCliServiceTest {
 
     private final CodexCliService service = new CodexCliService(
             new IssueBotProperties(), new CodexJsonParser(new ObjectMapper()),
-            new WorkflowCancellationService());
+            new WorkflowCancellationService(), mock(com.dbbaskette.issuebot.repository.TrackedIssueRepository.class));
 
     @Test
     void freshCommandUsesSubscriptionCliInHeadlessWorkspaceMode() {
@@ -106,6 +107,50 @@ class CodexCliServiceTest {
 
         assertThat(command).containsSubsequence("--config", "model_reasoning_effort=\"ultra\"", "exec")
                 .contains("--model", "gpt-6-astra");
+    }
+
+    @Test
+    void networkAccessIsExplicitAndDoesNotChangePlanningOrDefaultCommands() {
+        assertThat(service.buildCommand("gpt-6-astra", null, "medium", true))
+                .containsSubsequence("--sandbox", "workspace-write", "--config",
+                        "sandbox_workspace_write.network_access=true", "--config",
+                        "model_reasoning_effort=\"medium\"");
+        assertThat(service.buildCommand("gpt-6-astra", null, "medium"))
+                .doesNotContain("sandbox_workspace_write.network_access=true");
+        assertThat(service.buildPlanningCommand("gpt-6-astra", "medium"))
+                .doesNotContain("sandbox_workspace_write.network_access=true");
+    }
+
+    @Test
+    void codingEnvironmentDropsInheritedCredentials() {
+        Map<String, String> environment = new HashMap<>(Map.of(
+                "CODEX_HOME", "/operator/codex", "JAVA_HOME", "/jdk",
+                "ISSUEBOT_PASSWORD", "secret", "GH_TOKEN", "secret",
+                "AWS_SECRET_ACCESS_KEY", "secret", "SSH_AUTH_SOCK", "/tmp/agent.sock"));
+        CodexCliService.sanitizeCodingEnvironment(environment);
+        assertThat(environment).containsEntry("CODEX_HOME", "/operator/codex")
+                .containsEntry("JAVA_HOME", "/jdk")
+                .containsEntry("GIT_TERMINAL_PROMPT", "0")
+                .doesNotContainKeys("ISSUEBOT_PASSWORD", "GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK");
+    }
+
+    @Test
+    void networkAllowlistMatchesOnlyTheExactTrackedRepository() {
+        var properties = new IssueBotProperties();
+        properties.getCodexCli().setNetworkAllowedRepositories(List.of("dbbaskette/adksi"));
+        var issues = mock(com.dbbaskette.issuebot.repository.TrackedIssueRepository.class);
+        var tracked = new com.dbbaskette.issuebot.model.TrackedIssue();
+        var repo = new com.dbbaskette.issuebot.model.WatchedRepo();
+        repo.setOwner("dbbaskette");
+        repo.setName("adksi");
+        tracked.setRepo(repo);
+        when(issues.findById(119L)).thenReturn(java.util.Optional.of(tracked));
+        var runner = new CodexCliService(properties, new CodexJsonParser(new ObjectMapper()),
+                new WorkflowCancellationService(), issues);
+        assertThat(runner.networkAllowedFor(119L)).isTrue();
+        assertThat(runner.networkAllowedFor(120L)).isFalse();
+        repo.setName("other");
+        assertThat(runner.networkAllowedFor(119L)).isFalse();
     }
 
     @Test

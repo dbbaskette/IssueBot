@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.codex;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.harness.HarnessReadiness;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
@@ -28,14 +29,17 @@ public class CodexCliService {
     private final IssueBotProperties properties;
     private final CodexJsonParser parser;
     private final WorkflowCancellationService cancellationService;
+    private final TrackedIssueRepository issueRepository;
     private volatile boolean cliAvailable;
     private volatile Boolean cliAuthenticated;
 
     public CodexCliService(IssueBotProperties properties, CodexJsonParser parser,
-                           WorkflowCancellationService cancellationService) {
+                           WorkflowCancellationService cancellationService,
+                           TrackedIssueRepository issueRepository) {
         this.properties = properties;
         this.parser = parser;
         this.cancellationService = cancellationService;
+        this.issueRepository = issueRepository;
     }
 
     public HarnessExecutionResult executeImplementation(String prompt, Path directory, String model,
@@ -43,7 +47,8 @@ public class CodexCliService {
                                                    Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId,
                 properties.getCodexCli().getImplementationReasoningEffort(),
-                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false);
+                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false,
+                networkAllowedFor(issueId));
     }
 
     public HarnessExecutionResult executeReview(String prompt, Path directory, String model,
@@ -71,7 +76,8 @@ public class CodexCliService {
                                                         String reasoningLevel, String sessionId, Long issueId,
                                                         Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId, reasoningLevel,
-                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false);
+                properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false,
+                networkAllowedFor(issueId));
     }
 
     public HarnessExecutionResult executeReview(String prompt, Path directory, String model,
@@ -106,9 +112,18 @@ public class CodexCliService {
                                           String sessionId, String reasoningEffort,
                                           int timeoutMinutes, Long issueId,
                                           Consumer<String> callback, boolean planningMode) {
+        return executeTask(prompt, directory, model, sessionId, reasoningEffort,
+                timeoutMinutes, issueId, callback, planningMode, false);
+    }
+
+    private HarnessExecutionResult executeTask(String prompt, Path directory, String model,
+                                          String sessionId, String reasoningEffort,
+                                          int timeoutMinutes, Long issueId,
+                                          Consumer<String> callback, boolean planningMode,
+                                          boolean networkAccess) {
         List<String> command = planningMode
                 ? buildPlanningCommand(model, reasoningEffort)
-                : buildCommand(model, sessionId, reasoningEffort);
+                : buildCommand(model, sessionId, reasoningEffort, networkAccess);
         long started = System.currentTimeMillis();
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -117,6 +132,8 @@ public class CodexCliService {
             com.dbbaskette.issuebot.service.claude.ClaudeCodeService.sanitizeBillingEnvironment(builder.environment());
             if (planningMode) {
                 sanitizePlanningEnvironment(builder.environment());
+            } else {
+                sanitizeCodingEnvironment(builder.environment());
             }
             Process process = builder.start();
             if (issueId != null) cancellationService.registerProcess(issueId, process);
@@ -169,8 +186,16 @@ public class CodexCliService {
     }
 
     List<String> buildCommand(String model, String sessionId, String reasoningEffort) {
+        return buildCommand(model, sessionId, reasoningEffort, false);
+    }
+
+    List<String> buildCommand(String model, String sessionId, String reasoningEffort, boolean networkAccess) {
         List<String> command = new ArrayList<>(List.of(
                 "codex", "--ask-for-approval", "never", "--sandbox", "workspace-write"));
+        if (networkAccess) {
+            command.add("--config");
+            command.add("sandbox_workspace_write.network_access=true");
+        }
         addReasoningEffort(command, reasoningEffort);
         command.add("exec");
         if (sessionId != null && !sessionId.isBlank()) command.add("resume");
@@ -220,6 +245,29 @@ public class CodexCliService {
         environment.put("GIT_CONFIG_GLOBAL", "/dev/null");
         environment.put("GIT_CONFIG_NOSYSTEM", "1");
         environment.put("GIT_TERMINAL_PROMPT", "0");
+    }
+
+    /** Subscription auth comes from CODEX_HOME; IssueBot's service credentials do not belong in the agent shell. */
+    static void sanitizeCodingEnvironment(Map<String, String> environment) {
+        environment.keySet().removeIf(name -> {
+            String upper = name.toUpperCase(java.util.Locale.ROOT);
+            return upper.contains("TOKEN") || upper.contains("PASSWORD")
+                    || upper.contains("SECRET") || upper.contains("CREDENTIAL")
+                    || upper.contains("PRIVATE_KEY") || upper.contains("API_KEY")
+                    || upper.equals("GIT_ASKPASS") || upper.equals("SSH_ASKPASS")
+                    || upper.equals("SSH_AUTH_SOCK");
+        });
+        environment.put("GIT_CONFIG_GLOBAL", "/dev/null");
+        environment.put("GIT_CONFIG_NOSYSTEM", "1");
+        environment.put("GIT_TERMINAL_PROMPT", "0");
+    }
+
+    boolean networkAllowedFor(Long issueId) {
+        if (issueId == null || properties.getCodexCli().getNetworkAllowedRepositories().isEmpty()) return false;
+        return issueRepository.findById(issueId)
+                .map(issue -> properties.getCodexCli().getNetworkAllowedRepositories()
+                        .contains(issue.getRepo().fullName()))
+                .orElse(false);
     }
 
     static void terminateTimedOutProcess(Process process) {

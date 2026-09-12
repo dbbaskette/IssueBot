@@ -11,6 +11,7 @@ readonly DEPLOY_CONFIG="${ISSUEBOT_DEPLOY_CONFIG:-$SCRIPT_DIR/home-server.env}"
 }
 # shellcheck disable=SC1090
 source "$DEPLOY_CONFIG"
+export ISSUEBOT_CODEX_NETWORK_ALLOWED_REPOSITORIES="${ISSUEBOT_CODEX_NETWORK_ALLOWED_REPOSITORIES:-}"
 
 # Resolve the release link once: subsequent builds/deploys must never replace a running JVM's jar.
 readonly ISSUEBOT_JAR="$(readlink "$ISSUEBOT_STATE_DIR/releases/current.jar")"

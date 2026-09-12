@@ -14,6 +14,12 @@ The non-secret host topology is committed in
 home-server, hostname, label, or port changes. The installer renders the
 LaunchAgent from the committed plist template.
 
+`ISSUEBOT_CODEX_NETWORK_ALLOWED_REPOSITORIES` in that file is an exact,
+comma-separated `owner/repo` allowlist for outbound network access during Codex
+implementation turns (for example, Maven dependency downloads). It is empty by
+default. Planning, review, and all non-allowlisted repositories remain
+network-restricted. Restart IssueBot after changing the allowlist.
+
 The protected runtime file is configured by `ISSUEBOT_RUNTIME_ENV` and must
 remain outside the repository with mode `0600`. Start from the committed
 `deploy/macos/runtime.env.example`:
