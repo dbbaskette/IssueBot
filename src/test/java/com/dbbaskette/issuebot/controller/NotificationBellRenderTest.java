@@ -150,8 +150,13 @@ class NotificationBellRenderTest {
 
     private String renderPanel(List<Notification> notifications, long unreadCount) {
         WebContext context = new WebContext(webExchange, Locale.US);
-        context.setVariable("notifications", notifications);
-        context.setVariable("unreadCount", unreadCount);
+        var groups = notifications.stream().map(n -> new com.dbbaskette.issuebot.service.notification.NotificationSnapshot.Group(
+                "legacy:" + n.getId(), n, n.isUnread() ? 1 : 0, n.getId(),
+                n.getIssueId() == null ? null : new com.dbbaskette.issuebot.service.ui.IssueNextAction(
+                        "Current state", "View issue", "/issues/" + n.getIssueId(),
+                        com.dbbaskette.issuebot.service.ui.IssueNextAction.Tone.NEUTRAL, false), false)).toList();
+        context.setVariable("notificationSnapshot", new com.dbbaskette.issuebot.service.notification.NotificationSnapshot(
+                new org.springframework.data.domain.PageImpl<>(groups), unreadCount, unreadCount > 0 ? 10 : 0));
 
         TemplateSpec spec = new TemplateSpec("notifications", Set.of("panel"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
@@ -184,7 +189,24 @@ class NotificationBellRenderTest {
         assertThat(html).contains("Issue Completed");
         // th:text HTML-escapes the detail — "&" becomes "&amp;" — which is correct/expected.
         assertThat(html).contains("acme/widgets #42 — PR #7 created &amp; merged");
-        assertThat(html).contains("14:30");
+        assertThat(html).contains("Jul 11, 14:30");
+    }
+
+    @Test
+    void severityAndReadStateRemainIndependentOfPresentation() {
+        Notification unread = notification(Notification.Severity.WARN, "Waiting", "Review this stage", 42L);
+        Notification read = notification(Notification.Severity.ERROR, "Failed", "Inspect the error", null);
+        LocalDateTime readAt = LocalDateTime.of(2026, 7, 11, 15, 0);
+        read.setReadAt(readAt);
+
+        String html = renderPanel(List.of(unread, read), 1);
+
+        assertThat(html).contains("notif-item is-unread", "sev-warn", "ti-alert-triangle",
+                "sev-error", "ti-alert-circle", "Jul 11, 14:30", "href=\"/issues/42\"",
+                "hx-post=\"/notifications/read\"", "hx-target=\"#notif-panel\"");
+        assertThat(html.split("is-unread", -1)).hasSize(2);
+        assertThat(unread.getReadAt()).isNull();
+        assertThat(read.getReadAt()).isEqualTo(readAt);
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.dbbaskette.issuebot.service.ui;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
+import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.Locale;
 /**
  * Builds the compact, presentation-only workflow shown on issue detail.
  */
+@Component
 public final class WorkflowStepperAssembler {
 
     public enum StageKey {

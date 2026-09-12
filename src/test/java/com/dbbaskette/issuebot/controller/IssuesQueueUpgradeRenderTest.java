@@ -149,6 +149,7 @@ class IssuesQueueUpgradeRenderTest {
         assertThat(html).contains("class=\"queue-search\"");
         assertThat(html).contains("class=\"view-chips\"");
         assertThat(html).contains("Needs attention", "Active", "Waiting");
+        assertThat(html).contains("data-navigation-list", "hx-push-url=\"true\"");
     }
 
     @Test
@@ -158,6 +159,11 @@ class IssuesQueueUpgradeRenderTest {
         assertThat(html).contains("Page 2 of 3");
         assertThat(html).contains("Prev");
         assertThat(html).contains("Next");
+        assertThat(html).contains(
+                "href=\"/issues?status=&amp;repoId=&amp;q=&amp;page=0\"",
+                "href=\"/issues?status=&amp;repoId=&amp;q=&amp;page=2\"");
+        assertThat(java.util.regex.Pattern.compile("hx-push-url=\"true\"")
+                .matcher(html).results().count()).isGreaterThanOrEqualTo(5);
     }
 
     @Test

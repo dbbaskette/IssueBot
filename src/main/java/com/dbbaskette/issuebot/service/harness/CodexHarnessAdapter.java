@@ -36,6 +36,8 @@ public final class CodexHarnessAdapter implements CodingHarnessAdapter {
 
     @Override public boolean checkCliAvailable() { return runner.checkCliAvailable(); }
     @Override public boolean checkSubscriptionAuthentication() { return runner.checkSubscriptionAuthentication(); }
+    @Override public HarnessReadiness probeCliAvailability() { return runner.probeCliAvailability(); }
+    @Override public HarnessReadiness probeSubscriptionAuthentication() { return runner.probeSubscriptionAuthentication(); }
     @Override public boolean isCliAvailable() { return runner.isCliAvailable(); }
     @Override public boolean checkAuthentication() { return runner.checkAuthentication(); }
     @Override public void clearAuthCache() { runner.clearAuthCache(); }

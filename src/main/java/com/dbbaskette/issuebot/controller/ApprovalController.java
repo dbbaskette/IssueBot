@@ -97,6 +97,7 @@ public class ApprovalController {
                     "This issue is no longer awaiting approval. Refresh to see its current state.");
             case FEEDBACK_REQUIRED -> redirectAttributes.addFlashAttribute(
                     "error", "Rejection feedback is required.");
+            case MERGE_OUTCOME_UNKNOWN -> redirectAttributes.addFlashAttribute("error", decision.message());
             default -> redirectAttributes.addFlashAttribute("error",
                     "Rejection could not be processed. Refresh before retrying.");
         }
@@ -126,7 +127,6 @@ public class ApprovalController {
         model.addAttribute("ciStatuses", cards.ciStatuses());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", (long) approvals.size());
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         if (message != null) model.addAttribute("message", message);
     }
 }

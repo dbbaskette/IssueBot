@@ -99,7 +99,7 @@ public class StageWorkflowCoordinator {
         if (current.getStatus() != IssueStatus.AWAITING_PLAN_APPROVAL) return null;
         PlanningVersion version = versions.findByIssueIdOrderByVersionNumberDesc(issue.getId()).stream()
                 .filter(v -> v.getState() == PlanningVersionState.PENDING).findFirst().orElseThrow();
-        plans.approvePlan(issue.getId(), version.getId());
+        plans.approvePlan(issue.getId(), version.getId(), com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.AUTOMATION);
         IssueDispatchService.ClaimResult claim = dispatch.claimReadyStart(issue.getId());
         return claim.claimed() ? claim.issue() : null;
     }

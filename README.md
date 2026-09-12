@@ -16,16 +16,20 @@ Filing a good issue is the easy part; the work between a well-specified issue an
 
 ## How It Works
 
-IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured 6-phase workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. The coding harness is configurable as either Claude Code CLI or Codex CLI, and each role's model and reasoning are configurable together from the dashboard at the global, per-repo, and per-issue level. Defaults depend on the coding harness: Claude Code uses Opus 4.8 for implementation and Sonnet 5 for review, both with high effort; Codex CLI uses `gpt-5.6-sol` with low reasoning for implementation and `gpt-5.6-terra` with medium reasoning for review.
+IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. The coding harness is configurable as either Claude Code CLI or Codex CLI, and each role's model and reasoning are configurable together from the dashboard at the global, per-repo, and per-issue level. Defaults depend on the coding harness: Claude Code uses Opus 4.8 for implementation and Sonnet 5 for review, both with high effort; Codex CLI uses `gpt-5.6-sol` with low reasoning for implementation and `gpt-5.6-terra` with medium reasoning for review.
+
+Labeling an open issue `agent-ready` makes it eligible for polling or webhook discovery, not an unconditional immediate start. Processing controls, dependencies, global capacity, repository reservations, and workflow policy remain authoritative. See [the actual workflow and testing ownership](docs/operator-workflow.md) for policy gates, bounded corrections, test duplication limitations, and the distinction between current prompt methodology and future native skill integration.
 
 ```mermaid
 flowchart LR
     A[GitHub Issue<br>agent-ready] --> B[IssueBot<br>Polling]
-    B --> P[Plan First<br>Spec + Plan]
+    B --> P[Policy-dependent planning<br>Spec + Plan when enabled]
     P -->|Revise| P
-    P -->|Approve both| C[Setup<br>Clone & Branch]
+    P -->|Policy permits continuation| C[Setup<br>Clone & Branch]
     C --> D[Implement<br>Selected Coding Harness]
-    D --> E[CI Verify<br>Push & Check]
+    D --> V[Configured local verification]
+    V -->|Fail| D
+    V -->|Pass or unconfigured| E[Commit & Push<br>CI when enabled]
     E -->|Fail| F{Retry<br>Smart?}
     F -->|Skip| G[FAILED<br>needs-human]
     F -->|Yes| D
@@ -34,7 +38,7 @@ flowchart LR
     I -->|Fail| D
     I -->|Pass| J[Backlog<br>Findings]
     J --> K[Finalize &<br>Auto-Merge]
-    K --> L[Done]
+    K --> L[Workflow complete<br>Merge depends on policy]
 ```
 
 ### The 6-Phase Pipeline
@@ -52,14 +56,17 @@ If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout
 
 ### Plan First approval contract
 
-Plan First is enabled by default for every repository and can be explicitly disabled for a repository or overridden for an individual issue when it is started or retried. Before IssueBot can create a feature branch or modify code, the implementation model produces one structured planning version containing both a **Design Spec** and an **Implementation Plan**. The issue page presents those artifacts in separate tabs, with a third **History** tab for every immutable numbered version.
+Plan First is enabled by default. LEGACY repositories can disable it or override it for an individual start/retry; AUTOMATED and STAGED policies require it. When enabled, before feature-branch setup or code changes the implementation model produces one structured planning version containing both a **Design Spec** and an **Implementation Plan**. The issue page retains every immutable numbered version.
 
-Revision guidance creates a new version and supersedes the prior pending version without deleting or editing it. One approval action approves the selected current version's Design Spec and Implementation Plan together; that exact version is then pinned as the implementation and independent-review contract.
+Revision guidance creates a new version and supersedes the prior pending version without deleting or editing it. In LEGACY Plan First, one operator action approves the selected version's Design Spec and Implementation Plan together, then a separate start begins implementation. Managed policies system-accept the generated version; STAGED pauses before the configured stages. A PLANNING-stage approval authorizes generation, not a second approval of the finished artifacts. The exact accepted version is pinned as the implementation and independent-review contract.
 
 Plan First review uses a fixed two-attempt conformance cycle. The first miss automatically schedules one corrective implementation using the review findings. A second miss stops in Needs Guidance. An operator can then retry with implementation guidance, which starts a fresh two-attempt cycle against the same approved version—the guidance does not revise the spec, plan, or version history.
 
 ## Key Features
 
+- **Operator Decision Flow** - Current actions precede evidence; durable decision history distinguishes operator, automation, and unknown legacy actors without collecting personal identities
+- **Review and Recovery Context** - Comparable reviews show criterion/finding changes; missing collections remain unavailable. Recovery explains structured failures, preserves guidance drafts, and uses explicit fresh prerequisite observations rather than probing on page loads
+- **Notification Triage and Return Context** - Search grouped history, read only through a visible watermark, mute informational delivery without suppressing critical attention, and return to the original filtered result sequence
 - **Coding Harness Support** - Choose Claude Code CLI with a Claude subscription login or Codex CLI with a ChatGPT subscription login from Settings; model and reasoning choices follow the selected adapter's capabilities
 - **Dual-Model Architecture** - Implementation and review use independently configurable models, settable at the global, per-repo, and per-issue level for checks and balances
 - **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion

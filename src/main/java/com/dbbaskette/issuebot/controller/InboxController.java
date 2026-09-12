@@ -124,7 +124,6 @@ public class InboxController {
         // ApprovalController#populateModel, which does the same for its own approvals list.
         model.addAttribute("pendingApprovals", (long) approvals.size());
         model.addAttribute("needsYouCount", snapshot.totalCount());
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
     }
 }

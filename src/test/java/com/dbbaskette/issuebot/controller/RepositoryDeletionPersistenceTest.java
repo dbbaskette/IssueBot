@@ -41,6 +41,7 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({
         RepositoryController.class,
@@ -64,6 +65,7 @@ class RepositoryDeletionPersistenceTest {
 
     @MockitoBean private IssuePollingService pollingService;
     @MockitoBean private com.dbbaskette.issuebot.service.workflow.ProcessingControlService processingControl;
+    @MockitoBean private com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService prerequisites;
 
     @Test
     void deletionClearsApprovedPointerAndRemovesPendingAndApprovedVersionsBeforeIssues() {

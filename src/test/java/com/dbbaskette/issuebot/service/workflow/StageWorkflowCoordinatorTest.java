@@ -143,7 +143,7 @@ class StageWorkflowCoordinatorTest {
         when(dispatch.claimReadyStart(10L)).thenReturn(IssueDispatchService.ClaimResult.claimed(claimed));
         assertThat(coordinator.continueAfterPlanning(issue)).isSameAs(claimed);
         var sequence = inOrder(plans, dispatch);
-        sequence.verify(plans).approvePlan(10L, version.getId());
+        sequence.verify(plans).approvePlan(10L, version.getId(), com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.AUTOMATION);
         sequence.verify(dispatch).claimReadyStart(10L);
     }
 

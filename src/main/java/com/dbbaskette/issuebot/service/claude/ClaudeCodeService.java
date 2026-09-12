@@ -3,6 +3,7 @@ package com.dbbaskette.issuebot.service.claude;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.harness.HarnessReadiness;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -423,38 +424,40 @@ public class ClaudeCodeService {
         }
     }
 
-    /** Fresh Claude-only subscription authentication check for the harness adapter. */
+    /** Fresh, fail-closed compatibility check. Unknown readiness is never authorization. */
     public boolean checkSubscriptionAuthentication() {
+        return probeSubscriptionAuthentication().ready();
+    }
+
+    public HarnessReadiness probeSubscriptionAuthentication() {
+        var check = runReadinessProbe(buildSubscriptionAuthCommand(), true);
+        if (check.exitCode() < 0) return HarnessReadiness.UNKNOWN;
+        var result = subscriptionReadiness(check.output());
+        return result == HarnessReadiness.READY && check.exitCode() != 0
+                ? HarnessReadiness.UNKNOWN : result;
+    }
+
+    static HarnessReadiness subscriptionReadiness(String output) {
+        var ready = HarnessReadiness.READY;
+        var unmet = HarnessReadiness.UNMET;
+        var unknown = HarnessReadiness.UNKNOWN;
         try {
-            ProcessBuilder builder = new ProcessBuilder(buildSubscriptionAuthCommand()).redirectErrorStream(true);
-            stripNestedSessionEnv(builder);
-            sanitizeBillingEnvironment(builder.environment());
-            Process process = builder.start();
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                return false;
-            }
-            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            return process.exitValue() == 0 && isSubscriptionAuthentication(output);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        } catch (Exception e) {
-            log.debug("Claude subscription authentication check failed: {}", e.getMessage());
-            return false;
-        }
+            JsonNode status = new ObjectMapper().enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(output);
+            if (status == null || !status.isObject() || !status.path("loggedIn").isBoolean()) return unknown;
+            if (!status.path("loggedIn").booleanValue()) return unmet;
+            String method = status.path("authMethod").asText();
+            if ("api_key".equals(method)) return unmet;
+            if (!"claude.ai".equals(method) || !status.path("subscriptionType").isTextual()) return unknown;
+            return switch (status.path("subscriptionType").asText().toLowerCase(java.util.Locale.ROOT)) {
+                case "pro", "max", "team", "enterprise" -> ready;
+                case "free", "none" -> unmet;
+                default -> unknown;
+            };
+        } catch (Exception malformed) { return unknown; }
     }
 
     static boolean isSubscriptionAuthentication(String output) {
-        try {
-            JsonNode status = new ObjectMapper().readTree(output);
-            return status.path("loggedIn").isBoolean() && status.path("loggedIn").booleanValue()
-                    && "claude.ai".equals(status.path("authMethod").asText())
-                    && List.of("pro", "max", "team", "enterprise")
-                    .contains(status.path("subscriptionType").asText().toLowerCase(java.util.Locale.ROOT));
-        } catch (Exception e) {
-            return false;
-        }
+        return subscriptionReadiness(output).ready();
     }
 
     static List<String> buildSubscriptionAuthCommand() {
@@ -473,28 +476,44 @@ public class ClaudeCodeService {
     /**
      * Check if the Claude Code CLI is installed and accessible.
      */
-    public boolean checkCliAvailable() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder("claude", "--version");
-            pb.redirectErrorStream(true);
-            stripNestedSessionEnv(pb);
-            Process process = pb.start();
-            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-            if (finished && process.exitValue() == 0) {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(process.getInputStream()))) {
-                    String version = reader.readLine();
-                    log.info("Claude Code CLI found: {}", version);
-                }
-                this.cliAvailable = true;
-                return true;
-            }
-        } catch (Exception e) {
-            log.debug("Claude Code CLI check failed: {}", e.getMessage());
-        }
-        this.cliAvailable = false;
-        return false;
+    public boolean checkCliAvailable() { return probeCliAvailability().ready(); }
+
+    public HarnessReadiness probeCliAvailability() {
+        var check = runReadinessProbe(List.of("claude", "--version"), false);
+        var readiness = check.exitCode() == 0
+                ? HarnessReadiness.READY
+                : check.exitCode() == -2 ? HarnessReadiness.UNMET
+                : HarnessReadiness.UNKNOWN;
+        this.cliAvailable = readiness.ready();
+        return readiness;
     }
+
+    private ReadinessProbe runReadinessProbe(List<String> command, boolean subscription) {
+        Process process = null;
+        try {
+            var builder = new ProcessBuilder(command).redirectErrorStream(true);
+            stripNestedSessionEnv(builder);
+            if (subscription) sanitizeBillingEnvironment(builder.environment());
+            process = startReadinessProcess(builder);
+            if (!process.waitFor(10, TimeUnit.SECONDS)) return new ReadinessProbe(-1, "");
+            return new ReadinessProbe(process.exitValue(), new String(process.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new ReadinessProbe(-1, "");
+        } catch (java.io.FileNotFoundException | java.nio.file.NoSuchFileException missing) {
+            return new ReadinessProbe(-2, "");
+        } catch (Exception unavailable) {
+            return new ReadinessProbe(-1, "");
+        } finally {
+            if (process != null && process.isAlive()) process.destroyForcibly();
+        }
+    }
+
+    private record ReadinessProbe(int exitCode, String output) { }
+
+    /** Process boundary kept separate so readiness tests never execute an installed CLI. */
+    Process startReadinessProcess(ProcessBuilder builder) throws IOException { return builder.start(); }
 
     /**
      * Verify Claude Code authentication via 'claude auth status'.

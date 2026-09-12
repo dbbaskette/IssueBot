@@ -92,6 +92,8 @@ class ApprovalsDiffViewerRenderTest {
         issue.setBranchName("issuebot/9");
 
         Iteration iter = new Iteration(issue, 1);
+        iter.setId(77L);
+        iter.setSelfAssessment("assessment");
         iter.setDiff("diff --git a/Foo.java b/Foo.java\n--- a/Foo.java\n+++ b/Foo.java\n@@ -1 +1 @@\n-old\n+new\n");
 
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
@@ -107,7 +109,36 @@ class ApprovalsDiffViewerRenderTest {
 
         String html = render(model);
 
-        assertThat(html).contains("data-diff-viewer");
+        assertThat(html)
+                .contains("inset-panel decision-card", "class=\"decision-card-title\">Add feature</span>",
+                        "Awaiting approval", "hx-post=\"/approvals/2/approve\"", "hx-post=\"/approvals/2/reject\"")
+                .contains("data-diff-viewer")
+                .contains("data-ui-state-key=\"issue:2:iteration:77:diff\"")
+                .contains("data-ui-state-key=\"issue:2:iteration:77:self-assessment\"");
+    }
+
+    @Test
+    void emptyApprovalsExplainWhereFutureDecisionsAppear() {
+        Model model = new ExtendedModelMap();
+        model.addAttribute("approvals", List.of());
+        String html = render(model);
+        assertThat(html).contains("class=\"glass-card empty-state\"", "No actions need your attention",
+                "Workflow stage and pull request approvals appear here when a decision is ready.");
+        assertThat(html).doesNotContain("approval-gated repos", "class=\"decision-card-title\"");
+    }
+
+    @Test
+    void stageApprovalShowsReadableStageAndTitleWithExistingDeepLink() {
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("acme", "widgets"), 9, "Ship the feature");
+        issue.setId(2L);
+        issue.setStatus(IssueStatus.AWAITING_APPROVAL);
+        issue.setCurrentPhase("STAGE_APPROVAL_IMPLEMENTATION");
+        Model model = new ExtendedModelMap();
+        model.addAttribute("approvals", List.of(issue));
+        String html = render(model);
+        assertThat(html).contains("class=\"decision-card-title\">Ship the feature</h3>",
+                "Implementation approval", "href=\"/issues/2#stage-approval\"");
+        assertThat(html).doesNotContain("Stage Approval Implementation", "hx-post=\"/approvals/2/approve\"");
     }
 
     @Test
@@ -150,7 +181,7 @@ class ApprovalsDiffViewerRenderTest {
         Iteration iteration = new Iteration(issue, 1);
         iteration.setReviewPassed(true);
         iteration.setReviewJson("""
-                {"passed": true, "specComplianceScore": 0.8}
+                {"passed": true, "specComplianceScore": 0.8, "findings": [{"severity": "low", "description": "Follow-up observation"}]}
                 """);
 
         when(issues.findByStatus(IssueStatus.AWAITING_APPROVAL)).thenReturn(List.of(issue));
@@ -167,6 +198,9 @@ class ApprovalsDiffViewerRenderTest {
         String html = render(model);
 
         assertThat(html).contains("Overall 80%")
+                .contains("class=\"review-stat review-score\">Overall 80%</span>")
+                .contains("class=\"review-stat review-finding-count\">1 finding</span>")
+                .contains("class=\"status status-completed\">REVIEW PASSED</span>")
                 .contains("Spec 80%")
                 .doesNotContain("/10");
         assertThat(html).doesNotContain("Correctness 0.0", "Quality 0.0", "Tests 0.0",
@@ -198,6 +232,8 @@ class ApprovalsDiffViewerRenderTest {
         String html = render(model);
 
         assertThat(html).contains("Overall 0%")
+                .contains("class=\"review-stat review-score\">Overall 0%</span>")
+                .contains("class=\"status status-failed\">REVIEW FAILED</span>")
                 .contains("Spec 0%")
                 .contains("FAILED")
                 .doesNotContain("/10");

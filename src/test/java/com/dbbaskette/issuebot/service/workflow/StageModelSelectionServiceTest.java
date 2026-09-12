@@ -50,12 +50,12 @@ class StageModelSelectionServiceTest {
 
     @Test void missingCliAndUnavailableSubscriptionNeverFallBack() {
         var selected = new HarnessSelection("codex", "gpt-6-astra", "ultra");
-        when(fixture.codex.checkCliAvailable()).thenReturn(false);
+        when(fixture.codex.probeCliAvailability()).thenReturn(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET);
         assertThatThrownBy(() -> service.validate(selected)).hasMessageContaining("Install");
-        when(fixture.codex.checkCliAvailable()).thenReturn(true);
-        when(fixture.codex.checkSubscriptionAuthentication()).thenReturn(false);
+        when(fixture.codex.probeCliAvailability()).thenReturn(com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY);
+        when(fixture.codex.probeSubscriptionAuthentication()).thenReturn(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET);
         assertThatThrownBy(() -> service.validate(selected)).hasMessageContaining("codex login");
-        when(fixture.codex.checkSubscriptionAuthentication()).thenReturn(true);
+        when(fixture.codex.probeSubscriptionAuthentication()).thenReturn(com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY);
         service.validate(selected);
         verifyNoInteractions(fixture.claude);
     }

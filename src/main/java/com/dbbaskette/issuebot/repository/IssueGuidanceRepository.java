@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface IssueGuidanceRepository extends JpaRepository<IssueGuidance, Long> {
+    java.util.Optional<IssueGuidance> findByIssueIdAndRequestToken(Long issueId, String requestToken);
 
     List<IssueGuidance> findByIssueIdAndConsumedAtIsNullOrderByCreatedAtAsc(Long issueId);
 

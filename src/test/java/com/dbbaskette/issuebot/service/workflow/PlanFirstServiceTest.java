@@ -80,7 +80,8 @@ class PlanFirstServiceTest {
         when(repos.findByIdForUpdate(1L)).thenReturn(Optional.of(repo));
         when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(issue));
         service = new PlanFirstService(agent, gitHub,
-                new PlanFirstTransactionManager(issues, versions, repos), new PlanArtifactParser(),
+                com.dbbaskette.issuebot.service.history.HistoryTestFixtures.withHistory(
+                        new PlanFirstTransactionManager(issues, versions, repos)), new PlanArtifactParser(),
                 planningWorkspaces, events, notifications, cancellations);
 
         details = new ObjectMapper().createObjectNode()
@@ -111,7 +112,7 @@ class PlanFirstServiceTest {
                         && prompt.contains("Add pagination")),
                 eq(REPO_PATH), eq("gpt-5.6-sol"), eq(8L), isNull());
         verify(events).log(eq("PLAN_PROPOSED"), contains("version 1"), eq(issue.getRepo()), eq(issue));
-        verify(notifications).info(eq("Plan Proposed"), contains("version 1"), eq(issue));
+        verify(notifications).approval(eq("Plan Proposed"), contains("version 1"), eq(issue));
     }
 
     @Test
@@ -244,7 +245,7 @@ class PlanFirstServiceTest {
         verify(versions, never()).save(any());
         verify(issues).save(issue);
         verify(events).log(eq("PLAN_FAILED"), contains("# Design Spec"), eq(issue.getRepo()), eq(issue));
-        verify(notifications).warn(eq("Planning Failed"), contains("# Design Spec"), eq(issue));
+        verify(notifications).recovery(eq("Planning Failed"), contains("# Design Spec"), eq(issue));
         verifyNoInteractions(gitHub);
     }
 
@@ -316,8 +317,8 @@ class PlanFirstServiceTest {
         assertThat(issue.getLastFailureReason()).isNull();
         verify(versions).save(any(PlanningVersion.class));
         verify(issues, times(1)).save(issue);
-        verify(notifications).info(eq("Plan Proposed"), contains("version 1"), eq(issue));
-        verify(notifications, never()).warn(eq("Planning Failed"), anyString(), any());
+        verify(notifications).approval(eq("Plan Proposed"), contains("version 1"), eq(issue));
+        verify(notifications, never()).recovery(eq("Planning Failed"), anyString(), any());
     }
 
     @Test
@@ -325,7 +326,7 @@ class PlanFirstServiceTest {
         when(agent.executePlanning(anyString(), any(), anyString(), anyLong(), isNull()))
                 .thenReturn(success("# Design Spec\nspec\n# Implementation Plan\nplan"));
         doThrow(new RuntimeException("notification store unavailable"))
-                .when(notifications).info(eq("Plan Proposed"), anyString(), eq(issue));
+                .when(notifications).approval(eq("Plan Proposed"), anyString(), eq(issue));
 
         assertThat(service.generateVersion(issue, details, REPO_PATH)).isEqualTo(AWAITING_APPROVAL);
 
@@ -334,7 +335,7 @@ class PlanFirstServiceTest {
         verify(versions).save(any(PlanningVersion.class));
         verify(issues, times(1)).save(issue);
         verify(events).log(eq("PLAN_PROPOSED"), contains("version 1"), eq(issue.getRepo()), eq(issue));
-        verify(notifications, never()).warn(eq("Planning Failed"), anyString(), any());
+        verify(notifications, never()).recovery(eq("Planning Failed"), anyString(), any());
     }
 
     @Test
@@ -353,8 +354,8 @@ class PlanFirstServiceTest {
         verify(versions).save(any(PlanningVersion.class));
         verify(issues, times(1)).save(issue);
         verify(events).log(eq("PLAN_PROPOSED"), contains("version 1"), eq(issue.getRepo()), eq(issue));
-        verify(notifications).info(eq("Plan Proposed"), contains("version 1"), eq(issue));
-        verify(notifications, never()).warn(eq("Planning Failed"), anyString(), any());
+        verify(notifications).approval(eq("Plan Proposed"), contains("version 1"), eq(issue));
+        verify(notifications, never()).recovery(eq("Planning Failed"), anyString(), any());
     }
 
     @Test
@@ -382,7 +383,7 @@ class PlanFirstServiceTest {
         verify(events).log("PLAN_APPROVED",
                 "Approved planning version 3 — waiting for manual implementation start",
                 issue.getRepo(), issue);
-        verify(notifications).info("Plan Approved",
+        verify(notifications).approval("Plan Approved",
                 "owner/repo #42 — version 3 approved; waiting for you to start implementation",
                 issue);
 
@@ -391,7 +392,7 @@ class PlanFirstServiceTest {
         ArgumentCaptor<String> notificationCopy = ArgumentCaptor.forClass(String.class);
         verify(gitHub).addComment(eq("owner"), eq("repo"), eq(42), auditCopy.capture());
         verify(events).log(eq("PLAN_APPROVED"), eventCopy.capture(), eq(issue.getRepo()), eq(issue));
-        verify(notifications).info(eq("Plan Approved"), notificationCopy.capture(), eq(issue));
+        verify(notifications).approval(eq("Plan Approved"), notificationCopy.capture(), eq(issue));
         assertThat(List.of(auditCopy.getValue(), eventCopy.getValue(), notificationCopy.getValue()))
                 .allSatisfy(copy -> assertThat(copy.toLowerCase())
                         .doesNotContain("queued", "start shortly", "resume", "next poll"));
@@ -416,7 +417,7 @@ class PlanFirstServiceTest {
         sideEffects.verify(events).log("PLAN_APPROVED",
                 "Approved planning version 3 — waiting for manual implementation start",
                 issue.getRepo(), issue);
-        sideEffects.verify(notifications).info("Plan Approved",
+        sideEffects.verify(notifications).approval("Plan Approved",
                 "owner/repo #42 — version 3 approved; waiting for you to start implementation",
                 issue);
         sideEffects.verify(events).log("PLAN_INVALIDATED",
@@ -494,7 +495,7 @@ class PlanFirstServiceTest {
         verify(versions).save(current);
         verify(issues).save(issue);
         verify(events).log(eq("PLAN_REVISION_REQUESTED"), contains("version 2"), eq(issue.getRepo()), eq(issue));
-        verify(notifications).info(eq("Plan Revision Requested"), contains("version 2"), eq(issue));
+        verify(notifications).progress(eq("Plan Revision Requested"), contains("version 2"), eq(issue));
     }
 
     @Test

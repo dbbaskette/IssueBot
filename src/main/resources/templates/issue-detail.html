@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="content" th:if="${issue}">
+<div th:fragment="content" th:if="${issue}" data-navigation-detail
+     th:attr="data-current-issue-id=${issue.id}">
     <div th:replace="~{layout :: toasts}"></div>
 
     <!-- === Two-column layout (#90): LEFT carries header/banners/decision cards/goal/
@@ -19,7 +20,8 @@
 
             <div class="page-header">
                 <div>
-                    <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true" class="text-muted text-sm">&larr; Back to queue</a>
+                    <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true"
+                       data-navigation-return class="btn btn-ghost btn-sm">&larr; Back to queue</a>
                     <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
                     <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
                         <a class="repo-link" target="_blank" rel="noopener"
@@ -61,6 +63,24 @@
                     </button>
                 </div>
             </div>
+
+            <nav class="pager mb-3" aria-label="Issue navigation" data-navigation-sequence hidden>
+                <span class="pager-info" data-navigation-sequence-label>In this result set</span>
+                <a class="btn btn-ghost btn-sm" href="/issues" hx-get="/issues" hx-target="#content"
+                   hx-push-url="true" data-navigation-previous hidden>
+                    <i class="ti ti-chevron-left" aria-hidden="true"></i> Previous
+                </a>
+                <button type="button" class="btn btn-ghost btn-sm" data-navigation-previous-disabled disabled hidden>
+                    <i class="ti ti-chevron-left" aria-hidden="true"></i> Previous
+                </button>
+                <a class="btn btn-ghost btn-sm" href="/issues" hx-get="/issues" hx-target="#content"
+                   hx-push-url="true" data-navigation-next hidden>
+                    Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
+                </a>
+                <button type="button" class="btn btn-ghost btn-sm" data-navigation-next-disabled disabled hidden>
+                    Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
+                </button>
+            </nav>
 
             <!-- One decision surface; independently refreshed children preserve poll/dialog boundaries. -->
             <section id="issue-decision" class="issue-decision panel mb-3" aria-label="Current issue decision">
@@ -133,13 +153,17 @@
                 </div>
                 <div class="panel-body">
                     <h4>What happened</h4>
-                    <p th:text="${latestFailureDiagnostic != null ? latestFailureDiagnostic.summary : (issue.lastFailureReason != null ? issue.lastFailureReason : 'No failure summary was recorded. Review the technical activity below before retrying.')}"
+                    <p th:text="${recoveryGuidance != null ? recoveryGuidance.explanation : 'The cause is unavailable. Inspect the evidence and add guidance before trying again.'}"
                        style="white-space:pre-line"></p>
                     <h4>Suggested next step</h4>
-                    <p th:text="${latestFailureDiagnostic != null and latestFailureDiagnostic.suggestedAction != null ? latestFailureDiagnostic.suggestedAction : 'Review the failure details, add guidance for the next attempt, then retry.'}"></p>
-                    <details th:if="${latestFailureDiagnostic != null and latestFailureDiagnostic.technicalDetails != null}" class="mb-2">
+                    <p><a th:href="${recoveryGuidance != null ? recoveryGuidance.primaryPath : '#recovery-evidence'}"
+                          th:text="${recoveryGuidance != null ? recoveryGuidance.primaryLabel : 'Inspect evidence and add guidance'}"></a></p>
+                    <p class="text-sm" th:text="${recoveryGuidance != null ? recoveryGuidance.retryExplanation : 'Prerequisites: Not verified. Re-check in Setup; normal preflight checks still apply.'}"></p>
+                    <details id="recovery-evidence" class="mb-2"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + (latestFailureDiagnostic != null ? latestFailureDiagnostic.occurredAt : 'legacy') + ':technical'}">
                         <summary>Technical details</summary>
-                        <pre class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
+                        <pre th:if="${latestFailureDiagnostic != null}" class="terminal-well" th:text="${latestFailureDiagnostic.technicalDetails}"></pre>
+                        <p th:if="${latestFailureDiagnostic == null}" class="text-muted">No diagnostic was recorded. Inspect the existing workflow history below.</p>
                     </details>
                     <p th:if="${issue.status.name() == 'COOLDOWN' and issue.cooldownUntil != null}" class="text-sm text-muted"
                        th:text="'Cooldown until ' + ${#temporals.format(issue.cooldownUntil, 'MMM d, HH:mm')}"></p>
@@ -151,7 +175,8 @@
                                th:text="${reviewerInfrastructure ? 'Reviewer recovery note (optional)' : 'Guidance for the next attempt'}">Guidance for the next attempt</label>
                         <textarea id="recoveryInstructions" name="instructions" rows="4" class="modal-textarea"
                                   th:placeholder="${reviewerInfrastructure ? 'Optional note after restoring the reviewer provider or CLI' : 'What should the agent do differently this time?'}"></textarea>
-                        <details class="mt-1">
+                        <details class="mt-1"
+                                 th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery:run:' + (latestIteration != null and latestIteration.id != null ? latestIteration.id : 'none') + ':diagnostic:' + (latestFailureDiagnostic != null ? latestFailureDiagnostic.occurredAt : 'legacy') + ':advanced'}">
                             <summary>Advanced retry options</summary>
                             <div class="field-group" role="group" aria-label="Implementation" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.implementationModel, globalImplementationModel)}">
                                 <h4>Implementation for this attempt</h4>
@@ -183,12 +208,13 @@
                                 The previous session cannot be continued with the selected provider.
                             </p>
                         </details>
-                        <div class="modal-actions">
-                            <button type="submit" class="btn btn-primary btn-sm" th:disabled="${processingMode?.name() != 'RUNNING'}"
+                    </form>
+                        <div class="modal-actions" th:with="reviewerInfrastructure=${latestFailureDiagnostic != null and latestFailureDiagnostic.category?.name() == 'REVIEW_INFRASTRUCTURE'}">
+                            <button type="submit" class="btn btn-primary btn-sm" th:form="${'recovery-form-' + issue.id + '-' + issue.currentIteration}"
+                                    th:disabled="${processingMode?.name() != 'RUNNING' or (recoveryGuidance != null and !recoveryGuidance.retryAllowed)}"
                                     th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : (reviewerInfrastructure ? 'Retry workflow after reviewer recovery' : 'Retry with this guidance')}"
                                     th:text="${reviewerInfrastructure ? 'Retry after recovery' : 'Retry with guidance'}">Retry with guidance</button>
                         </div>
-                    </form>
                 </div>
             </section>
 
@@ -230,10 +256,12 @@
                         <label for="plan-implementation-guidance">Guidance for the next implementation attempt</label>
                         <textarea id="plan-implementation-guidance" name="guidance" rows="4" required maxlength="4000"
                                   placeholder="Point to the unmet requirement and describe what the implementation should do differently."></textarea>
-                        <button type="submit" class="btn btn-primary"
-                                th:disabled="${processingMode?.name() != 'RUNNING'}"
-                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                     </form>
+                    <p th:if="${recoveryGuidance != null}" class="text-sm" th:text="${recoveryGuidance.retryExplanation}"></p>
+                    <a th:if="${recoveryGuidance != null and !recoveryGuidance.retryAllowed}" href="/setup">Open Setup and re-check</a>
+                        <button type="submit" class="btn btn-primary plan-guidance-submit" th:form="${'plan-guidance-form-' + issue.id + '-' + issue.currentIteration}"
+                                th:disabled="${processingMode?.name() != 'RUNNING' or (recoveryGuidance != null and !recoveryGuidance.retryAllowed)}"
+                                th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                 </div>
             </section>
             </div>
@@ -275,7 +303,7 @@
             </section>
 
             <section th:if="${issue.status.name() == 'AWAITING_APPROVAL' and (issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_'))}"
-                     id="approval-decision" class="panel mb-3 approval-decision-card"
+                     id="approval-decision" class="panel mb-3 decision-card approval-decision-card"
                      aria-labelledby="approval-decision-title">
                 <header class="panel-header">
                     <div>
@@ -425,7 +453,8 @@
                         <a href="/issues#dependency-map">Choose the next task or resume the group in the dependency map.</a>
                     </p>
                     <details th:if="${decompositionGroup.parent() and decompositionGroup.releasable()}"
-                             class="decomposition-release">
+                             class="decomposition-release"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':decomposition:release'}">
                         <summary>Release repository control</summary>
                         <p class="text-sm text-muted">Stops active work safely, cancels unfinished children, and leaves the parent open for follow-up.</p>
                         <form th:action="@{'/issues/' + ${issue.id} + '/decomposition/release'}" method="post">
@@ -464,26 +493,30 @@
                     <div class="review-score-overview" th:if="${history.selected.score.overall != null}">
                         <strong th:text="${history.selected.overallPercent + '%'}">95%</strong>
                         <div class="review-score-context">
-                            <span th:if="${history.previous == null}">First scored review</span>
+                            <span th:if="${history.previous == null}"
+                                  th:text="${history.skippedAttempts.isEmpty() ? 'First scored review' : 'No comparable baseline'}">First scored review</span>
                             <span th:if="${history.previous != null and history.overallDeltaPoints != null and history.overallDeltaPoints != 0}"
                                   th:text="${history.overallDeltaPoints + ' ' + history.overallDeltaPointUnit + ' from review ' + history.previous.iterationNumber}">22 points from review 1</span>
                             <span th:if="${history.previous != null and history.overallDeltaPoints == 0}">No overall change</span>
                             <span class="review-score-meta"
-                                  th:if="${history.selected.score.model != null or history.selected.score.findingCount > 0}"
                                   th:text="${history.selected.score.model != null
-                                      ? history.selected.score.model + ' · ' + history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')
-                                      : history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')}">review-model · 2 findings</span>
+                                      ? history.selected.score.model + ' · ' + (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'findings unavailable')
+                                      : (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'Findings unavailable')}">review-model · 2 findings</span>
                         </div>
                     </div>
 
                     <div class="review-score-meta review-score-meta-only"
-                         th:if="${history.selected.score.overall == null and (history.selected.score.model != null or history.selected.score.findingCount > 0)}"
+                         th:if="${history.selected.score.overall == null}"
                          th:text="${history.selected.score.model != null
-                             ? history.selected.score.model + ' · ' + history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')
-                             : history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings')}">review-model · 0 findings</div>
+                             ? history.selected.score.model + ' · ' + (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'findings unavailable')
+                             : (history.selected.score.findingsAvailable ? history.selected.score.findingCount + (history.selected.score.findingCount == 1 ? ' finding' : ' findings') : 'Findings unavailable')}">review-model · 0 findings</div>
 
                     <p class="review-score-summary" th:if="${history.selected.score.summary != null}"
                        th:text="${history.selected.score.summary}">Review summary</p>
+
+                    <p class="review-change-sentence" th:text="${history.changeSentence}">
+                        Verdict remains passed. Compared with review 1.
+                    </p>
 
                     <nav th:if="${history.scoredAttemptCount > 2}" class="review-attempt-selector"
                          aria-label="Review attempts">
@@ -495,8 +528,12 @@
                            th:text="${attempt.selectorLabel}">Review 2 · Passed · 95%</a>
                     </nav>
 
-                    <div class="review-dimension-grid" th:if="${not history.dimensions.isEmpty()}">
-                        <div th:each="dimension : ${history.dimensions}" class="review-dimension">
+                    <details class="review-change-group" open
+                             th:if="${not history.dimensions.isEmpty()}"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':dimensions'}">
+                        <summary>Dimension changes</summary>
+                        <div class="review-dimension-grid">
+                          <div th:each="dimension : ${history.dimensions}" class="review-dimension">
                             <div class="review-dimension-heading">
                                 <strong th:text="${dimension.label}">Test coverage</strong>
                                 <span th:text="${dimension.currentPercent + '%'}">94%</span>
@@ -515,12 +552,32 @@
                             <span class="review-score-delta"
                                   th:classappend="${dimension.deltaPoints == null ? 'is-added' : (dimension.deltaPoints == 0 ? 'is-neutral' : (dimension.deltaPoints > 0 ? 'is-positive' : 'is-negative'))}"
                                   th:text="${dimension.deltaPoints == null ? 'New' : (dimension.deltaPoints == 0 ? 'No change' : (dimension.deltaPoints > 0 ? '+' : '') + dimension.deltaPoints)}">+49</span>
+                          </div>
                         </div>
-                    </div>
+                    </details>
 
-                    <details th:if="${history.criteriaTotal > 0}" class="review-criteria" open>
+                    <details th:if="${history.criteriaTotal > 0 or not history.changes.criteria.isEmpty() or not history.selected.score.criteriaAvailable}"
+                             class="review-criteria review-change-group" open
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':plan:' + (selectedPlanningVersion != null ? selectedPlanningVersion.versionNumber : 'legacy') + ':criteria'}">
                         <summary class="review-criteria-summary"
-                                 th:text="${history.criteriaMet + ' of ' + history.criteriaTotal + ' met'}">4 of 4 met</summary>
+                                 th:text="${history.selected.score.criteriaAvailable ? 'Acceptance criteria · ' + history.criteriaMet + ' of ' + history.criteriaTotal + ' met' : 'Acceptance criteria · unavailable'}">Acceptance criteria · 4 of 4 met</summary>
+                        <p th:if="${not history.selected.score.criteriaAvailable}"
+                           class="review-change-unavailable">Acceptance criteria were not included in this review.</p>
+                        <ul th:if="${not history.changes.criteria.isEmpty()}" class="review-change-list">
+                            <li th:each="change : ${history.changes.criteria}"
+                                th:classappend="${change.cssClass}">
+                                <span class="review-change-label" th:text="${change.label}">Newly met</span>
+                                <strong th:text="${change.text}">Criterion</strong>
+                                <span class="review-change-state"
+                                      th:if="${change.previousState != null or change.currentState != null}"
+                                      th:text="${change.previousState != null and change.currentState != null
+                                          ? change.previousState + ' → ' + change.currentState
+                                          : (change.currentState != null ? change.currentState : change.previousState)}">unmet → met</span>
+                            </li>
+                        </ul>
+                        <p class="review-current-evidence-label" th:if="${history.criteriaTotal > 0}">
+                            Current criterion evidence
+                        </p>
                         <ul class="review-criteria-list">
                             <li th:each="criterion : ${history.criteria}"
                                 th:classappend="${'is-' + criterion.verdict}">
@@ -536,13 +593,36 @@
                             </li>
                         </ul>
                     </details>
+
+                    <details class="review-change-group review-finding-changes"
+                             th:attr="data-ui-state-key=${'issue:' + issue.id + ':review:' + history.selected.iterationId + ':findings'}">
+                        <summary th:text="${history.selected.score.findingsAvailable
+                            ? 'Findings · ' + history.selected.score.findingCount
+                            : 'Findings · unavailable'}">Findings · 2</summary>
+                        <p th:if="${not history.selected.score.findingsAvailable}"
+                           class="review-change-unavailable">Findings were not included in this review.</p>
+                        <p th:if="${history.selected.score.findingsAvailable and history.selected.score.findingCount == 0}"
+                           class="review-change-unavailable">No findings in this review.</p>
+                        <ul th:if="${not history.changes.findings.isEmpty()}" class="review-change-list">
+                            <li th:each="change : ${history.changes.findings}"
+                                th:classappend="${change.cssClass}">
+                                <span class="review-change-label" th:text="${change.label}">Persistent</span>
+                                <strong th:text="${change.text}">Finding</strong>
+                                <span class="review-change-state"
+                                      th:if="${change.previousState != null or change.currentState != null}"
+                                      th:text="${change.previousState != null and change.currentState != null
+                                          ? change.previousState + ' → ' + change.currentState
+                                          : (change.currentState != null ? change.currentState : change.previousState)}">medium → high</span>
+                            </li>
+                        </ul>
+                    </details>
                 </div>
             </section>
 
             <!-- === BLOCKED-BY INFO PANEL === -->
             <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
-                <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-                    <h3>Blocked By</h3>
+                <div class="panel-header inset-heading">
+                    <h3>Dependencies</h3>
                     <span class="status status-blocked">WAITING</span>
                 </div>
                 <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
@@ -666,7 +746,8 @@
             <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
             <details th:if="${selectedPlanningVersion == null and planHtml != null}"
                      class="panel mb-3 plan-doc-panel secondary-section plan-section"
-                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':plan:legacy'}">
                 <summary class="panel-header">
                     <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
                     <span class="text-sm text-muted">click to expand</span>
@@ -678,7 +759,8 @@
 
             <!-- === GOAL CARD === -->
             <details class="panel mb-3 goal-card secondary-section goal-section"
-                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':goal'}">
                 <summary class="panel-header">
                     <h3>Goal</h3>
                     <span class="text-sm text-muted">Done when all of these hold:</span>
@@ -755,7 +837,8 @@
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
               <details class="panel mb-3 secondary-section timeline-section"
                        th:if="${timeline != null and not #lists.isEmpty(timeline)}"
-                       th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+                       th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                                data-ui-state-key=${'issue:' + issue.id + ':timeline'}">
                 <summary class="panel-header">
                     <h3>Timeline</h3>
                     <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
@@ -806,7 +889,9 @@
                     <span class="text-sm text-muted">Steer this run without stopping it</span>
                 </div>
                 <div class="panel-body">
-                    <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post">
+                    <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post"
+                          th:id="${'mid-run-guidance-' + issue.id}" hx-preserve="true">
+                        <input type="hidden" name="requestToken" th:value="${guidanceRequestToken}">
                         <textarea name="guidance" rows="3" class="modal-textarea" required
                                   placeholder="e.g. Check the retry logic in FooService — the bug is probably there"></textarea>
                         <p class="text-sm text-muted" style="margin:0.5rem 0 0">
@@ -1056,11 +1141,23 @@
         </div>
     </div>
 
+    <!-- History owns its own page, outside live polling and all draft/form regions. -->
+    <details id="decision-history" class="panel mb-3 secondary-section history-section"
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':decision-history'}">
+        <summary class="panel-header"><h3>Decision history</h3></summary>
+        <div id="decision-history-page" class="panel-body"
+             th:hx-get="${decisionHistoryUrl != null ? decisionHistoryUrl : '/issues/' + issue.id + '/decisions'}"
+             hx-trigger="load" hx-swap="outerHTML">
+            <a th:href="@{'/issues/' + ${issue.id} + '/decisions'}">Load decision history</a>
+        </div>
+    </details>
+
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
     <details id="iteration-history" class="panel mb-3 secondary-section history-section"
-             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                      data-ui-state-key=${'issue:' + issue.id + ':iteration-history'}">
         <summary class="panel-header">
-            <h3>Iteration History</h3>
+            <h3>Iteration history</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(iterationsNewestFirst) + ' attempts'}">0 attempts</span>
         </summary>
         <div class="panel-body">
@@ -1075,7 +1172,8 @@
             <ul class="iteration-timeline" th:if="${not #lists.isEmpty(iterationsNewestFirst)}">
                 <li th:each="iter : ${iterationsNewestFirst}"
                     th:classappend="${iter.ciResult == 'PASSED' ? 'passed' : (iter.completedAt != null ? 'failed' : 'active')}">
-                    <details class="iteration-entry">
+                    <details class="iteration-entry" th:id="${iter.id != null ? 'iteration-' + iter.id : null}"
+                             th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id : null}">
                         <summary class="iteration-entry-summary">
                             <span class="iteration-entry-num" th:text="${'Iteration ' + iter.iterationNum}">Iteration 1</span>
 
@@ -1108,17 +1206,20 @@
                         </summary>
 
                         <div class="iteration-entry-body">
-                            <details th:if="${iter.selfAssessment != null}">
+                            <details th:if="${iter.selfAssessment != null}"
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':self-assessment' : null}">
                                 <summary class="text-sm">Self-Assessment</summary>
                                 <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
                             </details>
 
-                            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
+                            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}"
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':diff' : null}">
                                 <summary class="text-sm">Diff</summary>
                                 <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff content</div>
                             </details>
 
-                            <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}">
+                            <details th:if="${iter.claudeOutput != null and not #strings.isEmpty(iter.claudeOutput)}"
+                                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':agent-output' : null}">
                                 <summary class="text-sm">Agent Output</summary>
                                 <pre class="code-output" th:text="${iter.claudeOutput}">output</pre>
                             </details>
@@ -1134,7 +1235,8 @@
                                 </div>
                                 <div th:if="${iter.reviewModel != null}" class="text-sm text-muted mb-1"
                                      th:text="'Model: ' + ${iter.reviewModel}">model</div>
-                                <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}">
+                                <details th:if="${iter.reviewJson != null and not #strings.isEmpty(iter.reviewJson)}"
+                                         th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':review-json' : null}">
                                     <summary class="text-sm">Raw JSON</summary>
                                     <pre class="code-output" th:text="${iter.reviewJson}">review json</pre>
                                 </details>
@@ -1149,9 +1251,10 @@
 
     <!-- === ACTIVITY LOG (full width, below the grid) === -->
     <details id="activity-log" class="panel secondary-section activity-section"
-             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null}">
+             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                      data-ui-state-key=${'issue:' + issue.id + ':activity'}">
         <summary class="panel-header">
-            <h3>Activity Log</h3>
+            <h3>Activity log</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(events) + ' events'}">0 events</span>
         </summary>
         <div class="panel-body">
@@ -1159,7 +1262,8 @@
                 <li th:each="event : ${events}" class="event-summary">
                     <span class="time" th:text="${#temporals.format(event.createdAt, 'HH:mm:ss')}">12:00:00</span>
                     <span class="type" th:text="${humanize.eventType(event.eventType)}">EVENT</span>
-                    <details class="event-technical">
+                    <details class="event-technical"
+                             th:attr="data-ui-state-key=${event.id != null ? 'issue:' + issue.id + ':event:' + event.id + ':technical' : null}">
                         <summary>Technical details</summary>
                         <pre th:text="${event.message}">message</pre>
                     </details>

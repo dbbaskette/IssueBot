@@ -13,6 +13,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class CodexCliServiceTest {
+    @org.junit.jupiter.api.Test void typedAuthParsingRequiresExactKnownResponses() {
+        assertThat(CodexCliService.subscriptionReadiness("Logged in using an API key")).isEqualTo(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET);
+        assertThat(CodexCliService.subscriptionReadiness("Not logged in")).isEqualTo(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET);
+        for (String output : java.util.List.of("", "Warning: previously Logged in using ChatGPT", "Not logged in: network unavailable", "not json")) {
+            assertThat(CodexCliService.subscriptionReadiness(output)).isEqualTo(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNKNOWN);
+        }
+    }
+    @org.junit.jupiter.api.Test void concreteReadinessOutcomesReachPreflightWithoutFalseCertainty() throws Exception {
+        var catalog = org.mockito.Mockito.mock(CodexModelCatalog.class);
+        org.mockito.Mockito.when(catalog.models()).thenReturn(CodexModelCatalog.fallbackModels());
+        com.dbbaskette.issuebot.service.harness.ConcreteReadinessProbeAssertions.verify(
+                starter -> new com.dbbaskette.issuebot.service.harness.CodexHarnessAdapter(new CodexCliService(
+                        new com.dbbaskette.issuebot.config.IssueBotProperties(), new CodexJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
+                        org.mockito.Mockito.mock(com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService.class)) {
+                    @Override Process startReadinessProcess(ProcessBuilder builder) throws java.io.IOException { return starter.start(builder); }
+                }, catalog),
+                "Logged in using ChatGPT", "Not logged in");
+    }
 
     @Test
     void planningCommandRetainsExplicitReasoningAndNeverResumes() {

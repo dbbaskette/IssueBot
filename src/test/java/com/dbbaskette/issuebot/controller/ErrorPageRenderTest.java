@@ -71,6 +71,11 @@ class ErrorPageRenderTest {
         assertThat(html).contains("Issue not found — it may have been removed with its repository.");
         assertThat(html).contains("href=\"/issues\"");
         assertThat(html).contains("Back to the queue");
+        assertThat(html).contains("class=\"panel-body empty-state error-state\" role=\"alert\"",
+                "ti ti-alert-circle", "class=\"empty-state-title\"", "class=\"btn btn-primary mt-2\"");
+        assertThat(html).contains("data-navigation-error", "data-navigation-return",
+                "data-navigation-sequence", "In this result set",
+                "data-navigation-previous-disabled", "data-navigation-next-disabled");
         assertThat(html).doesNotContain("Back to Dashboard");
     }
 

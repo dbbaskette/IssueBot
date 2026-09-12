@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest(properties = {"issuebot.github.token=test-token", "spring.jpa.open-in-view=false"})
 @Import({StageApprovalService.class, DecompositionReservationService.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -25,6 +26,7 @@ class StageApprovalPersistenceTest {
     @Autowired TrackedIssueRepository issues;
     @Autowired WatchedRepoRepository repos;
     @Autowired StageApprovalRepository approvals;
+    @Autowired com.dbbaskette.issuebot.service.history.DecisionHistoryService decisions;
     @Autowired PlanningVersionRepository versions;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @MockitoBean StageModelSelectionService selection;
@@ -37,8 +39,14 @@ class StageApprovalPersistenceTest {
         var adapter = mock(CodingHarnessAdapter.class);
         when(adapter.id()).thenReturn("codex");
         when(adapter.displayName()).thenReturn("Codex CLI");
-        when(adapter.checkCliAvailable()).thenReturn(true);
-        when(adapter.checkSubscriptionAuthentication()).thenReturn(true);
+        when(adapter.probeCliAvailability()).thenAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY;
+        });
+        when(adapter.probeSubscriptionAuthentication()).thenAnswer(call -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return com.dbbaskette.issuebot.service.harness.HarnessReadiness.READY;
+        });
         var reads = new java.util.concurrent.atomic.AtomicInteger();
         var refreshAt = new java.util.concurrent.atomic.AtomicInteger(Integer.MAX_VALUE);
         var original = new HarnessModel("gpt-6-astra", "Astra", "", "high", List.of("high", "ultra"));
@@ -117,7 +125,10 @@ class StageApprovalPersistenceTest {
                 assertThat(saved.getId()).isEqualTo(decision.getId());
                 assertThat(saved.getState()).isEqualTo(StageApproval.State.APPROVED);
                 assertThat(saved.getReasoningEffort()).isEqualTo("ultra");
+                assertThat(saved.getDecisionGeneration()).isEqualTo(2);
             });
+            assertThat(decisions.page(issue.getId(), org.springframework.data.domain.PageRequest.of(0, 25)))
+                    .hasSize(2);
         } finally {
             approvals.deleteAll();
             var saved = issues.findById(issue.getId()).orElseThrow();

@@ -62,6 +62,8 @@ import java.util.function.Function;
 @Controller
 @RequestMapping("/issues")
 public class IssueController {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService operatorTransactions;
 
     private static final Logger log = LoggerFactory.getLogger(IssueController.class);
 
@@ -104,7 +106,12 @@ public class IssueController {
     private final ApprovalCardAssembler approvalCardAssembler;
     private final IssueNextActionResolver nextActionResolver;
     private final NotificationService notificationService;
-    private final WorkflowStepperAssembler workflowStepperAssembler = new WorkflowStepperAssembler();
+    private final WorkflowStepperAssembler workflowStepperAssembler;
+    @Autowired
+    private com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService prerequisites;
+    @Autowired
+    private com.dbbaskette.issuebot.service.ui.RecoveryGuidanceAssembler recoveryGuidanceAssembler =
+            new com.dbbaskette.issuebot.service.ui.RecoveryGuidanceAssembler();
 
     @Autowired(required = false)
     private FailureDiagnosticService failureDiagnosticService;
@@ -137,7 +144,8 @@ public class IssueController {
                             PlanningVersionRepository planningVersionRepository,
                             ApprovalCardAssembler approvalCardAssembler,
                             IssueNextActionResolver nextActionResolver,
-                            NotificationService notificationService) {
+                            NotificationService notificationService,
+                            WorkflowStepperAssembler workflowStepperAssembler) {
         this.issueRepository = issueRepository;
         this.repoRepository = repoRepository;
         this.iterationRepository = iterationRepository;
@@ -161,6 +169,9 @@ public class IssueController {
         this.approvalCardAssembler = approvalCardAssembler;
         this.nextActionResolver = nextActionResolver;
         this.notificationService = notificationService;
+        this.workflowStepperAssembler = workflowStepperAssembler;
+        // Direct-controller fixtures use the same unknown-on-start contract; Spring injects the shared cache.
+        this.prerequisites = new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(properties);
     }
 
     @GetMapping
@@ -171,6 +182,7 @@ public class IssueController {
                        @RequestParam(defaultValue = "0") int page,
                        @RequestHeader(value = "HX-Request", required = false) String hx) {
         Page<TrackedIssue> issuePage = searchIssues(status, repoId, q, page);
+        model.addAttribute("retryPrerequisitesUnmet", prerequisites.retryRejection() != null);
 
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issues");
@@ -190,7 +202,6 @@ public class IssueController {
         model.addAttribute("hasNext", issuePage.hasNext());
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         populateDependencies(model, repoId);
         return ViewResolver.view("issues", hx != null);
     }
@@ -259,6 +270,8 @@ public class IssueController {
                 "/issues", "Back to the queue"));
         populateDetailModel(model, issue, id, parseRequestedInteger(planVersion),
                 parseRequestedLong(reviewAttempt));
+        // Independent history loading leaves the live-status/draft preservation boundary intact.
+        model.addAttribute("decisionHistoryUrl", "/issues/" + id + "/decisions");
         return ViewResolver.view("issue-detail", hx != null);
     }
 
@@ -398,6 +411,8 @@ public class IssueController {
         String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
                 implementationReasoningEffort, reviewReasoningEffort);
         if (selectionError != null) return selectionError;
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return prerequisiteRejection;
         if (continueSession && issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()
                 && !java.util.Objects.equals(issue.getResolvedHarnessId(), properties.getAgentProvider())) {
             String previousHarness = issue.getResolvedHarnessId() == null
@@ -423,6 +438,8 @@ public class IssueController {
 
         // Enforce the same gating as the polling service (using filtered list)
         Boolean planOverride = parsePlanFirstOverride(planFirstOverride);
+        String trimmedInstructions = (instructions != null && !instructions.isBlank())
+                ? instructions.trim() : null;
         IssueDispatchService.ClaimResult claim = dispatchService.claimRetry(
                 issue.getId(), candidate -> checkGate(candidate, remainingPRs), candidate -> {
                     candidate.setCurrentIteration(0);
@@ -450,12 +467,9 @@ public class IssueController {
                         candidate.setPlanCorrectionPending(false);
                     }
                     if (!continueSession) candidate.setClaudeSessionId(null);
-                });
+                }, trimmedInstructions);
         if (!claim.claimed()) return claim.reason();
         issue = claim.issue();
-
-        String trimmedInstructions = (instructions != null && !instructions.isBlank())
-                ? instructions.trim() : null;
 
         String retryMessage = trimmedInstructions != null
                 ? "Manual retry with instructions: " + trimmedInstructions
@@ -463,14 +477,8 @@ public class IssueController {
         eventService.log("MANUAL_RETRY", retryMessage, issue.getRepo(), issue);
 
         if (trimmedInstructions != null) {
-            try {
-                gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                        issue.getIssueNumber(),
-                        "**ADDITIONAL HUMAN INSTRUCTIONS** (manual retry):\n\n" + trimmedInstructions);
-            } catch (Exception e) {
-                log.warn("Failed to post retry instructions comment on #{}: {}",
-                        issue.getIssueNumber(), e.getMessage());
-            }
+            postGuidanceComment(issue, claim.guidanceId(),
+                    "**ADDITIONAL HUMAN INSTRUCTIONS** (manual retry):\n\n" + trimmedInstructions);
         }
 
         workflowService.processIssueAsync(issue, trimmedInstructions);
@@ -605,7 +613,7 @@ public class IssueController {
             String message = "Started implementation for " + issue.getRepo().fullName()
                     + " #" + issue.getIssueNumber() + " from approved Plan v" + version;
             eventService.log("IMPLEMENTATION_STARTED", message, issue.getRepo(), issue);
-            notificationService.info("Implementation Started", message, issue);
+            notificationService.progress("Implementation Started", message, issue);
         } else {
             eventService.log("MANUAL_START",
                     "Manually started issue #" + issue.getIssueNumber() + " from dashboard",
@@ -689,7 +697,7 @@ public class IssueController {
         String message = "Released the repository slot for " + issue.getRepo().fullName()
                 + " #" + issue.getIssueNumber() + approvedPlanReleaseDescription(issue);
         eventService.log("READY_SLOT_RELEASED", message, issue.getRepo(), issue);
-        notificationService.info("Repository Slot Released", message, issue);
+        notificationService.progress("Repository Slot Released", message, issue);
         redirectAttributes.addFlashAttribute("success",
                 "Returned to queue. The approved plan was preserved; normal automatic processing may start this issue later.");
         return "redirect:/issues/" + id + "#ready-to-start";
@@ -884,21 +892,28 @@ public class IssueController {
 
     @PostMapping("/{id}/cancel")
     public String cancel(@PathVariable Long id, RedirectAttributes redirectAttributes) {
-        TrackedIssue issue = issueRepository.findById(id).orElse(null);
-        if (issue == null || issue.getStatus() != IssueStatus.IN_PROGRESS) {
+        TrackedIssue issue;
+        try {
+            issue = operatorTransactions.stop(id);
+        } catch (IllegalStateException | java.util.NoSuchElementException invalid) {
             redirectAttributes.addFlashAttribute("error", "Only running issues can be stopped");
             return "redirect:/issues/" + id;
         }
-        cancellationService.requestCancel(id);
         eventService.log("CANCEL_REQUESTED", "Operator requested stop", issue.getRepo(), issue);
         redirectAttributes.addFlashAttribute("success",
                 "Stop requested — the workflow halts at the next checkpoint");
         return "redirect:/issues/" + id;
     }
 
-    @PostMapping("/{id}/guide")
     public String guide(@PathVariable Long id,
                         @RequestParam String guidance,
+                        RedirectAttributes redirectAttributes) {
+        return guide(id, guidance, null, redirectAttributes);
+    }
+
+    @PostMapping("/{id}/guide")
+    public String guide(@PathVariable Long id, @RequestParam String guidance,
+                        @RequestParam(required = false) String requestToken,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElse(null);
         if (issue == null) {
@@ -925,14 +940,16 @@ public class IssueController {
         // Guidance is inserted as its own row, never written onto TrackedIssue —
         // the workflow's frequent full-entity saves from its in-memory copy would
         // silently revert any column the controller wrote mid-iteration.
-        guidanceRepository.save(new IssueGuidance(issue.getId(), text));
-
+        com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance accepted;
         try {
-            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                    issue.getIssueNumber(), "**Operator guidance (mid-run):** " + text);
-        } catch (Exception e) {
-            log.warn("Failed to post guidance comment on #{}: {}",
-                    issue.getIssueNumber(), e.getMessage());
+            accepted = operatorTransactions.guide(id, text, requestToken);
+        } catch (IllegalArgumentException | IllegalStateException invalid) {
+            redirectAttributes.addFlashAttribute("error", "Guidance could not be accepted; refresh and try again.");
+            return "redirect:/issues/" + id;
+        }
+
+        if (accepted.created()) {
+            postGuidanceComment(issue, accepted.guidance().getId(), "**Operator guidance (mid-run):** " + text);
         }
 
         eventService.log("GUIDANCE_RECEIVED", "Operator guidance queued: " + text,
@@ -1096,6 +1113,11 @@ public class IssueController {
             text = text.substring(0, 4000);
         }
 
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) {
+            redirectAttributes.addFlashAttribute("error", prerequisiteRejection);
+            return planReviewRedirect(id);
+        }
         IssueDispatchService.ClaimResult claim = dispatchService.claimGuidedRetry(
                 id, text, properties.getMaxConcurrentIssues());
         if (!claim.claimed()) {
@@ -1110,15 +1132,8 @@ public class IssueController {
                         + " with operator guidance",
                 issue.getRepo(), issue);
 
-        try {
-            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(),
-                    issue.getIssueNumber(),
-                    "**IssueBot guided implementation retry (approved Plan v" + versionNumber
-                            + " unchanged):** " + text);
-        } catch (Exception e) {
-            log.warn("Failed to post guided retry comment on #{}: {}",
-                    issue.getIssueNumber(), e.getMessage());
-        }
+        postGuidanceComment(issue, claim.guidanceId(), "**IssueBot guided implementation retry (approved Plan v"
+                + versionNumber + " unchanged):** " + text);
 
         // The guidance row committed with the claim is the single source of truth. The workflow
         // consumes it only when the exact implementation context is durably checkpointed.
@@ -1130,6 +1145,22 @@ public class IssueController {
 
     private static String planReviewRedirect(Long id) {
         return "redirect:/issues/" + id + "#plan-review";
+    }
+
+    private void postGuidanceComment(TrackedIssue issue, Long guidanceId, String text) {
+        boolean confirmed = false;
+        try {
+            gitHubApiClient.addComment(issue.getRepo().getOwner(), issue.getRepo().getName(), issue.getIssueNumber(), text);
+            confirmed = true;
+        } catch (Exception failure) {
+            log.warn("Guidance comment outcome is unknown for issue {}", issue.getId());
+        }
+        try {
+            operatorTransactions.guidanceCommentResult(issue.getId(), guidanceId, confirmed);
+        } catch (RuntimeException auditFailure) {
+            // The durable comment intent remains IN_FLIGHT for startup UNKNOWN recovery, never replay.
+            log.warn("Guidance comment outcome could not be recorded for issue {}; accepted guidance remains queued", issue.getId());
+        }
     }
 
     private static String planFirstRedirect(Long id) {
@@ -1292,10 +1323,12 @@ public class IssueController {
         model.addAttribute("activePage", "issues");
         model.addAttribute("contentTemplate", "issue-detail");
         model.addAttribute("issue", issue);
+        model.addAttribute("guidanceRequestToken", java.util.UUID.randomUUID().toString());
         model.addAttribute("nextAction", nextActionResolver.resolve(
                 issue, readyReservationFor(issue, readyReservationsByRepository())));
-        model.addAttribute("latestFailureDiagnostic", failureDiagnosticService == null
-                ? null : failureDiagnosticService.latestFor(issue).orElse(null));
+        var latestFailure = failureDiagnosticService == null ? null : failureDiagnosticService.latestFor(issue).orElse(null);
+        model.addAttribute("latestFailureDiagnostic", latestFailure);
+        model.addAttribute("recoveryGuidance", recoveryGuidanceAssembler.assemble(latestFailure, prerequisites.retryState()));
         // Design + implementation plan rendered to safe HTML for the dashboard (any status,
         // not just AWAITING_PLAN_APPROVAL) — null when the issue has no stored plan.
         model.addAttribute("planHtml", markdownRenderer.toHtml(issue.getImplementationPlan()));
@@ -1315,7 +1348,6 @@ public class IssueController {
         model.addAttribute("workflowStepper", workflowStepperAssembler.assemble(issue));
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         BigDecimal effectiveBudget = issue.effectiveBudgetUsd();
         model.addAttribute("issueSpent", totalCost);
         model.addAttribute("effectiveBudget", effectiveBudget);

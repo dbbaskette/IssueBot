@@ -11,7 +11,11 @@ import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
+import com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService;
+import static com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.*;
+import static com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.*;
 
 import java.io.File;
 import java.time.Instant;
@@ -38,6 +42,7 @@ public class SetupController {
     private final WebhookController webhookController;
     private final WebhookDeliveryLog webhookDeliveryLog;
     private final NotificationRepository notificationRepository;
+    private final PrerequisiteStatusService prerequisites;
 
     public SetupController(CodingHarnessService harnessService,
                             IssueBotProperties properties,
@@ -48,6 +53,16 @@ public class SetupController {
                             WebhookController webhookController,
                             WebhookDeliveryLog webhookDeliveryLog,
                             NotificationRepository notificationRepository) {
+        this(harnessService, properties, pollingService, issueRepository, gitHubApiClient, repoRepository,
+                webhookController, webhookDeliveryLog, notificationRepository, new PrerequisiteStatusService(properties));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SetupController(CodingHarnessService harnessService, IssueBotProperties properties,
+            IssuePollingService pollingService, TrackedIssueRepository issueRepository,
+            GitHubApiClient gitHubApiClient, WatchedRepoRepository repoRepository,
+            WebhookController webhookController, WebhookDeliveryLog webhookDeliveryLog,
+            NotificationRepository notificationRepository, PrerequisiteStatusService prerequisites) {
         this.harnessService = harnessService;
         this.properties = properties;
         this.pollingService = pollingService;
@@ -57,6 +72,7 @@ public class SetupController {
         this.webhookController = webhookController;
         this.webhookDeliveryLog = webhookDeliveryLog;
         this.notificationRepository = notificationRepository;
+        this.prerequisites = prerequisites;
     }
 
     /** Row of the Webhooks table on the setup page: a watched repo and when it last sent a webhook event. */
@@ -67,8 +83,7 @@ public class SetupController {
                                       String outcome, String badgeClass, String detail) {}
 
     /**
-     * Main setup page — loads instantly with "Checking..." placeholders.
-     * Actual prereq checks are loaded async via /setup/prereqs.
+     * Main setup page — cached or unknown status only. Checks require an explicit POST.
      */
     @GetMapping("/setup")
     public String setup(Model model,
@@ -77,8 +92,8 @@ public class SetupController {
         model.addAttribute("contentTemplate", "setup");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
         addHarnessAttributes(model);
+        addPrerequisiteAttributes(model);
 
         model.addAttribute("webhookPath", "/webhooks/github");
         model.addAttribute("webhookSecretConfigured", webhookController.isSecretConfigured());
@@ -133,59 +148,77 @@ public class SetupController {
     }
 
     /**
-     * HTMX fragment endpoint — runs the actual prerequisite checks.
-     * Called async after the setup page renders.
+     * Read-only fragment endpoint. Never invokes CLI, network, or filesystem checks.
      */
     @GetMapping("/setup/prereqs")
     public String prereqs(Model model) {
         addHarnessAttributes(model);
-        // Fresh CLI check (don't rely on stale cache)
-        boolean cliAvailable = harnessService.checkCliAvailable();
-        model.addAttribute("cliAvailable", cliAvailable);
+        addPrerequisiteAttributes(model);
+        return "setup :: prereqs";
+    }
 
-        // Explicit readiness action: verify the selected adapter's subscription credentials.
-        boolean cliAuthenticated = false;
-        if (cliAvailable) {
-            cliAuthenticated = harnessService.checkSubscriptionAuthentication(properties.getAgentProvider());
-        }
-        model.addAttribute("cliAuthenticated", cliAuthenticated);
-
+    /** Explicit CSRF-protected action; no surrounding database transaction. */
+    @PostMapping("/setup/prereqs")
+    public String recheck(Model model) {
+        String harness = properties.getAgentProvider();
+        var context = prerequisites.context(harness);
+        boolean cli = observeHarness(context, CLI, () -> harnessService.probeCliAvailability(harness));
+        if (cli) observeHarness(context, SUBSCRIPTION, () -> harnessService.probeSubscriptionAuthentication(harness));
+        else prerequisites.record(context, SUBSCRIPTION, UNKNOWN);
         String token = properties.getGithub().getToken();
         boolean githubTokenSet = token != null && !token.isBlank() && !"not-set".equals(token);
-        model.addAttribute("githubTokenSet", githubTokenSet);
-
-        // Presence isn't enough — verify the token actually authenticates with GitHub.
-        boolean githubTokenValid = false;
-        String githubTokenMessage = "Set the GITHUB_TOKEN environment variable with 'repo' scope.";
+        var github = githubTokenSet ? UNKNOWN : UNMET;
         if (githubTokenSet) {
-            GitHubApiClient.TokenStatus status = gitHubApiClient.validateToken();
-            githubTokenValid = status.valid();
-            githubTokenMessage = status.message();
+            try {
+                GitHubApiClient.TokenStatus status = gitHubApiClient.validateToken();
+                if (status != null) github = switch (status.state()) {
+                    case VALID -> READY;
+                    case INVALID -> UNMET;
+                    case UNKNOWN -> UNKNOWN;
+                };
+            } catch (RuntimeException unavailable) { github = UNKNOWN; }
         }
-        model.addAttribute("githubTokenValid", githubTokenValid);
-        model.addAttribute("githubTokenMessage", githubTokenMessage);
+        prerequisites.record(context, GITHUB, github);
+        prerequisites.record(context, WORK_DIRECTORY, check(() -> {
+            File directory = new File(properties.getWorkDirectory());
+            if (!directory.exists() && !directory.mkdirs()) return false;
+            return directory.isDirectory() && directory.canWrite() && directory.getFreeSpace() / (1024 * 1024) > 500;
+        }));
+        return prereqs(model);
+    }
 
-        // Work directory check
-        File workDir = new File(properties.getWorkDirectory());
-        boolean workDirOk;
-        String workDirMessage;
-        if (workDir.exists()) {
-            long freeSpaceMb = workDir.getFreeSpace() / (1024 * 1024);
-            workDirOk = freeSpaceMb > 500;
-            workDirMessage = workDir.getAbsolutePath() + " (" + freeSpaceMb + " MB free)";
-        } else {
-            boolean created = workDir.mkdirs();
-            workDirOk = created;
-            workDirMessage = created
-                    ? workDir.getAbsolutePath() + " (created)"
-                    : "Could not create " + workDir.getAbsolutePath();
+    private PrerequisiteStatusService.Result check(java.util.function.BooleanSupplier probe) {
+        try { return probe.getAsBoolean() ? READY : UNMET; }
+        catch (RuntimeException unavailable) { return UNKNOWN; }
+    }
+
+    private boolean observeHarness(PrerequisiteStatusService.Context context, PrerequisiteStatusService.Component component,
+            java.util.function.Supplier<com.dbbaskette.issuebot.service.harness.HarnessReadiness> probe) {
+        try { return prerequisites.observe(context, component, probe); }
+        catch (RuntimeException unavailable) { return false; }
+    }
+
+    private void addPrerequisiteAttributes(Model model) {
+        var context = prerequisites.context(properties.getAgentProvider());
+        model.addAttribute("prerequisiteRows", List.of(
+                new PrerequisiteRow(harnessService.displayName(), prerequisites.result(context, CLI)),
+                new PrerequisiteRow(harnessService.displayName() + " Auth", prerequisites.result(context, SUBSCRIPTION)),
+                new PrerequisiteRow("GitHub Token", prerequisites.result(context, GITHUB)),
+                new PrerequisiteRow("Work Directory", prerequisites.result(context, WORK_DIRECTORY))));
+        model.addAttribute("prerequisiteState", prerequisites.retryState());
+    }
+
+    public record PrerequisiteRow(String label, PrerequisiteStatusService.Result result) {
+        public String status() { return switch (result) { case READY -> "Verified"; case UNMET -> "Needs attention"; case UNKNOWN -> "Not verified"; }; }
+        public String tone() { return switch (result) { case READY -> "status-completed"; case UNMET -> "status-failed"; case UNKNOWN -> "status-pending"; }; }
+        public String detail() {
+            if (result == UNKNOWN) return "No current result. Select Re-check to verify.";
+            if (result == READY) return "Verified within the last five minutes.";
+            if (label.equals("GitHub Token")) return "Set a valid GitHub token with repository access, then re-check.";
+            if (label.equals("Work Directory")) return "Ensure the work directory is writable with at least 500 MB free, then re-check.";
+            return label.endsWith(" Auth") ? "Complete subscription login for the selected harness, then re-check."
+                    : "Install the selected harness and make it available on PATH, then re-check.";
         }
-        model.addAttribute("workDirOk", workDirOk);
-        model.addAttribute("workDirMessage", workDirMessage);
-
-        model.addAttribute("allPassed", cliAvailable && cliAuthenticated && githubTokenValid && workDirOk);
-
-        return "setup :: prereqs";
     }
 
     private void addHarnessAttributes(Model model) {

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="history" id="decision-history-page" class="panel-body">
+    <p class="text-sm text-muted">Structured decision tracking began
+        <time th:text="${#temporals.format(decisionTrackingStartedAt, 'MMM d, yyyy HH:mm:ss')}"></time>.
+        Earlier actions are not reconstructed; actors for earlier records are unavailable.
+        Operator means a human-triggered action, not a verified individual.
+    </p>
+    <p th:if="${decisionPage.empty}" class="text-muted">No tracked decisions on this page.</p>
+    <ol class="iteration-timeline" th:if="${!decisionPage.empty}" aria-label="Decisions, newest first">
+        <li th:each="entry : ${decisionEntries}">
+            <p><span th:text="${entry.actor}">Operator</span> · <span th:text="${entry.action}">Approved</span>
+                · <span class="status" th:text="${entry.outcome}">Accepted</span>
+                <time class="text-sm text-muted" th:text="${#temporals.format(entry.decision.createdAt, 'MMM d, yyyy HH:mm:ss')}"></time>
+            </p>
+            <p class="text-sm" th:text="${entry.rationale}"></p>
+            <ul th:if="${!entry.artifacts.empty}">
+                <li th:each="artifact : ${entry.artifacts}">
+                    <a th:if="${artifact.href != null}" th:href="${artifact.href}" th:text="${artifact.label}"></a>
+                    <span th:unless="${artifact.href != null}" th:text="${artifact.label}"></span>
+                </li>
+            </ul>
+            <details class="secondary-section" th:attr="data-ui-state-key=${'issue:' + decisionIssueId + ':decision:' + entry.decision.id}">
+                <summary>Decision metadata</summary>
+                <p class="text-sm">Decision <span th:text="${entry.decision.id}"></span>
+                    · Issue <span th:text="${entry.decision.issueId}"></span>
+                    <span th:if="${entry.decision.repoId != null}" th:text="${'· Repository ' + entry.decision.repoId}"></span>
+                </p>
+            </details>
+        </li>
+    </ol>
+    <nav class="table-pagination" aria-label="Decision history pages">
+        <a th:if="${decisionPage.hasPrevious()}" class="btn btn-ghost btn-sm"
+           th:href="@{'/issues/' + ${decisionIssueId} + '/decisions?page=' + ${decisionPage.number - 1}}"
+           th:hx-get="@{'/issues/' + ${decisionIssueId} + '/decisions?page=' + ${decisionPage.number - 1}}"
+           hx-target="#decision-history-page" hx-swap="outerHTML">Newer decisions</a>
+        <span class="text-sm text-muted" th:text="${'Page ' + (decisionPage.number + 1)}"></span>
+        <a th:if="${decisionPage.hasNext()}" class="btn btn-ghost btn-sm"
+           th:href="@{'/issues/' + ${decisionIssueId} + '/decisions?page=' + ${decisionPage.number + 1}}"
+           th:hx-get="@{'/issues/' + ${decisionIssueId} + '/decisions?page=' + ${decisionPage.number + 1}}"
+           hx-target="#decision-history-page" hx-swap="outerHTML">Older decisions</a>
+        <a class="btn btn-ghost btn-sm" th:href="@{'/issues/' + ${decisionIssueId} + '/decisions'}"
+           th:hx-get="@{'/issues/' + ${decisionIssueId} + '/decisions'}"
+           hx-target="#decision-history-page" hx-swap="outerHTML">Refresh latest</a>
+    </nav>
+</div>
+</body>
+</html>

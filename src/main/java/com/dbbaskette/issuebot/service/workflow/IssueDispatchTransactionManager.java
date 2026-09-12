@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.function.Function;
+import com.dbbaskette.issuebot.service.history.DecisionProducer;
+import static com.dbbaskette.issuebot.service.history.DecisionDraft.*;
 
 /**
  * Separately proxied dispatch boundary. Every eligibility decision and mutation is made against
@@ -20,6 +22,8 @@ import java.util.function.Function;
  */
 @Service
 public class IssueDispatchTransactionManager {
+    @org.springframework.beans.factory.annotation.Autowired private DecisionProducer decisions;
+    @org.springframework.beans.factory.annotation.Autowired private PrerequisiteStatusService prerequisites;
 
     static final List<IssueStatus> ACTIVE_STATUSES = List.of(
             IssueStatus.IN_PROGRESS, IssueStatus.AWAITING_APPROVAL,
@@ -65,11 +69,15 @@ public class IssueDispatchTransactionManager {
 
     @Transactional
     public IssueDispatchService.ClaimResult claimStart(Long issueId) {
-        return claimStart(issueId, StartMutation.none());
+        return claimStart(issueId, StartMutation.none(), Actor.AUTOMATION);
     }
 
     @Transactional
     public IssueDispatchService.ClaimResult claimStart(Long issueId, StartMutation mutation) {
+        return claimStart(issueId, mutation, Actor.OPERATOR);
+    }
+
+    private IssueDispatchService.ClaimResult claimStart(Long issueId, StartMutation mutation, Actor actor) {
         String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
@@ -82,16 +90,20 @@ public class IssueDispatchTransactionManager {
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
         issue.setManualDispatch(false);
-        return claim(issue);
+        return claim(issue, actor, Action.START);
     }
 
     @Transactional
     public IssueDispatchService.ClaimResult claimReadyStart(Long issueId) {
-        return claimReadyStart(issueId, StartMutation.none());
+        return claimReadyStart(issueId, StartMutation.none(), Actor.AUTOMATION);
     }
 
     @Transactional
     public IssueDispatchService.ClaimResult claimReadyStart(Long issueId, StartMutation mutation) {
+        return claimReadyStart(issueId, mutation, Actor.OPERATOR);
+    }
+
+    private IssueDispatchService.ClaimResult claimReadyStart(Long issueId, StartMutation mutation, Actor actor) {
         String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
@@ -108,12 +120,18 @@ public class IssueDispatchTransactionManager {
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
         issue.setManualDispatch(false);
-        return claim(issue);
+        return claim(issue, actor, Action.START);
     }
 
     @Transactional
     public IssueDispatchService.ClaimResult claimRetry(
             Long issueId, Function<TrackedIssue, String> additionalGate, RetryMutation mutation) {
+        return claimRetry(issueId, additionalGate, mutation, null);
+    }
+
+    @Transactional
+    public IssueDispatchService.ClaimResult claimRetry(
+            Long issueId, Function<TrackedIssue, String> additionalGate, RetryMutation mutation, String instructions) {
         String pause = rejectIfNotRunning();
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
@@ -126,6 +144,8 @@ public class IssueDispatchTransactionManager {
             return IssueDispatchService.ClaimResult.rejected(
                     "The second Plan First conformance miss requires the guided implementation retry");
         }
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return IssueDispatchService.ClaimResult.rejected(prerequisiteRejection);
         String rejection = additionalGate.apply(issue);
         if (rejection != null) return IssueDispatchService.ClaimResult.rejected(rejection);
         String serialized = repositoryGate(issue);
@@ -133,7 +153,18 @@ public class IssueDispatchTransactionManager {
         mutation.apply(issue);
         issue.setManualDispatch(false);
         issue.setWorkflowRun(issue.getWorkflowRun() + 1);
-        return claim(issue);
+        IssueGuidance instructionArtifact = null;
+        if (instructions != null && !instructions.isBlank()) {
+            String bounded = instructions.trim();
+            if (bounded.length() > 4000) bounded = bounded.substring(0, 4000);
+            instructionArtifact = new IssueGuidance(issueId, bounded);
+            instructionArtifact.setRequestToken("retry:" + issue.getWorkflowRun());
+            // Ordinary retry already delivers this text directly as the workflow's base context.
+            // Retain the artifact without injecting it a second time at an iteration boundary.
+            instructionArtifact.setConsumedAt(java.time.LocalDateTime.now());
+            guidance.saveAndFlush(instructionArtifact);
+        }
+        return claim(issue, Actor.OPERATOR, Action.RETRY, instructionArtifact);
     }
 
     @Transactional
@@ -152,6 +183,8 @@ public class IssueDispatchTransactionManager {
                     "Guided retry is only available after the second Plan First conformance miss "
                             + "with an approved non-legacy planning version");
         }
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return IssueDispatchService.ClaimResult.rejected(prerequisiteRejection);
         long active = issues.countByStatus(IssueStatus.IN_PROGRESS);
         if (active >= maxConcurrentIssues) {
             return IssueDispatchService.ClaimResult.rejected(
@@ -170,9 +203,16 @@ public class IssueDispatchTransactionManager {
         issue.setPlanCorrectionPending(false);
         issue.setSuspensionReason(null);
         issue.setStatus(IssueStatus.IN_PROGRESS);
-        guidance.saveAndFlush(new IssueGuidance(issue.getId(), operatorGuidance));
+        IssueGuidance savedGuidance = guidance.saveAndFlush(new IssueGuidance(issue.getId(), operatorGuidance));
         TrackedIssue saved = issues.saveAndFlush(issue);
-        return IssueDispatchService.ClaimResult.claimed(saved);
+        decisions.prepareGuidanceComment(issue, savedGuidance.getId());
+        decisions.record(issue, "guidance:" + savedGuidance.getId() + ":retry", Actor.OPERATOR,
+                Action.RETRY, Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED,
+                issue.getApprovedPlanningVersion().getId(), null, null, savedGuidance.getId());
+        decisions.record(issue, "guidance:" + savedGuidance.getId() + ":accepted", Actor.OPERATOR,
+                Action.GUIDE, Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED,
+                issue.getApprovedPlanningVersion().getId(), null, null, savedGuidance.getId());
+        return IssueDispatchService.ClaimResult.claimed(saved, savedGuidance.getId());
     }
 
     @Transactional
@@ -189,7 +229,9 @@ public class IssueDispatchTransactionManager {
         issue.setStatus(IssueStatus.QUEUED);
         issue.setCurrentPhase(null);
         issue.setSuspensionReason(null);
-        return IssueDispatchService.TransitionResult.transitioned(issues.saveAndFlush(issue));
+        issues.saveAndFlush(issue);
+        decisions.accepted(issue, decisions.transitionKey(issue, Action.RESUME), Actor.OPERATOR, Action.RESUME, Reason.USER_REQUEST);
+        return IssueDispatchService.TransitionResult.transitioned(issue);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -199,6 +241,7 @@ public class IssueDispatchTransactionManager {
     @Transactional
     public IssueDispatchService.TransitionResult resetAndPause(Long issueId) {
         controls.findByIdForUpdate(ProcessingControl.SINGLETON_ID).orElseThrow();
+        var affected = processingControl.lockAffected(false);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.TransitionResult.rejected("Issue not found", null);
         if (!List.of(IssueStatus.FAILED, IssueStatus.COOLDOWN, IssueStatus.BLOCKED).contains(issue.getStatus())) {
@@ -216,7 +259,9 @@ public class IssueDispatchTransactionManager {
         issue.setCurrentReviewIteration(0);
         issue.setWorkflowRun(issue.getWorkflowRun() + 1);
         issues.saveAndFlush(issue);
-        processingControl.pauseAfterCurrent();
+        String key = decisions.transitionKey(issue, Action.PAUSE);
+        processingControl.pauseAfterCurrentLocked(affected);
+        decisions.accepted(issue, key, Actor.OPERATOR, Action.PAUSE, Reason.USER_REQUEST);
         return IssueDispatchService.TransitionResult.transitioned(issue);
     }
 
@@ -240,7 +285,7 @@ public class IssueDispatchTransactionManager {
         if (gate != null) return IssueDispatchService.ClaimResult.rejected(gate);
         mutation.apply(issue);
         issue.setManualDispatch(true);
-        return claim(issue);
+        return claim(issue, Actor.OPERATOR, Action.START);
     }
 
     private String rejectIfNotRunning() {
@@ -281,12 +326,28 @@ public class IssueDispatchTransactionManager {
                 + " is currently running for this repository";
     }
 
-    private IssueDispatchService.ClaimResult claim(TrackedIssue issue) {
+    private IssueDispatchService.ClaimResult claim(TrackedIssue issue, Actor actor, Action action) {
+        return claim(issue, actor, action, null);
+    }
+
+    private IssueDispatchService.ClaimResult claim(TrackedIssue issue, Actor actor, Action action, IssueGuidance artifact) {
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setSuspensionReason(null);
         TrackedIssue saved = issues.saveAndFlush(issue);
+        String source = decisions.transitionKey(issue, action);
+        if (artifact != null) decisions.prepareGuidanceComment(issue, artifact.getId());
+        if (artifact == null) {
+            decisions.accepted(issue, source, actor, action,
+                    actor == Actor.AUTOMATION ? Reason.POLICY_AUTOMATIC : Reason.USER_REQUEST);
+        } else {
+            Long planId = issue.getApprovedPlanningVersion() == null ? null : issue.getApprovedPlanningVersion().getId();
+            decisions.record(issue, source, actor, action, Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED,
+                    planId, null, null, artifact.getId());
+            decisions.record(issue, "guidance:" + artifact.getId() + ":accepted", actor, Action.GUIDE,
+                    Outcome.ACCEPTED, Reason.GUIDANCE_ATTACHED, planId, null, null, artifact.getId());
+        }
         // Entity graph above initialized the approved version and repository before OSIV closes.
-        return IssueDispatchService.ClaimResult.claimed(saved);
+        return IssueDispatchService.ClaimResult.claimed(saved, artifact == null ? null : artifact.getId());
     }
 
     private List<Iteration> reviewIterations(TrackedIssue issue) {

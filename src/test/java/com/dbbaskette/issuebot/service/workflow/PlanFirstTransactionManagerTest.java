@@ -69,6 +69,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({PlanFirstTransactionManager.class, PlanFirstService.class, PlanArtifactParser.class,
         DecompositionReservationService.class})
@@ -1047,7 +1048,11 @@ class PlanFirstTransactionManagerTest {
         doAnswer(invocation -> {
             captureCommittedState(issueId, transactionStates, visibleStatuses);
             return null;
-        }).when(notifications).info(anyString(), anyString(), any(TrackedIssue.class));
+        }).when(notifications).approval(anyString(), anyString(), any(TrackedIssue.class));
+        doAnswer(invocation -> {
+            captureCommittedState(issueId, transactionStates, visibleStatuses);
+            return null;
+        }).when(notifications).progress(anyString(), anyString(), any(TrackedIssue.class));
     }
 
     private TransactionTemplate tx() {

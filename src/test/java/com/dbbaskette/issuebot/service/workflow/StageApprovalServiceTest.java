@@ -36,6 +36,7 @@ class StageApprovalServiceTest {
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
         selection = new StageModelSelectionService(properties, fixture.selections);
         service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        wireTransactions();
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThat(decision.getHarnessId()).isEqualTo("claude");
         assertThat(decision.getReasoningEffort()).isEqualTo("high");
@@ -48,6 +49,7 @@ class StageApprovalServiceTest {
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
         selection = new StageModelSelectionService(properties, fixture.selections);
         service = new StageApprovalService(issues, repos, approvals, controls, reservations, selection, properties);
+        wireTransactions();
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         assertThatThrownBy(() -> service.approveAndClaim(2L, 3L, "claude", "claude-haiku-4-5", "alice", "max"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("max");
@@ -70,6 +72,7 @@ class StageApprovalServiceTest {
     TrackedIssue issue = new TrackedIssue(repo, 1, "Issue");
 
     @BeforeEach void setup() {
+        wireTransactions();
         repo.setId(1L);
         issue.setId(2L);
         issue.setStatus(IssueStatus.IN_PROGRESS);
@@ -87,6 +90,13 @@ class StageApprovalServiceTest {
         when(reservations.evaluate(issue)).thenReturn(
                 DecompositionReservationService.ReservationDecision.permitted());
         when(issues.findByRepoAndStatusInOrderByIssueNumberAsc(eq(repo), any())).thenReturn(List.of(issue));
+    }
+
+    private void wireTransactions() {
+        ReflectionTestUtils.setField(service, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
+        var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(manager.getTransaction(any())).thenAnswer(call -> new org.springframework.transaction.support.SimpleTransactionStatus());
+        ReflectionTestUtils.setField(service, "transactionManager", manager);
     }
 
     @Test void snapshotRemainsImmutableAndCopiesIntoDetachedCaller() {

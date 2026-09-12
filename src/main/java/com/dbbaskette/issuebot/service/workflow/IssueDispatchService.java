@@ -101,6 +101,7 @@ public class IssueDispatchService {
     }
 
     public synchronized ClaimResult claimReadyStart(Long issueId) {
+        if (transactions != null) return transactions.claimReadyStart(issueId);
         return claimReadyStart(issueId, IssueDispatchTransactionManager.StartMutation.none());
     }
 
@@ -185,6 +186,13 @@ public class IssueDispatchService {
         });
     }
 
+    /** Retains ordinary retry instructions without changing their existing direct delivery. */
+    public ClaimResult claimRetry(Long issueId, Function<TrackedIssue, String> additionalGate,
+            IssueDispatchTransactionManager.RetryMutation mutation, String instructions) {
+        if (transactions != null) return transactions.claimRetry(issueId, additionalGate, mutation, instructions);
+        return claimRetry(issueId, additionalGate, mutation);
+    }
+
     /** Atomically claims the one allowed post-conformance guided retry and stores its guidance. */
     public ClaimResult claimGuidedRetry(Long issueId, String guidance, int maxConcurrentIssues) {
         if (transactions != null) {
@@ -251,7 +259,11 @@ public class IssueDispatchService {
         return legacyIterations.findByIssueOrderByIterationNumAsc(issue);
     }
 
-    public record ClaimResult(boolean claimed, String reason, TrackedIssue issue) {
+    public record ClaimResult(boolean claimed, String reason, TrackedIssue issue, Long guidanceId) {
+        public ClaimResult(boolean claimed, String reason, TrackedIssue issue) { this(claimed, reason, issue, null); }
+        static ClaimResult claimed(TrackedIssue issue, Long guidanceId) {
+            return new ClaimResult(true, null, issue, guidanceId);
+        }
         static ClaimResult claimed(TrackedIssue issue) {
             return new ClaimResult(true, null, issue);
         }

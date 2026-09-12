@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.IssueStatus;
+import com.dbbaskette.issuebot.model.Iteration;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -11,6 +12,15 @@ import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.attoparser.MarkupParser;
+import org.attoparser.config.ParseConfiguration;
+import org.attoparser.dom.DOMBuilderMarkupHandler;
+import org.attoparser.dom.Element;
+import org.attoparser.dom.INestableNode;
+import org.attoparser.dom.Text;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockServletContext;
@@ -28,6 +38,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -162,6 +173,86 @@ class IssueDetailLivePollRenderTest {
         assertThat(html).contains("workflow-stage stage--completed");
         assertThat(html).contains("workflow-stage stage--current");
         assertThat(html).contains("aria-current=\"step\"");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"intake,PENDING,", "plan,IN_PROGRESS,PLANNING", "work,IN_PROGRESS,IMPLEMENTATION",
+            "verify,IN_PROGRESS,CI_VERIFICATION", "review,IN_PROGRESS,INDEPENDENT_REVIEW", "done,COMPLETED,"})
+    void allSixStagesRenderTheirOwnLabelIconAndVisibleState(String selectedKey, IssueStatus status,
+                                                          String phase) throws Exception {
+        TrackedIssue issue = inProgressIssue(149L, 149, phase);
+        issue.setStatus(status);
+        var document = parseDom(render(issue, "live-status", -1, status == IssueStatus.COMPLETED));
+        List<Element> stages = elements(document).filter(e -> hasClass(e, "workflow-stage")).toList();
+        List<String> keys = List.of("intake", "plan", "work", "verify", "review", "done");
+        List<String> labels = List.of("Intake", "Plan", "Work", "Verify", "Review", "Done");
+        assertThat(stages).hasSize(keys.size());
+        for (int index = 0; index < keys.size(); index++) {
+            Element stage = stages.get(index);
+            String state = status == IssueStatus.COMPLETED || index < keys.indexOf(selectedKey)
+                    ? "Completed" : index == keys.indexOf(selectedKey) ? "Current" : "Upcoming";
+            String icon = switch (state) {
+                case "Completed" -> "ti-circle-check";
+                case "Current" -> "ti-player-play-filled";
+                default -> "ti-circle";
+            };
+            assertThat(textOf(childWithClass(stage, "workflow-stage-label")))
+                    .as("%s label", keys.get(index)).isEqualTo(labels.get(index));
+            Element stateElement = childWithClass(stage, "workflow-stage-state");
+            assertThat(textOf(stateElement)).as("%s visible state", keys.get(index)).isEqualTo(state);
+            assertThat(stateElement.hasAttribute("hidden")).isFalse();
+            assertThat(stateElement.getAttributeValue("aria-hidden")).isNotEqualTo("true");
+            Element iconElement = childWithClass(stage, "workflow-stage-icon");
+            assertThat(iconElement.getElementName()).isEqualTo("i");
+            assertThat(hasClass(iconElement, icon)).as("%s icon", keys.get(index)).isTrue();
+            assertThat(stage.getAttributeValue("aria-label")).isEqualTo(labels.get(index) + ": " + state);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void timingLinkTargetsAnExistingStableElementInRenderedContent(boolean hasIterations) throws Exception {
+        TrackedIssue issue = inProgressIssue(150L, 150, "IMPLEMENTATION");
+        var document = parseDom(render(issue, "content", 1, false, context -> {
+            if (hasIterations) {
+                Iteration iteration = new Iteration(issue, 1);
+                context.setVariable("iterations", List.of(iteration));
+                context.setVariable("iterationsNewestFirst", List.of(iteration));
+            }
+        }));
+        Element stepper = elements(document).filter(e -> hasClass(e, "workflow-stepper")).findFirst().orElseThrow();
+        Element link = elements(stepper).filter(e -> e.elementNameMatches("a")).findFirst().orElseThrow();
+        String target = hasIterations ? "iteration-history" : "activity-log";
+        assertThat(textOf(link)).isEqualTo("View timing details");
+        assertThat(link.getAttributeValue("href")).isEqualTo("#" + target);
+        assertThat(elements(document).filter(e -> target.equals(e.getAttributeValue("id"))).count()).isEqualTo(1);
+    }
+
+    private INestableNode parseDom(String html) throws Exception {
+        DOMBuilderMarkupHandler handler = new DOMBuilderMarkupHandler();
+        new MarkupParser(ParseConfiguration.htmlConfiguration()).parse(html, handler);
+        return handler.getDocument();
+    }
+
+    private Stream<Element> elements(INestableNode root) {
+        return root.getChildren().stream().filter(Element.class::isInstance).map(Element.class::cast)
+                .flatMap(element -> Stream.concat(Stream.of(element), elements(element)));
+    }
+
+    private boolean hasClass(Element element, String name) {
+        String classes = element.getAttributeValue("class");
+        return classes != null && List.of(classes.split("\\s+")).contains(name);
+    }
+
+    private Element childWithClass(Element root, String name) {
+        List<Element> matches = elements(root).filter(element -> hasClass(element, name)).toList();
+        assertThat(matches).as("%s within stage", name).hasSize(1);
+        return matches.getFirst();
+    }
+
+    private String textOf(INestableNode element) {
+        return element.getChildrenOfType(Text.class).stream().map(Text::getContent)
+                .collect(java.util.stream.Collectors.joining()).trim();
     }
 
     @Test

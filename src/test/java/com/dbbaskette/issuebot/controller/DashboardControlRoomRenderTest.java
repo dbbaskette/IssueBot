@@ -72,7 +72,7 @@ class DashboardControlRoomRenderTest {
                                 "Queued and ready when processing capacity is available.", "View issue",
                                 "/issues/3", Tone.WAITING, "Queued", null)))));
 
-        assertThat(html).contains("Operator control room", "What needs attention now", "Updates every 10 seconds");
+        assertThat(html).contains("What needs attention now", "Updates every 10 seconds");
         assertThat(html).contains("Needs your decision", "Currently processing", "Up next");
         assertThat(html.indexOf("Needs your decision")).isLessThan(html.indexOf("Currently processing"));
         assertThat(html.indexOf("Currently processing")).isLessThan(html.indexOf("Up next"));
@@ -123,6 +123,8 @@ class DashboardControlRoomRenderTest {
                 emptyProcessingLane(), emptyUpNextLane()));
 
         assertThat(html).contains("href=\"/issues/9\"", "href=\"/issues/9#recovery\"");
+        assertThat(java.util.regex.Pattern.compile("data-navigation-issue=\"9\"")
+                .matcher(html).results().count()).isEqualTo(2);
         assertThat(html).doesNotContain("<form", "method=\"post\"");
         assertNoNestedAnchors(html);
     }
@@ -136,7 +138,8 @@ class DashboardControlRoomRenderTest {
                 "hx-get=\"/dashboard/live\"",
                 "hx-trigger=\"every 10s\"",
                 "hx-swap=\"morph:outerHTML\"",
-                "hx-target=\"this\"");
+                "hx-target=\"this\"",
+                "data-navigation-list");
     }
 
     @Test

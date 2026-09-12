@@ -28,6 +28,7 @@ import com.dbbaskette.issuebot.service.review.CodeReviewService;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
 import com.dbbaskette.issuebot.service.ui.MarkdownRenderer;
 import com.dbbaskette.issuebot.service.ui.TimelineAssembler;
+import com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler;
 import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -237,7 +238,7 @@ class IntegrationWorkflowTest {
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertNull(issue.getCurrentPhase());
         verify(gitHubApi, never()).markPrReady(anyString(), anyString(), anyInt());
-        verify(notificationService).info(eq("Issue Completed"), anyString(), eq(issue));
+        verify(notificationService).completion(eq("Issue Completed"), anyString(), eq(issue));
         // Passing review delegates non-blocking findings routing to FollowUpService
         verify(followUpService).handleNonBlockingFindings(
                 eq(issue), any(), any(CodeReviewResult.class), eq(99));
@@ -1033,6 +1034,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1070,6 +1072,76 @@ class IntegrationWorkflowTest {
                 eq(approvedContext), any(), any());
         verify(iterationRepository, never()).save(argThat(iteration ->
                 iteration != interruptedClaim && iteration.getIterationNum() == 2));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "mismatched {0} snapshot")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "workflow-run", "approved-plan", "legacy-unknown"
+    })
+    void postImplementationRecoveryWithMismatchedIdentityStartsNewIteration(String mismatch)
+            throws Exception {
+        TrackedIssue issue = createTestIssue();
+        issue.getRepo().setPlanFirst(true);
+        issue.getRepo().setCiEnabled(false);
+        issue.getRepo().setPreScreenEnabled(false);
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setWorkflowRun(7);
+        issue.setCurrentIteration(1);
+        issue.setCurrentPhase("CI_VERIFICATION");
+        issue.setPlanConformanceAttempt(1);
+        issue.setBranchName("issuebot/issue-42-fix-login-bug");
+        PlanningVersion approved = PlanningVersion.pending(
+                issue, 2, "approved spec", "approved corrective plan",
+                "CODEX", "gpt-5.6-sol", null);
+        ReflectionTestUtils.setField(approved, "id", 203L);
+        approved.approve(LocalDateTime.now());
+        issue.setApprovedPlanningVersion(approved);
+        ApprovedPlanContext approvedContext = new ApprovedPlanContext(
+                203L, 2, approved.getDesignSpec(), approved.getImplementationPlan());
+        setupCommonMocks(issue, createIssueDetails());
+
+        Iteration stale = switch (mismatch) {
+            case "workflow-run" -> new Iteration(issue, 1, 6, 203L);
+            case "approved-plan" -> new Iteration(issue, 1, 7, 202L);
+            case "legacy-unknown" -> new Iteration(issue, 1, null, null);
+            default -> throw new IllegalArgumentException(mismatch);
+        };
+        stale.setId(190L);
+        stale.setDiff("stale implementation evidence");
+        stale.setLocalCheckResult("PASSED");
+        stale.setCiResult("SKIPPED");
+        stale.setCompletedAt(LocalDateTime.now());
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(stale));
+
+        Iteration fresh = new Iteration(issue, 2, 7, 203L);
+        fresh.setId(204L);
+        when(iterationManager.canIterate(issue)).thenReturn(true, false);
+        when(iterationManager.claimImplementationIteration(issue, 2)).thenReturn(fresh);
+        when(harnessService.executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(successResult());
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString()))
+                .thenReturn(List.of(objectMapper.createObjectNode().put("number", 503)));
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
+                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any()))
+                .thenReturn(passedReview());
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(approvedContext));
+        IssueWorkflowService recoveredWorkflow = spy(workflowService);
+
+        recoveredWorkflow.processIssue(issue);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        assertEquals(2, issue.getCurrentIteration());
+        verify(iterationManager).claimImplementationIteration(issue, 2);
+        verify(harnessService).executeImplementation(
+                anyString(), any(Path.class), anyString(), any(), any(), any());
+        verify(recoveredWorkflow).phaseIndependentReview(
+                same(issue), any(), any(), anyString(), eq(503), same(fresh),
+                anyList(), eq(approvedContext), any());
+        verify(recoveredWorkflow, never()).phaseIndependentReview(
+                same(issue), any(), any(), anyString(), anyInt(), same(stale),
+                anyList(), any(), any());
     }
 
     @Test
@@ -1110,6 +1182,8 @@ class IntegrationWorkflowTest {
         correction.setLocalCheckResult("PASSED");
         correction.setCiResult("SKIPPED");
         correction.setCompletedAt(LocalDateTime.now());
+        assertTrue(correction.matchesAttemptIdentity(
+                issue.getWorkflowRun(), approvedContext.id()));
         when(iterationRepository.findByIssueOrderByIterationNumAsc(issue))
                 .thenReturn(List.of(priorRun, correction));
         when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 2))
@@ -1137,6 +1211,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1217,6 +1292,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1277,6 +1353,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1407,6 +1484,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = new IterationManager(
                 issueRepository, repos, iterationRepository,
                 gitHubApi, eventService, notificationService);
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
         IssueWorkflowService recoveredWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
                 localVerificationService, issueRepository, iterationRepository, costRepository,
@@ -1478,7 +1556,8 @@ class IntegrationWorkflowTest {
         when(planningWorkspace.path()).thenReturn(Path.of("/tmp/repo"));
         PlanFirstService authoritativePlanFirst = new PlanFirstService(
                 harnessService, gitHubApi,
-                new PlanFirstTransactionManager(issueRepository, lifecycleVersions, lifecycleRepos),
+                com.dbbaskette.issuebot.service.history.HistoryTestFixtures.withHistory(
+                        new PlanFirstTransactionManager(issueRepository, lifecycleVersions, lifecycleRepos)),
                 new PlanArtifactParser(), planningWorkspaces, eventService, notificationService,
                 new WorkflowCancellationService());
         when(harnessService.executePlanning(anyString(), any(Path.class), anyString(), anyLong(), isNull()))
@@ -1532,6 +1611,7 @@ class IntegrationWorkflowTest {
         IterationManager authoritativeIterations = spy(new IterationManager(
                 issueRepository, lifecycleRepos, iterationRepository,
                 gitHubApi, eventService, notificationService));
+        com.dbbaskette.issuebot.service.history.HistoryTestFixtures.iterationManager(authoritativeIterations);
 
         IssueWorkflowService lifecycleWorkflow = new IssueWorkflowService(
                 gitOps, gitHubApi, harnessService, codeReviewService, ciTemplateService,
@@ -1589,7 +1669,7 @@ class IntegrationWorkflowTest {
                 new WorkflowCancellationService(), guidanceRepository, objectMapper,
                 new TimelineAssembler(), mock(NotificationRepository.class), new MarkdownRenderer(),
                 dispatch, lifecycleVersions, mock(ApprovalCardAssembler.class), new IssueNextActionResolver(),
-                notificationService);
+                notificationService, new WorkflowStepperAssembler());
 
         controller.retryPlanImplementation(
                 issue.getId(), "test rollback on network failure", redirectAttributes);

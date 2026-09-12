@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.service.codex;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.harness.HarnessReadiness;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
 import com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService;
 import org.slf4j.Logger;
@@ -246,9 +247,16 @@ public class CodexCliService {
     }
 
     public boolean checkCliAvailable() {
+        return probeCliAvailability().ready();
+    }
+
+    public HarnessReadiness probeCliAvailability() {
         CommandCheck check = runCheck(List.of("codex", "--version"));
-        cliAvailable = check.exitCode == 0;
-        return cliAvailable;
+        var result = check.exitCode == 0 ? HarnessReadiness.READY
+                : check.exitCode == -2 ? HarnessReadiness.UNMET
+                : HarnessReadiness.UNKNOWN;
+        cliAvailable = result.ready();
+        return result;
     }
 
     /** Only ChatGPT login is accepted; API-key auth would violate subscription-only operation. */
@@ -262,32 +270,55 @@ public class CodexCliService {
     public void clearAuthCache() { cliAuthenticated = null; }
     /** Do not trust the startup cache when approving a managed stage. */
     public boolean checkSubscriptionAuthentication() {
+        return probeSubscriptionAuthentication().ready();
+    }
+
+    public HarnessReadiness probeSubscriptionAuthentication() {
         CommandCheck check = runCheck(List.of("codex", "login", "status"));
-        return check.exitCode == 0 && isSubscriptionAuthentication(check.output);
+        if (check.exitCode < 0) return HarnessReadiness.UNKNOWN;
+        var result = subscriptionReadiness(check.output);
+        return result == HarnessReadiness.READY && check.exitCode != 0
+                ? HarnessReadiness.UNKNOWN : result;
     }
 
     static boolean isSubscriptionAuthentication(String output) {
-        return output != null && output.trim().equals("Logged in using ChatGPT");
+        return subscriptionReadiness(output).ready();
+    }
+
+    static HarnessReadiness subscriptionReadiness(String output) {
+        if (output == null) return HarnessReadiness.UNKNOWN;
+        return switch (output.trim()) {
+            case "Logged in using ChatGPT" -> HarnessReadiness.READY;
+            case "Not logged in", "Logged in using an API key" -> HarnessReadiness.UNMET;
+            default -> HarnessReadiness.UNKNOWN;
+        };
     }
     public boolean isCliAvailable() { return cliAvailable; }
 
     private CommandCheck runCheck(List<String> command) {
+        Process process = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
             com.dbbaskette.issuebot.service.claude.ClaudeCodeService.sanitizeBillingEnvironment(builder.environment());
-            Process process = builder.start();
+            process = startReadinessProcess(builder);
             boolean finished = process.waitFor(10, TimeUnit.SECONDS);
             if (!finished) {
-                terminateTimedOutProcess(process);
-                return new CommandCheck(-1, "timed out");
+                return new CommandCheck(-1, "");
             }
             String output;
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 output = String.join("\n", reader.lines().toList());
             }
             return new CommandCheck(process.exitValue(), output);
-        } catch (Exception e) {
-            return new CommandCheck(-1, e.getMessage() == null ? "unknown error" : e.getMessage());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new CommandCheck(-1, "");
+        } catch (java.io.FileNotFoundException | java.nio.file.NoSuchFileException missing) {
+            return new CommandCheck(-2, "");
+        } catch (Exception unavailable) {
+            return new CommandCheck(-1, "");
+        } finally {
+            if (process != null && process.isAlive()) terminateTimedOutProcess(process);
         }
     }
 
@@ -297,6 +328,9 @@ public class CodexCliService {
         if (detail.length() > 500) detail = detail.substring(detail.length() - 500);
         return "Codex CLI exited with code " + code + (detail.isBlank() ? "" : ": " + detail);
     }
+
+    /** Process boundary kept separate so readiness tests never execute an installed CLI. */
+    Process startReadinessProcess(ProcessBuilder builder) throws IOException { return builder.start(); }
 
     private static HarnessExecutionResult failed(long duration, String message) {
         HarnessExecutionResult result = new HarnessExecutionResult();

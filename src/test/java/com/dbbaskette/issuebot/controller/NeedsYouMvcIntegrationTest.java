@@ -39,14 +39,14 @@ class NeedsYouMvcIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         assertThat(full).contains("Unique needs-you regression item", "id=\"needs-you-badge\"")
                 .containsPattern("(?s)id=\"needs-you-badge\"[^>]*>\\s*<span class=\"badge\">1</span>")
-                .doesNotContain("Nothing needs you — the loop is running itself.");
+                .doesNotContain("No actions need your attention");
 
         issue.setStatus(IssueStatus.COMPLETED);
         issues.saveAndFlush(issue);
         String live = mvc.perform(get("/inbox/live").param("includeInbox", "true"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 
-        assertThat(live).contains("Nothing needs you — the loop is running itself.", "id=\"needs-you-content\"")
+        assertThat(live).contains("No actions need your attention", "id=\"needs-you-content\"")
                 .containsPattern("(?s)id=\"needs-you-badge\"[^>]*hidden[^>]*>\\s*<span class=\"badge\">0</span>")
                 .doesNotContain("Unique needs-you regression item");
     }

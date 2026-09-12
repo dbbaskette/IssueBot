@@ -20,6 +20,8 @@ class CodingHarnessServiceTest {
     private final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
     private final StageApprovalRepository stages = mock(StageApprovalRepository.class);
     private CodingHarnessService service;
+    private final com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService prerequisites =
+            new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(properties);
 
     @BeforeEach void setup() {
         when(claude.id()).thenReturn("claude");
@@ -28,7 +30,7 @@ class CodingHarnessServiceTest {
         when(claude.models()).thenReturn(List.of(new HarnessModel("claude-opus-4-8", "Opus", "", "high", List.of("high", "max"))));
         when(codex.models()).thenReturn(List.of(new HarnessModel("gpt-6-astra", "Astra", "", "high", List.of("high", "ultra"))));
         var registry = new CodingHarnessRegistry(List.of(claude, codex));
-        service = new CodingHarnessService(registry, properties, new HarnessSelectionService(registry, properties, issues, stages));
+        service = new CodingHarnessService(registry, properties, new HarnessSelectionService(registry, properties, issues, stages, prerequisites), prerequisites);
         when(issues.findById(9L)).thenReturn(Optional.of(new TrackedIssue(new WatchedRepo(), 1, "issue")));
     }
 
@@ -37,6 +39,17 @@ class CodingHarnessServiceTest {
         service.executePlanning("plan", Path.of("repo"), "gpt-6-astra", "ultra", 9L, null);
         verify(codex).execute(new HarnessExecutionRequest(HarnessRole.DESIGN_PLANNING, "plan", Path.of("repo"), "gpt-6-astra", "ultra", null, 9L), null);
         verify(claude, never()).execute(any(), any());
+    }
+
+    @Test void stageSubscriptionFailureTracksTheRequestedPinNotTheConfiguredDefault() {
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.UNMET);
+        assertThrows(IllegalStateException.class, () -> service.pinSubscriptionHarness("codex"));
+        assertEquals(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.KNOWN_UNMET, prerequisites.state("codex"));
+        assertEquals(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED, prerequisites.retryState());
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY);
+        service.pinSubscriptionHarness("codex");
+        assertEquals(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED, prerequisites.state("codex"));
+        verify(claude, never()).probeSubscriptionAuthentication();
     }
 
     @Test void implementationForwardsSessionCallbackAndResult() {
@@ -104,14 +117,14 @@ class CodingHarnessServiceTest {
         service.pinHarness("claude");
         assertThrows(IllegalStateException.class, () -> service.pinSubscriptionHarness("codex"));
         assertEquals("claude", service.harnessId());
-        verify(codex).checkSubscriptionAuthentication();
+        verify(codex).probeSubscriptionAuthentication();
     }
 
     @Test void subscriptionPinChecksEveryTimeAndUsesManagedExecutionUntilClear() {
-        when(codex.checkSubscriptionAuthentication()).thenReturn(true);
+        when(codex.probeSubscriptionAuthentication()).thenReturn(HarnessReadiness.READY);
         service.pinSubscriptionHarness("codex");
         service.pinSubscriptionHarness("codex");
-        verify(codex, times(2)).checkSubscriptionAuthentication();
+        verify(codex, times(2)).probeSubscriptionAuthentication();
         service.executePlanning("plan", Path.of("repo"), "gpt-6-astra", "high", 9L, null);
         verify(codex).executeSubscription(any(), isNull());
         service.clearPinnedHarness();

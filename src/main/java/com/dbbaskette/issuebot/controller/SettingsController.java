@@ -328,7 +328,6 @@ public class SettingsController {
         model.addAttribute("config", properties);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         boolean codex = "codex".equals(properties.getAgentProvider());
         putDefault(model, "harnessId", properties.getAgentProvider());

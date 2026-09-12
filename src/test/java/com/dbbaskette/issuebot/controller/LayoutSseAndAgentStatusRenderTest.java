@@ -147,7 +147,13 @@ class LayoutSseAndAgentStatusRenderTest {
 
         assertThat(html).contains("id=\"sse-status\"");
         assertThat(html).contains("class=\"sse-dot\"");
+        assertThat(html).contains("class=\"shell-brand-header\"", "class=\"shell-status-actions\"",
+                "aria-label=\"Main navigation\"", "aria-current=\"page\"");
         assertThat(html).contains("data-state=\"none\"");
+        assertThat(html).contains("src=\"/js/ui-state.js\"", "src=\"/js/navigation-context.js\"",
+                "src=\"/js/app.js\"");
+        assertThat(html.indexOf("/js/ui-state.js")).isLessThan(html.indexOf("/js/navigation-context.js"));
+        assertThat(html.indexOf("/js/navigation-context.js")).isLessThan(html.indexOf("/js/app.js"));
     }
 
     @Test

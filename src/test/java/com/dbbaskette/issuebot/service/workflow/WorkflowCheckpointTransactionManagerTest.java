@@ -37,6 +37,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({WorkflowCheckpointTransactionManager.class, PlanFirstTransactionManager.class})
 @TestPropertySource(properties = {

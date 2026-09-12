@@ -27,6 +27,8 @@ import java.util.Set;
  */
 @Service
 public class PlanFirstTransactionManager {
+    @Autowired
+    private com.dbbaskette.issuebot.service.history.DecisionProducer decisions;
 
     private static final Set<IssueStatus> EARLIER_ORDERING_BLOCKERS = EnumSet.of(
             IssueStatus.PENDING,
@@ -123,6 +125,12 @@ public class PlanFirstTransactionManager {
     /** Approves exactly the latest pending row and its pointer in one transaction. */
     @Transactional
     public LifecycleCommit approvePlan(Long issueId, Long expectedVersionId) {
+        return approvePlan(issueId, expectedVersionId, com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.OPERATOR);
+    }
+
+    @Transactional
+    public LifecycleCommit approvePlan(Long issueId, Long expectedVersionId,
+            com.dbbaskette.issuebot.service.history.DecisionDraft.Actor actor) {
         List<TrackedIssue> ordered = lockRepositoryIssuesForApproval(issueId);
         TrackedIssue issue = ordered.stream()
                 .filter(candidate -> Objects.equals(candidate.getId(), issueId))
@@ -196,6 +204,7 @@ public class PlanFirstTransactionManager {
         List<InvalidatedPlan> invalidatedPlans = invalidatedIssues.stream()
                 .map(invalidated -> new InvalidatedPlan(invalidated, issue.getIssueNumber()))
                 .toList();
+        recordDecision(issue, current, com.dbbaskette.issuebot.service.history.DecisionDraft.Action.APPROVE, actor);
         return new LifecycleCommit(issue, current, invalidatedPlans);
     }
 
@@ -216,7 +225,21 @@ public class PlanFirstTransactionManager {
         issue.setStatus(IssueStatus.PENDING);
         issues.save(issue);
         issues.flush();
+        recordDecision(issue, current, com.dbbaskette.issuebot.service.history.DecisionDraft.Action.REJECT,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.OPERATOR);
         return new LifecycleCommit(issue, current, List.of());
+    }
+
+    private void recordDecision(TrackedIssue issue, PlanningVersion version,
+            com.dbbaskette.issuebot.service.history.DecisionDraft.Action action,
+            com.dbbaskette.issuebot.service.history.DecisionDraft.Actor actor) {
+        decisions.record(issue, "plan:" + version.getId() + ":" + action.name(),
+                actor, action,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Outcome.ACCEPTED,
+                actor == com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.OPERATOR
+                        ? com.dbbaskette.issuebot.service.history.DecisionDraft.Reason.USER_REQUEST
+                        : com.dbbaskette.issuebot.service.history.DecisionDraft.Reason.POLICY_AUTOMATIC,
+                version.getId(), null, null, null);
     }
 
     /**

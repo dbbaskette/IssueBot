@@ -278,7 +278,7 @@ public class IssuePollingService {
 
         eventService.log("ISSUE_DEQUEUED",
                 "No open IssueBot PR — starting issue #" + next.getIssueNumber(), repo, next);
-        notificationService.info("Issue Dequeued",
+        notificationService.progress("Issue Dequeued",
                 repo.fullName() + " #" + next.getIssueNumber() + " — gate cleared, starting work", next);
 
         workflowService.processIssueAsync(claim.issue());
@@ -413,7 +413,7 @@ public class IssuePollingService {
                         + " to start or release the repository slot";
                 eventService.log("ISSUE_QUEUED",
                         "Issue #" + issueNumber + " queued — " + wait, repo, tracked);
-                notificationService.info("Issue Queued",
+                notificationService.progress("Issue Queued",
                         repo.fullName() + " #" + issueNumber + ": " + title
                                 + " (" + wait + ")", tracked);
             } else {
@@ -421,7 +421,7 @@ public class IssuePollingService {
                         + " to complete";
                 eventService.log("ISSUE_QUEUED",
                         "Issue #" + issueNumber + " queued — " + wait, repo, tracked);
-                notificationService.info("Issue Queued",
+                notificationService.progress("Issue Queued",
                         repo.fullName() + " #" + issueNumber + ": " + title
                                 + " (" + wait + ")", tracked);
             }
@@ -435,7 +435,7 @@ public class IssuePollingService {
             eventService.log("ISSUE_QUEUED",
                     "Issue #" + issueNumber + " queued — open IssueBot PR must merge first",
                     repo, tracked);
-            notificationService.info("Issue Queued",
+            notificationService.progress("Issue Queued",
                     repo.fullName() + " #" + issueNumber + ": " + title
                             + " (waiting for open PR to merge)", tracked);
             return WebhookOutcome.QUEUED;
@@ -448,7 +448,7 @@ public class IssuePollingService {
             eventService.log("ISSUE_DISCOVERED",
                     "Discovered issue #" + issueNumber + ": " + title + " (auto-start off, queued)",
                     repo, tracked);
-            notificationService.info("Issue Discovered",
+            notificationService.progress("Issue Discovered",
                     repo.fullName() + " #" + issueNumber + ": " + title
                             + " (queued — manual start required)", tracked);
             return WebhookOutcome.QUEUED;
@@ -469,7 +469,7 @@ public class IssuePollingService {
         eventService.log("ISSUE_DETECTED",
                 "Detected agent-ready issue #" + issueNumber + ": " + title,
                 repo, tracked);
-        notificationService.info("New Issue Detected",
+        notificationService.progress("New Issue Detected",
                 repo.fullName() + " #" + issueNumber + ": " + title, tracked);
 
         // Start workflow
@@ -521,7 +521,7 @@ public class IssuePollingService {
         eventService.log("ISSUE_QUEUED",
                 "Issue #" + issueNumber + " queued via webhook — at max concurrent issues (" + maxConcurrent + ")",
                 repo, tracked);
-        notificationService.info("Issue Queued",
+        notificationService.progress("Issue Queued",
                 repo.fullName() + " #" + issueNumber + ": " + title + " (at capacity, waiting for a slot)", tracked);
         return WebhookOutcome.QUEUED;
     }
@@ -575,7 +575,7 @@ public class IssuePollingService {
                                 .map(n -> "#" + n)
                                 .collect(Collectors.joining(", ")),
                 repo, tracked);
-        notificationService.info("Issue Blocked",
+        notificationService.progress("Issue Blocked",
                 repo.fullName() + " #" + issueNumber + " waiting on dependencies", tracked);
         return true;
     }

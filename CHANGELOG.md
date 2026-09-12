@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0 — 2026-09-12
+
+- Unify operator decisions and live-state presentation, with durable actor/action history and comparable review changes that preserve missing-data and attempt-identity boundaries.
+- Add contextual recovery guidance and explicit cached prerequisite checks, grouped searchable notification history with watermark-safe read/mute controls, and bounded return-to-results navigation.
+- Close the original dispatch, processing-commit, and workflow-stepper coverage gaps; expand synthetic MVC/browser fixtures without changing deployment or the stable `target/issuebot.jar` artifact contract.
+
 ## 0.6.2
 
 - Apply processing mode changes and stop-request cancellations only after the database transaction commits, preventing rolled-back controls from publishing stale state or cancelling active work.

@@ -80,6 +80,9 @@ class IssueDetailLayoutRenderTest {
     }
 
     private String render(WebContext context, String fragment) {
+        context.setVariable("recoveryGuidance", new com.dbbaskette.issuebot.service.ui.RecoveryGuidanceAssembler().assemble(
+                (FailureDiagnostic) context.getVariable("latestFailureDiagnostic"),
+                com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED));
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of(fragment),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
@@ -110,6 +113,24 @@ class IssueDetailLayoutRenderTest {
         assertThat(html).contains("class=\"detail-grid-right\"");
         // Left column opens before the right column.
         assertThat(html.indexOf("detail-grid-left")).isLessThan(html.indexOf("detail-grid-right"));
+        assertThat(html).contains("<h3>Iteration history</h3>", "<h3>Activity log</h3>",
+                "id=\"iteration-history\"", "data-ui-state-key=\"issue:1:iteration-history\"",
+                "data-ui-state-key=\"issue:1:activity\"");
+    }
+
+    @Test
+    void detailRendersProgressiveReturnAndBoundedSequenceControlsOutsideLivePolling() {
+        String html = renderContent(issue(142L, 42, IssueStatus.IN_PROGRESS), List.of());
+
+        assertThat(html).contains(
+                "data-navigation-detail", "data-current-issue-id=\"142\"",
+                "data-navigation-return", "Back to queue",
+                "data-navigation-sequence", "In this result set",
+                "data-navigation-previous", "data-navigation-previous-disabled",
+                "data-navigation-next", "data-navigation-next-disabled",
+                "class=\"btn btn-ghost btn-sm\"");
+        assertThat(render(baseContext(issue(142L, 42, IssueStatus.IN_PROGRESS), List.of()), "live-status"))
+                .doesNotContain("data-navigation-return", "data-navigation-sequence");
     }
 
     @Test
@@ -290,8 +311,8 @@ class IssueDetailLayoutRenderTest {
 
         String html = render(context, "content");
 
-        assertThat(html).contains("What happened", "Unit tests failed");
-        assertThat(html).contains("Suggested next step", "Fix the failing assertions before retrying");
+        assertThat(html).contains("What happened", "Verification did not pass");
+        assertThat(html).contains("Suggested next step", "Inspect evidence and add guidance");
         assertThat(html).contains("Technical details", "three assertions failed");
         assertThat(html).contains("name=\"instructions\"");
     }
@@ -309,8 +330,8 @@ class IssueDetailLayoutRenderTest {
 
         String html = render(context, "content");
 
-        assertThat(html).contains("The independent review could not run after 2 attempts")
-                .contains("Check the reviewer provider, CLI, authentication, and configuration")
+        assertThat(html).contains("The reviewer was unavailable or could not complete its assessment")
+                .contains("Open Setup and re-check")
                 .contains("review provider timed out")
                 .contains("Reviewer recovery note (optional)")
                 .contains("Optional note after restoring the reviewer provider or CLI")

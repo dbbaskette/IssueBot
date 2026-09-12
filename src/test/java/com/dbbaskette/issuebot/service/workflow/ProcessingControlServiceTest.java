@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 class ProcessingControlServiceTest {
+    private final com.dbbaskette.issuebot.repository.WatchedRepoRepository repos = mock(com.dbbaskette.issuebot.repository.WatchedRepoRepository.class);
 
     private final ProcessingControlRepository repository = mock(ProcessingControlRepository.class);
     private final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
@@ -66,23 +67,26 @@ class ProcessingControlServiceTest {
         assertThat(service.mode()).isEqualTo(ProcessingState.PAUSE_AFTER_CURRENT);
         verify(repository).save(argThat(c -> c.getState() == ProcessingState.PAUSE_AFTER_CURRENT));
         verifyNoInteractions(issues, cancellationService);
-        verify(repository, times(2)).findByIdForUpdate(ProcessingControl.SINGLETON_ID);
+        verify(repository, times(4)).findByIdForUpdate(ProcessingControl.SINGLETON_ID);
     }
 
     @Test
     void stopNowPersistsBeforeCancellingAndIsIdempotent() {
         TrackedIssue active = issue(1L, IssueStatus.IN_PROGRESS);
-        when(issues.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(active));
+        active.getRepo().setId(1L);
+        when(repos.findAll()).thenReturn(List.of(active.getRepo()));
+        when(repos.findByIdForUpdate(1L)).thenReturn(Optional.of(active.getRepo()));
+        when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(active));
         ProcessingControlService service = serviceWithPersistedMode(ProcessingState.RUNNING);
 
         service.stopNow();
         service.stopNow();
 
         var order = inOrder(repository, issues, cancellationService);
+        order.verify(issues).findByRepoIdForUpdateOrderByIssueNumber(1L);
         order.verify(repository).save(argThat(c -> c.getState() == ProcessingState.STOPPED));
-        order.verify(issues).findByStatus(IssueStatus.IN_PROGRESS);
         order.verify(cancellationService).requestCancel(1L, CancellationReason.OPERATOR_STOP);
-        verify(issues).findByStatus(IssueStatus.IN_PROGRESS);
+        verify(issues, times(2)).findByRepoIdForUpdateOrderByIssueNumber(1L);
         verifyNoMoreInteractions(cancellationService);
     }
 
@@ -127,7 +131,10 @@ class ProcessingControlServiceTest {
     }
 
     private ProcessingControlService service() {
-        return new ProcessingControlService(repository, issues, cancellationService);
+        var service = new ProcessingControlService(repository, issues, cancellationService);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "repos", repos);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
+        return service;
     }
 
     private static TrackedIssue issue(Long id, IssueStatus status) {

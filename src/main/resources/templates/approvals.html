@@ -9,25 +9,28 @@
     </div>
 
     <div th:if="${#lists.isEmpty(approvals)}">
-        <div class="glass-card text-muted" style="text-align:center;padding:3rem">
-            No pending approvals. Issues in approval-gated repos will appear here when ready for review.
+        <div class="glass-card empty-state">
+            <p class="empty-state-title">No actions need your attention</p>
+            <p>Workflow stage and pull request approvals appear here when a decision is ready.</p>
         </div>
     </div>
 
-    <div th:each="issue : ${approvals}" class="glass-card mb-3"
+    <div th:each="issue : ${approvals}" class="glass-card inset-panel decision-card mb-3"
          th:if="${issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
         <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">Issue</strong>
-        <p>Workflow stage approval required. Choose the next stage's model on the issue page.</p>
+        <h3 class="decision-card-title" th:text="${issue.issueTitle}">Issue title</h3>
+        <p class="decision-stage" th:text="${#strings.capitalize(#strings.toLowerCase(#strings.substringAfter(issue.currentPhase, 'STAGE_APPROVAL_'))) + ' approval'}">Stage approval</p>
+        <p class="field-hint">Review the stage and any available model choices on the issue page.</p>
         <a class="btn btn-primary" th:href="@{'/issues/' + ${issue.id} + '#stage-approval'}">Review stage</a>
     </div>
-    <div th:each="issue : ${approvals}" class="glass-card mb-3"
+    <div th:each="issue : ${approvals}" class="glass-card inset-panel decision-card mb-3"
          th:if="${issue.currentPhase == null or not #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_')}">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
+        <div class="panel-header">
             <div>
                 <strong th:text="${issue.repo.fullName() + ' #' + issue.issueNumber}">owner/repo #1</strong>
-                <span class="text-muted text-sm" th:text="${' — ' + issue.issueTitle}">title</span>
+                <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
             </div>
-            <span class="status status-awaiting_approval">AWAITING APPROVAL</span>
+            <span class="status status-awaiting_approval">Awaiting approval</span>
         </div>
 
         <!-- Metrics + PR link -->
@@ -78,8 +81,8 @@
             <p th:if="${rev.failureReason != null}" class="text-sm text-muted mb-1"
                th:text="${rev.failureReason}">Review unavailable</p>
             <div th:if="${rev.overall != null}" class="mb-1">
-                <span class="badge" th:text="${'Overall ' + rev.overallPercent + '%'}">Overall 0%</span>
-                <span class="badge" th:if="${rev.findingCount > 0}"
+                <span class="review-stat review-score" th:text="${'Overall ' + rev.overallPercent + '%'}">Overall 0%</span>
+                <span class="review-stat review-finding-count" th:if="${rev.findingCount > 0}"
                       th:text="${rev.findingCount + (rev.findingCount == 1 ? ' finding' : ' findings')}">0 findings</span>
             </div>
             <div th:if="${rev.overall != null}" class="text-sm text-muted"
@@ -111,11 +114,13 @@
 
         <!-- Diff + self-assessment -->
         <div th:if="${lastIterations.containsKey(issue.id)}" th:with="iter=${lastIterations.get(issue.id)}">
-            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}">
+            <details th:if="${iter.diff != null and not #strings.isEmpty(iter.diff)}"
+                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':diff' : null}">
                 <summary class="text-sm">View Diff</summary>
                 <div class="diff-viewer" data-diff-viewer th:text="${iter.diff}">diff</div>
             </details>
-            <details th:if="${iter.selfAssessment != null}" class="mt-1">
+            <details th:if="${iter.selfAssessment != null}" class="mt-1"
+                     th:attr="data-ui-state-key=${iter.id != null ? 'issue:' + issue.id + ':iteration:' + iter.id + ':self-assessment' : null}">
                 <summary class="text-sm">Self-Assessment</summary>
                 <pre class="code-output" th:text="${iter.selfAssessment}">assessment</pre>
             </details>

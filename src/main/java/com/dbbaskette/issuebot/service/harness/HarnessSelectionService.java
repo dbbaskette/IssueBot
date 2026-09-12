@@ -4,6 +4,8 @@ import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.model.*;
 import com.dbbaskette.issuebot.repository.*;
 import org.springframework.stereotype.Service;
+import com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService;
+import static com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.*;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.Objects;
 
@@ -14,13 +16,23 @@ public class HarnessSelectionService {
     private final IssueBotProperties properties;
     private final TrackedIssueRepository issues;
     private final StageApprovalRepository stages;
+    private final PrerequisiteStatusService prerequisites;
 
     public HarnessSelectionService(CodingHarnessRegistry registry, IssueBotProperties properties,
             TrackedIssueRepository issues, StageApprovalRepository stages) {
+        this(registry, properties, issues, stages,
+                new PrerequisiteStatusService(properties));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public HarnessSelectionService(CodingHarnessRegistry registry, IssueBotProperties properties,
+            TrackedIssueRepository issues, StageApprovalRepository stages,
+            PrerequisiteStatusService prerequisites) {
         this.registry = registry;
         this.properties = properties;
         this.issues = issues;
         this.stages = stages;
+        this.prerequisites = prerequisites;
     }
 
     public HarnessSelection resolve(String harnessId, String modelId, String reasoningLevel) {
@@ -35,11 +47,14 @@ public class HarnessSelectionService {
     public void validateReady(HarnessSelection selection) {
         resolve(selection.harnessId(), selection.modelId(), selection.reasoningLevel());
         CodingHarnessAdapter adapter = requireHarness(selection.harnessId());
-        if (!adapter.checkCliAvailable()) {
+        var context = prerequisites.context(adapter.id());
+        boolean available = prerequisites.observe(context, CLI, adapter::probeCliAvailability);
+        if (!available) {
             throw new IllegalStateException(adapter.displayName()
                     + " is not installed or available on PATH. Install that CLI before approving this stage.");
         }
-        if (!adapter.checkSubscriptionAuthentication()) {
+        boolean authenticated = prerequisites.observe(context, SUBSCRIPTION, adapter::probeSubscriptionAuthentication);
+        if (!authenticated) {
             String command = switch (HarnessIds.normalize(adapter.id())) {
                 case HarnessIds.CLAUDE -> "claude auth login";
                 case HarnessIds.CODEX -> "codex login";

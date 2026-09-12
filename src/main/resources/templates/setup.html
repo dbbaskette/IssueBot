@@ -5,63 +5,32 @@
     <div th:replace="~{layout :: toasts}"></div>
 
     <div class="page-header">
-        <h2>Setup Wizard</h2>
+        <h2>Setup</h2>
         <p class="text-sm">Coding harness: <span th:text="${effectiveHarnessName}">Selected harness</span> · <a href="/settings">Model and reasoning settings</a></p>
     </div>
 
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Prerequisites Check</h3>
-            <button type="button" class="btn btn-outline btn-sm"
-                    hx-get="/setup/prereqs" hx-target="#prereqs-table" hx-swap="innerHTML">
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Prerequisites</h3>
+            <form th:action="@{/setup/prereqs}" method="post" hx-post="/setup/prereqs"
+                  hx-target="#prereqs-table" hx-swap="innerHTML">
+            <button type="submit" class="btn btn-outline btn-sm">
                 <i class="ti ti-refresh" aria-hidden="true"></i> Re-check
             </button>
+            </form>
         </div>
-        <!-- Loads instantly with "Checking..." then swaps in real results -->
-        <div id="prereqs-table" hx-get="/setup/prereqs" hx-trigger="load" hx-swap="innerHTML">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Component</th>
-                        <th>Status</th>
-                        <th>Details</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td th:text="${effectiveHarnessName}">Agent CLI</td>
-                        <td><span class="status status-queued">CHECKING</span></td>
-                        <td style="color: var(--text-tertiary)">Verifying CLI installation...</td>
-                    </tr>
-                    <tr>
-                        <td th:text="${effectiveHarnessName + ' Auth'}">Agent CLI Auth</td>
-                        <td><span class="status status-queued">CHECKING</span></td>
-                        <td style="color: var(--text-tertiary)">Verifying authentication...</td>
-                    </tr>
-                    <tr>
-                        <td>GitHub Token</td>
-                        <td><span class="status status-queued">CHECKING</span></td>
-                        <td style="color: var(--text-tertiary)">Checking environment...</td>
-                    </tr>
-                    <tr>
-                        <td>Work Directory</td>
-                        <td><span class="status status-queued">CHECKING</span></td>
-                        <td style="color: var(--text-tertiary)">Checking directory...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+        <!-- GET rendering only reads cached observations. -->
+        <div id="prereqs-table" th:insert="~{setup :: prereqs}"></div>
     </div>
 
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Webhooks</h3>
-        </div>
+    <details class="glass-card inset-panel mb-3 optional-setup" data-ui-state-key="setup:webhooks">
+        <summary class="panel-header">Optional: webhooks and delivery diagnostics</summary>
         <p class="text-sm text-muted mb-2">
             GitHub webhooks give near-instant issue pickup instead of waiting for the next poll.
             Polling keeps running as a fallback, so webhooks are optional but recommended.
         </p>
-        <table class="data-table mb-2">
+        <div class="setup-table-scroll mb-2" role="region" aria-label="Webhook configuration" tabindex="0">
+        <table class="data-table">
             <tbody>
                 <tr>
                     <td style="width: 200px">Payload URL</td>
@@ -79,9 +48,11 @@
                 </tr>
             </tbody>
         </table>
+        </div>
 
         <h4>Watched Repositories</h4>
-        <table class="data-table mb-2">
+        <div class="setup-table-scroll mb-2" role="region" aria-label="Watched repositories" tabindex="0">
+        <table class="data-table">
             <thead>
                 <tr>
                     <th>Repository</th>
@@ -98,6 +69,7 @@
                 </tr>
             </tbody>
         </table>
+        </div>
 
         <h4>Delivery Health</h4>
         <div class="metrics-grid mb-2">
@@ -121,7 +93,8 @@
                 <i class="ti ti-refresh" aria-hidden="true"></i> Refresh
             </a>
         </h4>
-        <table class="data-table mb-2">
+        <div class="setup-table-scroll mb-2" role="region" aria-label="Recent webhook deliveries" tabindex="0">
+        <table class="data-table">
             <thead>
                 <tr>
                     <th>Time</th>
@@ -144,6 +117,7 @@
                 </tr>
             </tbody>
         </table>
+        </div>
 
         <p class="text-sm text-muted">
             On GitHub: repo <strong>Settings &rarr; Webhooks &rarr; Add webhook</strong>, set the payload URL above,
@@ -153,24 +127,24 @@
             <a href="https://github.com/dbbaskette/IssueBot#github-webhooks-instant-pickup" target="_blank" rel="noopener">webhook tunnel guide</a>
             (smee.io, cloudflared, etc.).
         </p>
-    </div>
+    </details>
 
-    <div class="glass-card mb-3">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Quick Start</h3>
+    <div class="glass-card inset-panel mb-3">
+        <div class="panel-header">
+            <h3>Quick start</h3>
         </div>
-        <h4>Next Steps</h4>
+        <h4>Next steps</h4>
         <ol>
             <li>Go to <a href="/repositories">Repositories</a> and add a GitHub repository to watch.</li>
             <li>On your GitHub repo, add the label <code>agent-ready</code> to an issue you want IssueBot to work on.</li>
-            <li>IssueBot will detect the issue and begin implementation automatically.</li>
+            <li>IssueBot detects the issue while processing is enabled. Your repository workflow determines when work starts and which stages require approval.</li>
             <li>Monitor progress on the <a href="/">Dashboard</a>.</li>
         </ol>
     </div>
 
-    <div class="glass-card">
-        <div class="panel-header" style="margin:-16px -16px 1rem;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-            <h3>Configuration File</h3>
+    <details class="glass-card inset-panel optional-setup" data-ui-state-key="setup:configuration">
+        <summary class="panel-header">Optional: example configuration</summary>
+        <div class="form-actions mb-2">
             <button type="button" class="btn btn-outline btn-sm" data-copy-target="#example-config">
                 <i class="ti ti-copy" aria-hidden="true"></i> Copy
             </button>
@@ -200,63 +174,31 @@
       ci-timeout-minutes: 15
       security-review-enabled: false
       auto-merge: false</pre>
-    </div>
+    </details>
 </div>
 
-<!-- HTMX fragment: prerequisite check results (loaded async) -->
+<!-- Status refreshed only by explicit Re-check POST. -->
 <div th:fragment="prereqs">
+    <p class="text-sm text-muted">Results expire after five minutes. Opening this page does not run checks.</p>
+    <div class="setup-table-scroll" role="region" aria-label="Prerequisite checks" tabindex="0">
     <table class="data-table">
-        <thead>
-            <tr>
-                <th>Component</th>
-                <th>Status</th>
-                <th>Details</th>
-            </tr>
-        </thead>
+        <thead><tr><th>Component</th><th>Status</th><th>Details</th></tr></thead>
         <tbody>
-            <tr>
-                <td th:text="${effectiveHarnessName}">Agent CLI</td>
-                <td>
-                    <span class="status" th:classappend="${cliAvailable ? 'status-completed' : 'status-failed'}"
-                          th:text="${cliAvailable ? 'OK' : 'MISSING'}">OK</span>
-                </td>
-                <td th:if="${cliAvailable}" th:text="${effectiveHarnessName + ' is installed and accessible.'}">Agent CLI is installed.</td>
-                <td th:if="${!cliAvailable}" th:text="${'Install ' + effectiveHarnessName + ' and make it available on PATH.'}"></td>
-            </tr>
-            <tr>
-                <td th:text="${effectiveHarnessName + ' Auth'}">Agent CLI Auth</td>
-                <td>
-                    <span class="status" th:classappend="${cliAuthenticated ? 'status-completed' : 'status-failed'}"
-                          th:text="${cliAuthenticated ? 'OK' : 'FAILED'}">OK</span>
-                </td>
-                <td th:if="${cliAuthenticated}">Subscription authentication verified.</td>
-                <td th:if="${!cliAuthenticated}" th:text="${'Complete the subscription login for ' + effectiveHarnessName + ', then re-check.'}"></td>
-            </tr>
-            <tr>
-                <td>GitHub Token</td>
-                <td>
-                    <span class="status"
-                          th:classappend="${githubTokenValid ? 'status-completed' : (githubTokenSet ? 'status-failed' : 'status-failed')}"
-                          th:text="${githubTokenValid ? 'OK' : (githubTokenSet ? 'INVALID' : 'MISSING')}">OK</span>
-                </td>
-                <td th:text="${githubTokenMessage}">GitHub token status</td>
-            </tr>
-            <tr>
-                <td>Work Directory</td>
-                <td>
-                    <span class="status" th:classappend="${workDirOk ? 'status-completed' : 'status-failed'}"
-                          th:text="${workDirOk ? 'OK' : 'ISSUE'}">OK</span>
-                </td>
-                <td th:text="${workDirMessage}">Work directory details</td>
+            <tr th:each="row : ${prerequisiteRows}">
+                <td th:text="${row.label}">Component</td>
+                <td><span class="status" th:classappend="${row.tone()}" th:text="${row.status()}">Not verified</span></td>
+                <td th:text="${row.detail()}">Select Re-check to verify.</td>
             </tr>
         </tbody>
     </table>
-    <p th:if="${allPassed}" class="mt-1" style="color: var(--ok); font-weight: 600;">
-        All prerequisites are met. You're ready to go!
+    </div>
+    <p th:if="${prerequisiteState?.name() == 'VERIFIED_READY'}" class="mt-1" style="color: var(--ok); font-weight: 600;">
+        Prerequisites were recently verified. Normal workflow checks still apply.
     </p>
-    <p th:unless="${allPassed}" class="mt-1" style="color: var(--danger); font-weight: 600;">
-        Some prerequisites are not met. Please resolve the issues above.
+    <p th:if="${prerequisiteState?.name() == 'KNOWN_UNMET'}" class="mt-1" style="color: var(--danger); font-weight: 600;">
+        A prerequisite needs attention. Resolve it, then re-check before retrying.
     </p>
+    <p th:if="${prerequisiteState == null or prerequisiteState.name() == 'NOT_VERIFIED'}" class="mt-1 text-muted">Prerequisites: Not verified.</p>
 </div>
 </body>
 </html>

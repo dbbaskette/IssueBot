@@ -350,6 +350,27 @@ public class IssueWorkflowService {
             return;
         }
 
+        Iteration persistedCurrentIteration = null;
+        if (approvedPlan != null
+                && (trackedIssue.isPlanCorrectionPending() || recoveryResumePhase != null)) {
+            int currentWorkflowRun = trackedIssue.getWorkflowRun();
+            Long currentApprovedPlanId = approvedPlan.id();
+            persistedCurrentIteration = iterationRepository
+                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
+                            trackedIssue.getId(), trackedIssue.getCurrentIteration())
+                    .filter(candidate -> candidate.matchesAttemptIdentity(
+                            currentWorkflowRun, currentApprovedPlanId))
+                    .orElse(null);
+            if (recoveryResumePhase != null && persistedCurrentIteration == null) {
+                log.warn("Cannot resume {} for {} #{}: current iteration has no matching "
+                                + "workflow-run and approved-plan snapshot; starting a new iteration",
+                        recoveryResumePhase, repo.fullName(), issueNumber);
+                recoveryResumePhase = null;
+                trackedIssue.setCurrentPhase("SETUP");
+                issueRepository.save(trackedIssue);
+            }
+        }
+
         log.info("Entering iteration loop for {} #{}, maxIterations={}",
                 repo.fullName(), issueNumber, repo.getMaxIterations());
 
@@ -363,24 +384,16 @@ public class IssueWorkflowService {
         String previousCiLogs = null;
         int prNumber = 0;
 
-        Iteration persistedCurrentIteration = null;
-        if (approvedPlan != null
-                && (trackedIssue.isPlanCorrectionPending() || recoveryResumePhase != null)) {
-            persistedCurrentIteration = iterationRepository
-                    .findFirstByIssueIdAndIterationNumOrderByIdDesc(
-                            trackedIssue.getId(), trackedIssue.getCurrentIteration())
-                    .orElse(null);
-            if (trackedIssue.isPlanCorrectionPending()
-                    && persistedCurrentIteration != null
-                    && persistedCurrentIteration.getReviewJson() != null
-                    && !persistedCurrentIteration.getReviewJson().isBlank()) {
-                String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
-                        + persistedCurrentIteration.getReviewJson();
-                previousFeedback = previousFeedback == null
-                        ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
-                previousDiff = persistedCurrentIteration.getDiff();
-                reviewFeedback = true;
-            }
+        if (trackedIssue.isPlanCorrectionPending()
+                && persistedCurrentIteration != null
+                && persistedCurrentIteration.getReviewJson() != null
+                && !persistedCurrentIteration.getReviewJson().isBlank()) {
+            String persistedFeedback = "PERSISTED PLAN CONFORMANCE REVIEW:\n"
+                    + persistedCurrentIteration.getReviewJson();
+            previousFeedback = previousFeedback == null
+                    ? persistedFeedback : persistedFeedback + "\n\n" + previousFeedback;
+            previousDiff = persistedCurrentIteration.getDiff();
+            reviewFeedback = true;
         }
         final Iteration authoritativeCurrentIteration = persistedCurrentIteration;
 
@@ -435,9 +448,9 @@ public class IssueWorkflowService {
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
                 trackedIssue.setPlanCorrectionPending(false);
             } else if (resumePhase == null) {
+                iteration = iterationManager.claimImplementationIteration(trackedIssue, iterationNum);
                 trackedIssue.setCurrentIteration(iterationNum);
                 trackedIssue.setCurrentPhase("IMPLEMENTATION");
-                issueRepository.save(trackedIssue);
             }
 
             if (resumePhase != null) {
@@ -453,10 +466,14 @@ public class IssueWorkflowService {
                 return;
             }
             if (iteration == null) {
-                iteration = reusableImplementationIteration(trackedIssue.getId(), iterationNum);
+                iteration = reusableImplementationIteration(trackedIssue.getId(), iterationNum,
+                        trackedIssue.getWorkflowRun(),
+                        approvedPlan == null ? null : approvedPlan.id());
             }
             if (iteration == null) {
-                iteration = new Iteration(trackedIssue, iterationNum);
+                iteration = new Iteration(trackedIssue, iterationNum,
+                        trackedIssue.getWorkflowRun(),
+                        approvedPlan == null ? null : approvedPlan.id());
                 iteration.setImplModel(trackedIssue.getResolvedImplModel());
                 iterationRepository.save(iteration);
             }
@@ -930,11 +947,13 @@ public class IssueWorkflowService {
     }
 
     /** Reuses the row rearmed after a crash so its exact prepared prompt is not lost. */
-    Iteration reusableImplementationIteration(Long issueId, int iterationNum) {
+    Iteration reusableImplementationIteration(Long issueId, int iterationNum,
+                                               int workflowRun, Long approvedPlanId) {
         return iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
                         issueId, iterationNum)
                 .filter(candidate -> candidate.getCompletedAt() == null
-                        && candidate.getImplementationCompletedAt() == null)
+                        && candidate.getImplementationCompletedAt() == null
+                        && candidate.matchesAttemptIdentity(workflowRun, approvedPlanId))
                 .orElse(null);
     }
 
@@ -1411,22 +1430,22 @@ public class IssueWorkflowService {
         trackedIssue.setCurrentPhase(null);
         if (merged) {
             trackedIssue.setStatus(IssueStatus.COMPLETED);
-            notificationService.info("Issue Completed",
+            notificationService.completion("Issue Completed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR #" + prNumber + " is merged", trackedIssue);
         } else if (isApprovalGated) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
-            notificationService.info("PR Ready for Review",
+            notificationService.approval("PR Ready for Review",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR created, awaiting approval", trackedIssue);
         } else if (shouldAutoMerge && !merged) {
             trackedIssue.setStatus(IssueStatus.AWAITING_APPROVAL);
-            notificationService.warn("Auto-Merge Failed",
+            notificationService.recovery("Auto-Merge Failed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR #" + prNumber + " created but merge failed, needs manual merge", trackedIssue);
         } else {
             trackedIssue.setStatus(IssueStatus.COMPLETED);
-            notificationService.info("Issue Completed",
+            notificationService.completion("Issue Completed",
                     repo.fullName() + " #" + trackedIssue.getIssueNumber()
                             + " — PR #" + prNumber + (merged ? " created & merged" : " created"), trackedIssue);
         }

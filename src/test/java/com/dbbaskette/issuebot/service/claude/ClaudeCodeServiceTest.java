@@ -20,6 +20,27 @@ import static org.mockito.Mockito.*;
  * (issue #67 — session continuity via --resume).
  */
 class ClaudeCodeServiceTest {
+    @org.junit.jupiter.api.Test void typedAuthParsingDistinguishesEvidenceFromUnknown() {
+        assertEquals(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET,
+                ClaudeCodeService.subscriptionReadiness("{\"loggedIn\":false}"));
+        assertEquals(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNMET,
+                ClaudeCodeService.subscriptionReadiness("{\"loggedIn\":true,\"authMethod\":\"api_key\"}"));
+        for (String output : java.util.List.of("not json", "{}", "{\"loggedIn\":true}",
+                "{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"subscriptionType\":\"future\"}",
+                "{\"loggedIn\":false} {\"loggedIn\":true}")) {
+            assertEquals(com.dbbaskette.issuebot.service.harness.HarnessReadiness.UNKNOWN, ClaudeCodeService.subscriptionReadiness(output));
+        }
+    }
+    @org.junit.jupiter.api.Test void concreteReadinessOutcomesReachPreflightWithoutFalseCertainty() throws Exception {
+        com.dbbaskette.issuebot.service.harness.ConcreteReadinessProbeAssertions.verify(
+                starter -> new com.dbbaskette.issuebot.service.harness.ClaudeHarnessAdapter(new ClaudeCodeService(
+                        new com.dbbaskette.issuebot.config.IssueBotProperties(), new StreamJsonParser(new com.fasterxml.jackson.databind.ObjectMapper()),
+                        org.mockito.Mockito.mock(com.dbbaskette.issuebot.service.workflow.WorkflowCancellationService.class)) {
+                    @Override Process startReadinessProcess(ProcessBuilder builder) throws java.io.IOException { return starter.start(builder); }
+                }),
+                "{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"subscriptionType\":\"max\"}",
+                "{\"loggedIn\":false}");
+    }
 
     @Test
     void managedAdapterExecutionEnforcesSubscriptionSettingsOnlyDuringInvocation() {

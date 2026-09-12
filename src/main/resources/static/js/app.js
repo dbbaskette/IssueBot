@@ -91,19 +91,59 @@
   // from "Mark all read" — can't update it via normal HTMX targeting. The
   // panel fragment carries the fresh count in data-unread-count for exactly
   // this: read it after every swap and reflect it on the badge.
+  function markNotifUnavailable() {
+    var btn = notifBellBtn();
+    if (!btn) { return; }
+    btn.setAttribute('title', 'Notification state unavailable');
+    btn.setAttribute('aria-label', 'Notifications — unread actions unavailable');
+    var badge = btn.querySelector('.notif-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'badge notif-badge';
+      btn.appendChild(badge);
+    }
+    // Keep any last-known number visibly stale. A previous zero has no badge,
+    // so show '?' rather than leaving the bell looking currently empty.
+    var lastKnown = (badge.textContent || '').replace(/\?$/, '');
+    badge.textContent = lastKnown + '?';
+    badge.setAttribute('aria-label', lastKnown
+      ? 'Unread actions unavailable; last known count ' + lastKnown
+      : 'Unread actions unavailable');
+  }
+
+  // Failed HTTP responses and network failures normally do not swap content.
+  // Scope the failure indication to requests targeting this panel only.
+  function notificationRequestFailed(evt) {
+    var detail = evt.detail || {};
+    var target = detail.target || (detail.requestConfig && detail.requestConfig.target);
+    if (target && target.id === 'notif-panel') { markNotifUnavailable(); }
+  }
+  ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
+    document.body.addEventListener(name, notificationRequestFailed);
+  });
+
   function syncNotifBadge(panelElement) {
     var btn = notifBellBtn();
     if (!btn || !panelElement) { return; }
     var content = panelElement.querySelector('#notif-panel-content');
-    var count = content ? parseInt(content.getAttribute('data-unread-count'), 10) || 0 : 0;
+    var rawCount = content && content.getAttribute('data-unread-count');
+    if (rawCount == null || !/^\d+$/.test(rawCount)) {
+      markNotifUnavailable();
+      return;
+    }
+    var count = Number(rawCount);
+    btn.setAttribute('title', 'Unread actions');
+    btn.setAttribute('aria-label', 'Notifications — unread actions');
     var badge = btn.querySelector('.notif-badge');
     if (count > 0) {
       if (!badge) {
         badge = document.createElement('span');
         badge.className = 'badge notif-badge';
+        badge.setAttribute('aria-label', 'Unread actions');
         btn.appendChild(badge);
       }
       badge.textContent = String(count);
+      badge.setAttribute('aria-label', 'Unread actions');
     } else if (badge) {
       badge.remove();
     }
@@ -138,23 +178,6 @@
     }
   }
   window.copyText = copyText;
-
-  // --- Toast auto-dismiss -------------------------------------------------
-  function dismissToasts() {
-    var toasts = document.querySelectorAll('.toast');
-    toasts.forEach(function (toast) {
-      if (toast.__dismissScheduled) { return; }
-      toast.__dismissScheduled = true;
-      setTimeout(function () {
-        toast.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-6px)';
-        setTimeout(function () {
-          if (toast.parentNode) { toast.parentNode.removeChild(toast); }
-        }, 400);
-      }, 4000);
-    });
-  }
 
   // --- SSE health indicator (#83) ------------------------------------------
   // A single header dot (#sse-status, in layout.html) reflects whether live
@@ -342,7 +365,10 @@
     var href = row.getAttribute('data-issue-href');
     if (!href) { return; }
     if (window.htmx && typeof window.htmx.ajax === 'function') {
-      window.htmx.ajax('GET', href, { target: '#content', pushUrl: true });
+      // Passing the row as the supported HTMX request source preserves its
+      // inherited hx-target and hx-push-url behavior. HTMX 2.0.4 does not
+      // support the later pushUrl ajax option.
+      window.htmx.ajax('GET', href, { source: row, target: '#content', event: e });
     } else {
       window.location.href = href;
     }
@@ -547,10 +573,22 @@
     return files.length ? files : null;
   }
 
-  function renderDiffFile(file, defaultOpen) {
+  function stableDiffIdentity(path) {
+    var hash = 2166136261;
+    for (var i = 0; i < path.length; i++) {
+      hash ^= path.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36) + '-' + path.length;
+  }
+
+  function renderDiffFile(file, defaultOpen, statePrefix) {
     var details = document.createElement('details');
     details.className = 'diff-file';
     details.open = defaultOpen;
+    if (statePrefix) {
+      details.setAttribute('data-ui-state-key', statePrefix + ':file:' + stableDiffIdentity(file.path));
+    }
 
     var summary = document.createElement('summary');
     summary.className = 'diff-file-summary';
@@ -626,8 +664,10 @@
 
     var list = document.createElement('div');
     list.className = 'diff-file-list';
+    var owner = el.closest && el.closest('details[data-ui-state-key]');
+    var statePrefix = owner && owner.getAttribute('data-ui-state-key');
     files.forEach(function (file) {
-      list.appendChild(renderDiffFile(file, defaultOpen));
+      list.appendChild(renderDiffFile(file, defaultOpen, statePrefix));
     });
     el.appendChild(list);
   }
@@ -639,6 +679,7 @@
     if (!raw) { return; }
     try {
       renderDiffViewer(el, raw);
+      if (window.IssueBotUiState) { window.IssueBotUiState.restore(el); }
     } catch (e) {
       // Degrade to today's whole-blob rendering on any parse/render surprise.
       try { renderFlatDiff(el, raw); } catch (e2) { /* leave raw text as-is */ }
@@ -647,6 +688,12 @@
 
   function initDiffViewers() {
     document.querySelectorAll('[data-diff-viewer]').forEach(initDiffViewer);
+  }
+
+  function setDiffFilesOpen(container, open) {
+    if (!container) { return; }
+    container.querySelectorAll('.diff-file').forEach(function (details) { details.open = open; });
+    if (window.IssueBotUiState) { window.IssueBotUiState.capture(container); }
   }
 
   // --- Live terminal controller ------------------------------------------
@@ -1083,18 +1130,14 @@
     if (diffExpandAll) {
       e.preventDefault();
       var expandContainer = diffExpandAll.closest('[data-diff-viewer]');
-      if (expandContainer) {
-        expandContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = true; });
-      }
+      setDiffFilesOpen(expandContainer, true);
       return;
     }
     var diffCollapseAll = e.target.closest('[data-diff-collapse-all]');
     if (diffCollapseAll) {
       e.preventDefault();
       var collapseContainer = diffCollapseAll.closest('[data-diff-viewer]');
-      if (collapseContainer) {
-        collapseContainer.querySelectorAll('.diff-file').forEach(function (d) { d.open = false; });
-      }
+      setDiffFilesOpen(collapseContainer, false);
       return;
     }
   });
@@ -1174,6 +1217,7 @@
   }
 
   function resetRepoForm() {
+    configureRepositoryDisclosureKeys('new');
     var title = document.getElementById('form-title');
     if (title) { title.textContent = 'Add Repository'; }
     setValue('edit-id', '');
@@ -1209,6 +1253,7 @@
   }
 
   function editRepoFromDataset(ds) {
+    configureRepositoryDisclosureKeys(ds.id || 'new');
     var title = document.getElementById('form-title');
     if (title) { title.textContent = ds.id ? 'Edit Repository' : 'Add Repository'; }
     setValue('edit-id', ds.id);
@@ -1252,6 +1297,20 @@
       editRepoFromDataset(JSON.parse(form.dataset.repositoryFormValues));
       showRepoForm();
     } catch (e) { /* Server-generated JSON should be valid; leave the safe defaults if not. */ }
+  }
+
+  function configureRepositoryDisclosureKeys(repoId) {
+    var form = document.getElementById('add-repo-form');
+    if (!form) { return; }
+    if (form.getAttribute('data-repository-editor-active') === 'true' && window.IssueBotUiState) {
+      window.IssueBotUiState.capture(form);
+    }
+    Array.prototype.forEach.call(form.querySelectorAll('[data-repository-disclosure]'), function (details) {
+      details.setAttribute('data-ui-state-key', 'editor:' + repoId + ':' + details.getAttribute('data-repository-disclosure'));
+      details.open = details.getAttribute('data-ui-state-default-open') === 'true';
+    });
+    form.setAttribute('data-repository-editor-active', 'true');
+    if (window.IssueBotUiState) { window.IssueBotUiState.restore(form); }
   }
 
   // Show/hide the CI timeout field based on the CI-enabled checkbox.
@@ -1303,10 +1362,13 @@
   function revealQueueDependencies() {
     if (window.location.hash !== '#dependency-map') return;
     var section = document.getElementById('queue-dependencies');
-    if (section) section.open = true;
+    if (section) {
+      section.open = true;
+      if (window.IssueBotUiState) { window.IssueBotUiState.capture(section); }
+    }
   }
   document.addEventListener('DOMContentLoaded', revealQueueDependencies);
-  document.addEventListener('htmx:afterSwap', revealQueueDependencies);
+  document.addEventListener('htmx:pushedIntoHistory', revealQueueDependencies);
   window.addEventListener('hashchange', revealQueueDependencies);
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
@@ -1592,9 +1654,18 @@
     });
   }
 
-  // Re-run toast handling + diff viewers after HTMX swaps in new content.
+  function initNavigationContext(scope) {
+    if (!window.IssueBotNavigation) { return; }
+    // The navigation module owns only result-set identity and return scrolling.
+    // IssueBotUiState continues to own drafts, disclosures, toasts, and native
+    // history restoration; both modules initialize the same swapped subtree.
+    window.IssueBotNavigation.decorateDetail(scope || document);
+  }
+
+  // Re-run enhanced widgets after HTMX swaps in new content. ui-state.js owns
+  // disclosure restoration, ordinary SPA scroll, and toast lifetimes; the
+  // navigation module adds only an explicit Back-to-results scroll restore.
   document.body.addEventListener('htmx:afterSwap', function (evt) {
-    dismissToasts();
     initDiffViewers();
     initSortableTables();
     initCostCharts();
@@ -1611,6 +1682,7 @@
     // pipeline — including the queue's SSE-triggered refresh, which flows
     // through htmx's normal fetch+swap cycle) marks just that region's key.
     var target = evt.detail && evt.detail.target;
+    initNavigationContext(target);
     if (target && target.id === 'content') {
       // Re-trigger footgun (mirrors the fix already applied to issues.html's
       // #issue-table-body): htmx does not reliably wire up a *nested* self-morphing
@@ -1623,14 +1695,6 @@
       // safe no-op everywhere else.
       if (window.htmx && typeof window.htmx.process === 'function') { window.htmx.process(target); }
       UpdateStamps.markAllVisible();
-      // Deep-link anchors (e.g. the dashboard's "awaiting X" tiles linking to
-      // /inbox#split-proposals, #91) — an htmx swap is a pushState navigation, not a
-      // real page load, so the browser never auto-scrolls to the URL's #fragment on
-      // its own. Do it ourselves once the freshly-swapped content is in the DOM.
-      if (location.hash) {
-        var hashTarget = document.getElementById(location.hash.slice(1));
-        if (hashTarget) hashTarget.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
     } else if (target && target.id && SWAP_TARGET_STAMPS[target.id]) {
       markUpdated(SWAP_TARGET_STAMPS[target.id]);
     }
@@ -1778,12 +1842,12 @@
   // --- Init ---------------------------------------------------------------
   function init() {
     syncThemeIcon();
-    dismissToasts();
     initDiffViewers();
     initSortableTables();
     initCostCharts();
     updateBulkActionBar();
     restoreSubmittedRepoForm();
+    initNavigationContext(document);
     UpdateStamps.markAllVisible();
     document.querySelectorAll('[data-plan-revision-guidance]').forEach(syncPlanRevisionButton);
   }

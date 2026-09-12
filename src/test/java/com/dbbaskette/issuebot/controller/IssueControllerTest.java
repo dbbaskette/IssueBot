@@ -24,6 +24,7 @@ import com.dbbaskette.issuebot.service.ui.ApprovalCardAssembler;
 import com.dbbaskette.issuebot.service.ui.IssueNextAction;
 import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.service.ui.ReviewScore;
+import com.dbbaskette.issuebot.service.ui.WorkflowStepperAssembler;
 import com.dbbaskette.issuebot.service.ui.ReviewScoreHistoryAssembler.History;
 import com.dbbaskette.issuebot.service.review.PersistedReviewOutcome;
 import com.dbbaskette.issuebot.service.review.ReviewOutcome;
@@ -48,6 +49,39 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class IssueControllerTest {
+    @Test void knownUnmetPrerequisiteBlocksAllDirectRetryPostsBeforeAnyExternalWork() throws Exception {
+        for (String path : List.of("/issues/1/retry", "/issues/1/retry-quick", "/issues/bulk/retry", "/issues/1/plan/retry-implementation")) {
+            Fixture f = new Fixture(IssueStatus.FAILED);
+            var prerequisites = new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(f.properties);
+            prerequisites.record(prerequisites.context("claude"),
+                    com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.CLI,
+                    com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.UNMET);
+            org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "prerequisites", prerequisites);
+            MockMvcBuilders.standaloneSetup(f.controller).build().perform(
+                    org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
+                            .param("ids", "1").param("guidance", "Operator guidance"))
+                    .andExpect(status().is3xxRedirection());
+            verifyNoInteractions(f.gitHubApiClient, f.workflowService);
+            verify(f.issues, never()).save(any());
+            verify(f.dispatchService, never()).claimGuidedRetry(anyLong(), anyString(), anyInt());
+        }
+    }
+
+    @Test void detailAndPollOnlyReadPrerequisiteCacheAndNeverCallExternalServices() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        var prerequisites = new com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService(f.properties);
+        prerequisites.record(prerequisites.context("claude"),
+                com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Component.SUBSCRIPTION,
+                com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService.Result.UNMET);
+        org.springframework.test.util.ReflectionTestUtils.setField(f.controller, "prerequisites", prerequisites);
+        var detail = new org.springframework.ui.ExtendedModelMap();
+        var poll = new org.springframework.ui.ExtendedModelMap();
+        f.controller.detail(detail, 1L, null, null, null);
+        f.controller.liveStatus(poll, 1L);
+        org.assertj.core.api.Assertions.assertThat(detail.get("recoveryGuidance")).isEqualTo(poll.get("recoveryGuidance"));
+        org.assertj.core.api.Assertions.assertThat(((com.dbbaskette.issuebot.service.ui.RecoveryGuidance) detail.get("recoveryGuidance")).retryAllowed()).isFalse();
+        verifyNoInteractions(f.gitHubApiClient, f.workflowService);
+    }
 
     @Test void rejectedStartAndRetryPreserveExactModelAndReasoningInputs() {
         for (boolean retry : new boolean[] {false, true}) {
@@ -155,7 +189,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = c.table(model, "FAILED", null, null, 0);
@@ -184,7 +218,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, 7L, "login", 2);
@@ -213,7 +247,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, null, null, "   ", 0);
@@ -236,7 +270,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.table(model, "NOT_A_REAL_STATUS", null, null, 0);
@@ -273,7 +307,7 @@ class IssueControllerTest {
                 mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         c.list(model, null, null, null, 1, null);
@@ -404,6 +438,8 @@ class IssueControllerTest {
      * for a FAILED issue on a fresh repo: no active issues, no open PRs.
      */
     private static final class Fixture {
+        final com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService operatorTransactions =
+                mock(com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.class);
         final TrackedIssueRepository issues = mock(TrackedIssueRepository.class);
         final WatchedRepoRepository repos = mock(WatchedRepoRepository.class);
         final GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
@@ -421,6 +457,7 @@ class IssueControllerTest {
         final PlanningVersionRepository planningVersions = mock(PlanningVersionRepository.class);
         final ApprovalCardAssembler approvalCardAssembler = mock(ApprovalCardAssembler.class);
         final NotificationService notificationService = mock(NotificationService.class);
+        final WorkflowStepperAssembler workflowStepperAssembler = new WorkflowStepperAssembler();
         final IssueDispatchService dispatchService;
         final IssueController controller;
         final TrackedIssue issue;
@@ -459,8 +496,24 @@ class IssueControllerTest {
                     new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatchService,
                     planningVersions, approvalCardAssembler, new IssueNextActionResolver(),
-                    notificationService);
+                    notificationService, workflowStepperAssembler);
+            org.springframework.test.util.ReflectionTestUtils.setField(controller, "operatorTransactions", operatorTransactions);
+            when(operatorTransactions.stop(1L)).thenAnswer(call -> {
+                if (issue.getStatus() != IssueStatus.IN_PROGRESS) throw new IllegalStateException("Not running");
+                return issue;
+            });
+            when(operatorTransactions.guide(eq(1L), anyString(), nullable(String.class))).thenAnswer(call ->
+                    new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(
+                            issue, new IssueGuidance(1L, call.getArgument(1)), true));
         }
+    }
+
+    @Test
+    void controllerRetainsTheInjectedWorkflowStepperAssembler() {
+        Fixture fixture = new Fixture(IssueStatus.IN_PROGRESS);
+        org.assertj.core.api.Assertions.assertThat(org.springframework.test.util.ReflectionTestUtils
+                        .getField(fixture.controller, "workflowStepperAssembler"))
+                .isSameAs(fixture.workflowStepperAssembler);
     }
 
     @Test
@@ -678,7 +731,7 @@ class IssueControllerTest {
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v3")),
                 eq(f.issue.getRepo()), same(f.issue));
-        verify(f.notificationService).info(eq("Implementation Started"),
+        verify(f.notificationService).progress(eq("Implementation Started"),
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v3")),
                 same(f.issue));
@@ -720,7 +773,7 @@ class IssueControllerTest {
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v4")),
                 eq(f.issue.getRepo()), same(f.issue));
-        verify(f.notificationService).info(eq("Repository Slot Released"),
+        verify(f.notificationService).progress(eq("Repository Slot Released"),
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && message.contains("Plan v4")),
                 same(f.issue));
@@ -741,7 +794,7 @@ class IssueControllerTest {
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && !message.contains("Plan v")),
                 eq(f.issue.getRepo()), same(f.issue));
-        verify(f.notificationService).info(eq("Repository Slot Released"),
+        verify(f.notificationService).progress(eq("Repository Slot Released"),
                 argThat(message -> message.contains("acme/widgets")
                         && message.contains("#42") && !message.contains("Plan v")),
                 same(f.issue));
@@ -799,7 +852,8 @@ class IssueControllerTest {
 
         String view = f.controller.cancel(1L, f.redirectAttributes);
 
-        verify(f.cancellationService).requestCancel(1L);
+        verify(f.operatorTransactions).stop(1L);
+        verifyNoInteractions(f.cancellationService);
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
     }
@@ -1185,8 +1239,9 @@ class IssueControllerTest {
     }
 
     private static void stubPersistedMiss(Fixture f) {
+        Iteration missed = review(f.issue, 2, false, 0.70, 0.65);
         when(f.iterationRepository.findByIssueOrderByIterationNumAsc(f.issue))
-                .thenReturn(List.of(review(f.issue, 2, false, 0.70, 0.65)));
+                .thenReturn(List.of(missed));
     }
 
     private static Fixture approvedPlanFixture(IssueStatus status, int conformanceAttempt) {
@@ -1732,14 +1787,8 @@ class IssueControllerTest {
 
         // Guidance is inserted as its own row — never written onto TrackedIssue,
         // where the workflow's frequent full-entity saves would silently revert it.
-        ArgumentCaptor<IssueGuidance> captor = ArgumentCaptor.forClass(IssueGuidance.class);
-        verify(f.guidanceRepository).save(captor.capture());
-        IssueGuidance saved = captor.getValue();
-        org.assertj.core.api.Assertions.assertThat(saved.getIssueId()).isEqualTo(1L);
-        org.assertj.core.api.Assertions.assertThat(saved.getGuidance())
-                .isEqualTo("Check the retry logic in FooService");
-        org.assertj.core.api.Assertions.assertThat(saved.getCreatedAt()).isNotNull();
-        org.assertj.core.api.Assertions.assertThat(saved.getConsumedAt()).isNull();
+        verify(f.operatorTransactions).guide(1L, "Check the retry logic in FooService", null);
+        verifyNoInteractions(f.guidanceRepository);
         verify(f.issues, never()).save(any());
 
         verify(f.gitHubApiClient).addComment(eq("acme"), eq("widgets"), eq(42),
@@ -1747,6 +1796,64 @@ class IssueControllerTest {
         verify(f.eventService).log(eq("GUIDANCE_RECEIVED"), anyString(), any(), eq(f.issue));
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
+    }
+
+    @Test void repeatedGuidanceRequestTokenDoesNotRepeatComment() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        var row = new IssueGuidance(1L, "same guidance"); row.setId(17L);
+        when(f.operatorTransactions.guide(1L, "same guidance", "stable-token"))
+                .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, false));
+        f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
+        verify(f.operatorTransactions).guide(1L, "same guidance", "stable-token");
+        verify(f.gitHubApiClient, never()).addComment(any(), any(), anyInt(), any());
+        verify(f.operatorTransactions, never()).guidanceCommentResult(any(), any(), anyBoolean());
+        verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void allGuidanceCommentPathsRecordKnownOrUnknownOutcomes(boolean confirmed) {
+        for (String path : java.util.List.of("mid-run", "ordinary", "guided")) {
+            Fixture f = path.equals("guided") ? approvedPlanFixture(IssueStatus.FAILED, 2)
+                    : new Fixture(path.equals("mid-run") ? IssueStatus.IN_PROGRESS : IssueStatus.FAILED);
+            if (!confirmed) doThrow(new IllegalStateException("private external failure"))
+                    .when(f.gitHubApiClient).addComment(any(), any(), anyInt(), any());
+            var row = new IssueGuidance(1L, "instructions"); row.setId(17L);
+            if (path.equals("mid-run")) {
+                when(f.operatorTransactions.guide(1L, "instructions", "comment-token"))
+                        .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, true));
+                f.controller.guide(1L, "instructions", "comment-token", f.redirectAttributes);
+            } else if (path.equals("ordinary")) {
+                doReturn(new IssueDispatchService.ClaimResult(true, null, f.issue, 17L)).when(f.dispatchService)
+                        .claimRetry(eq(1L), any(), any(), eq("instructions"));
+                f.controller.retry(1L, "instructions", null, null, null, null, false, f.redirectAttributes);
+                verify(f.workflowService).processIssueAsync(f.issue, "instructions");
+            } else {
+                doReturn(new IssueDispatchService.ClaimResult(true, null, f.issue, 17L)).when(f.dispatchService)
+                        .claimGuidedRetry(eq(1L), eq("instructions"), anyInt());
+                f.controller.retryPlanImplementation(1L, "instructions", f.redirectAttributes);
+                verify(f.workflowService).processIssueAsync(f.issue);
+            }
+            verify(f.gitHubApiClient, times(1)).addComment(any(), any(), anyInt(), any());
+            verify(f.operatorTransactions).guidanceCommentResult(1L, 17L, confirmed);
+            verify(f.redirectAttributes, never()).addFlashAttribute(eq("error"), any());
+        }
+    }
+
+    @Test void guidanceOutcomeAuditFailureDoesNotInvalidateAcceptedGuidanceOrRepeatComment() {
+        Fixture f = new Fixture(IssueStatus.IN_PROGRESS);
+        var row = new IssueGuidance(1L, "same guidance"); row.setId(17L);
+        when(f.operatorTransactions.guide(1L, "same guidance", "stable-token"))
+                .thenReturn(new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, true),
+                        new com.dbbaskette.issuebot.service.workflow.IssueOperatorTransactionService.GuidanceAcceptance(f.issue, row, false));
+        doThrow(new IllegalStateException("private database error"))
+                .when(f.operatorTransactions).guidanceCommentResult(1L, 17L, true);
+        f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
+        f.controller.guide(1L, "same guidance", "stable-token", f.redirectAttributes);
+        verify(f.gitHubApiClient, times(1)).addComment(any(), any(), anyInt(), any());
+        verify(f.operatorTransactions, times(1)).guidanceCommentResult(1L, 17L, true);
+        verify(f.redirectAttributes, times(2)).addFlashAttribute(eq("success"), anyString());
+        verify(f.redirectAttributes, never()).addFlashAttribute(eq("error"), any());
     }
 
     @Test
@@ -1782,11 +1889,8 @@ class IssueControllerTest {
 
         // Each submission is its own row; ordering is carried by created_at,
         // so nothing is ever overwritten (append semantics by construction).
-        ArgumentCaptor<IssueGuidance> captor = ArgumentCaptor.forClass(IssueGuidance.class);
-        verify(f.guidanceRepository, times(2)).save(captor.capture());
-        org.assertj.core.api.Assertions.assertThat(captor.getAllValues())
-                .extracting(IssueGuidance::getGuidance)
-                .containsExactly("First instruction", "Second instruction");
+        verify(f.operatorTransactions).guide(1L, "First instruction", null);
+        verify(f.operatorTransactions).guide(1L, "Second instruction", null);
     }
 
     @Test
@@ -1797,7 +1901,7 @@ class IssueControllerTest {
 
         String view = f.controller.guide(1L, "Look at BarService", f.redirectAttributes);
 
-        verify(f.guidanceRepository).save(any(IssueGuidance.class));
+        verify(f.operatorTransactions).guide(1L, "Look at BarService", null);
         verify(f.eventService).log(eq("GUIDANCE_RECEIVED"), anyString(), any(), eq(f.issue));
         verify(f.redirectAttributes).addFlashAttribute(eq("success"), anyString());
         org.assertj.core.api.Assertions.assertThat(view).isEqualTo("redirect:/issues/1");
@@ -2015,7 +2119,7 @@ class IssueControllerTest {
                 mock(WorkflowCancellationService.class), mock(IssueGuidanceRepository.class), new ObjectMapper(), new com.dbbaskette.issuebot.service.ui.TimelineAssembler(),
                     mock(NotificationRepository.class), new MarkdownRenderer(), dispatch(issues),
                     mock(PlanningVersionRepository.class), mock(ApprovalCardAssembler.class),
-                    new IssueNextActionResolver(), mock(NotificationService.class));
+                    new IssueNextActionResolver(), mock(NotificationService.class), new WorkflowStepperAssembler());
     }
 
     @Test

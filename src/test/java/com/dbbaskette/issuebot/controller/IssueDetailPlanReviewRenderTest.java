@@ -420,7 +420,7 @@ class IssueDetailPlanReviewRenderTest {
             WebContext context = context(issue, List.of(approved), approved, approved, attempts);
             context.setVariable("showPlanGuidance", true);
             context.setVariable("processingMode", mode);
-            String retry = slice(render(context), "class=\"plan-guidance-form\"", "</form>");
+            String retry = slice(render(context), "form=\"plan-guidance-form-42-0\"", "</button>");
 
             if (mode == ProcessingState.RUNNING) {
                 assertThat(retry)
@@ -547,6 +547,64 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     @Test
+    void reviewChangesRenderExactMatchesSeverityTransitionsAndEscapedModelText() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":0.60,"criteria":[
+                   {"id":"AC-1","text":"<img src=x onerror=alert(1)>","verdict":"unmet"}],
+                 "findings":[
+                   {"severity":"medium","category":"security","file":"src/View.java","line":10,
+                    "finding":"<script>alert('model')</script>"},
+                   {"severity":"low","category":"correctness","file":"src/Old.java","line":2,
+                    "finding":"Old issue"}]}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"specComplianceScore":0.90,"criteria":[
+                   {"id":"AC-1","text":"<img src=x onerror=alert(1)>","verdict":"met"}],
+                 "findings":[
+                   {"severity":"high","category":"security","file":"src/View.java","line":44,
+                    "finding":"<script>alert('model')</script>"},
+                   {"severity":"low","category":"code_quality","file":"src/New.java","line":5,
+                    "finding":"New issue"}]}
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("Verdict changed from changes requested to passed.")
+                .contains("Overall score improved 30 points.")
+                .contains("Compared with review 1 (attempt 1).")
+                .contains("Dimension changes")
+                .contains("Newly met")
+                .contains("Persistent")
+                .contains("medium → high")
+                .contains("New issue")
+                .contains("Old issue")
+                .contains("data-ui-state-key=\"issue:42:review:2:dimensions\"")
+                .contains("data-ui-state-key=\"issue:42:review:2:findings\"")
+                .contains("&lt;img src=x onerror=alert(1)&gt;")
+                .contains("&lt;script&gt;alert(&#39;model&#39;)&lt;/script&gt;")
+                .doesNotContain("<img src=x onerror=alert(1)>")
+                .doesNotContain("<script>alert('model')</script>");
+    }
+
+    @Test
+    void missingHistoricalCollectionsRenderUnavailableRatherThanZeroOrResolved() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration review = review(issue, 1, false,
+                "{\"summary\":\"Legacy review\",\"specComplianceScore\":0.70}");
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(review));
+
+        assertThat(html).contains("Acceptance criteria · unavailable")
+                .contains("Findings · unavailable")
+                .contains("Findings were not included in this review")
+                .doesNotContain("0 findings")
+                .doesNotContain(">Resolved</span>");
+    }
+
+    @Test
     void firstScoredReviewUsesUnavailableVerdictAndNewScoreLanguage() {
         TrackedIssue issue = issueAwaitingApproval();
         PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
@@ -632,6 +690,32 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("review-criterion-icon")
                 .contains(">!</span>")
                 .containsSubsequence("Blocking criterion", "Missing guard", "Passing criterion", "Still covered");
+    }
+
+    @Test
+    void completedStructuredReviewWithoutNumericScoreRendersAsSelectedComparison() {
+        TrackedIssue issue = issueAwaitingApproval();
+        PlanningVersion plan = pending(issue, 1, "# Design", "# Plan", null);
+        Iteration first = review(issue, 1, false, """
+                {"specComplianceScore":0.60,
+                 "criteria":[{"id":"AC-1","text":"Preserve state","verdict":"unmet"}],
+                 "findings":[]}
+                """);
+        Iteration second = review(issue, 2, true, """
+                {"criteria":[{"id":"AC-1","text":"Preserve state","verdict":"met"}],
+                 "findings":[]}
+                """);
+
+        String html = render(issue, List.of(plan), plan, plan, List.of(second, first));
+
+        assertThat(html).contains("Implementation review · Attempt 2")
+                .contains("Conforms to plan")
+                .contains("Verdict changed from changes requested to passed.")
+                .contains("Compared with review 1 (attempt 1).")
+                .contains("Newly met")
+                .contains("unmet → met")
+                .contains("review-model · 0 findings")
+                .doesNotContain("class=\"review-score-overview\"");
     }
 
     @Test

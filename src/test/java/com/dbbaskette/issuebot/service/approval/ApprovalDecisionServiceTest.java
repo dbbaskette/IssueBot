@@ -35,6 +35,18 @@ class ApprovalDecisionServiceTest {
 
     @BeforeEach
     void configureRepositoryLock() {
+        var transitions = mock(com.dbbaskette.issuebot.repository.OperatorTransitionRepository.class);
+        var producer = mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class);
+        var stored = new java.util.HashMap<Long, com.dbbaskette.issuebot.model.OperatorTransition>();
+        when(transitions.saveAndFlush(any())).thenAnswer(call -> {
+            com.dbbaskette.issuebot.model.OperatorTransition intent = call.getArgument(0);
+            if (intent.getId() == null) org.springframework.test.util.ReflectionTestUtils.setField(intent, "id", (long) stored.size() + 1);
+            stored.put(intent.getId(), intent); return intent;
+        });
+        when(transitions.findById(anyLong())).thenAnswer(call -> Optional.ofNullable(stored.get(call.getArgument(0))));
+        var tx = new ApprovalDecisionTransactionManager(issues, repos, transitions, producer, events);
+        org.springframework.test.util.ReflectionTestUtils.setField(decisions, "transactions", tx);
+        org.springframework.test.util.ReflectionTestUtils.setField(decisions, "decisions", producer);
         when(issues.findRepoIdByIssueId(1L)).thenReturn(Optional.of(10L));
         when(repos.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(new WatchedRepo("acme", "widgets")));
@@ -44,6 +56,9 @@ class ApprovalDecisionServiceTest {
     void decisionMethodsAreTransactionalAndUseFreshLockedIssueReads() throws Exception {
         assertThat(ApprovalDecisionService.class
                 .getDeclaredMethod("approve", Long.class, boolean.class)
+                .getAnnotation(Transactional.class).propagation())
+                .isEqualTo(org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED);
+        assertThat(ApprovalDecisionTransactionManager.class.getDeclaredMethod("begin", Long.class, boolean.class)
                 .getAnnotation(Transactional.class)).isNotNull();
         assertThat(ApprovalDecisionService.class
                 .getDeclaredMethod("reject", Long.class, String.class)
@@ -105,8 +120,7 @@ class ApprovalDecisionServiceTest {
 
         assertThat(result.outcome()).isEqualTo(MERGE_CONFIRMED_OPEN);
         assertThat(result.message()).isEqualTo(
-                "GitHub did not merge PR #55: merge conflict. GitHub confirms the pull request "
-                        + "is still open; the IssueBot issue was not completed.");
+                "GitHub confirms the pull request is still open; the issue was not completed.");
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
         verify(issues, never()).save(any());
         verifyNoInteractions(events);
@@ -127,8 +141,7 @@ class ApprovalDecisionServiceTest {
 
         assertThat(result.outcome()).isEqualTo(MERGE_OUTCOME_UNKNOWN);
         assertThat(result.message()).isEqualTo(
-                "GitHub merge outcome for PR #55 is unknown after: merge timed out. Verify the "
-                        + "pull request on GitHub before retrying; the IssueBot issue was not completed.");
+                "GitHub merge outcome is unknown. Verify the pull request before retrying; no merge will be replayed while its outcome is unknown.");
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
         verify(issues, never()).save(any());
         verifyNoInteractions(events);
@@ -169,8 +182,7 @@ class ApprovalDecisionServiceTest {
 
         assertThat(result.outcome()).isEqualTo(MERGE_CONFIRMED_OPEN);
         assertThat(result.message()).isEqualTo(
-                "GitHub did not merge PR #55: empty merge response. GitHub confirms the pull "
-                        + "request is still open; the IssueBot issue was not completed.");
+                "GitHub confirms the pull request is still open; the issue was not completed.");
         assertThat(issue.getStatus()).isEqualTo(IssueStatus.AWAITING_APPROVAL);
         verify(issues, never()).saveAndFlush(any());
         verifyNoInteractions(events);

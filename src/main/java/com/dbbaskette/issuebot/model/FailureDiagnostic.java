@@ -16,5 +16,6 @@ public class FailureDiagnostic {
  @Enumerated(EnumType.STRING) @Column(nullable=false) private FailureRetryability retryability;
  protected FailureDiagnostic() {}
  public FailureDiagnostic(TrackedIssue i,FailureCategory c,String s,String p,String d,String a,FailureRetryability r){issue=i;category=c;summary=s;phase=p;technicalDetails=d;suggestedAction=a;retryability=r;}
+ public Long getId(){return id;}
  public String getTechnicalDetails(){return technicalDetails;} public String getSummary(){return summary;} public FailureCategory getCategory(){return category;} public String getPhase(){return phase;} public String getSuggestedAction(){return suggestedAction;} public FailureRetryability getRetryability(){return retryability;} public LocalDateTime getOccurredAt(){return occurredAt;}
 }

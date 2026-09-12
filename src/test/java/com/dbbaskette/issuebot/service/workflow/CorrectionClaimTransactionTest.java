@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import(IterationManager.class)
 @TestPropertySource(properties = "issuebot.github.token=test-token")
@@ -93,6 +94,7 @@ class CorrectionClaimTransactionTest {
             WatchedRepo repo = repos.save(new WatchedRepo(
                     "acme", includePriorGuidedRetryRow ? "widgets-success" : "widgets-rollback"));
             TrackedIssue issue = new TrackedIssue(repo, 42, "Correct the approved plan");
+            issue.setStatus(com.dbbaskette.issuebot.model.IssueStatus.IN_PROGRESS);
             issue.setCurrentIteration(1);
             issue.setCurrentPhase("INDEPENDENT_REVIEW");
             issue.setPlanConformanceAttempt(1);

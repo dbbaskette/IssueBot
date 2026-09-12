@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+@com.dbbaskette.issuebot.service.history.WithDecisionHistory
 @DataJpaTest
 @Import({IssueDispatchTransactionManager.class, PlanFirstTransactionManager.class, ProcessingControlService.class, WorkflowCancellationService.class})
 @TestPropertySource(properties = {
@@ -43,6 +44,7 @@ import static org.mockito.Mockito.*;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class IssueDispatchTransactionManagerTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean private PrerequisiteStatusService prerequisites;
 
     @Autowired private IssueDispatchTransactionManager dispatch;
     @Autowired private PlanFirstTransactionManager planTransactions;
@@ -54,6 +56,24 @@ class IssueDispatchTransactionManagerTest {
     @Autowired private DecompositionGroupRepository decompositionGroups;
     @Autowired private DecompositionChildRepository decompositionChildren;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
+    @Test void knownUnmetPrerequisiteRejectsBothLockedRetryClaimsWithoutMutation() {
+        Long ordinary = seedApprovedIssue(IssueStatus.FAILED, 0, 91);
+        Long guided = seedApprovedIssue(IssueStatus.FAILED, 2, 92);
+        seedReview(guided, 2, false, "{}");
+        when(prerequisites.retryRejection()).thenReturn(PrerequisiteStatusService.RETRY_BLOCKED);
+        for (Long id : List.of(ordinary, guided)) {
+            var before = issues.findById(id).orElseThrow();
+            int run = before.getWorkflowRun();
+            var result = id.equals(ordinary)
+                    ? dispatch.claimRetry(id, candidate -> null, IssueDispatchTransactionManager.RetryMutation.none())
+                    : dispatch.claimGuidedRetry(id, "Guidance", 100);
+            assertThat(result.claimed()).isFalse();
+            assertThat(result.reason()).isEqualTo(PrerequisiteStatusService.RETRY_BLOCKED);
+            var after = issues.findById(id).orElseThrow();
+            assertThat(after.getStatus()).isEqualTo(IssueStatus.FAILED);
+            assertThat(after.getWorkflowRun()).isEqualTo(run);
+        }
+    }
     @Autowired private PlatformTransactionManager transactionManager;
 
     @AfterEach
@@ -351,6 +371,7 @@ class IssueDispatchTransactionManagerTest {
         IssueDispatchTransactionManager manager = new IssueDispatchTransactionManager(
                 mockIssues, mockRepos, mockControls, mock(IssueGuidanceRepository.class),
                 mock(IterationRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(manager, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
 
         IssueDispatchService.ClaimResult result = manager.claimStart(42L);
 
@@ -815,6 +836,7 @@ class IssueDispatchTransactionManagerTest {
         IssueDispatchTransactionManager manager = new IssueDispatchTransactionManager(
                 mockIssues, mockRepos, mockControls, mock(IssueGuidanceRepository.class),
                 mock(IterationRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(manager, "decisions", mock(com.dbbaskette.issuebot.service.history.DecisionProducer.class));
 
         IssueDispatchService.ClaimResult duplicateResult = manager.claimReadyStart(143L);
         IssueDispatchService.ClaimResult ownerResult = manager.claimReadyStart(141L);

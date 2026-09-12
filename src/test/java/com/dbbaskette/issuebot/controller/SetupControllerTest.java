@@ -1,6 +1,7 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.config.IssueBotProperties;
+import com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.repository.NotificationRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
@@ -26,6 +27,65 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class SetupControllerTest {
+    @Test void recheckRequiresCsrfAndGetNeverCreatesWorkDirectory(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        var props = new IssueBotProperties();
+        var work = directory.resolve("work");
+        props.setWorkDirectory(work.toString());
+        var harness = mock(CodingHarnessService.class);
+        when(harness.displayName()).thenReturn("Selected harness");
+        var github = mock(GitHubApiClient.class);
+        var controller = new SetupController(harness, props, mock(IssuePollingService.class),
+                mock(TrackedIssueRepository.class), github, repoRepository,
+                webhookController, webhookDeliveryLog, mock(NotificationRepository.class));
+        var tokens = new org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository();
+        var csrfFilter = new org.springframework.security.web.csrf.CsrfFilter(tokens);
+        csrfFilter.setRequestHandler(new org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler());
+        var mvc = MockMvcBuilders.standaloneSetup(controller).addFilters(csrfFilter).build();
+        mvc.perform(get("/setup")).andExpect(status().isOk());
+        mvc.perform(get("/setup/prereqs")).andExpect(status().isOk());
+        assertThat(java.nio.file.Files.exists(work)).isFalse();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/setup/prereqs"))
+                .andExpect(status().isForbidden());
+        verify(harness, never()).probeCliAvailability(anyString());
+        verifyNoInteractions(github);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/setup/prereqs")
+                .with(request -> {
+                    var token = tokens.generateToken(request);
+                    tokens.saveToken(token, request, new org.springframework.mock.web.MockHttpServletResponse());
+                    request.addParameter(token.getParameterName(), token.getToken());
+                    return request;
+                }))
+                .andExpect(status().isOk());
+        verify(harness).probeCliAvailability("claude");
+        assertThat(java.nio.file.Files.isDirectory(work)).isTrue();
+    }
+
+    @Test void githubUnavailableIsUnknownNotInvalid() {
+        var github = mock(GitHubApiClient.class);
+        when(github.validateToken()).thenReturn(new TokenStatus(TokenState.UNKNOWN, "private network detail"));
+        var model = new ExtendedModelMap();
+        controller(github, "test-token").recheck(model);
+        assertThat(result(model, "GitHub Token")).isEqualTo(PrerequisiteStatusService.Result.UNKNOWN);
+        assertThat(model.toString()).doesNotContain("private network detail", "test-token");
+    }
+
+    @Test void unknownHarnessOutcomeIsNotReportedAsAnUnmetPrerequisite() {
+        var github = mock(GitHubApiClient.class);
+        when(github.validateToken()).thenReturn(new TokenStatus(TokenState.VALID, "Verified"));
+        var controller = controller(github, "test-token");
+        var harness = (CodingHarnessService) org.springframework.test.util.ReflectionTestUtils.getField(controller, "harnessService");
+        when(harness.displayName()).thenReturn("Selected harness");
+        when(harness.probeSubscriptionAuthentication("claude")).thenReturn(HarnessReadiness.UNKNOWN);
+        var model = new ExtendedModelMap();
+        controller.recheck(model);
+        assertThat(result(model, "Selected harness Auth")).isEqualTo(PrerequisiteStatusService.Result.UNKNOWN);
+        // Other components may independently be unmet; this auth observation must remain unknown.
+    }
+    private static PrerequisiteStatusService.Result result(Model model, String label) {
+        @SuppressWarnings("unchecked")
+        var rows = (List<SetupController.PrerequisiteRow>) model.getAttribute("prerequisiteRows");
+        return rows.stream().filter(row -> label.equals(row.label())).findFirst().orElseThrow().result();
+    }
 
     @Test void setupRequestSkipsAllCatalogDiscoveryAndReadinessChecksRemainFresh() throws Exception {
         var selected = new CountingAdapter("claude", "Selected Harness");
@@ -49,12 +109,16 @@ class SetupControllerTest {
         assertThat(selected.availabilityCalls).isZero();
         assertThat(selected.subscriptionCalls).isZero();
 
-        // Preserve the existing HTMX GET contract; each explicit check observes fresh credentials.
         mvc.perform(get("/setup/prereqs")).andExpect(status().isOk())
-                .andExpect(model().attribute("cliAuthenticated", false));
+                .andExpect(model().attribute("prerequisiteState", com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.NOT_VERIFIED));
+        assertThat(selected.availabilityCalls).isZero();
+        assertThat(selected.subscriptionCalls).isZero();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/setup/prereqs"))
+                .andExpect(status().isOk());
         selected.subscriptionReady = true;
-        mvc.perform(get("/setup/prereqs")).andExpect(status().isOk())
-                .andExpect(model().attribute("cliAuthenticated", true));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/setup/prereqs"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/setup/prereqs")).andExpect(status().isOk());
         assertThat(selected.availabilityCalls).isEqualTo(2);
         assertThat(selected.subscriptionCalls).isEqualTo(2);
         assertThat(other.availabilityCalls).isZero();
@@ -78,6 +142,7 @@ class SetupControllerTest {
         public HarnessCapabilities capabilities() { return HarnessCapabilities.NONE; }
         public boolean checkCliAvailable() { availabilityCalls++; return true; }
         public boolean checkSubscriptionAuthentication() { subscriptionCalls++; return subscriptionReady; }
+        public HarnessReadiness probeSubscriptionAuthentication() { return checkSubscriptionAuthentication() ? HarnessReadiness.READY : HarnessReadiness.UNMET; }
         public HarnessExecutionResult execute(HarnessExecutionRequest request,
                 java.util.function.Consumer<String> lines) { throw new AssertionError("Setup cannot execute work"); }
     }
@@ -85,19 +150,19 @@ class SetupControllerTest {
     @Test void readinessCannotReportSubscriptionSuccessFromAGenericLogin() {
         var harness = mock(CodingHarnessService.class);
         when(harness.displayName()).thenReturn("Example Harness");
-        when(harness.checkCliAvailable()).thenReturn(true);
+        when(harness.probeCliAvailability(anyString())).thenReturn(HarnessReadiness.READY);
         when(harness.checkAuthentication()).thenReturn(true);
-        when(harness.checkSubscriptionAuthentication("example")).thenReturn(false);
+        when(harness.probeSubscriptionAuthentication("example")).thenReturn(HarnessReadiness.UNMET);
         var props = new IssueBotProperties();
         props.setAgentProvider("example");
         var controller = new SetupController(harness, props, mock(IssuePollingService.class),
                 mock(TrackedIssueRepository.class), mock(GitHubApiClient.class), repoRepository,
                 webhookController, webhookDeliveryLog, mock(NotificationRepository.class));
         var model = new ExtendedModelMap();
-        controller.prereqs(model);
-        assertThat(model.get("cliAvailable")).isEqualTo(true);
-        assertThat(model.get("cliAuthenticated")).isEqualTo(false);
-        verify(harness).checkSubscriptionAuthentication("example");
+        controller.recheck(model);
+        assertThat(result(model, "Example Harness")).isEqualTo(PrerequisiteStatusService.Result.READY);
+        assertThat(result(model, "Example Harness Auth")).isEqualTo(PrerequisiteStatusService.Result.UNMET);
+        verify(harness).probeSubscriptionAuthentication("example");
     }
 
     @Test void setupUsesSelectedHarnessMetadataWithoutRunningReadinessChecks() {
@@ -129,8 +194,8 @@ class SetupControllerTest {
         IssueBotProperties props = new IssueBotProperties();
         props.getGithub().setToken(token);
         CodingHarnessService claude = mock(CodingHarnessService.class);
-        when(claude.checkCliAvailable()).thenReturn(true);
-        when(claude.checkSubscriptionAuthentication("claude")).thenReturn(true);
+        when(claude.probeCliAvailability(anyString())).thenReturn(HarnessReadiness.READY);
+        when(claude.probeSubscriptionAuthentication("claude")).thenReturn(HarnessReadiness.READY);
         lenient().when(repoRepository.findAll()).thenReturn(List.of());
         return new SetupController(claude, props, mock(IssuePollingService.class),
                 mock(TrackedIssueRepository.class), gitHub, repoRepository, webhooks, webhookDeliveryLog,
@@ -144,12 +209,10 @@ class SetupControllerTest {
                 new TokenStatus(TokenState.INVALID, "GitHub rejected the token (401)."));
 
         Model model = new ExtendedModelMap();
-        controller(gitHub, "ghp_bad").prereqs(model);
+        controller(gitHub, "ghp_bad").recheck(model);
 
-        assertThat(model.getAttribute("githubTokenSet")).isEqualTo(true);
-        assertThat(model.getAttribute("githubTokenValid")).isEqualTo(false);
-        assertThat(model.getAttribute("githubTokenMessage")).asString().contains("401");
-        assertThat(model.getAttribute("allPassed")).isEqualTo(false);
+        assertThat(result(model, "GitHub Token")).isEqualTo(PrerequisiteStatusService.Result.UNMET);
+        assertThat(model.getAttribute("prerequisiteState")).isEqualTo(com.dbbaskette.issuebot.service.ui.RecoveryGuidance.PrerequisiteState.KNOWN_UNMET);
     }
 
     @Test
@@ -159,10 +222,9 @@ class SetupControllerTest {
                 new TokenStatus(TokenState.VALID, "Token authenticated with GitHub."));
 
         Model model = new ExtendedModelMap();
-        controller(gitHub, "ghp_good").prereqs(model);
+        controller(gitHub, "ghp_good").recheck(model);
 
-        assertThat(model.getAttribute("githubTokenSet")).isEqualTo(true);
-        assertThat(model.getAttribute("githubTokenValid")).isEqualTo(true);
+        assertThat(result(model, "GitHub Token")).isEqualTo(PrerequisiteStatusService.Result.READY);
     }
 
     @Test
@@ -170,10 +232,9 @@ class SetupControllerTest {
         GitHubApiClient gitHub = mock(GitHubApiClient.class);
 
         Model model = new ExtendedModelMap();
-        controller(gitHub, null).prereqs(model);
+        controller(gitHub, null).recheck(model);
 
-        assertThat(model.getAttribute("githubTokenSet")).isEqualTo(false);
-        assertThat(model.getAttribute("githubTokenValid")).isEqualTo(false);
+        assertThat(result(model, "GitHub Token")).isEqualTo(PrerequisiteStatusService.Result.UNMET);
         verify(gitHub, never()).validateToken();
     }
 

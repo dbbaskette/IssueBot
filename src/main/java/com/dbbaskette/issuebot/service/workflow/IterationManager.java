@@ -36,6 +36,7 @@ import java.util.List;
  */
 @Component
 public class IterationManager {
+    @Autowired private com.dbbaskette.issuebot.service.history.DecisionProducer decisions;
 
     private static final Logger log = LoggerFactory.getLogger(IterationManager.class);
     private static final int DEFAULT_COOLDOWN_HOURS = 24;
@@ -86,8 +87,11 @@ public class IterationManager {
      */
     @Transactional
     public Iteration claimPlanCorrectionIteration(TrackedIssue trackedIssue, int iterationNum) {
-        TrackedIssue claimTarget = issueRepository.findById(trackedIssue.getId())
+        repoRepository.findByIdForUpdate(trackedIssue.getRepo().getId()).orElseThrow();
+        TrackedIssue claimTarget = issueRepository.findByIdForDispatch(trackedIssue.getId())
                 .orElseThrow(() -> new IllegalStateException("Tracked issue no longer exists"));
+        if (claimTarget.getWorkflowRun() != trackedIssue.getWorkflowRun() || claimTarget.getStatus() != IssueStatus.IN_PROGRESS)
+            throw new IllegalStateException("Correction claim is stale");
         if (!claimTarget.isPlanCorrectionPending()) {
             throw new IllegalStateException("Plan correction is not pending");
         }
@@ -98,7 +102,9 @@ public class IterationManager {
         Iteration authoritative = iterationRepository
                 .findFirstByIssueIdAndIterationNumOrderByIdDesc(
                         claimTarget.getId(), iterationNum)
-                .filter(candidate -> candidate.getCompletedAt() == null)
+                .filter(candidate -> candidate.getCompletedAt() == null
+                        && candidate.matchesAttemptIdentity(claimTarget.getWorkflowRun(),
+                        approvedPlanId(claimTarget)))
                 .orElse(null);
 
         claimTarget.setCurrentIteration(iterationNum);
@@ -108,11 +114,61 @@ public class IterationManager {
         issueRepository.flush();
 
         if (authoritative != null) {
+            recordRetry(claimTarget, authoritative);
             return authoritative;
         }
-        Iteration iteration = new Iteration(claimTarget, iterationNum);
+        Iteration iteration = new Iteration(claimTarget, iterationNum,
+                claimTarget.getWorkflowRun(), approvedPlanId(claimTarget));
         iteration.setImplModel(claimTarget.getResolvedImplModel());
-        return iterationRepository.save(iteration);
+        iterationRepository.save(iteration);
+        iterationRepository.flush();
+        recordRetry(claimTarget, iteration);
+        return iteration;
+    }
+
+    /** The ordinary iteration claim and retry choice commit together before execution. */
+    @Transactional
+    public Iteration claimImplementationIteration(TrackedIssue expected, int number) {
+        repoRepository.findByIdForUpdate(expected.getRepo().getId()).orElseThrow();
+        TrackedIssue issue = issueRepository.findByIdForDispatch(expected.getId()).orElseThrow();
+        if (issue.getWorkflowRun() != expected.getWorkflowRun() || issue.getStatus() != IssueStatus.IN_PROGRESS)
+            throw new IllegalStateException("Iteration claim is stale");
+        var existing = iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), number)
+                .filter(i -> i.getCompletedAt() == null
+                        && i.getImplementationCompletedAt() == null
+                        && i.matchesAttemptIdentity(issue.getWorkflowRun(), approvedPlanId(issue)))
+                .orElse(null);
+        if (number == issue.getCurrentIteration() && existing != null) return existing;
+        if (number != issue.getCurrentIteration()
+                && number != issue.getCurrentIteration() + 1) {
+            throw new IllegalStateException("Iteration must be current or advance by one");
+        }
+        issue.setCurrentIteration(number);
+        issue.setCurrentPhase("IMPLEMENTATION");
+        issueRepository.saveAndFlush(issue);
+        var iteration = existing == null
+                ? new Iteration(issue, number, issue.getWorkflowRun(), approvedPlanId(issue))
+                : existing;
+        iteration.setImplModel(issue.getResolvedImplModel());
+        iterationRepository.saveAndFlush(iteration);
+        if (number > 1) recordRetry(issue, iteration);
+        return iteration;
+    }
+
+    private Long approvedPlanId(TrackedIssue issue) {
+        return issue.getApprovedPlanningVersion() == null
+                ? null : issue.getApprovedPlanningVersion().getId();
+    }
+
+    private void recordRetry(TrackedIssue issue, Iteration iteration) {
+        decisions.record(issue, com.dbbaskette.issuebot.service.history.DecisionProducer.run(issue)
+                        + ":iteration:" + iteration.getId() + ":retry",
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Actor.AUTOMATION,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Action.AUTO_RETRY,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Outcome.ACCEPTED,
+                com.dbbaskette.issuebot.service.history.DecisionDraft.Reason.POLICY_AUTOMATIC,
+                issue.getApprovedPlanningVersion() == null ? null : issue.getApprovedPlanningVersion().getId(),
+                iteration.getId(), null, null);
     }
 
     /**
@@ -433,7 +489,7 @@ public class IterationManager {
 
         enterCooldown(trackedIssue);
 
-        notificationService.warn(notificationTitle,
+        notificationService.recovery(notificationTitle,
                 repo.fullName() + " #" + issueNumber + " — " + notificationDetail, trackedIssue);
 
         eventService.log(eventType, eventMessage, repo, trackedIssue);

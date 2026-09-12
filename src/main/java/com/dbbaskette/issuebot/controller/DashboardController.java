@@ -49,7 +49,6 @@ public class DashboardController {
         model.addAttribute("contentTemplate", "dashboard");
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
-        model.addAttribute("unreadNotificationCount", notificationRepository.countByReadAtIsNull());
 
         populateMetrics(model);
 
