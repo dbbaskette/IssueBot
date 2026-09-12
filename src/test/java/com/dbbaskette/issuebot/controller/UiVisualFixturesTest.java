@@ -8,6 +8,10 @@ import com.dbbaskette.issuebot.service.claude.ClaudeCodeService;
 import com.dbbaskette.issuebot.service.codex.CodexModelCatalog;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.harness.CodingHarnessService;
+import com.dbbaskette.issuebot.service.harness.HarnessReadiness;
+import com.dbbaskette.issuebot.service.history.DecisionDraft;
+import com.dbbaskette.issuebot.service.notification.NotificationTriageService;
+import com.dbbaskette.issuebot.service.workflow.PrerequisiteStatusService;
 import com.dbbaskette.issuebot.service.polling.IssuePollingService;
 import com.dbbaskette.issuebot.service.workflow.ProcessingControlService;
 import com.dbbaskette.issuebot.validation.StartupValidator;
@@ -35,6 +39,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
 /** Synthetic, read-only real-MVC fixtures for browser review without starting workers. */
 @SpringBootTest(properties = {
@@ -75,6 +81,10 @@ class UiVisualFixturesTest {
     @Autowired EventRepository events;
     @Autowired RepoLessonRepository lessons;
     @Autowired NotificationRepository notifications;
+    @Autowired com.dbbaskette.issuebot.service.history.DecisionHistoryService decisions;
+    @Autowired FailureDiagnosticRepository diagnostics;
+    @Autowired PrerequisiteStatusService prerequisites;
+    @Autowired NotificationTriageService triage;
     @Autowired IssueBotProperties properties;
     @Autowired SettingsController settingsController;
     @Autowired ObjectMapper objectMapper;
@@ -99,8 +109,8 @@ class UiVisualFixturesTest {
         when(codexModelCatalog.contains(org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(invocation -> CodexModelCatalog.fallbackModels().stream()
                         .anyMatch(model -> model.id().equals(invocation.getArgument(0))));
-        when(harnessService.checkCliAvailable()).thenReturn(true);
-        when(harnessService.checkSubscriptionAuthentication("codex")).thenReturn(false);
+        when(harnessService.probeCliAvailability("codex")).thenReturn(HarnessReadiness.READY);
+        when(harnessService.probeSubscriptionAuthentication("codex")).thenReturn(HarnessReadiness.UNMET);
         when(harnessService.displayName()).thenReturn("Codex CLI");
         when(gitHubApiClient.validateToken()).thenReturn(new GitHubApiClient.TokenStatus(
                 GitHubApiClient.TokenState.INVALID, "Synthetic fixture: token rejected."));
@@ -121,6 +131,7 @@ class UiVisualFixturesTest {
         settingsController.setConfigPathForTests(syntheticConfig);
 
         Map<String, ExportedRoute> routes = new LinkedHashMap<>();
+        page(routes, "/notifications?fixture=empty", "notifications-empty");
         String emptyInbox = render(get("/inbox").param("fixture", "empty-paused"), 200);
         String emptyInboxFragment = render(hx(get("/inbox").param("fixture", "empty-paused")), 200);
         assertThat(emptyInbox).contains("Needs You", "No actions need your attention", "Work stopped");
@@ -158,6 +169,15 @@ class UiVisualFixturesTest {
         stageIssue.setResolvedReviewModel("gpt-5.6-terra");
         stageIssue = issues.saveAndFlush(stageIssue);
 
+        for (int index = 0; index < 31; index++) {
+            var actor = DecisionDraft.Actor.values()[index % 3];
+            decisions.append(new DecisionDraft(stageIssue.getId(), repo.getId(), "fixture-run-1",
+                    "fixture-decision-" + index, actor, DecisionDraft.Action.RETRY, DecisionDraft.Outcome.ACCEPTED,
+                    actor == DecisionDraft.Actor.OPERATOR ? DecisionDraft.Reason.USER_REQUEST :
+                            actor == DecisionDraft.Actor.AUTOMATION ? DecisionDraft.Reason.POLICY_AUTOMATIC : null,
+                    null, null, null, null, null));
+        }
+
         PlanningVersion oldPlan = PlanningVersion.pending(stageIssue, 2,
                 "## Earlier design\n\nUse a process-local lock.",
                 "## Earlier plan\n\n1. Add an in-memory guard.", "CODEX", "gpt-5.6-sol", null);
@@ -175,7 +195,9 @@ class UiVisualFixturesTest {
         stageIssue = issues.saveAndFlush(stageIssue);
 
         Iteration firstIteration = reviewIteration(stageIssue, 1, false,
-                REVIEW_JSON.replace("0.94", "0.72"), DIFF.replace("claimAtomically", "findForUpdate"));
+                REVIEW_JSON.replace("0.94", "0.72").replace("\"verdict\":\"met\"", "\"verdict\":\"unmet\"")
+                        .replace("\"findings\":[]", "\"findings\":[{\"severity\":\"medium\",\"category\":\"correctness\",\"file\":\"src/Checkpoint.java\",\"line\":10,\"finding\":\"Restart race remains\"}]"),
+                DIFF.replace("claimAtomically", "findForUpdate"));
         firstIteration.setSelfAssessment("The first attempt exposed a restart race.");
         iterations.saveAndFlush(firstIteration);
         Iteration secondIteration = reviewIteration(stageIssue, 2, true, REVIEW_JSON, DIFF);
@@ -229,6 +251,37 @@ class UiVisualFixturesTest {
         error.setReadAt(LocalDateTime.now().minusMinutes(2));
         notifications.saveAndFlush(error);
 
+        TrackedIssue recoveryIssue = issues.saveAndFlush(issue(repo, 147,
+                "Recover after the independent reviewer became unavailable without losing operator guidance "
+                        + "or replaying completed verification and previously approved workflow decisions",
+                IssueStatus.FAILED, "INDEPENDENT_REVIEW"));
+        diagnostics.saveAndFlush(new FailureDiagnostic(recoveryIssue, FailureCategory.REVIEW_INFRASTRUCTURE,
+                "Synthetic reviewer timeout", "INDEPENDENT_REVIEW",
+                "Synthetic diagnostic evidence: " + "reviewer did not return a usable assessment; ".repeat(45),
+                "Review setup", FailureRetryability.RETRYABLE));
+        String recoveryRoute = "/issues/" + recoveryIssue.getId();
+        when(processingControl.mode()).thenReturn(ProcessingState.RUNNING);
+        when(processingControl.isRunning()).thenReturn(true);
+        String unknownRecovery = page(routes, recoveryRoute + "?fixture=unverified", "recovery-unverified");
+        assertThat(unknownRecovery).contains("Not verified", "hx-preserve=\"true\"");
+
+        TrackedIssue legacyIssue = issues.saveAndFlush(issue(repo, 148,
+                "Legacy review with unavailable findings and unknown attempt identity", IssueStatus.FAILED, null));
+        Iteration legacy = new Iteration(legacyIssue, 1, null, null);
+        legacy.setReviewJson("{\"summary\":\"Legacy imported review\",\"specComplianceScore\":0.7}");
+        legacy.setReviewPassed(false);
+        iterations.saveAndFlush(legacy);
+        String legacyPage = page(routes, "/issues/" + legacyIssue.getId(), "review-unavailable-legacy");
+        assertThat(legacyPage).contains("Acceptance criteria · unavailable", "Findings · unavailable");
+        page(routes, "/issues/" + queuedIssue.getId(), "issue-empty-history");
+        page(routes, "/issues/" + prIssue.getId(), "issue-pr-approval");
+        page(routes, "/issues/" + blockedIssue.getId(), "issue-blocked");
+        page(routes, "/issues/" + runningIssue.getId(), "issue-running");
+        putFragment(routes, "/issues/" + queuedIssue.getId() + "/decisions", "decisions-empty",
+                render(get("/issues/" + queuedIssue.getId() + "/decisions"), 200));
+        when(processingControl.mode()).thenReturn(ProcessingState.STOPPED);
+        when(processingControl.isRunning()).thenReturn(false);
+
         String dashboard = render(get("/"), 200);
         String dashboardFragment = render(hx(get("/")), 200);
         assertThat(dashboard).contains("Dashboard", "Needs your decision", "Currently processing",
@@ -258,6 +311,19 @@ class UiVisualFixturesTest {
                 "Version 3", "Version 2", "data-diff-viewer", "Restart test passes",
                 "iteration-history");
         put(routes, detailRoute, "issue-detail", detail, detailFragment);
+        assertThat(detail).contains("Newly met", "Restart race remains");
+        page(routes, detailRoute + "?reviewAttempt=" + firstIteration.getId(), "review-selected-first");
+        for (int page = 0; page < 2; page++) {
+            String route = detailRoute + "/decisions?page=" + page;
+            String history = render(get(route), 200);
+            assertThat(history).contains("Operator", "Automation", "Actor unavailable");
+            putFragment(routes, route, "decisions-page-" + page, history);
+            if (page == 0) putFragment(routes, detailRoute + "/decisions", "decisions", history);
+        }
+        page(routes, "/issues?q=checkpoint", "navigation-filtered");
+        page(routes, "/issues?q=fixture", "navigation-sequence");
+        page(routes, "/issues?status=FAILED", "navigation-failed");
+        page(routes, "/issues?q=definitely-no-results", "navigation-empty");
 
         String liveStatusRoute = detailRoute + "/live-status";
         String liveStatus = render(get(liveStatusRoute), 200);
@@ -286,13 +352,32 @@ class UiVisualFixturesTest {
 
         String setup = render(get("/setup"), 200);
         String setupFragment = render(hx(get("/setup")), 200);
-        assertThat(setup).contains("Setup", "Prerequisites", "Checking", "Optional: webhooks");
+        assertThat(setup).contains("Setup", "Prerequisites", "Not verified", "Optional: webhooks");
         put(routes, "/setup", "setup", setup, setupFragment);
 
         String prereqs = render(get("/setup/prereqs"), 200);
-        assertThat(prereqs).contains("OK", "FAILED", "INVALID",
-                "Synthetic fixture: token rejected.", tempDir.toString());
+        assertThat(prereqs).contains("Not verified");
+        verify(harnessService, never()).probeCliAvailability("codex");
+        verify(harnessService, never()).probeSubscriptionAuthentication("codex");
+        verify(gitHubApiClient, never()).validateToken();
         putFragment(routes, "/setup/prereqs", "setup-prereqs", prereqs);
+        // Explicit synthetic POST only: providers are mocks; filesystem checks use the isolated @TempDir.
+        String checked = render(post("/setup/prereqs").with(csrf()), 200);
+        assertThat(checked).contains("Needs attention", "A prerequisite needs attention");
+        putFragment(routes, "/setup/prereqs?fixture=known-unmet", "setup-prereqs-known-unmet", checked);
+        page(routes, "/setup?fixture=known-unmet", "setup-known-unmet");
+        when(processingControl.mode()).thenReturn(ProcessingState.RUNNING);
+        when(processingControl.isRunning()).thenReturn(true);
+        String knownRecovery = page(routes, recoveryRoute, "recovery-known-unmet");
+        assertThat(knownRecovery).contains("Retry is blocked", "disabled=\"disabled\"", "hx-preserve=\"true\"");
+        putFragment(routes, recoveryRoute + "/live-status", "recovery-live-known-unmet",
+                render(get(recoveryRoute + "/live-status"), 200));
+        var context = prerequisites.context("codex");
+        for (var component : PrerequisiteStatusService.Component.values())
+            prerequisites.record(context, component, PrerequisiteStatusService.Result.READY);
+        page(routes, recoveryRoute + "?fixture=verified-ready", "recovery-verified-ready");
+        putFragment(routes, recoveryRoute + "/live-status?fixture=verified-ready", "recovery-live-ready",
+                render(get(recoveryRoute + "/live-status"), 200));
 
         String costPage = render(get("/costs"), 200);
         String costFragment = render(hx(get("/costs")), 200);
@@ -303,10 +388,11 @@ class UiVisualFixturesTest {
         long unreadBefore = notifications.countByReadAtIsNull();
         String panel = render(get("/notifications/panel"), 200);
         assertThat(panel).contains(info.getTitle(), warn.getTitle(), error.getTitle(),
-                "sev-info", "sev-warn", "sev-error", "Mark all read");
+                "Mark all read");
         assertThat(notifications.countByReadAtIsNull()).isEqualTo(unreadBefore);
         assertThat(notifications.findById(info.getId()).orElseThrow().getReadAt()).isNull();
         putFragment(routes, "/notifications/panel", "notifications-panel", panel);
+        exportNotificationTransitions(routes, repo, stageIssue);
 
         String missingRoute = "/issues/999999";
         String errorPage = render(get(missingRoute), 404);
@@ -314,8 +400,10 @@ class UiVisualFixturesTest {
         assertThat(errorPage).contains("Not Found", "Issue not found", "Back to the queue");
         put(routes, missingRoute, "error-missing-issue", errorPage, errorFragment);
 
-        verify(harnessService).checkCliAvailable();
-        verify(harnessService).checkSubscriptionAuthentication("codex");
+        verify(harnessService).probeCliAvailability("codex");
+        verify(harnessService).probeSubscriptionAuthentication("codex");
+        verify(harnessService, never()).checkCliAvailable();
+        verify(harnessService, never()).checkSubscriptionAuthentication("codex");
         verify(claudeCodeService, never()).checkCliAvailable();
         verify(claudeCodeService, never()).checkAuthentication();
         verify(gitHubApiClient).validateToken();
@@ -324,6 +412,88 @@ class UiVisualFixturesTest {
                 org.mockito.ArgumentMatchers.anyString());
 
         export(routes);
+    }
+
+    private void exportNotificationTransitions(Map<String, ExportedRoute> routes,
+                                              WatchedRepo repo, TrackedIssue issue) throws Exception {
+        String groupKey = "issue:" + repo.getId() + ":" + issue.getId();
+        for (int index = 0; index < 31; index++) {
+            Notification notification = new Notification(Notification.Severity.WARN,
+                    "Approval evidence update " + index,
+                    "Synthetic grouped history: " + "Confirm the approved artifact and review identity before continuing. ".repeat(10),
+                    issue.getId());
+            notification.setCategory(Notification.Category.APPROVAL);
+            notification.setGroupKey(groupKey);
+            notification.setRepoId(repo.getId());
+            notifications.save(notification);
+        }
+        for (int index = 0; index < 27; index++) {
+            Notification notification = new Notification(Notification.Severity.INFO,
+                    "Synthetic progress " + index, "Information only; no workflow action required.", null);
+            notification.setCategory(Notification.Category.PROGRESS);
+            notification.setRepoId(repo.getId());
+            notification = notifications.saveAndFlush(notification);
+            notification.setGroupKey("legacy:" + notification.getId());
+            notifications.save(notification);
+        }
+        notifications.flush();
+        page(routes, "/notifications", "notifications-grouped");
+        page(routes, "/notifications?page=1", "notifications-page-1");
+        page(routes, "/notifications?query=Approval", "notifications-search");
+        page(routes, "/notifications?actionsOnly=true", "notifications-actions");
+        for (int page = 0; page < 2; page++) {
+            String route = "/notifications/group?groupKey=" + groupKey + "&page=" + page;
+            putFragment(routes, route, "notification-group-page-" + page, render(get(route), 200));
+            routes.put(route.replace(groupKey, java.net.URLEncoder.encode(groupKey, java.nio.charset.StandardCharsets.UTF_8)),
+                    routes.get(route));
+        }
+        for (Notification notification : notifications.findAll()) {
+            String key = notification.getGroupKey() == null ? "legacy:" + notification.getId() : notification.getGroupKey();
+            String route = "/notifications/group?groupKey=" + key;
+            if (routes.containsKey(route)) continue;
+            putFragment(routes, route, "notification-group-" + notification.getId(), render(get(route), 200));
+            routes.put(route.replace(key, java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8)), routes.get(route));
+        }
+        putFragment(routes, "/notifications/panel?fixture=grouped", "notifications-panel-grouped",
+                render(get("/notifications/panel"), 200));
+        long watermark = notifications.findAll().stream().mapToLong(Notification::getId).max().orElseThrow();
+        render(post("/notifications/read").param("throughId", Long.toString(watermark)).with(csrf()), 200);
+        assertThat(notifications.countByReadAtIsNull()).isZero();
+        page(routes, "/notifications?fixture=read", "notifications-read");
+        putFragment(routes, "/notifications/panel?fixture=read", "notifications-panel-read",
+                render(get("/notifications/panel"), 200));
+
+        Notification arrival = new Notification(Notification.Severity.ERROR,
+                "Critical arrival after read", "A new critical event remains unread beyond the previous watermark.", null);
+        arrival.setCategory(Notification.Category.SYSTEM);
+        arrival.setGroupKey("system:SYSTEM");
+        arrival.setRepoId(repo.getId());
+        arrival = notifications.saveAndFlush(arrival);
+        putFragment(routes, "/notifications/group?groupKey=system%3ASYSTEM", "notification-critical-history",
+                render(get("/notifications/group").param("groupKey", "system:SYSTEM"), 200));
+        render(post("/notifications/read").param("throughId", Long.toString(watermark)).with(csrf()), 200);
+        assertThat(notifications.findById(arrival.getId()).orElseThrow().getReadAt()).isNull();
+        page(routes, "/notifications?fixture=arrival", "notifications-arrival");
+        render(post("/notifications/mute").param("category", "PROGRESS").param("muted", "true").with(csrf()), 302);
+        String muted = page(routes, "/notifications?fixture=muted-critical", "notifications-muted-critical");
+        assertThat(muted).contains("Critical arrival after read", "Synthetic progress");
+        putFragment(routes, "/notifications/panel?fixture=arrival", "notifications-panel-arrival",
+                render(get("/notifications/panel"), 200));
+        assertThat(triage.snapshot("", null, "ALL", "ALL", false,
+                org.springframework.data.domain.PageRequest.of(0, 25)).unreadActionGroupCount()).isEqualTo(1);
+    }
+
+    private String page(Map<String, ExportedRoute> routes, String route, String basename) throws Exception {
+        String full = render(get(route), 200);
+        put(routes, route, basename, full, render(hx(get(route)), 200));
+        String path = route.split("\\?", 2)[0];
+        if (path.matches("/issues/[1-9][0-9]*")) {
+            if (!routes.containsKey(path + "/decisions"))
+                putFragment(routes, path + "/decisions", basename + "-decisions", render(get(path + "/decisions"), 200));
+            if (!routes.containsKey(path + "/live-status"))
+                putFragment(routes, path + "/live-status", basename + "-live", render(get(path + "/live-status"), 200));
+        }
+        return full;
     }
 
     private TrackedIssue issue(WatchedRepo repo, int number, String title, IssueStatus status, String phase) {

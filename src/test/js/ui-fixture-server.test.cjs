@@ -21,7 +21,10 @@ fs.writeFileSync(path.join(fixtureRoot, 'fixture-manifest.json'), JSON.stringify
     '/': { full: 'dashboard.html', fragment: 'dashboard.fragment.html' },
     '/dashboard?fixture=empty': { full: 'dashboard.empty.html' },
     '/fixtures/dashboard-empty': { full: 'dashboard.empty.html' },
-    '/dashboard/live': { fragment: 'dashboard.live.html' }
+    '/dashboard/live': { fragment: 'dashboard.live.html' },
+    '/issues/7': { full: 'dashboard.html', fragment: 'dashboard.fragment.html' },
+    '/issues/7?reviewAttempt=4': { full: 'dashboard.empty.html' },
+    '/issues/999999': { full: 'dashboard.empty.html' }
   }
 }));
 
@@ -116,4 +119,20 @@ test('HEAD returns the GET metadata without a response body', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
   assert.equal(await response.text(), '');
+});
+
+test('allows only a bounded navigation token on explicitly exported issue detail routes', async () => {
+  const token = 'a'.repeat(32);
+  const detail = await fetch(`${baseUrl}/issues/7?nav=${token}`, { headers: { 'HX-Request': 'true' } });
+  assert.equal(detail.status, 200);
+  assert.match(await detail.text(), /dashboard fragment/);
+  assert.equal((await fetch(`${baseUrl}/issues/7?reviewAttempt=4&nav=${token}`)).status, 200);
+  assert.equal((await fetch(`${baseUrl}/issues/999999?nav=${token}`)).status, 200);
+  for (const route of [
+    `/issues/8?nav=${token}`, `/issues/7?nav=${token}&unknown=1`,
+    `/issues/7?nav=${token}&nav=${token}`, '/issues/7?nav=malformed',
+    `/dashboard/live?nav=${token}`, `/issues/7?reviewAttempt=5&nav=${token}`
+  ]) assert.equal((await fetch(`${baseUrl}${route}`)).status, 404, route);
+  assert.equal((await rawRequest(`/issues/%2e%2e/7?nav=${token}`)).statusCode, 400);
+  assert.equal((await fetch(`${baseUrl}/issues/7?nav=${token}`, { method: 'POST' })).status, 405);
 });

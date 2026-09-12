@@ -60,6 +60,18 @@ function responseHeaders(contentType) {
   };
 }
 
+// Detail navigation generates a per-tab token at runtime. Strip only that bounded
+// parameter on an already allowlisted detail route, never arbitrary application queries.
+function fixtureRouteKey(pathname, rawSearch) {
+  if (!/^\/issues\/[1-9][0-9]*$/.test(pathname)) return `${pathname}${rawSearch}`;
+  const query = new URLSearchParams(rawSearch);
+  const tokens = query.getAll('nav');
+  if (tokens.length !== 1 || !/^[a-f0-9]{32}$/.test(tokens[0])) return `${pathname}${rawSearch}`;
+  query.delete('nav');
+  const remaining = query.toString();
+  return `${pathname}${remaining ? `?${remaining}` : ''}`;
+}
+
 function send(res, req, status, body, contentType = 'text/plain; charset=utf-8', extra = {}) {
   const bytes = Buffer.from(body);
   res.writeHead(status, {
@@ -104,7 +116,8 @@ function createFixtureServer({ root = '/tmp/issuebot-ui-consistency', host = '12
       return;
     }
 
-    const route = manifest.routes[`${pathname}${rawSearch}`];
+    const route = manifest.routes[`${pathname}${rawSearch}`]
+      || manifest.routes[fixtureRouteKey(pathname, rawSearch)];
     let relative;
     if (route) {
       const wantsFragment = req.headers['hx-request'] === 'true';
