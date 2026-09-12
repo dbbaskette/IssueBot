@@ -27,6 +27,10 @@ import java.util.Optional;
 
 @Controller
 public class SetupController {
+    @org.springframework.web.bind.annotation.ModelAttribute("managedSkillBundle")
+    public com.dbbaskette.issuebot.service.harness.ManagedSkillBundle.Identity managedSkillBundle() {
+        return com.dbbaskette.issuebot.service.harness.ManagedSkillBundle.bundled().identity();
+    }
 
     private static final DateTimeFormatter LAST_EVENT_FORMAT =
             DateTimeFormatter.ofPattern("MMM d, HH:mm:ss").withZone(ZoneId.systemDefault());

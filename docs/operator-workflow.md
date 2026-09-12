@@ -1,6 +1,6 @@
 # Operator workflow and testing ownership
 
-This describes the implemented runtime including the 0.7.1 prompt refresh, not the future cross-harness methodology design. Saved repository settings, rather than defaults alone, determine a particular run.
+This describes the implemented runtime including the 0.8.0 managed skill bundle and verification-context refinement, not the full future cross-harness methodology design. Saved repository settings, rather than defaults alone, determine a particular run.
 
 ## From `agent-ready` to completion
 
@@ -36,17 +36,17 @@ Managed merge requires a passed review, the reviewed commit still matching the P
 | Merge freshness | IssueBot checks reviewed SHA and remote check status without rerunning tests. |
 | Correction | Changed code passes through the applicable gates again; prior success is not proof for a new tree. |
 
-The shared prompt bundle assigns focused development checks to implementation and configured final verification to IssueBot. Review is instructed to consume supplied evidence and avoid automatic full-suite reruns. A harness can still choose overlapping checks: prompts are not enforcement. Configured command details are not currently injected into implementation, and review summaries are not an exact-tree/command/environment ledger. A model's bare `PASSED` is never grounds to skip IssueBot's trusted gate.
+The shared prompt bundle assigns focused development checks to implementation and configured final verification to IssueBot. Implementation receives the effective configured command list on initial/resumed runs and cold fallback, or an explicit notice that none are configured. Review is instructed to consume supplied evidence and avoid automatic full-suite reruns. A harness can still choose overlapping checks: prompts are not enforcement. Review summaries are not an exact-tree/command/environment ledger. A model's bare `PASSED` is never grounds to skip IssueBot's trusted gate.
 
 For repository development, use coherent increments and focused checks at milestones, then one combined relevant suite before release. Reviewers should consume supplied evidence and request only a justified focused check for a specific doubt. Evidence reuse requires an unchanged tree and relevant environment; changed corrections still go through applicable gates.
 
 The original, provider-neutral resources in `src/main/resources/prompts/guidance/` are bundled with the application. Each of planning, implementation, and review receives common guidance, its own role guidance, and conditional frontend guidance. UI work consults the existing design system, consistent controls/statuses, accessible mobile layouts, and state preservation during refresh. Backend-only changes do not trigger a browser pass. No third-party skill text is copied into this bundle.
 
-## Skills are not yet a bundled runtime
+## Managed stage skill bundle
 
-IssueBot's planning methodology is embedded prompt text. Harness adapters currently report native skill projection unsupported. Claude omits personal user settings/hooks; Codex runs with user-config/rules isolation. An operator's installed desktop Superpowers or frontend-design plugin therefore does not provision a canonical IssueBot skill bundle. This does not claim every repository-local instruction is inaccessible.
+IssueBot 0.8.0 bundles a pinned Superpowers Custom stage subset with manifest/file integrity checks. The common harness boundary projects only the selected stage guidance for Codex and Claude; utility calls remain unmodified. Startup fails if bundled resources are missing or corrupt. Setup shows validated provenance. See [managed skills](managed-skills.md) for the upgrade and rollback procedure.
 
-The [cross-harness design](superpowers/specs/2026-09-11-cross-harness-superpowers-orchestration-design.md) proposes versioned skill resources, native projections or explicit emulation, task-ledger execution, and shared gates. Those are future work. No personal cache paths, runtime downloads, or automatic third-party redistribution are part of this release.
+This is explicit stage-prompt emulation, not native plugin loading: native-skill capability flags remain false. Claude still omits personal settings/hooks and Codex isolates user config/rules. No personal cache path or startup download is required. The MIT-licensed vendored subset includes attribution. Native projection and task-ledger execution from the [cross-harness design](superpowers/specs/2026-09-11-cross-harness-superpowers-orchestration-design.md) remain future work.
 
 ## Operator surfaces and safety
 

@@ -37,7 +37,8 @@ class CodingHarnessServiceTest {
     @Test void pinnedHarnessReceivesExplicitRoleModelAndReasoning() {
         service.pinHarness("codex");
         service.executePlanning("plan", Path.of("repo"), "gpt-6-astra", "ultra", 9L, null);
-        verify(codex).execute(new HarnessExecutionRequest(HarnessRole.DESIGN_PLANNING, "plan", Path.of("repo"), "gpt-6-astra", "ultra", null, 9L), null);
+        verify(codex).execute(new HarnessExecutionRequest(HarnessRole.DESIGN_PLANNING,
+                ManagedSkillBundle.bundled().project(HarnessRole.DESIGN_PLANNING, "plan"), Path.of("repo"), "gpt-6-astra", "ultra", null, 9L), null);
         verify(claude, never()).execute(any(), any());
     }
 
@@ -58,7 +59,8 @@ class CodingHarnessServiceTest {
         HarnessExecutionResult result = new HarnessExecutionResult();
         when(codex.execute(any(), same(callback))).thenReturn(result);
         assertSame(result, service.executeImplementation("fix", Path.of("repo"), "gpt-6-astra", "ultra", "session", 9L, callback));
-        verify(codex).execute(new HarnessExecutionRequest(HarnessRole.IMPLEMENTATION, "fix", Path.of("repo"), "gpt-6-astra", "ultra", "session", 9L), callback);
+        verify(codex).execute(new HarnessExecutionRequest(HarnessRole.IMPLEMENTATION,
+                ManagedSkillBundle.bundled().project(HarnessRole.IMPLEMENTATION, "fix"), Path.of("repo"), "gpt-6-astra", "ultra", "session", 9L), callback);
     }
 
     @Test void reviewStartsFreshAndUsesReviewRole() {
@@ -78,6 +80,8 @@ class CodingHarnessServiceTest {
     @Test void omittedClaudeReasoningUsesModelDefault() {
         service.executePlanning("plan", Path.of("repo"), "claude-opus-4-8", 9L, null);
         verify(claude).execute(argThat(r -> r.reasoningLevel().equals("high")), isNull());
+        verify(claude).execute(argThat(r -> r.prompt().contains("# Implementation plans")
+                && r.prompt().endsWith("plan")), isNull());
     }
 
     @Test void legacyCodexCallsRetainPersistedStageReasoning() {

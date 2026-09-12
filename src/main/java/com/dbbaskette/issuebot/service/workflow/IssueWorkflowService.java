@@ -1149,7 +1149,9 @@ public class IssueWorkflowService {
 
         String prompt = buildImplementationPrompt(issueDetails, previousDiff,
                 previousAssessment, previousCiLogs, resumed, lastRunFailureReason, approvedPlan,
-                repoInstructions, lessons, legacyApprovedPlan);
+                repoInstructions, lessons, legacyApprovedPlan)
+                + com.dbbaskette.issuebot.service.prompt.PromptGuidance.configuredVerification(
+                        LocalVerificationService.parseCommands(repo.getVerificationCommands()));
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching " + harnessService.displayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -1185,7 +1187,9 @@ public class IssueWorkflowService {
 
             String coldPrompt = buildImplementationPrompt(issueDetails, previousDiff,
                     previousAssessment, previousCiLogs, false, null, approvedPlan,
-                    repoInstructions, lessons, legacyApprovedPlan);
+                    repoInstructions, lessons, legacyApprovedPlan)
+                    + com.dbbaskette.issuebot.service.prompt.PromptGuidance.configuredVerification(
+                            LocalVerificationService.parseCommands(repo.getVerificationCommands()));
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
                     + harnessService.displayName() + " session...");
             result = harnessService.executeImplementation(coldPrompt, repoPath,

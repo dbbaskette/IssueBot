@@ -4,6 +4,10 @@
 
 # IssueBot
 
+Agent guidance is bundled and versioned with IssueBot for both Codex and Claude; no global
+Superpowers installation is required. See [managed skills](docs/managed-skills.md) for
+integrity checks, stage isolation, and coordinated upgrades/rollback.
+
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Java](https://img.shields.io/badge/java-21-orange.svg)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)

@@ -6,6 +6,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PromptGuidanceTest {
     @Test
+    void configuredVerificationPreservesExactCommandsAndTheirOrder() {
+        String prompt = PromptGuidance.configuredVerification(java.util.List.of(
+                "./mvnw verify -Poffline", "node --test 'test/*.js'"));
+        assertThat(prompt).containsSubsequence("./mvnw verify -Poffline", "node --test 'test/*.js'")
+                .contains("not an instruction to execute them now")
+                .contains("do not bypass IssueBot's configured gate");
+    }
+
+    @Test
+    void noConfiguredCommandsDoesNotPromiseAutomaticTests() {
+        assertThat(PromptGuidance.configuredVerification(java.util.List.of()))
+                .contains("No local verification commands are configured")
+                .doesNotContain("IssueBot will run these");
+    }
+
+    @Test
     void bundlesShareCommonAndFrontendResourcesButOnlyTheirOwnRole() throws Exception {
         for (var stage : PromptGuidance.Stage.values()) {
             String bundle = PromptGuidance.forStage(stage);
