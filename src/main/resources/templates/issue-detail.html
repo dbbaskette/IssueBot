@@ -89,12 +89,33 @@
                      th:classappend="${nextAction != null ? ' next-action--' + nextAction.tone().name().toLowerCase() : ''}"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}"
                      aria-labelledby="next-action-heading">
-                <div>
-                    <span class="eyebrow">Current decision</span>
+                <div class="issue-brief-main">
+                    <div class="issue-brief-meta">
+                        <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
+                              th:text="${humanize.status(issue.status)}">In progress</span>
+                        <span th:if="${workflowStepper != null}"
+                              th:text="${workflowStepper.selectedStage.label + ' · ' + workflowStepper.selectedStage.stateText}">Implementation · Working</span>
+                    </div>
+                    <span class="eyebrow">Next step</span>
                     <p id="next-action-heading" th:text="${nextAction != null ? nextAction.summary() : humanize.status(issue.status)}">Review the current issue state.</p>
                     <a th:if="${nextAction != null and nextAction.hasAction() and not nextAction.actionRequired() and nextAction.href().contains('#')}"
                        class="text-sm issue-decision__evidence" th:href="${nextAction.href()}"
                        th:text="${nextAction.ctaLabel()}">View evidence</a>
+                    <div class="issue-brief-activity" th:if="${latestActivityPreview != null}">
+                        <div class="issue-brief-label">
+                            <strong>Latest operation</strong>
+                            <time th:if="${latestActivity != null}"
+                                  th:text="${#temporals.format(latestActivity.createdAt, 'MMM d, HH:mm')}">Today, 13:50</time>
+                        </div>
+                        <p th:text="${latestActivityPreview}">Local checks passed.</p>
+                    </div>
+                    <div class="issue-brief-activity" th:if="${recentLiveOutput != null or latestAgentOutputPreview != null}">
+                        <div class="issue-brief-label">
+                            <strong th:text="${recentLiveOutput != null ? 'Recent live output' : 'Last coding output'}">Recent live output</strong>
+                            <a th:href="${recentLiveOutput != null ? '#live-terminal-panel' : '#iteration-history'}">Full output</a>
+                        </div>
+                        <pre class="issue-brief-output" th:text="${recentLiveOutput != null ? recentLiveOutput : latestAgentOutputPreview}">Agent output</pre>
+                    </div>
                 </div>
                     <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                             type="button" class="btn btn-primary btn-sm"
@@ -844,8 +865,7 @@
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
               <details class="panel mb-3 secondary-section timeline-section"
                        th:if="${timeline != null and not #lists.isEmpty(timeline)}"
-                       th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
-                                data-ui-state-key=${'issue:' + issue.id + ':timeline'}">
+                       th:attr="data-ui-state-key=${'issue:' + issue.id + ':timeline'}">
                 <summary class="panel-header">
                     <h3>Timeline</h3>
                     <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
@@ -948,13 +968,14 @@
                                 data-terminal-download th:title="${'Download issue-' + issue.id + '-terminal.txt'}">
                             <i class="ti ti-download" aria-hidden="true"></i> Download
                         </button>
-                        <span class="status-dot running"></span>
-                        <span class="text-sm text-muted">Streaming</span>
+                        <span class="status-dot" data-terminal-dot aria-hidden="true"></span>
+                        <span class="text-sm text-muted" data-terminal-connection>Connecting…</span>
+                        <span class="text-sm text-muted" data-terminal-last-output>Waiting for output</span>
                     </div>
                 </div>
                 <div class="panel-body terminal-well" style="padding:0;position:relative">
                     <div id="live-terminal" class="live-terminal" aria-live="polite" role="log">
-                        <div class="terminal-line term-system" data-raw="Waiting for agent output...">Waiting for agent output...</div>
+                        <div class="terminal-line term-system" data-raw="Loading recent output...">Loading recent output...</div>
                     </div>
                     <button type="button" class="terminal-jump-btn" id="terminal-jump" data-terminal-jump hidden>
                         <i class="ti ti-arrow-down" aria-hidden="true"></i> Jump to bottom
@@ -1161,8 +1182,7 @@
 
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
     <details id="iteration-history" class="panel mb-3 secondary-section history-section"
-             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
-                      data-ui-state-key=${'issue:' + issue.id + ':iteration-history'}">
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration-history'}">
         <summary class="panel-header">
             <h3>Iteration history</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(iterationsNewestFirst) + ' attempts'}">0 attempts</span>
@@ -1266,8 +1286,7 @@
 
     <!-- === ACTIVITY LOG (full width, below the grid) === -->
     <details id="activity-log" class="panel secondary-section activity-section"
-             th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
-                      data-ui-state-key=${'issue:' + issue.id + ':activity'}">
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':activity'}">
         <summary class="panel-header">
             <h3>Activity log</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(events) + ' events'}">0 events</span>
@@ -1319,6 +1338,13 @@
         <span class="text-sm text-muted" data-updated-stamp="pipeline"></span>
     </div>
 
+    <details class="panel mb-3 secondary-section issue-progress-details"
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':progress-details'}">
+        <summary class="panel-header">
+            <h3>Progress details</h3>
+            <span class="text-sm text-muted" th:text="${workflowStepper.selectedStage.label}">Implementation</span>
+        </summary>
+        <div class="panel-body">
     <div class="metrics-grid mb-3">
         <div class="metric-card">
             <div class="label">Repository</div>
@@ -1378,6 +1404,8 @@
             </nav>
         </div>
     </div>
+        </div>
+    </details>
 </div>
 
 <!--/* Poll response for GET /issues/{id}/live-status. Returns the pollable #live-status block

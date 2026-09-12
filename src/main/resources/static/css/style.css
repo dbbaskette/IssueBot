@@ -3620,6 +3620,14 @@ details summary:hover { color: var(--text-primary); }
     background: var(--surface-raised);
 }
 .next-action-callout p { margin: .15rem 0 0; color: var(--text-primary); font-weight: 600; }
+.issue-brief-main { flex: 1; min-width: 0; }
+.issue-brief-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .65rem; margin-bottom: .55rem; color: var(--text-secondary); font-size: .78rem; }
+.issue-brief-activity { margin-top: .9rem; padding-top: .7rem; border-top: 1px solid var(--hairline); }
+.issue-brief-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; color: var(--text-secondary); font-size: .76rem; }
+.issue-brief-label time { color: var(--text-tertiary); }
+.issue-brief-label a { margin-left: auto; }
+.next-action-callout .issue-brief-activity p { font-size: .83rem; line-height: 1.5; font-weight: 400; overflow-wrap: anywhere; }
+.issue-brief-output { margin: .45rem 0 0; max-height: 8rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.45; color: var(--text-secondary); }
 .next-action--action { border-left-color: var(--danger); background: color-mix(in srgb, var(--danger-soft) 55%, var(--surface)); }
 .next-action--active { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok-soft) 55%, var(--surface)); }
 .next-action--waiting { border-left-color: var(--accent); }

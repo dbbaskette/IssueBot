@@ -731,6 +731,7 @@
     trimMarkerInserted: false,
     maxLines: 5000,
     longLineThreshold: 500,
+    lastOutputAt: null,
 
     init: function (issueId) {
       var terminal = document.getElementById('live-terminal');
@@ -740,8 +741,38 @@
       this.trimmed = 0;
       this.trimMarkerInserted = false;
       this.follow = true;
+      this.lastOutputAt = null;
       this._wireControls(terminal);
+      this._setConnection('connecting');
       this._openStream();
+    },
+
+    _setConnection: function (state) {
+      var label = document.querySelector('[data-terminal-connection]');
+      if (label) {
+        label.textContent = state === 'connected' ? 'Connected' :
+          (state === 'reconnecting' ? 'Reconnecting…' : 'Connecting…');
+      }
+      var dot = document.querySelector('[data-terminal-dot]');
+      if (dot) { dot.classList.toggle('running', state === 'connected'); }
+    },
+
+    _markOutput: function (at) {
+      var parsed = at ? new Date(at) : new Date();
+      if (isNaN(parsed.getTime())) { parsed = new Date(); }
+      this.lastOutputAt = parsed;
+      var label = document.querySelector('[data-terminal-last-output]');
+      if (label) { label.textContent = 'Last output ' + parsed.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}); }
+    },
+
+    _setEmptyMessage: function (message) {
+      if (this.lineCount !== 0) { return; }
+      var terminal = document.getElementById('live-terminal');
+      var placeholder = terminal && terminal.querySelector('.terminal-line');
+      if (placeholder) {
+        placeholder.textContent = message;
+        placeholder.dataset.raw = message;
+      }
     },
 
     _openStream: function () {
@@ -752,20 +783,29 @@
         window.__issueBotES = null;
         SseStatus.clear('terminal');
       }
-      var es = new EventSource('/api/events/stream');
+      var es = new EventSource('/api/events/stream?issueId=' + encodeURIComponent(self.issueId));
       window.__issueBotES = es;
       self.es = es;
 
       // EventSource auto-reconnects on drop, firing 'error' then 'open' again —
       // the dot mirrors that lifecycle directly, no extra retry bookkeeping needed.
-      es.addEventListener('open', function () { SseStatus.set('terminal', 'connected'); });
-      es.addEventListener('error', function () { SseStatus.set('terminal', 'reconnecting'); });
+      es.addEventListener('open', function () {
+        SseStatus.set('terminal', 'connected');
+        self._setConnection('connected');
+        self._setEmptyMessage('No recent output yet; listening for new events…');
+      });
+      es.addEventListener('error', function () {
+        SseStatus.set('terminal', 'reconnecting');
+        self._setConnection('reconnecting');
+        self._setEmptyMessage('Connection interrupted; retrying…');
+      });
 
       es.addEventListener('claude-log', function (e) {
         try {
           var data = JSON.parse(e.data);
           if (data.issueId !== self.issueId) { return; }
           self._appendLine(data.text || '');
+          self._markOutput(data.at);
         } catch (err) { /* ignore malformed payloads */ }
       });
     },

@@ -7,7 +7,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -19,18 +25,70 @@ public class SseService {
     private static final Logger log = LoggerFactory.getLogger(SseService.class);
     private static final long SSE_TIMEOUT = 0L; // no timeout — we handle cleanup via heartbeat
 
-    private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+    private static final int MAX_ISSUES_WITH_OUTPUT = 32;
+    private static final int MAX_LINES_PER_ISSUE = 150;
+    private final List<Subscriber> emitters = new CopyOnWriteArrayList<>();
+    private final Object outputLock = new Object();
+    private final Map<Long, ArrayDeque<OutputLine>> recentOutput = new LinkedHashMap<>(16, 0.75f, true);
+    private final String outputEpoch = UUID.randomUUID().toString();
+    private long nextOutputSequence;
+
+    private record Subscriber(SseEmitter emitter, Long issueId) {}
+    public record OutputLine(String id, Instant at, String text) {}
 
     public SseEmitter subscribe() {
-        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
-        emitters.add(emitter);
+        return subscribe(null, null);
+    }
 
-        emitter.onCompletion(() -> emitters.remove(emitter));
-        emitter.onTimeout(() -> emitters.remove(emitter));
-        emitter.onError(e -> emitters.remove(emitter));
+    /** Replays only this issue's recent output; an EventSource reconnect sends its last event ID. */
+    public SseEmitter subscribe(Long issueId, String lastEventId) {
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
+        Subscriber subscriber = new Subscriber(emitter, issueId);
+
+        emitter.onCompletion(() -> emitters.remove(subscriber));
+        emitter.onTimeout(() -> emitters.remove(subscriber));
+        emitter.onError(e -> emitters.remove(subscriber));
+
+        synchronized (outputLock) {
+            emitters.add(subscriber);
+            if (issueId != null) {
+                long after = cursor(lastEventId);
+                for (OutputLine line : recentOutput.getOrDefault(issueId, new ArrayDeque<>())) {
+                    if (sequence(line.id()) <= after) continue;
+                    try { sendOutput(subscriber, issueId, line); }
+                    catch (Exception error) { removeEmitter(subscriber); break; }
+                }
+            }
+        }
 
         log.debug("SSE client connected, total: {}", emitters.size());
         return emitter;
+    }
+
+    /** A new run must not replay a previous run's terminal output. */
+    public void beginIssueRun(Long issueId) {
+        if (issueId == null) return;
+        synchronized (outputLock) { recentOutput.remove(issueId); }
+    }
+
+    public List<OutputLine> recentOutput(Long issueId) {
+        if (issueId == null) return List.of();
+        synchronized (outputLock) {
+            ArrayDeque<OutputLine> lines = recentOutput.get(issueId);
+            return lines == null ? List.of() : List.copyOf(lines);
+        }
+    }
+
+    /** Compact top-of-page preview; the full bounded replay stays in the terminal. */
+    public String recentOutputText(Long issueId, int maxLines, int maxChars) {
+        List<OutputLine> lines = recentOutput(issueId);
+        if (lines.isEmpty()) return null;
+        List<String> tail = new ArrayList<>();
+        for (int index = Math.max(0, lines.size() - Math.max(1, maxLines)); index < lines.size(); index++) {
+            tail.add(lines.get(index).text());
+        }
+        String value = String.join("\n", tail);
+        return value.length() <= maxChars ? value : "…" + value.substring(value.length() - maxChars + 1);
     }
 
     /**
@@ -39,11 +97,11 @@ public class SseService {
     @Scheduled(fixedRate = 30_000)
     public void heartbeat() {
         if (emitters.isEmpty()) return;
-        for (SseEmitter emitter : emitters) {
+        for (Subscriber subscriber : emitters) {
             try {
-                emitter.send(SseEmitter.event().comment("heartbeat"));
+                subscriber.emitter().send(SseEmitter.event().comment("heartbeat"));
             } catch (Exception e) {
-                removeEmitter(emitter);
+                removeEmitter(subscriber);
             }
         }
     }
@@ -52,21 +110,21 @@ public class SseService {
      * Broadcast an event to all connected SSE clients.
      */
     public void broadcast(String eventName, String data) {
-        for (SseEmitter emitter : emitters) {
+        for (Subscriber subscriber : emitters) {
             try {
-                emitter.send(SseEmitter.event()
+                subscriber.emitter().send(SseEmitter.event()
                         .name(eventName)
                         .data(data));
             } catch (Exception e) {
-                removeEmitter(emitter);
+                removeEmitter(subscriber);
             }
         }
     }
 
-    private void removeEmitter(SseEmitter emitter) {
-        emitters.remove(emitter);
+    private void removeEmitter(Subscriber subscriber) {
+        emitters.remove(subscriber);
         try {
-            emitter.completeWithError(new IOException("Client disconnected"));
+            subscriber.emitter().completeWithError(new IOException("Client disconnected"));
         } catch (Exception ignored) {
             // Already completed or errored — fine
         }
@@ -85,8 +143,37 @@ public class SseService {
      * Sent as a "claude-log" event with JSON payload containing issueId and text.
      */
     public void broadcastClaudeLog(Long issueId, String text) {
-        String data = "{\"issueId\":" + issueId + ",\"text\":" + escapeJson(text) + "}";
-        broadcast("claude-log", data);
+        if (issueId == null) return;
+        synchronized (outputLock) {
+            if (!recentOutput.containsKey(issueId) && recentOutput.size() >= MAX_ISSUES_WITH_OUTPUT) {
+                recentOutput.remove(recentOutput.keySet().iterator().next());
+            }
+            ArrayDeque<OutputLine> lines = recentOutput.computeIfAbsent(issueId, ignored -> new ArrayDeque<>());
+            OutputLine line = new OutputLine(outputEpoch + ":" + ++nextOutputSequence, Instant.now(), text);
+            lines.addLast(line);
+            while (lines.size() > MAX_LINES_PER_ISSUE) lines.removeFirst();
+            for (Subscriber subscriber : emitters) {
+                if (subscriber.issueId() != null && !subscriber.issueId().equals(issueId)) continue;
+                try { sendOutput(subscriber, issueId, line); }
+                catch (Exception error) { removeEmitter(subscriber); }
+            }
+        }
+    }
+
+    private void sendOutput(Subscriber subscriber, Long issueId, OutputLine line) throws IOException {
+        String data = "{\"issueId\":" + issueId + ",\"text\":" + escapeJson(line.text())
+                + ",\"at\":" + escapeJson(line.at().toString()) + "}";
+        subscriber.emitter().send(SseEmitter.event().id(line.id()).name("claude-log").data(data));
+    }
+
+    private long cursor(String lastEventId) {
+        if (lastEventId == null || !lastEventId.startsWith(outputEpoch + ":")) return 0;
+        return sequence(lastEventId);
+    }
+
+    private long sequence(String eventId) {
+        try { return Math.max(0, Long.parseLong(eventId.substring(eventId.lastIndexOf(':') + 1))); }
+        catch (RuntimeException invalid) { return 0; }
     }
 
     private String escapeJson(String text) {

@@ -5,6 +5,7 @@ import com.dbbaskette.issuebot.service.ui.IssueNextActionResolver;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.util.HumanizeHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -51,6 +52,7 @@ class IssueNextActionRenderTest {
         TrackedIssue issue = new TrackedIssue();
         issue.setStatus(IssueStatus.AWAITING_PLAN_APPROVAL);
         context.setVariable("issue", issue);
+        context.setVariable("humanize", new HumanizeHelper());
         TemplateSpec spec = new TemplateSpec("issue-detail", Set.of("next-action-callout"),
                 (org.thymeleaf.templatemode.TemplateMode) null, null);
         StringWriter writer = new StringWriter();
@@ -74,7 +76,7 @@ class IssueNextActionRenderTest {
         String activeHtml = render(actionFor(IssueStatus.IN_PROGRESS));
         String completedHtml = render(actionFor(IssueStatus.COMPLETED));
 
-        assertThat(planHtml).contains("Current decision", "Review and approve the current plan.")
+        assertThat(planHtml).contains("Next step", "Review and approve the current plan.")
                 .contains("next-action--action").doesNotContain("next-action-cta");
         assertThat(activeHtml).contains("IssueBot is Implementation.")
                 .contains("next-action--active");

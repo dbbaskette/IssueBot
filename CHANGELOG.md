@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.0 — 2026-09-12
+
+- Put issue state, next action, latest activity, and the last agent output together at the top of the issue page; collapse detailed progress and history by default.
+- Replay recent per-issue terminal output after refresh or reconnect, show connection and last-output status, and display Codex command starts and captured results.
+
 ## 0.10.0 — 2026-09-12
 
 - Keep bundled Superpowers provenance in Setup but omit its unrelated upstream commit from coding prompts, so agents use the task checkout as their source of truth.
