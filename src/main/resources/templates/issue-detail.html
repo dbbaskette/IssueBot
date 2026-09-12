@@ -667,9 +667,11 @@
                      class="alert alert-danger" role="alert" th:text="${planError}">
                     Plan approval could not reserve this repository.
                 </div>
-            <section th:if="${selectedPlanningVersion != null}"
-                     class="panel mb-3 plan-review" data-plan-review>
-                <header class="panel-header plan-review-header">
+            <details th:if="${selectedPlanningVersion != null}"
+                     class="panel mb-3 plan-review secondary-section" data-plan-review
+                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' or selectedPlanIsHistorical ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':plan-contract:' + selectedPlanningVersion.versionNumber}">
+                <summary class="panel-header plan-review-header">
                     <div>
                         <span class="eyebrow">Planning contract</span>
                         <h3>Plan Review</h3>
@@ -682,7 +684,7 @@
                         <span th:text="${#temporals.format(currentPlanningVersion.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
                         <span th:text="${(currentPlanningVersion.provider != null ? currentPlanningVersion.provider : 'Unknown provider') + ' · ' + (currentPlanningVersion.model != null ? currentPlanningVersion.model : 'Unknown model')}">Harness · model</span>
                     </div>
-                </header>
+                </summary>
 
                 <div class="plan-history-banner" role="status" th:if="${selectedPlanIsHistorical}">
                     <div>
@@ -765,13 +767,13 @@
                     </div>
                 </div>
 
-            </section>
+            </details>
             </div>
 
             <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
             <details th:if="${selectedPlanningVersion == null and planHtml != null}"
                      class="panel mb-3 plan-doc-panel secondary-section plan-section"
-                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
+                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' ? 'open' : null},
                               data-ui-state-key=${'issue:' + issue.id + ':plan:legacy'}">
                 <summary class="panel-header">
                     <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
@@ -784,8 +786,7 @@
 
             <!-- === GOAL CARD === -->
             <details class="panel mb-3 goal-card secondary-section goal-section"
-                     th:attr="open=${issue.status.name() != 'FAILED' and issue.status.name() != 'COOLDOWN' ? 'open' : null},
-                              data-ui-state-key=${'issue:' + issue.id + ':goal'}">
+                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':goal'}">
                 <summary class="panel-header">
                     <h3>Goal</h3>
                     <span class="text-sm text-muted">Done when all of these hold:</span>
@@ -910,11 +911,13 @@
             <div th:replace="~{issue-detail :: live-status}"></div>
 
             <!-- === GUIDE CARD (mid-loop steering, #63) === -->
-            <div th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel" class="panel mb-3">
-                <div class="panel-header">
+            <details th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel"
+                     class="panel mb-3 secondary-section"
+                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':guide'}">
+                <summary class="panel-header">
                     <h3>Guide</h3>
                     <span class="text-sm text-muted">Steer this run without stopping it</span>
-                </div>
+                </summary>
                 <div class="panel-body">
                     <form th:action="@{'/issues/' + ${issue.id} + '/guide'}" method="post"
                           th:id="${'mid-run-guidance-' + issue.id}" hx-preserve="true">
@@ -931,7 +934,7 @@
                         </div>
                     </form>
                 </div>
-            </div>
+            </details>
 
         </div>
 
@@ -974,7 +977,8 @@
                     </div>
                 </div>
                 <div class="panel-body terminal-well" style="padding:0;position:relative">
-                    <div id="live-terminal" class="live-terminal" aria-live="polite" role="log">
+                    <div id="live-terminal" class="live-terminal" aria-live="polite" role="log"
+                         th:attr="data-issue-id=${issue.id}">
                         <div class="terminal-line term-system" data-raw="Loading recent output...">Loading recent output...</div>
                     </div>
                     <button type="button" class="terminal-jump-btn" id="terminal-jump" data-terminal-jump hidden>
@@ -982,14 +986,6 @@
                     </button>
                 </div>
             </div>
-            <script th:if="${issue.status.name() == 'IN_PROGRESS'}" th:inline="javascript">
-            (function() {
-                var issueId = /*[[${issue.id}]]*/ 0;
-                if (window.IssueBotTerminal && typeof window.IssueBotTerminal.init === 'function') {
-                    window.IssueBotTerminal.init(issueId);
-                }
-            })();
-            </script>
         </div>
     </div>
 

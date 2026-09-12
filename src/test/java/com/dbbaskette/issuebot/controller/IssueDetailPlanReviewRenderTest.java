@@ -78,7 +78,7 @@ class IssueDetailPlanReviewRenderTest {
     }
 
     private static void assertUniqueIds(String html) {
-        var ids = java.util.regex.Pattern.compile("\\bid=\"([^\"]+)\"").matcher(html)
+        var ids = java.util.regex.Pattern.compile("(?:\\s|<)id=\"([^\"]+)\"").matcher(html)
                 .results().map(match -> match.group(1)).toList();
         assertThat(ids).doesNotHaveDuplicates();
     }
@@ -276,6 +276,22 @@ class IssueDetailPlanReviewRenderTest {
                 .doesNotContain("name=\"versionId\" value=\"3\"");
         assertThat(occurrences(html, "name=\"versionId\" value=\"9003\"")).isEqualTo(2);
         assertThat(occurrences(html, "class=\"plan-review-actions\"")).isEqualTo(1);
+    }
+
+    @Test
+    void planningContractCanCollapseButDefaultsOpenWhenApprovalIsNeeded() {
+        TrackedIssue awaiting = issueAwaitingApproval();
+        PlanningVersion version = pending(awaiting, 3, "# Design", "# Plan", null);
+        String approvalHtml = render(awaiting, List.of(version), version, version, List.of());
+
+        assertThat(approvalHtml).containsPattern("(?s)<details[^>]*class=\"panel mb-3 plan-review secondary-section\"[^>]*open=\"open\"[^>]*>")
+                .contains("data-ui-state-key=\"issue:42:plan-contract:3\"")
+                .contains("<summary class=\"panel-header plan-review-header\">");
+
+        awaiting.setStatus(IssueStatus.IN_PROGRESS);
+        String activeHtml = render(awaiting, List.of(version), version, version, List.of());
+        assertThat(activeHtml).containsPattern("(?s)<details[^>]*class=\"panel mb-3 plan-review secondary-section\"[^>]*>")
+                .doesNotContain("class=\"panel mb-3 plan-review secondary-section\" data-plan-review open=\"open\"");
     }
 
     @Test

@@ -114,6 +114,8 @@ class IssueDetailTerminalToolbarRenderTest {
         String html = render(issueWithStatus(22L, 22, IssueStatus.IN_PROGRESS));
 
         assertThat(html).contains("data-raw=\"Loading recent output...\"")
-                .contains("data-terminal-connection", "data-terminal-last-output");
+                .contains("data-terminal-connection", "data-terminal-last-output")
+                .contains("data-issue-id=\"22\"")
+                .doesNotContain("IssueBotTerminal.init(issueId)");
     }
 }
