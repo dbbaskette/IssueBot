@@ -19,6 +19,9 @@ public final class RepoLessonQuality {
     private static final Pattern ISSUE_BRANCH = Pattern.compile("(?i)\\bissuebot/\\d+\\b");
     private static final Pattern LINE_REFERENCE = Pattern.compile("(?i)\\bline\\s+\\d+\\b");
     private static final Pattern ISSUE_URL = Pattern.compile("(?i)/(?:issues|pull)/\\d+\\b");
+    private static final Pattern TASK_CODE = Pattern.compile("(?i)\\bT\\d{2,3}\\b");
+    private static final Pattern AGENT_NARRATION = Pattern.compile(
+            "(?i)^\\s*(?:I|we)\\s*(?:['’]ll|['’]m|will|am|are|plan to|intend to)\\b");
 
     private RepoLessonQuality() {}
 
@@ -31,7 +34,9 @@ public final class RepoLessonQuality {
                 && !FILE_LINE.matcher(lesson).find()
                 && !ISSUE_BRANCH.matcher(lesson).find()
                 && !LINE_REFERENCE.matcher(lesson).find()
-                && !ISSUE_URL.matcher(lesson).find();
+                && !ISSUE_URL.matcher(lesson).find()
+                && !TASK_CODE.matcher(lesson).find()
+                && !AGENT_NARRATION.matcher(lesson).find();
     }
 
     /** Never silently remove saved rows: omit clear one-off notes from future prompts instead. */

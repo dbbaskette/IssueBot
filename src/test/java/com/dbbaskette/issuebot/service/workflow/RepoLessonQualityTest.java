@@ -26,7 +26,10 @@ class RepoLessonQualityTest {
                 "Check line 97 in FooService before merging.",
                 "Use branch issuebot/42 for the next change.",
                 "Read https://github.com/acme/widgets/issues/42 before coding.",
-                "Return to commit 533b37c8a79f80d0 for the implementation.")) {
+                "Return to commit 533b37c8a79f80d0 for the implementation.",
+                "Read T04's plan and T03 contracts before coding.",
+                "I’ll inspect the repository guidance and completed change.",
+                "We will review the completed issue's notes.")) {
             assertThat(RepoLessonQuality.reusable(text)).as(text).isFalse();
         }
     }
