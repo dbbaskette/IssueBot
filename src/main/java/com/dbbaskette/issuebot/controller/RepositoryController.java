@@ -4,6 +4,7 @@ import com.dbbaskette.issuebot.model.DecompositionMode;
 import com.dbbaskette.issuebot.model.FollowUpMode;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.RepoLesson;
+import com.dbbaskette.issuebot.service.workflow.RepoLessonQuality;
 import com.dbbaskette.issuebot.model.RepoMode;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
@@ -391,6 +392,27 @@ public class RepositoryController {
         return "redirect:/repositories";
     }
 
+    @PostMapping("/{id}/lessons/{lessonId}/update")
+    public String updateLesson(@PathVariable Long id, @PathVariable Long lessonId,
+                               @RequestParam("lesson") String text,
+                               RedirectAttributes redirectAttributes) {
+        RepoLesson lesson = lessonRepository.findById(lessonId).orElse(null);
+        if (lesson == null || !lesson.getRepoId().equals(id)) {
+            redirectAttributes.addFlashAttribute("error", "Lesson not found for this repository.");
+            return "redirect:/repositories";
+        }
+        String revised = text == null ? "" : text.strip().replaceAll("\\s+", " ");
+        if (revised.length() > 1000 || !RepoLessonQuality.reusable(revised)) {
+            redirectAttributes.addFlashAttribute("error",
+                    "Use a short rule that applies to future issues; remove issue numbers and one-off details.");
+            return "redirect:/repositories";
+        }
+        lesson.setLesson(revised);
+        lessonRepository.save(lesson);
+        redirectAttributes.addFlashAttribute("message", "Lesson updated.");
+        return "redirect:/repositories";
+    }
+
     private static String normalize(String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
     }
@@ -424,6 +446,7 @@ public class RepositoryController {
         Map<Long, Long> issueCounts = new HashMap<>();
         Map<Long, Long> totalIssueCounts = new HashMap<>();
         Map<Long, List<RepoLesson>> lessonsByRepo = new HashMap<>();
+        Map<Long, Boolean> reusableLessons = new HashMap<>();
         for (WatchedRepo repo : repos) {
             long count = issueRepository.countByRepoAndStatusNot(repo, IssueStatus.COMPLETED);
             issueCounts.put(repo.getId(), count);
@@ -432,7 +455,13 @@ public class RepositoryController {
             // (findByRepo, unfiltered by status), unlike the open-issue count above.
             totalIssueCounts.put(repo.getId(), issueRepository.countByRepo(repo));
             // One query per repo is acceptable at this scale (small number of watched repos).
-            lessonsByRepo.put(repo.getId(), lessonRepository.findByRepoIdOrderByCreatedAtAsc(repo.getId()));
+            List<RepoLesson> lessons = lessonRepository.findByRepoIdOrderByCreatedAtAsc(repo.getId());
+            lessonsByRepo.put(repo.getId(), lessons);
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (RepoLesson lesson : lessons) {
+                reusableLessons.put(lesson.getId(), RepoLessonQuality.reusable(lesson.getLesson())
+                        && seen.add(RepoLessonQuality.key(lesson.getLesson())));
+            }
         }
 
         model.addAttribute("activePage", "repositories");
@@ -441,6 +470,7 @@ public class RepositoryController {
         model.addAttribute("issueCounts", issueCounts);
         model.addAttribute("totalIssueCounts", totalIssueCounts);
         model.addAttribute("lessonsByRepo", lessonsByRepo);
+        model.addAttribute("reusableLessons", reusableLessons);
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         if (message != null) model.addAttribute("message", message);

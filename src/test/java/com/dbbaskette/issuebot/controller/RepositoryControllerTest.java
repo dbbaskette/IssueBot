@@ -338,6 +338,28 @@ class RepositoryControllerTest {
     }
 
     @Test
+    void listMarksOldIssueSpecificLessonsAsNotReusableWithoutDeletingThem() {
+        Fixture fixture = new Fixture();
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(7L);
+        RepoLesson oneOff = new RepoLesson(7L, "Fix issue #42 in FooService.java:97", 42);
+        oneOff.setId(1L);
+        RepoLesson rule = new RepoLesson(7L, "Follow docs/architecture.md for module boundaries.", 40);
+        rule.setId(2L);
+        when(fixture.repos.findAll()).thenReturn(java.util.List.of(repo));
+        when(fixture.lessons.findByRepoIdOrderByCreatedAtAsc(7L)).thenReturn(java.util.List.of(oneOff, rule));
+
+        org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
+        fixture.controller.list(model, null, null);
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<Long, Boolean> reusable =
+                (java.util.Map<Long, Boolean>) model.getAttribute("reusableLessons");
+        assertThat(reusable).containsEntry(1L, false).containsEntry(2L, true);
+        verify(fixture.lessons, never()).delete(any());
+    }
+
+    @Test
     void deleteLesson_belongsToRepo_deletesAndRedirects() {
         Fixture fixture = new Fixture();
         RepoLesson lesson = new RepoLesson(1L, "Use constructor injection", 10);
@@ -380,6 +402,40 @@ class RepositoryControllerTest {
         assertThat(view).isEqualTo("redirect:/repositories");
         verify(fixture.lessons, never()).delete(any());
         assertThat(redirectAttributes.getFlashAttributes().get("error")).isNotNull();
+    }
+
+    @Test
+    void updateLesson_allowsBroadRuleAndPreservesSourceIssue() {
+        Fixture fixture = new Fixture();
+        RepoLesson lesson = new RepoLesson(1L, "Fix issue #42 in FooService", 42);
+        lesson.setId(5L);
+        when(fixture.lessons.findById(5L)).thenReturn(Optional.of(lesson));
+        var flashes = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+
+        String view = fixture.controller.updateLesson(1L, 5L,
+                "  Follow docs/architecture.md for module boundaries.  ", flashes);
+
+        assertThat(view).isEqualTo("redirect:/repositories");
+        assertThat(lesson.getLesson()).isEqualTo("Follow docs/architecture.md for module boundaries.");
+        assertThat(lesson.getSourceIssue()).isEqualTo(42);
+        verify(fixture.lessons).save(lesson);
+        assertThat(flashes.getFlashAttributes().get("message")).isEqualTo("Lesson updated.");
+    }
+
+    @Test
+    void updateLesson_rejectsIssueSpecificOrOtherRepositoryContent() {
+        Fixture fixture = new Fixture();
+        RepoLesson lesson = new RepoLesson(1L, "Existing rule", 42);
+        lesson.setId(5L);
+        when(fixture.lessons.findById(5L)).thenReturn(Optional.of(lesson));
+        var flashes = new org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap();
+
+        fixture.controller.updateLesson(1L, 5L, "Fix issue #42 in FooService.java:97", flashes);
+        fixture.controller.updateLesson(2L, 5L, "Use constructor injection", flashes);
+
+        assertThat(lesson.getLesson()).isEqualTo("Existing rule");
+        verify(fixture.lessons, never()).save(any());
+        assertThat(flashes.getFlashAttributes().get("error")).isNotNull();
     }
 
     @Test

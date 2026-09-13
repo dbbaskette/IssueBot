@@ -95,6 +95,24 @@ class LessonsServiceTest {
     }
 
     @Test
+    void captureRejectsIssueSpecificAnswersAndExistingDuplicates() {
+        TrackedIssue issue = issueWithLessons(true);
+        when(lessonRepository.findByRepoIdOrderByCreatedAtAsc(1L)).thenReturn(List.of(
+                new RepoLesson(1L, "Run ./mvnw test before Java changes.", 9)));
+        when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
+                .thenReturn(success("Fix issue #42 in FooService.java:97\n"
+                        + "Run ./mvnw test before Java changes.\n"
+                        + "Follow docs/architecture.md for module boundaries."));
+        when(lessonRepository.countByRepoId(1L)).thenReturn(2L);
+
+        lessonsService.capture(issue, "completed successfully", "no failures", Path.of("/tmp/repo"));
+
+        ArgumentCaptor<RepoLesson> saved = ArgumentCaptor.forClass(RepoLesson.class);
+        verify(lessonRepository).save(saved.capture());
+        assertEquals("Follow docs/architecture.md for module boundaries.", saved.getValue().getLesson());
+    }
+
+    @Test
     void moreThanThreeLines_capsAtThree() {
         TrackedIssue issue = issueWithLessons(true);
         when(harnessService.executeUtility(anyString(), any(Path.class), isNull()))
@@ -173,5 +191,8 @@ class LessonsServiceTest {
         assertTrue(prompt.contains("completed successfully"));
         assertTrue(prompt.contains("no failures"));
         assertTrue(prompt.contains("NONE"));
+        assertTrue(prompt.contains("DIFFERENT future issues"));
+        assertTrue(prompt.contains("do not invent paths"));
+        assertTrue(prompt.contains("Do not turn a one-time workaround into a permanent rule"));
     }
 }

@@ -203,7 +203,7 @@
                         </div>
                         <div class="checkbox-field">
                             <input type="checkbox" id="lessons-enabled" name="lessonsEnabled" value="true">
-                            <label for="lessons-enabled">Collect lessons from completed issues</label>
+                            <label for="lessons-enabled">Collect reusable lessons from finished issue runs</label>
                         </div>
                     </div>
 
@@ -315,9 +315,31 @@
                             <details class="lessons-details"
                                      th:attr="data-ui-state-key=${'repo:' + repo.id + ':lessons'}">
                                 <summary th:text="'Lessons (' + ${lessonsByRepo.containsKey(repo.id) ? #lists.size(lessonsByRepo.get(repo.id)) : 0} + ')'">Lessons (0)</summary>
+                                <p class="text-sm text-muted">Keep advice that applies to future issues. Stable repository conventions and links to existing docs are useful; one-off fixes belong in the issue history. Obvious issue-specific notes are kept here for review but skipped in future coding prompts.</p>
                                 <ul class="lessons-list">
                                     <li th:each="lesson : ${lessonsByRepo.get(repo.id)}">
-                                        <span th:text="${lesson.lesson}">lesson text</span>
+                                        <div class="lesson-entry">
+                                            <span th:text="${lesson.lesson}">lesson text</span>
+                                            <small th:if="${repo.lessonsEnabled and reusableLessons != null and reusableLessons.containsKey(lesson.id) and not reusableLessons.get(lesson.id)}"
+                                                   class="text-muted">Not used in future prompts — too specific or duplicate</small>
+                                            <small th:if="${not repo.lessonsEnabled}" class="text-muted">Learning is off for this repository</small>
+                                            <small class="text-muted">
+                                                <a th:if="${lesson.sourceIssue != null}"
+                                                   th:href="${'https://github.com/' + repo.owner + '/' + repo.name + '/issues/' + lesson.sourceIssue}"
+                                                   target="_blank" rel="noopener"
+                                                   th:text="${'From issue #' + lesson.sourceIssue}">From issue #42</a>
+                                                <time th:text="${#temporals.format(lesson.createdAt, 'MMM d, yyyy')}">Sep 12, 2026</time>
+                                            </small>
+                                            <details class="lesson-edit-details"
+                                                     th:attr="data-ui-state-key=${'repo:' + repo.id + ':lesson:' + lesson.id + ':edit'}">
+                                                <summary>Edit lesson</summary>
+                                                <form th:action="@{'/repositories/' + ${repo.id} + '/lessons/' + ${lesson.id} + '/update'}" method="post">
+                                                    <label th:for="${'lesson-' + lesson.id}">Reusable rule</label>
+                                                    <textarea th:id="${'lesson-' + lesson.id}" name="lesson" rows="2" maxlength="1000" required th:text="${lesson.lesson}"></textarea>
+                                                    <button type="submit" class="btn btn-outline btn-sm">Save lesson</button>
+                                                </form>
+                                            </details>
+                                        </div>
                                         <form th:action="@{'/repositories/' + ${repo.id} + '/lessons/' + ${lesson.id} + '/delete'}"
                                               method="post" class="lesson-delete-form">
                                             <button type="submit" class="btn btn-outline btn-sm" title="Delete lesson">

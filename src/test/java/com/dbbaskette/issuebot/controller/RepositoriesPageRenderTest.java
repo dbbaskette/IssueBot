@@ -1,6 +1,8 @@
 package com.dbbaskette.issuebot.controller;
 
 import com.dbbaskette.issuebot.model.WatchedRepo;
+import com.dbbaskette.issuebot.model.RepoLesson;
+import com.dbbaskette.issuebot.service.workflow.RepoLessonQuality;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -58,11 +60,22 @@ class RepositoriesPageRenderTest {
 
     private String render(List<WatchedRepo> repos, Map<Long, Long> issueCounts,
                           Map<Long, Long> totalIssueCounts, String repositoryFormValues) {
+        return render(repos, issueCounts, totalIssueCounts, repositoryFormValues, Map.of());
+    }
+
+    private String render(List<WatchedRepo> repos, Map<Long, Long> issueCounts,
+                          Map<Long, Long> totalIssueCounts, String repositoryFormValues,
+                          Map<Long, List<RepoLesson>> lessonsByRepo) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("repos", repos);
         context.setVariable("issueCounts", issueCounts);
         context.setVariable("totalIssueCounts", totalIssueCounts);
-        context.setVariable("lessonsByRepo", Map.of());
+        context.setVariable("lessonsByRepo", lessonsByRepo);
+        java.util.Map<Long, Boolean> reusableLessons = new java.util.HashMap<>();
+        lessonsByRepo.values().stream().flatMap(List::stream)
+                .forEach(lesson -> reusableLessons.put(lesson.getId(),
+                        RepoLessonQuality.reusable(lesson.getLesson())));
+        context.setVariable("reusableLessons", reusableLessons);
         var fixture = new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture();
         var advice = new HarnessCatalogAdvice(fixture.registry, new com.fasterxml.jackson.databind.ObjectMapper(), fixture.properties);
         context.setVariable("harnessCatalog", advice.harnessCatalog());
@@ -131,6 +144,22 @@ class RepositoriesPageRenderTest {
         assertThat(normalized).contains("Kept: the local clone on disk and everything on GitHub.");
         assertThat(html).contains("Delete repository data");
         assertThat(html).contains("id=\"remove-repo-form\"");
+    }
+
+    @Test
+    void savedLessonsShowProvenanceAndCanBeRewrittenWithoutReusingOneOffNotes() {
+        WatchedRepo repo = new WatchedRepo("acme", "widgets");
+        repo.setId(7L);
+        repo.setLessonsEnabled(true);
+        RepoLesson lesson = new RepoLesson(7L, "Fix issue #42 in FooService.java:97", 42);
+        lesson.setId(5L);
+
+        String html = render(List.of(repo), Map.of(7L, 0L), Map.of(7L, 0L), null,
+                Map.of(7L, List.of(lesson)));
+
+        assertThat(html).contains("Lessons (1)", "From issue #42",
+                "https://github.com/acme/widgets/issues/42", "Not used in future prompts",
+                "action=\"/repositories/7/lessons/5/update\"", "Save lesson");
     }
 
     @Test

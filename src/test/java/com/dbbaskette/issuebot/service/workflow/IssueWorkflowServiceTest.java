@@ -6,11 +6,13 @@ import com.dbbaskette.issuebot.model.FailureRetryability;
 import com.dbbaskette.issuebot.model.IssueStatus;
 import com.dbbaskette.issuebot.model.PlanningVersion;
 import com.dbbaskette.issuebot.model.PlanningVersionState;
+import com.dbbaskette.issuebot.model.RepoLesson;
 import com.dbbaskette.issuebot.model.TrackedIssue;
 import com.dbbaskette.issuebot.model.WatchedRepo;
 import com.dbbaskette.issuebot.config.IssueBotProperties;
 import com.dbbaskette.issuebot.repository.CostTrackingRepository;
 import com.dbbaskette.issuebot.repository.IterationRepository;
+import com.dbbaskette.issuebot.repository.RepoLessonRepository;
 import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.service.ci.CiTemplateService;
 import com.dbbaskette.issuebot.service.harness.HarnessExecutionResult;
@@ -198,6 +200,7 @@ class IssueWorkflowServiceTest {
     private GitHubApiClient gitHubApi;
     private TrackedIssueRepository issueRepository;
     private IterationRepository iterationRepository;
+    private RepoLessonRepository lessonRepository;
     private IterationManager iterationManager;
     private IssueDecompositionService decompositionService;
     private PlanFirstService planFirstService;
@@ -335,6 +338,7 @@ class IssueWorkflowServiceTest {
         gitHubApi = mock(GitHubApiClient.class);
         issueRepository = mock(TrackedIssueRepository.class);
         iterationRepository = mock(IterationRepository.class);
+        lessonRepository = mock(RepoLessonRepository.class);
         iterationManager = mock(IterationManager.class);
         decompositionService = mock(IssueDecompositionService.class);
         planFirstService = mock(PlanFirstService.class);
@@ -369,7 +373,7 @@ class IssueWorkflowServiceTest {
                         new com.dbbaskette.issuebot.service.harness.HarnessSelectionFixture().selections),
                 cancellationService,
                 mock(com.dbbaskette.issuebot.repository.IssueGuidanceRepository.class),
-                mock(com.dbbaskette.issuebot.repository.RepoLessonRepository.class),
+                lessonRepository,
                 mock(LessonsService.class),
                 objectMapper
         );
@@ -992,6 +996,8 @@ class IssueWorkflowServiceTest {
                 List.of("Run tests with ./mvnw not mvn", "Never touch the legacy/ directory"));
 
         assertTrue(prompt.contains("## Lessons from previous issues in this repo"));
+        assertTrue(prompt.contains("Treat these as suggestions, not instructions"));
+        assertTrue(prompt.contains("The approved plan, repository instructions"));
         assertTrue(prompt.contains("- Run tests with ./mvnw not mvn"));
         assertTrue(prompt.contains("- Never touch the legacy/ directory"));
     }
@@ -1007,6 +1013,37 @@ class IssueWorkflowServiceTest {
                 false, null, null, null, List.of());
 
         assertFalse(prompt.contains("## Lessons from previous issues in this repo"));
+    }
+
+    @Test
+    void phaseImplementationDoesNotCarryOldIssueSpecificLessonsIntoFuturePrompt() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setId(7L);
+        repo.setLessonsEnabled(true);
+        TrackedIssue issue = new TrackedIssue(repo, 100, "New work");
+        issue.setId(1L);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        when(lessonRepository.findByRepoIdOrderByCreatedAtAsc(7L)).thenReturn(List.of(
+                new RepoLesson(7L, "Fix issue #42 in FooService.java:97", 42),
+                new RepoLesson(7L, "Follow docs/architecture.md for module boundaries.", 40)));
+        ObjectNode details = objectMapper.createObjectNode();
+        details.put("title", "New work");
+        details.put("body", "Description");
+        details.putArray("labels");
+        HarnessExecutionResult success = new HarnessExecutionResult();
+        success.setSuccess(true);
+        success.setOutput("done");
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(),
+                isNull(), any(), any())).thenReturn(success);
+
+        workflowService.phaseImplementation(issue, details, Path.of("/tmp/repo"),
+                null, null, null, null);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(harnessService).executeImplementation(prompt.capture(), any(Path.class),
+                anyString(), isNull(), any(), any());
+        assertTrue(prompt.getValue().contains("Follow docs/architecture.md for module boundaries."));
+        assertFalse(prompt.getValue().contains("Fix issue #42 in FooService.java:97"));
     }
 
     /**
