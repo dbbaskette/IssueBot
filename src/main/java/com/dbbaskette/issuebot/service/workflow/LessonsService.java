@@ -13,7 +13,9 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Cross-issue lessons (#69, opt-in via {@link WatchedRepo#isLessonsEnabled()}):
@@ -66,7 +68,9 @@ public class LessonsService {
         if (repo == null || !repo.isLessonsEnabled()) return;
 
         try {
-            String prompt = buildPrompt(issue.getIssueNumber(), outcome, contextSummary);
+            List<String> existing = RepoLessonQuality.forPrompt(
+                    lessonRepository.findByRepoIdOrderByCreatedAtAsc(repo.getId()));
+            String prompt = buildPrompt(issue.getIssueNumber(), outcome, contextSummary, existing);
             HarnessExecutionResult result = harnessService.executeUtility(prompt, repoPath, null);
             if (result == null || !result.isSuccess()) {
                 log.warn("Lessons capture: utility call failed for {} #{}: {}",
@@ -82,13 +86,20 @@ public class LessonsService {
                 return;
             }
 
+            Set<String> seen = new HashSet<>();
+            existing.forEach(lesson -> seen.add(RepoLessonQuality.key(lesson)));
+            int stored = 0;
             for (String lesson : lessons) {
+                if (!RepoLessonQuality.reusable(lesson)
+                        || !seen.add(RepoLessonQuality.key(lesson))) continue;
                 lessonRepository.save(new RepoLesson(repo.getId(), lesson, issue.getIssueNumber()));
+                stored++;
             }
+            if (stored == 0) return;
             evictOverCap(repo.getId());
 
             log.info("Lessons capture: stored {} lesson(s) for {} #{}",
-                    lessons.size(), repo.fullName(), issue.getIssueNumber());
+                    stored, repo.fullName(), issue.getIssueNumber());
         } catch (Exception e) {
             log.warn("Lessons capture failed for {} #{}: {}",
                     repo.fullName(), issue.getIssueNumber(), e.getMessage(), e);
@@ -102,12 +113,35 @@ public class LessonsService {
     }
 
     String buildPrompt(int issueNumber, String outcome, String contextSummary) {
-        return "An automated coding agent just finished working on issue #" + issueNumber
-                + " (" + outcome + ") in this repository. Context:\n" + contextSummary
-                + "\nWrite 1-3 SHORT transferable lessons (one line each, imperative, specific to "
-                + "THIS repository) that would help a fresh automated attempt succeed here. Respond "
-                + "with ONLY the lessons, one per line, no numbering/bullets. If nothing transferable "
-                + "was learned, respond with exactly: NONE";
+        return buildPrompt(issueNumber, outcome, contextSummary, List.of());
+    }
+
+    String buildPrompt(int issueNumber, String outcome, String contextSummary,
+                       List<String> existing) {
+        StringBuilder prompt = new StringBuilder("An automated coding agent just finished working on issue #")
+                .append(issueNumber)
+                .append(" (").append(outcome).append(") in this repository. Context:\n")
+                .append(contextSummary)
+                .append("\nExtract at most 3 durable, repository-wide rules that would help with DIFFERENT future issues. "
+                + "Prefer a general principle or stable repository convention over the steps taken for this issue. "
+                + "A path to an existing repository document is useful when it is a durable source of truth; "
+                + "do not invent paths or claim a document exists without checking. "
+                + "Do not include issue or PR numbers, commit hashes, line numbers, one-off file edits, "
+                + "failure descriptions, or instructions that only make sense for this issue. "
+                + "Do not turn a one-time workaround into a permanent rule. "
+                + "Examples of good lessons: 'Follow docs/architecture.md for module boundaries' "
+                + "(only if that file exists); 'Run ./mvnw test before submitting Java changes' "
+                + "(only if this repo uses Maven). Bad: 'Fix issue #42 by changing FooService.java:97'. "
+                + "If the evidence does not support a reusable rule, respond exactly NONE. "
+                + "Otherwise respond with ONLY the rules, one short imperative sentence per line, "
+                + "no numbering or bullets.");
+        if (existing != null && !existing.isEmpty()) {
+            prompt.append("\nAlready saved; do not repeat these lessons:\n");
+            existing.stream().skip(Math.max(0, existing.size() - 10))
+                    .forEach(lesson -> prompt.append("- ")
+                            .append(lesson, 0, Math.min(lesson.length(), 240)).append('\n'));
+        }
+        return prompt.toString();
     }
 
     /**

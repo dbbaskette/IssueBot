@@ -1114,6 +1114,11 @@ label {
     font-size: 0.85rem;
 }
 .lessons-list li:last-child { border-bottom: none; }
+.lesson-entry { min-width: 0; flex: 1; display: grid; gap: 0.25rem; overflow-wrap: anywhere; }
+.lesson-entry small { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.lesson-edit-details summary { cursor: pointer; width: fit-content; }
+.lesson-edit-details form { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
+.lesson-edit-details textarea { width: 100%; }
 .lesson-delete-form { margin: 0; }
 
 input[type="text"],

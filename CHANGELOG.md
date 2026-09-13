@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0 — 2026-09-12
+
+- Capture only durable, repository-wide lessons: ask for transferable rules, allow verified documentation references, reject obvious issue-specific details, and skip duplicates.
+- Keep older one-off lessons visible for review but out of future coding prompts; treat all reusable lessons as advisory behind the current issue, approved plan, repository instructions, and actual code.
+- Show each lesson's source issue and date, and let operators rewrite existing lessons into reusable guidance.
+
 ## 0.12.0 — 2026-09-12
 
 - Start the issue terminal on direct page loads, refreshes, and HTMX navigation instead of relying on an inline script that could run before deferred JavaScript; avoid reconnecting on unrelated polls.
