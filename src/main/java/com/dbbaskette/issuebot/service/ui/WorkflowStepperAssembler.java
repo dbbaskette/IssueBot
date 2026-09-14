@@ -179,7 +179,7 @@ public final class WorkflowStepperAssembler {
             case "PLANNING" -> "Planning";
             case "SETUP" -> "Preparing the repository";
             case "IMPLEMENTATION" -> "Implementation in progress";
-            case "LOCAL_CHECKS" -> "Running local checks";
+            case "LOCAL_CHECKS" -> "Preparing test evidence for review";
             case "CI_VERIFICATION" -> "CI checks running";
             case "PR_CREATION" -> "Creating the pull request";
             case "INDEPENDENT_REVIEW" -> "Independent review in progress";

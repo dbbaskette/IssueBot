@@ -14,6 +14,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ReviewPromptBuilderTest {
 
     @Test
+    void reviewerReceivesActualHarnessEvidenceAndMustAssessGapsWithoutRerunning() {
+        String prompt = builder.buildReviewPrompt("Title", "Body", List.of("src/Main.java"),
+                "diff", List.of(), false, 0.85, null, null,
+                new ReviewTestEvidence("REPORTED", "SKIPPED", null,
+                        "Command: pnpm check\nReported result: FAILED: regression\nLimitations: no live API"));
+        assertThat(prompt).contains("pnpm check", "FAILED: regression", "no live API",
+                "REPORTED is not an independent PASS", "request focused correction and testing",
+                "Do not reject solely because IssueBot did not rerun tests");
+    }
+
+    @Test
     void reviewUsesItsStageBundleWithoutAssumingADifferentModel() {
         String prompt = builder.buildReviewPrompt("UI change", "Preserve expanded details",
                 List.of("view.html"), "diff", List.of(), false, 0.85);

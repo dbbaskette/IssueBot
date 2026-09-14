@@ -120,7 +120,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).contains("Local verification", "GitHub CI", "PASSED");
+        assertThat(html).contains("Coding harness tests", "GitHub CI", "PASSED");
         assertThat(html).contains("Attempt 1/2", "Review rounds 1/2");
     }
 
@@ -175,7 +175,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("Local verification", "Not run");
+        assertThat(html).contains("Coding harness tests", "Awaiting evidence");
     }
 
     @Test
@@ -191,8 +191,8 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).contains("Local verification");
-        int start = html.indexOf("Local verification");
+        assertThat(html).contains("Coding harness tests");
+        int start = html.indexOf("Coding harness tests");
         int end = html.indexOf("GitHub CI", start);
         String localChecksRow = html.substring(start, end);
         assertThat(localChecksRow).contains("FAILED");

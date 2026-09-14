@@ -203,6 +203,8 @@ class UiVisualFixturesTest {
         Iteration secondIteration = reviewIteration(stageIssue, 2, true, REVIEW_JSON, DIFF);
         secondIteration.setSelfAssessment("Atomic claim and restart coverage are complete.");
         secondIteration.setClaudeOutput("Implemented durable claim and added concurrent recovery coverage.");
+        secondIteration.setLocalCheckResult("REPORTED");
+        secondIteration.setHarnessVerificationEvidence("Command: ./mvnw -q test\nReported result: PASS — 12 focused tests\nLimitations: no live API checks.\nAgent-reported evidence; IssueBot did not rerun these commands.");
         iterations.saveAndFlush(secondIteration);
 
         StageApproval stageDecision = new StageApproval();

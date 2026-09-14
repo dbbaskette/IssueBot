@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.0 — 2026-09-14
+
+- Make local testing the coding harness's responsibility: IssueBot no longer requires configured commands or reruns tests. Existing commands become optional harness guidance.
+- Save exact agent-reported commands, results, and limitations for the issue UI and independent reviewer. Missing evidence is never counted as passing; review findings drive focused correction in the harness.
+- Preserve test evidence across recovery and allow reviewed merge retries without another coding/test run. GitHub CI and independent review gates remain in place.
+
 ## 0.18.0 — 2026-09-14
 
 - Browse issue output by clicking a workflow stage, following the current stage by default while preserving a manually selected stage during updates.

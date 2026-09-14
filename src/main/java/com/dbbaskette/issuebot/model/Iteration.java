@@ -98,6 +98,12 @@ public class Iteration {
     @Column(name = "local_check_failure")
     private String localCheckFailure;
 
+    @Column(name = "harness_verification_evidence", columnDefinition = "CLOB")
+    private String harnessVerificationEvidence;
+
+    public String getHarnessVerificationEvidence() { return harnessVerificationEvidence; }
+    public void setHarnessVerificationEvidence(String evidence) { this.harnessVerificationEvidence = evidence; }
+
     @Column(name = "started_at", nullable = false, updatable = false)
     private LocalDateTime startedAt = LocalDateTime.now();
 

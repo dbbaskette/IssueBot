@@ -7,7 +7,8 @@ package com.dbbaskette.issuebot.service.review;
  */
 public record ReviewTestEvidence(String localVerificationResult,
                                  String ciResult,
-                                 String priorReviewContext) {
+                                 String priorReviewContext,
+                                 String harnessVerificationEvidence) {
 
     public ReviewTestEvidence {
         localVerificationResult = normalize(localVerificationResult);
@@ -18,6 +19,10 @@ public record ReviewTestEvidence(String localVerificationResult,
 
     public ReviewTestEvidence(String localVerificationResult, String ciResult) {
         this(localVerificationResult, ciResult, null);
+    }
+
+    public ReviewTestEvidence(String localVerificationResult, String ciResult, String priorReviewContext) {
+        this(localVerificationResult, ciResult, priorReviewContext, null);
     }
 
     public static ReviewTestEvidence notRun() {

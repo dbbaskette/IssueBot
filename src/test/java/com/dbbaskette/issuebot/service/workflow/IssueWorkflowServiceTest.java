@@ -213,15 +213,7 @@ class IssueWorkflowServiceTest {
     private SseService sseService;
     private CiTemplateService ciTemplateService;
 
-    @Test
-    void approvedPlanRequiresAnExecutableOperatorConfiguredLocalGate() {
-        WatchedRepo repo = new WatchedRepo("owner", "repo");
-        assertFalse(IssueWorkflowService.hasTrustedLocalVerification(repo));
-        repo.setVerificationCommands("# comment only\n  ");
-        assertFalse(IssueWorkflowService.hasTrustedLocalVerification(repo));
-        repo.setVerificationCommands("./mvnw -B -ntp verify");
-        assertTrue(IssueWorkflowService.hasTrustedLocalVerification(repo));
-    }
+
 
     @Test
     void recordsStructuredFailureForRecoveryUi() {

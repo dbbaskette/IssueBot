@@ -288,7 +288,7 @@
                                  th:if="${attempt.localCheckResult != null or attempt.ciResult != null}">
                                 <strong>Persisted verification evidence</strong>
                                 <p th:if="${attempt.localCheckResult != null}"
-                                   th:text="${'Local checks: ' + attempt.localCheckResult}">Local checks: PASSED</p>
+                                   th:text="${attempt.localCheckResult == 'REPORTED' ? 'Test evidence: agent-reported' : (attempt.localCheckResult == 'NOT_RUN' ? 'Test evidence: no structured results' : 'Earlier local checks: ' + attempt.localCheckResult)}">Test evidence</p>
                                 <p th:if="${attempt.ciResult != null}"
                                    th:text="${'CI verification: ' + attempt.ciResult}">CI verification: PASSED</p>
                             </div>
@@ -584,10 +584,6 @@
                        th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">Return to current version</a>
                 </div>
 
-                <div class="alert alert-warning"
-                     th:if="${(localVerificationRequired != null ? localVerificationRequired : issue.effectivePlanFirst()) and (localVerificationConfigured != null ? not localVerificationConfigured : issue.repo.verificationCommands == null)}">
-                    Local verification is not configured. Add a trusted command in Repository settings before starting this approved plan; IssueBot will not publish unchecked changes.
-                </div>
                 <div class="plan-review-body">
                     <aside class="plan-version-rail" aria-label="Selected planning version">
                         <span class="plan-version-number" th:text="${'v' + selectedPlanningVersion.versionNumber}">v3</span>
@@ -696,9 +692,11 @@
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <div class="panel-header"><h3>Checks</h3></div>
                 <div class="panel-body">
-                    <div class="flex-between mb-1"><span>Local verification</span>
+                    <p class="text-sm text-muted">The coding harness owns local testing. IssueBot reviews its evidence and monitors GitHub CI when enabled; it does not rerun local tests.</p>
+                    <div class="flex-between mb-1"><span>Coding harness tests</span>
                         <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.localCheckResult == 'PASSED' ? 'status-completed' : (currentRunIteration != null and currentRunIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
-                              th:text="${currentRunIteration != null and currentRunIteration.localCheckResult != null ? currentRunIteration.localCheckResult : 'Not run'}">Not run</span></div>
+                              th:text="${currentRunIteration != null and currentRunIteration.localCheckResult != null ? (currentRunIteration.localCheckResult == 'REPORTED' ? 'Agent-reported' : (currentRunIteration.localCheckResult == 'NOT_RUN' ? 'No test evidence' : currentRunIteration.localCheckResult)) : 'Awaiting evidence'}">Awaiting evidence</span></div>
+                    <pre class="stage-saved-output" th:if="${currentRunIteration != null and currentRunIteration.harnessVerificationEvidence != null}" th:text="${currentRunIteration.harnessVerificationEvidence}">Harness test evidence</pre>
                     <div class="flex-between"><span>GitHub CI</span>
                         <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.ciResult == 'PASSED' ? 'status-completed' : (currentRunIteration != null and currentRunIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
                               th:text="${currentRunIteration != null and currentRunIteration.ciResult != null ? (currentRunIteration.ciResult == 'SKIPPED' ? 'Not monitored' : currentRunIteration.ciResult) : 'Not run'}">Not run</span></div>

@@ -111,14 +111,9 @@ public class RepositoryController {
             return "redirect:/repositories";
         }
         String normalized = normalize(verificationCommands);
-        if (normalized == null || com.dbbaskette.issuebot.service.workflow.LocalVerificationService
-                .parseCommands(normalized).isEmpty()) {
-            redirects.addFlashAttribute("error", "Enter at least one executable verification command");
-            return "redirect:/repositories";
-        }
         repo.setVerificationCommands(normalized);
         repoRepository.saveAndFlush(repo);
-        redirects.addFlashAttribute("success", "Trusted verification commands saved for " + repo.fullName());
+        redirects.addFlashAttribute("success", "Suggested test commands saved for " + repo.fullName());
         return "redirect:/repositories";
     }
 

@@ -294,13 +294,6 @@ public class IssueWorkflowService {
             }
         }
 
-        // An approved plan is not a substitute for an operator-authorized command.
-        // Refuse to spend an implementation turn or publish unverified code when the
-        // repository has no executable local gate, even if CI is disabled or absent.
-        if (approvedPlan != null && !hasTrustedLocalVerification(repo)) {
-            failMissingVerificationConfiguration(trackedIssue);
-            return;
-        }
 
         String branchName;
         Path repoPath;
@@ -550,7 +543,7 @@ public class IssueWorkflowService {
                     // Native turns already saved their output, session and ledger on the locked
                     // iteration. Saving this older workflow object would erase those checkpoints.
                     if (!harnessOwnedImplementation) {
-                        iteration.setClaudeOutput(implResult.getOutput());
+                        iteration.setClaudeOutput(implResult.getFinalResultOrOutput());
                         if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
                             iteration.setClaudeSessionId(implResult.getSessionId());
                         }
@@ -654,95 +647,20 @@ public class IssueWorkflowService {
                 }
             }
 
-            // === Phase 2.5: Local Verification Commands (operator-defined, before CI) ===
-            if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS) && stageWorkflow != null) {
+            // Save harness evidence before a verification/CI approval pause so the operator can inspect it.
+            if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS)) {
+                HarnessVerificationEvidence evidence = HarnessVerificationEvidence.capture(
+                        iteration, implResult, objectMapper);
+                iteration.setLocalCheckResult(evidence.status());
+                iteration.setHarnessVerificationEvidence(evidence.text());
                 iterationRepository.save(iteration);
-                if (!stageWorkflow.before(trackedIssue, WorkflowStage.VERIFICATION, iterationNum)) return;
-            }
-            List<String> verificationCommands = LocalVerificationService.parseCommands(repo.getVerificationCommands());
-            // Settings can change while a harness is working. Recheck immediately before
-            // publication so removing the gate mid-run cannot turn a required check into
-            // a silent SKIPPED outcome.
-            if (approvedPlan != null && verificationCommands.isEmpty()) {
-                iteration.setLocalCheckResult("NOT_RUN");
-                iterationRepository.save(iteration);
-                failMissingVerificationConfiguration(trackedIssue);
-                return;
-            }
-            if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS)
-                    && !verificationCommands.isEmpty()) {
-                trackedIssue.setCurrentPhase("LOCAL_CHECKS");
-                issueRepository.save(trackedIssue);
-                eventService.log("PHASE_LOCAL_CHECKS", "Starting local verification commands", repo, trackedIssue);
-
-                Long issueIdForLog = trackedIssue.getId();
-                LocalVerificationService.Result localResult;
-                try {
-                    localResult = localVerificationService.run(
-                            repoPath, verificationCommands, LocalVerificationService.TIMEOUT_MINUTES_PER_COMMAND,
-                            line -> sseService.broadcastClaudeLog(issueIdForLog, "[local-check] " + line));
-                } catch (Exception e) {
-                    // An unexpected error must route through the normal retry path,
-                    // not escape and fail the whole issue.
-                    log.warn("Local verification threw for iteration {}: {}", iterationNum, e.getMessage());
-                    localResult = LocalVerificationService.Result.failure(
-                            "(local verification error)", "Local verification error: " + e.getMessage());
-                }
-
-                if (!localResult.success()) {
-                    log.info("Local verification failed for iteration {}: {}",
-                            iterationNum, localResult.failedCommand());
-                    iteration.setLocalCheckResult("FAILED");
-                    if (approvedPlan != null && implementationTurnCheckpoints != null) {
-                        String failure = "Trusted local verification failed: " + localResult.failedCommand()
-                                + "\n\n" + truncate(localResult.output(), 5000);
-                        implementationTurnCheckpoints.reopenForLocalRepair(
-                                trackedIssue.getId(), iteration.getId(), failure);
-                        iteration.setImplementationCompletedAt(null);
-                        iteration.setImplementationSucceeded(null);
-                        iteration.setLocalCheckFailure(failure);
-                        iteration.setImplementationOutcome(ImplementationOutcome.Status.CONTINUE.name());
-                        trackedIssue.setCurrentPhase("IMPLEMENTATION");
-                        previousDiff = null;
-                        previousCiLogs = failure;
-                        previousFeedback = null;
-                        reviewFeedback = false;
-                        localRepairPending = true;
-                        eventService.log("IMPLEMENTATION_REPAIR",
-                                "Returning trusted-check failure to the same coding session",
-                                repo, trackedIssue);
-                        continue;
-                    }
-                    iteration.setCompletedAt(LocalDateTime.now());
-                    iterationRepository.save(iteration);
-                    eventService.log("PHASE_LOCAL_CHECKS_FAILED",
-                            "Local check failed: " + localResult.failedCommand(), repo, trackedIssue);
-
-                    String skipReason = iterationManager.shouldSkipRetry(
-                            trackedIssue, implResult, "FAILED", previousFeedback);
-                    if (skipReason != null) {
-                        log.warn("Skipping retry for {} #{}: {}", repo.fullName(),
-                                trackedIssue.getIssueNumber(), skipReason);
-                        if (repo.getDecompositionMode() != DecompositionMode.OFF
-                                && decompositionService.isDecomposable(skipReason)
-                                && decompositionService.decompose(trackedIssue, issueDetails,
-                                        repoPath, skipReason)) {
-                            return;
-                        }
-                        iterationManager.handleRetrySkipped(trackedIssue, skipReason);
-                        return;
-                    }
-
-                    previousDiff = diff;
-                    previousCiLogs = "Local verification command failed: " + localResult.failedCommand()
-                            + "\n\n" + truncate(localResult.output(), 5000);
-                    previousFeedback = null;
-                    reviewFeedback = false; // local check failure is not review feedback
-                    continue;
-                }
-
-                iteration.setLocalCheckResult("PASSED");
-                eventService.log("PHASE_LOCAL_CHECKS_COMPLETE", "Local checks passed", repo, trackedIssue);
+                eventService.log("HARNESS_TEST_EVIDENCE",
+                        evidence.status().equals("REPORTED")
+                                ? "Coding harness test evidence saved for independent review"
+                                : "Coding harness supplied no structured test results; reviewer must assess the gap",
+                        repo, trackedIssue);
+                if (stageWorkflow != null
+                        && !stageWorkflow.before(trackedIssue, WorkflowStage.VERIFICATION, iterationNum)) return;
             }
 
             // === Phase 3: CI Verification ===
@@ -1119,21 +1037,6 @@ public class IssueWorkflowService {
         eventService.log("PLAN_APPROVAL_INVARIANT_FAILED", reason, issue.getRepo(), issue);
     }
 
-    static boolean hasTrustedLocalVerification(WatchedRepo repo) {
-        return !LocalVerificationService.parseCommands(repo.getVerificationCommands()).isEmpty();
-    }
-
-    private void failMissingVerificationConfiguration(TrackedIssue issue) {
-        String reason = "Approved-plan implementation requires a configured local verification command; "
-                + "the approved plan's suggested commands are not an executable gate";
-        issue.setStatus(IssueStatus.FAILED);
-        issue.setCurrentPhase(null);
-        recordFailure(issue, FailureCategory.SETUP, reason, "LOCAL_CHECKS", reason,
-                "Add a trusted verification command in Repository settings, then retry this issue. "
-                        + "IssueBot will not advance this unverified run.",
-                FailureRetryability.OPERATOR_ACTION_REQUIRED);
-        eventService.log("LOCAL_VERIFICATION_NOT_CONFIGURED", reason, issue.getRepo(), issue);
-    }
 
     private JsonNode fetchIssueDetails(WatchedRepo repo, int issueNumber) {
         log.info("Fetching issue details from GitHub for {} #{}...", repo.fullName(), issueNumber);
@@ -1288,7 +1191,7 @@ public class IssueWorkflowService {
                 repoInstructions, lessons, legacyApprovedPlan)
                 + com.dbbaskette.issuebot.service.prompt.PromptGuidance.configuredVerification(
                         LocalVerificationService.parseCommands(repo.getVerificationCommands()))
-                + (approvedPlan == null ? "" : ImplementationOutcome.promptContract());
+                + ImplementationOutcome.promptContract();
 
         sseService.broadcastClaudeLog(issueId, "[system] Launching " + harnessService.displayName() + " ("
                 + trackedIssue.getResolvedImplModel() + ") for implementation"
@@ -1327,7 +1230,7 @@ public class IssueWorkflowService {
                     repoInstructions, lessons, legacyApprovedPlan)
                     + com.dbbaskette.issuebot.service.prompt.PromptGuidance.configuredVerification(
                             LocalVerificationService.parseCommands(repo.getVerificationCommands()))
-                    + (approvedPlan == null ? "" : ImplementationOutcome.promptContract());
+                    + ImplementationOutcome.promptContract();
             sseService.broadcastClaudeLog(issueId, "[system] Retrying with a fresh "
                     + harnessService.displayName() + " session...");
             result = harnessService.executeImplementation(coldPrompt, repoPath,
@@ -1791,7 +1694,7 @@ public class IssueWorkflowService {
                         approvedPlan,
                         new ReviewTestEvidence(
                                 iteration.getLocalCheckResult(), iteration.getCiResult(),
-                                priorReviewContext),
+                                priorReviewContext, iteration.getHarnessVerificationEvidence()),
                         line -> streamClaudeLog(issueId, line));
             } catch (Exception e) {
                 log.error("Independent review failed", e);

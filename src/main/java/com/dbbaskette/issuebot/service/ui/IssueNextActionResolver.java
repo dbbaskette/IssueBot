@@ -97,7 +97,7 @@ public class IssueNextActionResolver {
             case "SETUP" -> "Preparing the repository.";
             case "PLANNING" -> "Preparing the plan.";
             case "IMPLEMENTATION" -> "The coding agent is working.";
-            case "LOCAL_CHECKS" -> "Running local verification.";
+            case "LOCAL_CHECKS" -> "Preparing the coding harness's test evidence for review.";
             case "CI_VERIFICATION" -> "Waiting for CI checks.";
             case "PR_CREATION" -> "Creating the pull request.";
             case "INDEPENDENT_REVIEW" -> "Independent review is in progress.";

@@ -197,10 +197,10 @@
                             <input type="text" id="allowed-paths" name="allowedPaths" placeholder="src/, test/">
                         </div>
                         <div class="field-group full-width">
-                            <label for="verification-commands">Verification commands (one per line, run before CI/push)</label>
+                            <label for="verification-commands">Suggested test commands for the coding harness (optional)</label>
                             <textarea id="verification-commands" name="verificationCommands" rows="3"
                                       placeholder="./mvnw -q verify&#10;npm run lint"></textarea>
-                            <p class="text-sm text-muted">Required for approved-plan implementation. IssueBot runs these trusted commands before publishing changes; commands mentioned in a plan are not run automatically.</p>
+                            <p class="text-sm text-muted">Leave blank to let the harness discover appropriate checks. Saved commands are suggestions for the harness; IssueBot does not execute them.</p>
                         </div>
                         <div class="field-group full-width">
                             <label for="custom-instructions">Custom instructions (injected into every implementation and review prompt)</label>
