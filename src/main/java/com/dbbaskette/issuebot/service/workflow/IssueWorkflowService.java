@@ -61,6 +61,9 @@ public class IssueWorkflowService {
      *  so tests can zero it out and not sleep. */
     long reviewRetryBackoffBaseMs = 2000L;
 
+    /** Short recheck interval while a reviewed PR's GitHub checks are still running. */
+    long mergeCheckPollIntervalMs = 5000L;
+
     private static final DateTimeFormatter GUIDANCE_TIME = DateTimeFormatter.ofPattern("HH:mm");
 
     private final GitOperationsService gitOps;
@@ -766,7 +769,9 @@ public class IssueWorkflowService {
                     } else {
                         ciPassed = phaseCommitAndPush(trackedIssue, branchName);
                         iteration.setCiResult("SKIPPED");
-                        eventService.log("PHASE_CI_SKIPPED", "CI disabled — skipped check polling", repo, trackedIssue);
+                        eventService.log("PHASE_CI_SKIPPED",
+                                "IssueBot CI polling is off; GitHub checks may still run and must finish before merge",
+                                repo, trackedIssue);
                     }
                 } catch (Exception e) {
                     log.error("Phase 3 (CI) failed, iteration {}", iterationNum, e);
@@ -961,11 +966,16 @@ public class IssueWorkflowService {
                 return; // Success!
             } catch (Exception e) {
                 log.error("Phase 6 (Completion) failed", e);
+                boolean reviewedMergeFailure = StageWorkflowCoordinator.managed(trackedIssue)
+                        && e.getMessage() != null
+                        && e.getMessage().startsWith("Managed merge failed:");
                 trackedIssue.setStatus(IssueStatus.FAILED);
-                trackedIssue.setCurrentPhase(null);
+                trackedIssue.setCurrentPhase(reviewedMergeFailure ? "COMPLETION" : null);
                 recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
                         "Completion failed: " + e.getMessage(), "COMPLETION", e.toString(),
-                        "Inspect the pull request and merge checks, then retry completion.",
+                        reviewedMergeFailure
+                                ? "The reviewed code is retained. Wait for GitHub checks, then resume merging this PR."
+                                : "Inspect the pull request and merge checks before retrying.",
                         FailureRetryability.OPERATOR_ACTION_REQUIRED);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);
@@ -1571,7 +1581,8 @@ public class IssueWorkflowService {
 
         // Post review to PR now that it's no longer a draft
         // (submitting reviews on draft PRs can interfere with merge)
-        if (reviewResult != null && !reviewResult.invocationFailed() && prNumber > 0 && !merged) {
+        if (!recoveryResume && reviewResult != null && !reviewResult.invocationFailed()
+                && prNumber > 0 && !merged) {
             postReviewToGitHub(trackedIssue, prNumber, reviewResult);
         }
 
@@ -1607,7 +1618,7 @@ public class IssueWorkflowService {
                                     .findFirstByIssueIdAndIterationNumOrderByIdDesc(
                                             trackedIssue.getId(), trackedIssue.getCurrentIteration())
                                     .orElseThrow(() -> new IllegalStateException("Reviewed iteration is missing"));
-                            String expectedSha = managedMergeGuard.validateForMerge(
+                            String expectedSha = awaitReviewedMergeChecks(
                                     trackedIssue, reviewed.getReviewedCommitSha());
                             JsonNode mergeResponse = gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
                                     prNumber, prTitle, "squash", expectedSha);
@@ -1627,11 +1638,14 @@ public class IssueWorkflowService {
                     } catch (Exception e) {
                         log.warn("Auto-merge attempt {} failed for PR #{}: {}",
                                 attempt, prNumber, e.getMessage());
-                        if (attempt < 3) {
+                        boolean retryable = !(e instanceof MergeChecksTimedOutException)
+                                && !(e instanceof InterruptedException);
+                        if (attempt < 3 && retryable) {
                             try { Thread.sleep(5000); } catch (InterruptedException ie) {
                                 Thread.currentThread().interrupt(); break;
                             }
                         } else {
+                            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                             eventService.log("AUTO_MERGE_FAILED",
                                     "Auto-merge failed for PR #" + prNumber + ": " + e.getMessage(),
                                     repo, trackedIssue);
@@ -1669,6 +1683,39 @@ public class IssueWorkflowService {
 
         eventService.log("WORKFLOW_COMPLETED",
                 "Workflow completed — PR #" + prNumber + " (" + prUrl + ")", repo, trackedIssue);
+    }
+
+    private static final class MergeChecksTimedOutException extends IllegalStateException {
+        private MergeChecksTimedOutException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    private String awaitReviewedMergeChecks(TrackedIssue issue, String reviewedSha)
+            throws InterruptedException {
+        WatchedRepo repo = issue.getRepo();
+        int timeoutMinutes = Math.max(1, repo.getCiTimeoutMinutes());
+        long deadline = System.nanoTime() + java.time.Duration.ofMinutes(timeoutMinutes).toNanos();
+        boolean announced = false;
+        while (true) {
+            try {
+                return managedMergeGuard.validateForMerge(issue, reviewedSha);
+            } catch (ManagedMergeGuard.PendingChecksException pending) {
+                if (!announced) {
+                    eventService.log("PHASE_MERGE_WAITING_CHECKS",
+                            "Review passed; waiting for GitHub checks on PR #" + issue.getPrNumber(),
+                            repo, issue);
+                    announced = true;
+                }
+                long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                        deadline - System.nanoTime());
+                if (remainingMs <= 0) {
+                    throw new MergeChecksTimedOutException("GitHub checks did not finish within "
+                            + timeoutMinutes + " minutes; the reviewed PR remains open", pending);
+                }
+                Thread.sleep(Math.min(remainingMs, mergeCheckPollIntervalMs));
+            }
+        }
     }
 
     /**

@@ -51,7 +51,7 @@ class IssueNextActionResolverTest {
 
         TrackedIssue running = issue(IssueStatus.IN_PROGRESS);
         running.setCurrentPhase("CI_VERIFICATION");
-        assertThat(resolver.resolve(running).summary()).isEqualTo("IssueBot is CI Verification.");
+        assertThat(resolver.resolve(running).summary()).isEqualTo("Waiting for CI checks.");
 
         TrackedIssue oneBlocker = issue(IssueStatus.BLOCKED);
         oneBlocker.setBlockedByIssues("12");
@@ -60,6 +60,20 @@ class IssueNextActionResolverTest {
         TrackedIssue manyBlockers = issue(IssueStatus.BLOCKED);
         manyBlockers.setBlockedByIssues("12, 19");
         assertThat(resolver.resolve(manyBlockers).summary()).isEqualTo("Waiting for issues #12, #19.");
+    }
+
+    @Test
+    void reviewedMergeFailurePointsToMergeRecoveryInsteadOfCodingRetry() {
+        TrackedIssue issue = issue(IssueStatus.FAILED);
+        issue.setCurrentPhase("COMPLETION");
+        issue.setLastFailureReason("Completion failed: Managed merge failed: GitHub checks still pending");
+
+        IssueNextAction action = resolver.resolve(issue);
+
+        assertThat(action.summary()).isEqualTo(
+                "The review passed. Resolve the merge blocker, then resume this PR without recoding.");
+        assertThat(action.ctaLabel()).isEqualTo("Resume merge");
+        assertThat(action.href()).isEqualTo("/issues/7#recovery");
     }
 
     @Test

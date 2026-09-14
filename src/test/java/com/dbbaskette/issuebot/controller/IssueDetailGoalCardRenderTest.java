@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Renders the real issue-detail.html "content" fragment through Thymeleaf (no Spring context,
- * no database) to verify the new Goal card (issue #62) is null-safe and shows the right
+ * no database) to verify fixed progress and evidence sections are null-safe and show the right
  * text/badges for a range of issue states. Unlike the plain controller tests, this exercises
  * the actual template expressions (th:if/th:text/th:classappend), which a Java-level unit test
  * can't catch mistakes in (e.g. NPEs on a null latestIteration, bad SpEL syntax).
@@ -64,6 +64,7 @@ class IssueDetailGoalCardRenderTest {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
         context.setVariable("latestIteration", latestIteration);
+        context.setVariable("currentRunIteration", latestIteration);
         List<Iteration> iterations = latestIteration == null ? List.of() : List.of(latestIteration);
         context.setVariable("iterations", iterations);
         // Iteration History (#90) reads this newest-first view; mirrors IssueController.
@@ -88,7 +89,7 @@ class IssueDetailGoalCardRenderTest {
     }
 
     @Test
-    void rendersGoalCardWithNoIterationsWithoutError() {
+    void rendersStableEvidenceSectionsWithNoIterationsWithoutError() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 1, "Some issue");
         issue.setId(1L);
@@ -96,19 +97,15 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("Goal");
-        assertThat(html).contains("Done when all of these hold");
-        assertThat(html).contains("CI checks pass");
-        // No iteration yet — CI and review rows must fall back to the placeholder, not NPE.
-        assertThat(html).contains("Independent review passes");
-        assertThat(html).contains("70%");
-        assertThat(html).contains("iterations 0/2");
-        assertThat(html).contains("review rounds 0/2");
-        assertThat(html).contains("escalates to needs-human with 24 h cooldown");
+        assertThat(html).contains("<h3>Progress</h3>", "<h3>Implementation</h3>",
+                "<h3>Checks</h3>", "<h3 id=\"review-history-title\">Implementation review</h3>",
+                "<h3>Outcome</h3>");
+        assertThat(html).contains("Attempt 0/2", "Review rounds 0/2", "Not started", "Not run");
+        assertThat(html).doesNotContain("<h3>Goal</h3>", "<h3>Timeline</h3>", "Progress details");
     }
 
     @Test
-    void rendersPassedCiAndReviewText() {
+    void rendersPassedCiAndLocalCheckText() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 2, "Another issue");
         issue.setId(2L);
@@ -118,23 +115,17 @@ class IssueDetailGoalCardRenderTest {
 
         Iteration iteration = new Iteration(issue, 1);
         iteration.setCiResult("PASSED");
+        iteration.setLocalCheckResult("PASSED");
         iteration.setReviewPassed(true);
 
         String html = render(baseContext(issue, iteration));
 
-        // Extract just the goal card region for a focused assertion.
-        int start = html.indexOf("Done when all of these hold");
-        int end = html.indexOf("Retry Issue");
-        String goalCard = html.substring(start, end < 0 ? html.length() : end);
-
-        assertThat(goalCard).contains("PASSED");
-        assertThat(goalCard).doesNotContain("CHANGES REQUESTED");
-        assertThat(goalCard).contains("iterations 1/2");
-        assertThat(goalCard).contains("review rounds 1/2");
+        assertThat(html).contains("Local verification", "GitHub CI", "PASSED");
+        assertThat(html).contains("Attempt 1/2", "Review rounds 1/2");
     }
 
     @Test
-    void rendersFailedReviewAsChangesRequested() {
+    void rendersFailedChecksWithoutLosingTheReviewPlaceholder() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 3, "Third issue");
         issue.setId(3L);
@@ -146,12 +137,11 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).contains("CHANGES REQUESTED");
-        assertThat(html).contains("FAILED");
+        assertThat(html).contains("GitHub CI", "FAILED", "Implementation review");
     }
 
     @Test
-    void ciDisabledShowsDisabledNoteInsteadOfCiRow() {
+    void ciDisabledExplainsGitHubMergeChecks() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         repo.setCiEnabled(false);
         TrackedIssue issue = new TrackedIssue(repo, 4, "Fourth issue");
@@ -160,12 +150,11 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("CI disabled");
-        assertThat(html).doesNotContain("CI checks pass");
+        assertThat(html).contains("IssueBot does not poll CI here", "GitHub checks that start must still finish before merge");
     }
 
     @Test
-    void customReviewPassThresholdIsReflectedInGoalCard() {
+    void removedGoalCardDoesNotRepeatReviewPolicy() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         repo.setReviewPassThreshold(new BigDecimal("0.85"));
         TrackedIssue issue = new TrackedIssue(repo, 5, "Fifth issue");
@@ -174,12 +163,11 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("85%");
-        assertThat(html).doesNotContain("70%");
+        assertThat(html).doesNotContain("<h3>Goal</h3>", "85%");
     }
 
     @Test
-    void repoWithoutVerificationCommandsHidesLocalChecksRow() {
+    void repoWithoutVerificationCommandsStillShowsPendingChecksSlot() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 7, "Seventh issue");
         issue.setId(7L);
@@ -187,11 +175,11 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).doesNotContain("Local checks pass");
+        assertThat(html).contains("Local verification", "Not run");
     }
 
     @Test
-    void repoWithVerificationCommandsShowsLocalChecksRowWithBadge() {
+    void repoWithVerificationCommandsShowsLocalChecksResult() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         repo.setVerificationCommands("./mvnw -q verify");
         TrackedIssue issue = new TrackedIssue(repo, 8, "Eighth issue");
@@ -203,16 +191,15 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, iteration));
 
-        assertThat(html).contains("Local checks pass");
-        int start = html.indexOf("Local checks pass");
-        int end = html.indexOf("Independent review passes");
+        assertThat(html).contains("Local verification");
+        int start = html.indexOf("Local verification");
+        int end = html.indexOf("GitHub CI", start);
         String localChecksRow = html.substring(start, end);
         assertThat(localChecksRow).contains("FAILED");
     }
 
-    // === Cost budget bar (#66) — budgetPct is computed by IssueController.budgetPct,
-    //     so these tests route through the real helper to exercise controller math and
-    //     template rendering together (the zero-budget NaN regression lived across both).
+    // The budget bar was removed from the main view; the compact progress line keeps
+    // the spending evidence without taking another whole panel.
 
     private WebContext budgetContext(TrackedIssue issue, BigDecimal spent, BigDecimal budget) {
         WebContext context = baseContext(issue, null);
@@ -231,63 +218,53 @@ class IssueDetailGoalCardRenderTest {
     }
 
     @Test
-    void budgetBar_zeroBudgetWithSpend_rendersFullBarInOverState_neverNaN() {
-        // A $0.00 budget is reachable (form allows min=0; only negatives are normalized
-        // to null) — with any spend the bar must show fully exhausted, not width:NaN%.
+    void zeroBudgetWithSpendRendersCompactSpendNeverNaN() {
         String html = render(budgetContext(budgetIssue(),
                 new BigDecimal("0.44"), new BigDecimal("0.00")));
 
-        assertThat(html).contains("Cost budget");
-        assertThat(html).contains("width:100%");
-        assertThat(html).contains("budget-bar-fill over");
+        assertThat(html).contains("Spent $0.44 of $0.00");
+        assertThat(html).doesNotContain("budget-bar-fill");
         assertThat(html).doesNotContain("NaN");
     }
 
     @Test
-    void budgetBar_zeroBudgetZeroSpend_rendersEmptyBar_neverNaN() {
+    void zeroBudgetZeroSpendRendersCompactSpendNeverNaN() {
         String html = render(budgetContext(budgetIssue(),
                 new BigDecimal("0.00"), new BigDecimal("0.00")));
 
-        assertThat(html).contains("width:0%");
+        assertThat(html).contains("Spent $0.00 of $0.00");
         assertThat(html).doesNotContain("NaN");
-        assertThat(html).doesNotContain("budget-bar-fill over");
-        assertThat(html).doesNotContain("budget-bar-fill warning");
+        assertThat(html).doesNotContain("budget-bar-fill");
     }
 
     @Test
-    void budgetBar_normalSpend_rendersIntegerWidthAndAmounts() {
-        // 1.84 / 5.00 = 36.8% → rounds down to the clamped integer 36
+    void normalSpendRendersAmountsWithoutASecondCard() {
         String html = render(budgetContext(budgetIssue(),
                 new BigDecimal("1.84"), new BigDecimal("5.00")));
 
-        assertThat(html).contains("$1.84 of $5.00");
-        assertThat(html).contains("width:36%");
-        assertThat(html).doesNotContain("budget-bar-fill over");
-        assertThat(html).doesNotContain("budget-bar-fill warning");
+        assertThat(html).contains("Spent $1.84 of $5.00");
+        assertThat(html).doesNotContain("budget-bar-fill");
     }
 
     @Test
-    void budgetBar_atWarningThreshold_rendersWarningState() {
-        // 4.00 / 5.00 = exactly 80% → warning fires at the threshold, not before
+    void spendAtWarningThresholdRemainsVisible() {
         String html = render(budgetContext(budgetIssue(),
                 new BigDecimal("4.00"), new BigDecimal("5.00")));
 
-        assertThat(html).contains("width:80%");
-        assertThat(html).contains("budget-bar-fill warning");
-        assertThat(html).doesNotContain("budget-bar-fill over");
+        assertThat(html).contains("Spent $4.00 of $5.00");
     }
 
     @Test
-    void budgetBar_noEffectiveBudget_hidesCostBudgetRow() {
+    void noEffectiveBudgetHidesSpendLine() {
         // Unlimited issues (no override, no repo default) show no cost-budget row at all.
         String html = render(baseContext(budgetIssue(), null));
 
-        assertThat(html).doesNotContain("Cost budget");
+        assertThat(html).doesNotContain("Spent $");
         assertThat(html).doesNotContain("budget-bar-track");
     }
 
     @Test
-    void failedStatusShowsCurrentStatusInFooter() {
+    void failedStatusRemainsClearInHeader() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue issue = new TrackedIssue(repo, 6, "Sixth issue");
         issue.setId(6L);
@@ -296,8 +273,7 @@ class IssueDetailGoalCardRenderTest {
 
         String html = render(baseContext(issue, null));
 
-        assertThat(html).contains("currently Failed");
-        assertThat(html).doesNotContain("currently FAILED");
+        assertThat(html).contains("status-failed\">Failed");
     }
 
     // === Session continuity (#67) ===

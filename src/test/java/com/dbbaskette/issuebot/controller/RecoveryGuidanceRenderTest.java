@@ -45,12 +45,27 @@ class RecoveryGuidanceRenderTest {
                 .contains("disabled=\"disabled\"");
     }
 
+    @Test void reviewedMergeFailureOffersMergeOnlyActionInsteadOfCodingRetry() {
+        String html = render(VERIFIED_READY, ProcessingState.RUNNING, false, false, true);
+        assertThat(html).contains("Review passed; merge needs another check",
+                "action=\"/issues/7/resume-merge\"", "Resume merge")
+                .doesNotContain("Retry with guidance", "name=\"instructions\"");
+        assertThat(render(VERIFIED_READY, ProcessingState.STOPPED, false, false, true))
+                .contains("disabled=\"disabled\"");
+    }
+
     private String render(RecoveryGuidance.PrerequisiteState state, ProcessingState processing, boolean guided) {
         return render(state, processing, guided, false);
     }
 
     private String render(RecoveryGuidance.PrerequisiteState state, ProcessingState processing,
                           boolean guided, boolean handoffRecoveryAvailable) {
+        return render(state, processing, guided, handoffRecoveryAvailable, false);
+    }
+
+    private String render(RecoveryGuidance.PrerequisiteState state, ProcessingState processing,
+                          boolean guided, boolean handoffRecoveryAvailable,
+                          boolean completionRecoveryAvailable) {
         var resolver = new ClassLoaderTemplateResolver();
         resolver.setPrefix("templates/"); resolver.setSuffix(".html"); resolver.setTemplateMode(TemplateMode.HTML);
         var engine = new SpringTemplateEngine(); engine.setTemplateResolver(resolver);
@@ -65,6 +80,7 @@ class RecoveryGuidanceRenderTest {
         context.setVariable("issue", issue);
         context.setVariable("showPlanGuidance", guided);
         context.setVariable("handoffRecoveryAvailable", handoffRecoveryAvailable);
+        context.setVariable("completionRecoveryAvailable", completionRecoveryAvailable);
         context.setVariable("processingMode", processing);
         context.setVariable("planReviewAttempts", List.of());
         context.setVariable("latestFailureDiagnostic", diagnostic);

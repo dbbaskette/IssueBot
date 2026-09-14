@@ -64,7 +64,7 @@ class DashboardControlRoomRenderTest {
                                 "/issues/1#plan-review", Tone.ACTION, "Awaiting plan approval", null))),
                 lane("processing", "Execution", "Currently processing", 1,
                         List.of(card(2, 15, IssueStatus.IN_PROGRESS,
-                                "IssueBot is Implementation.", "View progress",
+                                "The coding agent is working.", "View progress",
                                 "/issues/2#live-status", Tone.ACTIVE, "Implementation",
                                 new RunDetails(new BigDecimal("2.50"), new BigDecimal("10.00"), 25, "12m")))),
                 lane("up-next", "Queue", "Up next", 1,
@@ -77,7 +77,7 @@ class DashboardControlRoomRenderTest {
         assertThat(html.indexOf("Needs your decision")).isLessThan(html.indexOf("Currently processing"));
         assertThat(html.indexOf("Currently processing")).isLessThan(html.indexOf("Up next"));
         assertThat(html).contains("Review and approve the current plan.", "Review plan");
-        assertThat(html).contains("IssueBot is Implementation.", "View progress", "Run details");
+        assertThat(html).contains("The coding agent is working.", "View progress", "Run details");
         assertThat(html).contains("Queued and ready when processing capacity is available.");
         assertThat(html).contains("$2.50 of $10.00", "width:25%", "12m", "2/5", "codex-5.6");
         assertThat(html).doesNotContain("Now Running", "data-modal-open=\"stop-modal-", "modal-backdrop", "/cancel");

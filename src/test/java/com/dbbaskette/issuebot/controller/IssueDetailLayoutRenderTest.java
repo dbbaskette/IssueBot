@@ -365,9 +365,10 @@ class IssueDetailLayoutRenderTest {
 
         String html = render(context, "content");
 
-        assertThat(html).contains("secondary-section goal-section", "secondary-section history-section",
-                "secondary-section activity-section");
-        assertThat(html).doesNotContain("secondary-section goal-section\" open");
+        assertThat(html).contains("id=\"implementation-summary\"", "id=\"checks-summary\"",
+                "id=\"review-history\"", "id=\"outcome-summary\"",
+                "secondary-section history-section", "secondary-section activity-section");
+        assertThat(html).doesNotContain("secondary-section goal-section", "id=\"timeline-panel\"");
         assertThat(html).doesNotContain("secondary-section history-section\" open");
         assertThat(html).doesNotContain("secondary-section activity-section\" open");
     }

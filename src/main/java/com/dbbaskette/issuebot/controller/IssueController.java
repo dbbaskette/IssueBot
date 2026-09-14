@@ -32,6 +32,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
 import com.dbbaskette.issuebot.service.workflow.ImplementationHandoffRecovery;
+import com.dbbaskette.issuebot.service.workflow.CompletionRecovery;
 import com.dbbaskette.issuebot.service.workflow.LocalVerificationService;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
@@ -305,12 +306,26 @@ public class IssueController {
      * for live refresh without disrupting the terminal or EventSource.
      */
     @GetMapping("/{id}/live-status")
-    public String liveStatus(Model model, @PathVariable Long id) {
+    public String liveStatus(Model model, @PathVariable Long id,
+                             @RequestParam(required = false) Integer planVersion,
+                             @RequestParam(required = false) Long reviewAttempt) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        populateDetailModel(model, issue, id, planVersion, reviewAttempt);
+        // live-status-poll = the #live-status block plus out-of-band updates for the
+        // status header, current decision, and stage evidence.
+        return "issue-detail :: live-status-poll";
+    }
+
+    public String liveStatus(Model model, Long id) {
+        return liveStatus(model, id, null, null);
+    }
+
+    /** Refresh full attempt evidence only while its details section is open. */
+    @GetMapping("/{id}/iteration-history")
+    public String iterationHistory(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id, null, null);
-        // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
-        // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
-        return "issue-detail :: live-status-poll";
+        return "issue-detail :: iteration-history";
     }
 
     @Autowired(required = false)
@@ -364,6 +379,25 @@ public class IssueController {
             workflowService.processIssueAsync(issue);
             redirectAttributes.addFlashAttribute("success",
                     "Coding work retained. IssueBot is running trusted checks and review.");
+        }
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/resume-merge")
+    public String resumeMerge(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        IssueDispatchService.ClaimResult claim = dispatchService.claimCompletionRecovery(
+                id, properties.getMaxConcurrentIssues());
+        if (!claim.claimed()) {
+            redirectAttributes.addFlashAttribute("error", claim.reason());
+        } else {
+            TrackedIssue issue = claim.issue();
+            eventService.log("MERGE_RESUMED",
+                    "Resuming checks and merge for reviewed PR #" + issue.getPrNumber()
+                            + " without rerunning implementation",
+                    issue.getRepo(), issue);
+            workflowService.processIssueAsync(issue);
+            redirectAttributes.addFlashAttribute("success",
+                    "Reviewed code retained. IssueBot is rechecking GitHub and merging the same PR.");
         }
         return "redirect:/issues/" + id;
     }
@@ -1355,10 +1389,20 @@ public class IssueController {
         model.addAttribute("recentLiveOutput", issue.getStatus() == IssueStatus.IN_PROGRESS && liveOutput != null
                 ? liveOutput.recentOutputText(id, 4, 900) : null);
         model.addAttribute("latestAgentOutputPreview", latestCurrentRun == null ? null
-                : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 1400));
+                : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 600));
+        model.addAttribute("currentRunIteration", latestCurrentRun);
+        // A previous run's passing review must not look like the result of a fresh attempt.
+        model.addAttribute("currentReviewAvailable", requestedReviewAttempt != null
+                || (latestCurrentRun != null && latestCurrentRun.getReviewPassed() != null));
+        var pollSelection = objectMapper.createObjectNode();
+        if (requestedReviewAttempt != null) pollSelection.put("reviewAttempt", requestedReviewAttempt);
+        if (requestedPlanVersion != null) pollSelection.put("planVersion", requestedPlanVersion);
+        model.addAttribute("pollSelectionJson", pollSelection.toString());
         model.addAttribute("handoffRecoveryAvailable",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty()
                         && ImplementationHandoffRecovery.available(issue, latestCurrentRun, objectMapper));
+        model.addAttribute("completionRecoveryAvailable",
+                CompletionRecovery.available(issue, latestCurrentRun));
         model.addAttribute("localVerificationRequired", issue.effectivePlanFirst());
         model.addAttribute("localVerificationConfigured",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty());

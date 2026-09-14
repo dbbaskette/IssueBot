@@ -210,6 +210,36 @@ public class IssueDispatchTransactionManager {
         return IssueDispatchService.ClaimResult.claimed(saved);
     }
 
+    /** Recheck and merge the same reviewed PR without starting another implementation attempt. */
+    @Transactional
+    public IssueDispatchService.ClaimResult claimCompletionRecovery(Long issueId, int maxConcurrentIssues) {
+        String pause = rejectIfNotRunning();
+        if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return IssueDispatchService.ClaimResult.rejected(prerequisiteRejection);
+        if (issues.countByStatus(IssueStatus.IN_PROGRESS) >= maxConcurrentIssues) {
+            return IssueDispatchService.ClaimResult.rejected("Global concurrency limit reached");
+        }
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
+        Iteration iteration = iterations.findCurrentForUpdate(issueId, issue.getCurrentIteration()).orElse(null);
+        try {
+            CompletionRecovery.requireReviewedAttempt(issue, iteration);
+        } catch (IllegalArgumentException invalid) {
+            return IssueDispatchService.ClaimResult.rejected("Cannot resume merge: " + invalid.getMessage());
+        }
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCooldownUntil(null);
+        issue.setLastFailureReason(null);
+        issue.setSuspensionReason(null);
+        TrackedIssue saved = issues.saveAndFlush(issue);
+        decisions.accepted(saved, decisions.transitionKey(saved, Action.RESUME),
+                Actor.OPERATOR, Action.RESUME, Reason.USER_REQUEST);
+        return IssueDispatchService.ClaimResult.claimed(saved);
+    }
+
     @Transactional
     public IssueDispatchService.ClaimResult claimGuidedRetry(
             Long issueId, String operatorGuidance, int maxConcurrentIssues) {

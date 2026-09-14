@@ -99,6 +99,46 @@ class IssueDispatchTransactionManagerTest {
         assertThat(iteration.getClaudeOutput()).isEqualTo(answer);
         assertThat(dispatch.claimHandoffRecovery(issueId, new ObjectMapper(), 10).claimed()).isFalse();
     }
+
+    @Test
+    void reviewedMergeRetryKeepsTheSameAttemptAndPullRequest() {
+        Long issueId = seedApprovedIssue(IssueStatus.FAILED, 0);
+        Long iterationId = new TransactionTemplate(transactionManager).execute(tx -> {
+            TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+            issue.setWorkflowPolicy(WorkflowPolicy.AUTOMATED);
+            issue.setCurrentIteration(1);
+            issue.setCurrentPhase("COMPLETION");
+            issue.setBranchName("issuebot/issue-9-reviewed");
+            issue.setPrNumber(29);
+            issue.setLastFailureReason("Completion failed: Managed merge failed: a current CI check is still pending");
+            issues.saveAndFlush(issue);
+            Iteration iteration = new Iteration(issue, 1);
+            iteration.setLocalCheckResult("PASSED");
+            iteration.setCiResult("SKIPPED");
+            iteration.setReviewPassed(true);
+            iteration.setReviewedCommitSha("a".repeat(40));
+            iteration.setCompletedAt(LocalDateTime.now());
+            return iterations.saveAndFlush(iteration).getId();
+        });
+
+        var result = dispatch.claimCompletionRecovery(issueId, 10);
+
+        assertThat(result.claimed()).isTrue();
+        TrackedIssue resumed = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        assertThat(resumed.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(resumed.getCurrentPhase()).isEqualTo("COMPLETION");
+        assertThat(resumed.getWorkflowRun()).isZero();
+        assertThat(resumed.getCurrentIteration()).isEqualTo(1);
+        assertThat(resumed.getPrNumber()).isEqualTo(29);
+        assertThat(resumed.getBranchName()).isEqualTo("issuebot/issue-9-reviewed");
+        assertThat(iterations.findById(iterationId).orElseThrow().getReviewPassed()).isTrue();
+        assertThat(dispatch.claimCompletionRecovery(issueId, 10).claimed()).isFalse();
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            TrackedIssue persisted = issues.findById(issueId).orElseThrow();
+            persisted.setStatus(IssueStatus.FAILED);
+            issues.saveAndFlush(persisted);
+        });
+    }
     @Test void knownUnmetPrerequisiteRejectsBothLockedRetryClaimsWithoutMutation() {
         Long ordinary = seedApprovedIssue(IssueStatus.FAILED, 0, 91);
         Long guided = seedApprovedIssue(IssueStatus.FAILED, 2, 92);

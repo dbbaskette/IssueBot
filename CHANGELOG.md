@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0 — 2026-09-14
+
+- Wait up to the repository's CI timeout for pending GitHub checks before merging reviewed work; keep a guarded merge-only recovery path instead of requiring another coding attempt.
+- Put compact progress at the top of every issue, keep Plan, Implementation, Checks, Review, and Outcome in stable positions, and refresh new review evidence without reopening the page.
+- Remove duplicate Goal and Timeline cards from the main issue view while retaining attempt and activity history; clarify CI and current-stage wording.
+
 ## 0.14.0 — 2026-09-14
 
 - Accept longer exact verification commands in coding handoffs and identify the specific invalid check when a handoff is malformed.

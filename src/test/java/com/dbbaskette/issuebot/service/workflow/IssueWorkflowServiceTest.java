@@ -703,6 +703,37 @@ class IssueWorkflowServiceTest {
     }
 
     @Test
+    void managedCompletionWaitsForPendingChecksWithoutRepeatingImplementationOrReview() {
+        TrackedIssue issue = planFirstWorkflowIssue();
+        issue.setWorkflowPolicy(com.dbbaskette.issuebot.model.WorkflowPolicy.AUTOMATED);
+        issue.setCurrentIteration(1);
+        issue.setPrNumber(27);
+        Iteration iteration = new Iteration(issue, 1);
+        String sha = "a".repeat(40);
+        iteration.setReviewedCommitSha(sha);
+        when(iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(issue.getId(), 1))
+                .thenReturn(Optional.of(iteration));
+        when(gitHubApi.getPullRequest("owner", "repo", 27))
+                .thenReturn(objectMapper.createObjectNode().put("merged", false).put("draft", false));
+        ManagedMergeGuard guard = mock(ManagedMergeGuard.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "managedMergeGuard", guard);
+        workflowService.mergeCheckPollIntervalMs = 0;
+        when(guard.validateForMerge(issue, sha))
+                .thenThrow(new ManagedMergeGuard.PendingChecksException("pending"))
+                .thenReturn(sha);
+        when(gitHubApi.mergePullRequest(eq("owner"), eq("repo"), eq(27), anyString(), eq("squash"), eq(sha)))
+                .thenReturn(objectMapper.createObjectNode().put("merged", true));
+
+        workflowService.phaseRecoveryCompletion(issue, objectMapper.createObjectNode(), "branch", 1, "diff", 27, null);
+
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
+        verify(guard, times(2)).validateForMerge(issue, sha);
+        verify(eventService).log(eq("PHASE_MERGE_WAITING_CHECKS"), contains("waiting for GitHub checks"),
+                same(issue.getRepo()), same(issue));
+        verify(harnessService, never()).executeImplementation(anyString(), any(), anyString(), any(), anyLong(), any());
+    }
+
+    @Test
     void planFirstGenerationFailureStopsBeforeImplementation() throws Exception {
         TrackedIssue issue = planFirstWorkflowIssue();
         IssueWorkflowService spy = workflowSpyWithIssueDetails(issue);

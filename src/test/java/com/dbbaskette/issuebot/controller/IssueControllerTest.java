@@ -67,6 +67,25 @@ class IssueControllerTest {
         verifyNoInteractions(rejected.workflowService);
     }
 
+    @Test void reviewedMergeResumesOnlyAfterAClaimSucceeds() {
+        Fixture accepted = new Fixture(IssueStatus.FAILED);
+        accepted.issue.setPrNumber(29);
+        doReturn(new IssueDispatchService.ClaimResult(true, null, accepted.issue))
+                .when(accepted.dispatchService).claimCompletionRecovery(1L, 5);
+        assertThat(accepted.controller.resumeMerge(1L, accepted.redirectAttributes))
+                .isEqualTo("redirect:/issues/1");
+        verify(accepted.workflowService).processIssueAsync(accepted.issue);
+        verify(accepted.eventService).log(eq("MERGE_RESUMED"), contains("without rerunning implementation"),
+                eq(accepted.issue.getRepo()), eq(accepted.issue));
+
+        Fixture rejected = new Fixture(IssueStatus.FAILED);
+        doReturn(new IssueDispatchService.ClaimResult(false, "Reviewed PR changed", null))
+                .when(rejected.dispatchService).claimCompletionRecovery(1L, 5);
+        assertThat(rejected.controller.resumeMerge(1L, rejected.redirectAttributes))
+                .isEqualTo("redirect:/issues/1");
+        verifyNoInteractions(rejected.workflowService);
+    }
+
     @Test void knownUnmetPrerequisiteBlocksAllDirectRetryPostsBeforeAnyExternalWork() throws Exception {
         for (String path : List.of("/issues/1/retry", "/issues/1/retry-quick", "/issues/bulk/retry", "/issues/1/plan/retry-implementation")) {
             Fixture f = new Fixture(IssueStatus.FAILED);

@@ -2399,6 +2399,22 @@ details summary:hover { color: var(--text-primary); }
 .workflow-current-summary {
     display: none;
 }
+.issue-progress-summary .workflow-current-summary {
+    display: grid;
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+}
+.issue-progress-summary .progress-route { margin-top: 0.65rem; }
+.issue-progress-summary .progress-route > summary {
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.78rem;
+}
+.issue-progress-summary .progress-route nav { margin-top: 0.45rem; }
+.issue-progress-meta { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin-top: 0.55rem; }
+.review-history-card > summary { cursor: pointer; }
 .stage--current .workflow-stage-label { color: var(--info); }
 .stage--completed .workflow-stage-label { color: var(--ok); }
 .stage--paused .workflow-stage-label { color: var(--warn); }
