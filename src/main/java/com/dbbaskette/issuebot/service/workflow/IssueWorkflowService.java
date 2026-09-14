@@ -534,30 +534,39 @@ public class IssueWorkflowService {
 
             // === Phase 2: Implementation (Opus) ===
             HarnessExecutionResult implResult = null;
+            boolean harnessOwnedImplementation = approvedPlan != null && implementationTurnCheckpoints != null;
             if (resumePhase == null) {
                 try {
-                    implResult = approvedPlan != null && implementationTurnCheckpoints != null
+                    implResult = harnessOwnedImplementation
                             ? phaseHarnessOwnedImplementation(trackedIssue, iteration, issueDetails, repoPath,
                                     previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
                                     approvedPlan, legacyApprovedPlan)
                             : phaseImplementation(trackedIssue, issueDetails, repoPath,
                                     previousDiff, previousFeedback, previousCiLogs, lastRunFailureReason,
                                     approvedPlan, legacyApprovedPlan);
-                    iteration.setClaudeOutput(implResult.getOutput());
-                    if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
-                        iteration.setClaudeSessionId(implResult.getSessionId());
+                    // Native turns already saved their output, session and ledger on the locked
+                    // iteration. Saving this older workflow object would erase those checkpoints.
+                    if (!harnessOwnedImplementation) {
+                        iteration.setClaudeOutput(implResult.getOutput());
+                        if (implResult.getSessionId() != null && !implResult.getSessionId().isBlank()) {
+                            iteration.setClaudeSessionId(implResult.getSessionId());
+                        }
                     }
                     if ((workflowCheckpoints == null || !implResult.isSuccess())
-                            && !(approvedPlan != null && implementationTurnCheckpoints != null)) {
+                            && !harnessOwnedImplementation) {
                         trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
                     }
                 } catch (Exception e) {
                     log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
-                    iteration.setCompletedAt(LocalDateTime.now());
-                    iterationRepository.save(iteration);
+                    if (harnessOwnedImplementation) {
+                        implementationTurnCheckpoints.closeFailed(trackedIssue.getId(), iteration.getId());
+                    } else {
+                        iteration.setCompletedAt(LocalDateTime.now());
+                        iterationRepository.save(iteration);
+                    }
                     eventService.log("PHASE_IMPL_FAILED",
                             "Implementation failed: " + e.getMessage(), repo, trackedIssue);
-                    if (approvedPlan != null && implementationTurnCheckpoints != null) {
+                    if (harnessOwnedImplementation) {
                         iterationManager.handleHarnessBlocked(trackedIssue,
                                 "Coding harness could not checkpoint the approved-plan run: " + e.getMessage());
                         return;
@@ -588,11 +597,15 @@ public class IssueWorkflowService {
 
             if (resumePhase == null && !implResult.isSuccess()) {
                 log.warn("{} returned failure for iteration {}", harnessService.displayName(), iterationNum);
-                iteration.setCompletedAt(LocalDateTime.now());
-                iterationRepository.save(iteration);
+                if (harnessOwnedImplementation) {
+                    implementationTurnCheckpoints.closeFailed(trackedIssue.getId(), iteration.getId());
+                } else {
+                    iteration.setCompletedAt(LocalDateTime.now());
+                    iterationRepository.save(iteration);
+                }
 
                 // Check if retrying is worthwhile before burning more tokens
-                if (approvedPlan != null && implementationTurnCheckpoints != null) {
+                if (harnessOwnedImplementation) {
                     iterationManager.handleHarnessBlocked(trackedIssue,
                             implResult.getErrorMessage() == null ? "Implementation needs operator guidance"
                                     : implResult.getErrorMessage());

@@ -28,6 +28,28 @@ class ImplementationOutcomeTest {
     }
 
     @Test
+    void acceptsLongReactorCommandFromACompletedCodingTurn() {
+        String command = "./mvnw -pl examples/local-agent -am " + "-Dtest=ApprovalRecoveryIT,".repeat(20);
+        assertThat(command.length()).isGreaterThan(500);
+        var parsed = ImplementationOutcome.parse(result("ISSUEBOT_IMPLEMENTATION_V1: "
+                + "{\"status\":\"COMPLETE\",\"summary\":\"Focused checks passed\","
+                + "\"checks\":[{\"command\":\"" + command + "\",\"result\":\"PASS: 97 tests\"}],"
+                + "\"limitations\":\"Trusted final review pending\"}"), mapper);
+        assertThat(parsed.checks().getFirst().command()).isEqualTo(command);
+    }
+
+    @Test
+    void identifiesTheExactInvalidCheckFieldAndLimit() {
+        String tooLong = "x".repeat(2001);
+        assertThatThrownBy(() -> ImplementationOutcome.parse(result("ISSUEBOT_IMPLEMENTATION_V1: "
+                + "{\"status\":\"COMPLETE\",\"summary\":\"Done\","
+                + "\"checks\":[{\"command\":\"./mvnw test\",\"result\":\"PASS\"},"
+                + "{\"command\":\"" + tooLong + "\",\"result\":\"PASS\"}],"
+                + "\"limitations\":\"\"}"), mapper))
+                .hasMessage("Check 2 command is 2001 characters (maximum 2000)");
+    }
+
+    @Test
     void rejectsCliCompletionWithoutSemanticOutcome() {
         assertThatThrownBy(() -> ImplementationOutcome.parse(result("I made partial progress"), mapper))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("omitted");

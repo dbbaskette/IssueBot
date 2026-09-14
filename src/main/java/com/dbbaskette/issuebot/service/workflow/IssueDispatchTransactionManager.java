@@ -8,6 +8,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.WatchedRepoRepository;
 import com.dbbaskette.issuebot.repository.DecompositionChildRepository;
 import com.dbbaskette.issuebot.repository.DecompositionGroupRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -165,6 +166,48 @@ public class IssueDispatchTransactionManager {
             guidance.saveAndFlush(instructionArtifact);
         }
         return claim(issue, Actor.OPERATOR, Action.RETRY, instructionArtifact);
+    }
+
+    /** Reuse a saved COMPLETE handoff from an old formatting failure; never rerun coding. */
+    @Transactional
+    public IssueDispatchService.ClaimResult claimHandoffRecovery(
+            Long issueId, ObjectMapper mapper, int maxConcurrentIssues) {
+        String pause = rejectIfNotRunning();
+        if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        String prerequisiteRejection = prerequisites.retryRejection();
+        if (prerequisiteRejection != null) return IssueDispatchService.ClaimResult.rejected(prerequisiteRejection);
+        if (issues.countByStatus(IssueStatus.IN_PROGRESS) >= maxConcurrentIssues) {
+            return IssueDispatchService.ClaimResult.rejected("Global concurrency limit reached");
+        }
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
+        if (!IssueWorkflowService.hasTrustedLocalVerification(issue.getRepo())) {
+            return IssueDispatchService.ClaimResult.rejected("Configure a trusted local verification command first");
+        }
+        Iteration iteration = iterations.findCurrentForUpdate(issueId, issue.getCurrentIteration()).orElse(null);
+        try {
+            ImplementationHandoffRecovery.requireComplete(issue, iteration, mapper);
+        } catch (IllegalArgumentException invalid) {
+            return IssueDispatchService.ClaimResult.rejected("Cannot resume final checks: " + invalid.getMessage());
+        }
+        // The original turn ledger was lost by the old failure path. Preserve that fact rather
+        // than fabricating a turn; the raw final answer and actual cost rows remain available.
+        iteration.setCompletedAt(null);
+        iteration.setImplementationCompletedAt(java.time.LocalDateTime.now());
+        iteration.setImplementationSucceeded(true);
+        iteration.setImplementationOutcome(ImplementationOutcome.Status.COMPLETE.name());
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase("LOCAL_CHECKS");
+        issue.setCooldownUntil(null);
+        issue.setLastFailureReason(null);
+        issue.setSuspensionReason(null);
+        iterations.saveAndFlush(iteration);
+        TrackedIssue saved = issues.saveAndFlush(issue);
+        decisions.accepted(saved, decisions.transitionKey(saved, Action.RESUME),
+                Actor.OPERATOR, Action.RESUME, Reason.USER_REQUEST);
+        return IssueDispatchService.ClaimResult.claimed(saved);
     }
 
     @Transactional

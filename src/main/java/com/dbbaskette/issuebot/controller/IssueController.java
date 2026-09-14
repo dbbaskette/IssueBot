@@ -31,6 +31,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueDecompositionService;
 import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
+import com.dbbaskette.issuebot.service.workflow.ImplementationHandoffRecovery;
 import com.dbbaskette.issuebot.service.workflow.LocalVerificationService;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
@@ -345,6 +346,24 @@ public class IssueController {
                     implementationReasoningEffort, reviewReasoningEffort);
         } else {
             redirectAttributes.addFlashAttribute("success", "Issue retry started");
+        }
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/recover-handoff")
+    public String recoverHandoff(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        IssueDispatchService.ClaimResult claim = dispatchService.claimHandoffRecovery(
+                id, objectMapper, properties.getMaxConcurrentIssues());
+        if (!claim.claimed()) {
+            redirectAttributes.addFlashAttribute("error", claim.reason());
+        } else {
+            TrackedIssue issue = claim.issue();
+            eventService.log("HANDOFF_RECOVERED",
+                    "Saved coding result accepted; continuing with trusted checks and independent review",
+                    issue.getRepo(), issue);
+            workflowService.processIssueAsync(issue);
+            redirectAttributes.addFlashAttribute("success",
+                    "Coding work retained. IssueBot is running trusted checks and review.");
         }
         return "redirect:/issues/" + id;
     }
@@ -1337,6 +1356,9 @@ public class IssueController {
                 ? liveOutput.recentOutputText(id, 4, 900) : null);
         model.addAttribute("latestAgentOutputPreview", latestCurrentRun == null ? null
                 : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 1400));
+        model.addAttribute("handoffRecoveryAvailable",
+                !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty()
+                        && ImplementationHandoffRecovery.available(issue, latestCurrentRun, objectMapper));
         model.addAttribute("localVerificationRequired", issue.effectivePlanFirst());
         model.addAttribute("localVerificationConfigured",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty());

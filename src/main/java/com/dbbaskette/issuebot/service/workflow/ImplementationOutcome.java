@@ -14,6 +14,8 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
     public record Check(String command, String result) {}
 
     public static final String MARKER = "ISSUEBOT_IMPLEMENTATION_V1: ";
+    private static final int MAX_CHECK_COMMAND_LENGTH = 2000;
+    private static final int MAX_CHECK_RESULT_LENGTH = 500;
 
     public static ImplementationOutcome parse(HarnessExecutionResult result, ObjectMapper mapper) {
         if (result == null || !result.isSuccess()) {
@@ -47,13 +49,25 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
                 throw new IllegalArgumentException("Outcome checks must be an array of at most 30 entries");
             }
             List<Check> checks = new ArrayList<>();
-            for (JsonNode check : checkNodes) {
+            for (int index = 0; index < checkNodes.size(); index++) {
+                JsonNode check = checkNodes.get(index);
+                int number = index + 1;
+                if (!check.isObject() || check.size() != 2
+                        || !check.has("command") || !check.has("result")
+                        || !check.path("command").isTextual() || !check.path("result").isTextual()) {
+                    throw new IllegalArgumentException("Check " + number
+                            + " must contain only text command and result fields");
+                }
                 String command = check.path("command").asText("").strip();
                 String checkResult = check.path("result").asText("").strip();
-                if (!check.isObject() || check.size() != 2 || command.isEmpty()
-                        || checkResult.isEmpty() || command.length() > 500 || checkResult.length() > 500) {
-                    throw new IllegalArgumentException("Each check needs a bounded command and result");
-                }
+                if (command.isEmpty()) throw new IllegalArgumentException("Check " + number + " command is empty");
+                if (checkResult.isEmpty()) throw new IllegalArgumentException("Check " + number + " result is empty");
+                if (command.length() > MAX_CHECK_COMMAND_LENGTH) throw new IllegalArgumentException(
+                        "Check " + number + " command is " + command.length()
+                                + " characters (maximum " + MAX_CHECK_COMMAND_LENGTH + ")");
+                if (checkResult.length() > MAX_CHECK_RESULT_LENGTH) throw new IllegalArgumentException(
+                        "Check " + number + " result is " + checkResult.length()
+                                + " characters (maximum " + MAX_CHECK_RESULT_LENGTH + ")");
                 checks.add(new Check(command, checkResult));
             }
             JsonNode limitationNode = root.path("limitations");
@@ -80,6 +94,10 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
                 + "\"limitations\":\"remaining limitations or empty string\"}\n"
                 + "Replace the status placeholder with exactly one of COMPLETE, CONTINUE, or BLOCKED; "
                 + "the example's vertical bars are not a valid status. Put the JSON on one line. "
+                + "Each check must have only text command and result fields; commands may be up to "
+                + MAX_CHECK_COMMAND_LENGTH + " characters and results up to " + MAX_CHECK_RESULT_LENGTH
+                + " characters. Summarize a longer command or result in the marker and keep its exact "
+                + "details in the final answer. "
                 + "Use COMPLETE only when the plan is implemented and your appropriate focused checks pass; "
                 + "IssueBot will still run trusted final verification and an independent review. "
                 + "Use CONTINUE if work remains and this session can continue. Use BLOCKED for missing "

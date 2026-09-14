@@ -84,5 +84,22 @@ class ImplementationTurnCheckpointServiceTest {
         assertThat(repair.getImplementationOutcome()).isEqualTo("CONTINUE");
         assertThat(issues.findById(issue.getId()).orElseThrow().getCurrentPhase())
                 .isEqualTo("IMPLEMENTATION");
+
+        HarnessExecutionResult blockedTurn = new HarnessExecutionResult();
+        blockedTurn.setSuccess(true);
+        blockedTurn.setSessionId("native-session");
+        blockedTurn.setFinalResult("A malformed final status report");
+        blockedTurn.setModel("gpt-6-astra");
+        checkpoints.record(issueId, iterationId, 2,
+                new ImplementationOutcome(ImplementationOutcome.Status.BLOCKED,
+                        "Invalid handoff", java.util.List.of(), "Correct the status report"), blockedTurn);
+        checkpoints.closeFailed(issueId, iterationId);
+
+        Iteration closed = iterations.findById(iterationId).orElseThrow();
+        assertThat(closed.getCompletedAt()).isNotNull();
+        assertThat(closed.getImplementationTurnCount()).isEqualTo(2);
+        assertThat(closed.getClaudeOutput()).isEqualTo("A malformed final status report");
+        assertThat(ImplementationTurnLedger.read(closed.getImplementationTurnsJson(), mapper))
+                .hasSize(2);
     }
 }
