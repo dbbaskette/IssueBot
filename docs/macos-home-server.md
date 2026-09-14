@@ -31,7 +31,23 @@ ISSUEBOT_PASSWORD=replace_me
 ISSUEBOT_WEBHOOK_SECRET=replace_me
 ```
 
-Install or redeploy the service with:
+For a manual deploy of the **current checkout** on `home-services.local`, run:
+
+```bash
+cd /Users/dbbaskette/Projects/IssueBot
+./deploy/macos/deploy-current.sh
+```
+
+This does not pull or switch branches. It first refuses active work, then runs
+the Java and JavaScript suites, pauses automatic dispatch, and checks again
+before restarting the service.
+After the installer reports ready, it verifies the UI version and restores a
+previously running queue; a queue that was already paused or stopped stays that
+way. If a check fails after pausing, the queue stays paused for inspection.
+Run this only from code you intend to serve. It does not touch the Cloudflare
+Tunnel, which needs recreation only when its own configuration changes.
+
+For low-level service installation or troubleshooting, use:
 
 ```bash
 ./deploy/macos/install-service.sh

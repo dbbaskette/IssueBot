@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.0 — 2026-09-14
+
+- Add a one-command macOS home-server deploy for the current checkout, with Java/JavaScript verification, queue and active-work safety checks, running-version confirmation, and preservation of the prior queue mode.
+
 ## 0.16.0 — 2026-09-14
 
 - Run Codex as a single agent by default. Repositories can allow subagents, and each issue start, retry, or implementation approval can override that policy.
