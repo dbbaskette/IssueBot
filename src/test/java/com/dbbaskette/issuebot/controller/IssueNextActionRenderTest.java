@@ -78,7 +78,7 @@ class IssueNextActionRenderTest {
 
         assertThat(planHtml).contains("Next step", "Review and approve the current plan.")
                 .contains("next-action--action").doesNotContain("next-action-cta");
-        assertThat(activeHtml).contains("IssueBot is Implementation.")
+        assertThat(activeHtml).contains("The coding agent is working.")
                 .contains("next-action--active");
         assertThat(completedHtml).contains("No action needed — completed.")
                 .doesNotContain("next-action-cta");

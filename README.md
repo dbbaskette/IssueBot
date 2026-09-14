@@ -239,6 +239,8 @@ The compatibility configuration key remains `agent-provider`, with stable values
 
 Every saved model selection now carries a compatible reasoning value. Models without configurable reasoning use the explicit value `default`; older model-only selections resolve the adapter's documented default when saved or dispatched. Settings, repository overrides, start/retry dialogs, and stage approvals expose paired model/reasoning controls from the coding harness catalog. Unsupported combinations are rejected before dispatch. Run overrides apply to that run without changing repository defaults.
 
+Codex implementation runs are single-agent by default. The Add/Edit Repository form can allow Codex subagents for that repository, and the issue Start, Retry, and Implementation approval controls can override the choice for one run. IssueBot passes the mode to the non-interactive Codex CLI before launch; "allowed" means Codex may delegate when useful, not that it necessarily did. This does not change the sandbox or grant new approvals. Codex is expected to run enough safe local checks to have its own evidence-based judgment that IssueBot's later independent verification is likely to pass, without reflexively running the entire suite.
+
 The Add/Edit Repository form contains one workflow editor and one save action for repository settings and approval policy:
 
 - **Existing settings** (`LEGACY`) preserves the existing autonomy settings and approval behavior, with the older controls available in advanced settings.
@@ -264,6 +266,7 @@ The editor replaces the older autonomy presets and separate policy form. Existin
 | `pre-screen-enabled` | `true` | Run a cheap utility-model pass before implementation to catch oversized issues early |
 | `implementation-model` | inherit global | Per-repo override of the implementation model |
 | `implementation-reasoning-effort` | inherit global | Compatible reasoning paired with the implementation model |
+| Codex subagents (UI) | off | Allow Codex to delegate within a repository; each issue start/retry can override it |
 | `review-model` | inherit global | Per-repo override of the review model |
 | `review-reasoning-effort` | inherit global | Compatible reasoning paired with the review model |
 | `custom-instructions` | (none) | Free-text standing guidance injected into every implementation prompt (`## Repository Instructions`) and into the review prompt as reviewer context ("the repo owner requires...") |

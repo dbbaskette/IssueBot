@@ -21,12 +21,13 @@ public final class PromptGuidance {
         }
         return "\n## Configured local verification\n\n"
                 + "IssueBot will run these operator-configured commands after implementation, "
-                + "subject to the verification approval gate. They are context, not an instruction "
-                + "to execute them now:\n\n"
+                + "subject to the verification approval gate. You may run safe, relevant commands "
+                + "yourself when needed to judge whether those independent checks will pass:\n\n"
                 + commands.stream().map(command -> "    " + command + "\n")
                         .collect(java.util.stream.Collectors.joining())
-                + "\nUse focused checks during development. Repeat one of these broader commands "
-                + "only when needed to diagnose a failure or establish correctness. Your test claims "
+                + "\nUse focused checks during development. Run a broader command when focused "
+                + "evidence does not give you reasonable confidence in the independent gate; "
+                + "avoid repeating an unchanged check without a new reason. Your test claims "
                 + "do not bypass IssueBot's configured gate.\n";
     }
 

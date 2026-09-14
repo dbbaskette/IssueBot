@@ -94,6 +94,10 @@ public class TrackedIssue {
     @Column(name = "impl_model_override")
     private String implModelOverride;
 
+    /** Null inherits the repository choice until this issue's coding run is pinned. */
+    @Column(name = "allow_subagents_override")
+    private Boolean allowSubagentsOverride;
+
     @Column(name = "review_model_override")
     private String reviewModelOverride;
 
@@ -221,6 +225,12 @@ public class TrackedIssue {
 
     public String getImplModelOverride() { return implModelOverride; }
     public void setImplModelOverride(String implModelOverride) { this.implModelOverride = implModelOverride; }
+
+    public Boolean getAllowSubagentsOverride() { return allowSubagentsOverride; }
+    public void setAllowSubagentsOverride(Boolean value) { allowSubagentsOverride = value; }
+    public boolean isSubagentsAllowed() {
+        return allowSubagentsOverride != null ? allowSubagentsOverride : repo != null && repo.isAllowSubagents();
+    }
 
     public String getReviewModelOverride() { return reviewModelOverride; }
     public void setReviewModelOverride(String reviewModelOverride) { this.reviewModelOverride = reviewModelOverride; }

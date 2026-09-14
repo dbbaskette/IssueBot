@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0 — 2026-09-14
+
+- Run Codex as a single agent by default. Repositories can allow subagents, and each issue start, retry, or implementation approval can override that policy.
+- Pass the delegation choice directly to Codex and show the effective mode on the issue page.
+- Ask the coding harness to form its own test-backed judgment about the independent checks without reflexive full-suite runs.
+- On a failed independent review, feed focused findings back to the existing coding work and preserve passing behavior instead of treating the correction as a fresh implementation.
+
+## 0.15.0 — 2026-09-14
+
+- Wait up to the repository's CI timeout for pending GitHub checks before merging reviewed work; keep a guarded merge-only recovery path instead of requiring another coding attempt.
+- Put compact progress at the top of every issue, keep Plan, Implementation, Checks, Review, and Outcome in stable positions, and refresh new review evidence without reopening the page.
+- Remove duplicate Goal and Timeline cards from the main issue view while retaining attempt and activity history; clarify CI and current-stage wording.
+
 ## 0.14.0 — 2026-09-14
 
 - Accept longer exact verification commands in coding handoffs and identify the specific invalid check when a handoff is malformed.

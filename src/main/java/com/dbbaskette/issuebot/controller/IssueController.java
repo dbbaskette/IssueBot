@@ -32,6 +32,7 @@ import com.dbbaskette.issuebot.service.workflow.IssueWorkflowService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchService;
 import com.dbbaskette.issuebot.service.workflow.IssueDispatchTransactionManager;
 import com.dbbaskette.issuebot.service.workflow.ImplementationHandoffRecovery;
+import com.dbbaskette.issuebot.service.workflow.CompletionRecovery;
 import com.dbbaskette.issuebot.service.workflow.LocalVerificationService;
 import com.dbbaskette.issuebot.service.workflow.FailureDiagnosticService;
 import com.dbbaskette.issuebot.service.workflow.PlanFirstService;
@@ -305,12 +306,26 @@ public class IssueController {
      * for live refresh without disrupting the terminal or EventSource.
      */
     @GetMapping("/{id}/live-status")
-    public String liveStatus(Model model, @PathVariable Long id) {
+    public String liveStatus(Model model, @PathVariable Long id,
+                             @RequestParam(required = false) Integer planVersion,
+                             @RequestParam(required = false) Long reviewAttempt) {
+        TrackedIssue issue = issueRepository.findById(id).orElseThrow();
+        populateDetailModel(model, issue, id, planVersion, reviewAttempt);
+        // live-status-poll = the #live-status block plus out-of-band updates for the
+        // status header, current decision, and stage evidence.
+        return "issue-detail :: live-status-poll";
+    }
+
+    public String liveStatus(Model model, Long id) {
+        return liveStatus(model, id, null, null);
+    }
+
+    /** Refresh full attempt evidence only while its details section is open. */
+    @GetMapping("/{id}/iteration-history")
+    public String iterationHistory(Model model, @PathVariable Long id) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         populateDetailModel(model, issue, id, null, null);
-        // live-status-poll = the #live-status block + hx-swap-oob updates for the status header,
-        // goal counters, and timeline, so the whole screen refreshes on the poll, not just cards.
-        return "issue-detail :: live-status-poll";
+        return "issue-detail :: iteration-history";
     }
 
     @Autowired(required = false)
@@ -333,12 +348,14 @@ public class IssueController {
                         @RequestParam(required = false, defaultValue = "false") boolean continueSession,
                         @RequestParam(required = false) String implementationReasoningEffort,
                         @RequestParam(required = false) String reviewReasoningEffort,
+                        @RequestParam(required = false) Boolean allowSubagentsOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         String error;
         try {
             error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
-                    budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort);
+                    budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort,
+                    reviewReasoningEffort, allowSubagentsOverride);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
@@ -348,6 +365,15 @@ public class IssueController {
             redirectAttributes.addFlashAttribute("success", "Issue retry started");
         }
         return "redirect:/issues/" + id;
+    }
+
+    public String retry(Long id, String instructions, String implModelOverride, String reviewModelOverride,
+            BigDecimal budgetOverrideUsd, String planFirstOverride, boolean continueSession,
+            String implementationReasoningEffort, String reviewReasoningEffort,
+            RedirectAttributes redirectAttributes) {
+        return retry(id, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort,
+                null, redirectAttributes);
     }
 
     @PostMapping("/{id}/recover-handoff")
@@ -364,6 +390,25 @@ public class IssueController {
             workflowService.processIssueAsync(issue);
             redirectAttributes.addFlashAttribute("success",
                     "Coding work retained. IssueBot is running trusted checks and review.");
+        }
+        return "redirect:/issues/" + id;
+    }
+
+    @PostMapping("/{id}/resume-merge")
+    public String resumeMerge(@PathVariable Long id, RedirectAttributes redirectAttributes) {
+        IssueDispatchService.ClaimResult claim = dispatchService.claimCompletionRecovery(
+                id, properties.getMaxConcurrentIssues());
+        if (!claim.claimed()) {
+            redirectAttributes.addFlashAttribute("error", claim.reason());
+        } else {
+            TrackedIssue issue = claim.issue();
+            eventService.log("MERGE_RESUMED",
+                    "Resuming checks and merge for reviewed PR #" + issue.getPrNumber()
+                            + " without rerunning implementation",
+                    issue.getRepo(), issue);
+            workflowService.processIssueAsync(issue);
+            redirectAttributes.addFlashAttribute("success",
+                    "Reviewed code retained. IssueBot is rechecking GitHub and merging the same PR.");
         }
         return "redirect:/issues/" + id;
     }
@@ -412,12 +457,20 @@ public class IssueController {
                                 String reviewModelOverride, BigDecimal budgetOverrideUsd,
                                 String planFirstOverride, boolean continueSession) {
         return performRetry(issue, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
-                planFirstOverride, continueSession, null, null);
+                planFirstOverride, continueSession, null, null, null);
     }
 
     private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
             String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
             boolean continueSession, String implementationReasoningEffort, String reviewReasoningEffort) {
+        return performRetry(issue, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort, null);
+    }
+
+    private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
+            String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
+            boolean continueSession, String implementationReasoningEffort, String reviewReasoningEffort,
+            Boolean allowSubagentsOverride) {
         if (!dispatchService.isRunning()) {
             return "Processing is paused";
         }
@@ -469,6 +522,8 @@ public class IssueController {
                     candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
                     candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
                     candidate.setImplModelOverride(normalize(implModelOverride));
+                    candidate.setAllowSubagentsOverride(allowSubagentsOverride != null
+                            ? allowSubagentsOverride : candidate.getRepo().isAllowSubagents());
                     candidate.setReviewModelOverride(normalize(reviewModelOverride));
                     candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
                     candidate.setPlanFirstOverride(planOverride);
@@ -548,13 +603,15 @@ public class IssueController {
                         @RequestParam(required = false) String planFirstOverride,
                         @RequestParam(required = false) String implementationReasoningEffort,
                         @RequestParam(required = false) String reviewReasoningEffort,
+                        @RequestParam(required = false) Boolean allowSubagentsOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
         String error;
         try {
             error = claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
-                    budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort);
+                    budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort,
+                    reviewReasoningEffort, allowSubagentsOverride);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
@@ -565,6 +622,14 @@ public class IssueController {
                     readyStart ? "Implementation started." : "Issue started");
         }
         return "redirect:/issues/" + id;
+    }
+
+    public String start(Long id, String implModelOverride, String reviewModelOverride,
+            BigDecimal budgetOverrideUsd, String planFirstOverride,
+            String implementationReasoningEffort, String reviewReasoningEffort,
+            RedirectAttributes redirectAttributes) {
+        return start(id, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride,
+                implementationReasoningEffort, reviewReasoningEffort, null, redirectAttributes);
     }
 
     /**
@@ -596,12 +661,20 @@ public class IssueController {
                                          String planFirstOverride, boolean readyStart) {
 
         return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd,
-                planFirstOverride, readyStart, null, null);
+                planFirstOverride, readyStart, null, null, null);
     }
 
     private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
             String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
             boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort) {
+        return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort, null);
+    }
+
+    private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
+            String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
+            boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort,
+            Boolean allowSubagentsOverride) {
         String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
                 implementationReasoningEffort, reviewReasoningEffort);
         if (selectionError != null) return selectionError;
@@ -616,6 +689,8 @@ public class IssueController {
             candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
             candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
             candidate.setImplModelOverride(normalize(implModelOverride));
+            candidate.setAllowSubagentsOverride(allowSubagentsOverride != null
+                    ? allowSubagentsOverride : candidate.getRepo().isAllowSubagents());
             candidate.setReviewModelOverride(normalize(reviewModelOverride));
             candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
             if (candidate.getStatus() != IssueStatus.READY_TO_START) {
@@ -664,6 +739,7 @@ public class IssueController {
             @RequestParam(required = false) String reviewModelOverride,
             @RequestParam(required = false) String implementationReasoningEffort,
             @RequestParam(required = false) String reviewReasoningEffort,
+            @RequestParam(required = false) Boolean allowSubagentsOverride,
             @RequestParam(required = false) BigDecimal budgetOverrideUsd,
             @RequestParam(required = false) String planFirstOverride, RedirectAttributes redirect) {
         try {
@@ -678,6 +754,8 @@ public class IssueController {
             var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
                     candidate -> checkGate(candidate, null), candidate -> {
                         candidate.setImplModelOverride(normalize(implModelOverride));
+                        candidate.setAllowSubagentsOverride(allowSubagentsOverride != null
+                                ? allowSubagentsOverride : candidate.getRepo().isAllowSubagents());
                         candidate.setReviewModelOverride(normalize(reviewModelOverride));
                         candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
                         candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
@@ -1355,10 +1433,20 @@ public class IssueController {
         model.addAttribute("recentLiveOutput", issue.getStatus() == IssueStatus.IN_PROGRESS && liveOutput != null
                 ? liveOutput.recentOutputText(id, 4, 900) : null);
         model.addAttribute("latestAgentOutputPreview", latestCurrentRun == null ? null
-                : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 1400));
+                : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 600));
+        model.addAttribute("currentRunIteration", latestCurrentRun);
+        // A previous run's passing review must not look like the result of a fresh attempt.
+        model.addAttribute("currentReviewAvailable", requestedReviewAttempt != null
+                || (latestCurrentRun != null && latestCurrentRun.getReviewPassed() != null));
+        var pollSelection = objectMapper.createObjectNode();
+        if (requestedReviewAttempt != null) pollSelection.put("reviewAttempt", requestedReviewAttempt);
+        if (requestedPlanVersion != null) pollSelection.put("planVersion", requestedPlanVersion);
+        model.addAttribute("pollSelectionJson", pollSelection.toString());
         model.addAttribute("handoffRecoveryAvailable",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty()
                         && ImplementationHandoffRecovery.available(issue, latestCurrentRun, objectMapper));
+        model.addAttribute("completionRecoveryAvailable",
+                CompletionRecovery.available(issue, latestCurrentRun));
         model.addAttribute("localVerificationRequired", issue.effectivePlanFirst());
         model.addAttribute("localVerificationConfigured",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty());

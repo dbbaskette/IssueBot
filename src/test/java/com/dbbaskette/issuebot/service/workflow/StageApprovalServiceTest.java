@@ -160,6 +160,21 @@ class StageApprovalServiceTest {
         assertThat(decision.getHarnessId()).isEqualTo("codex");
     }
 
+    @Test void implementationApprovalPinsCodexDelegationChoice() {
+        repo.setAllowSubagents(true);
+        waiting(WorkflowStage.IMPLEMENTATION);
+        service.approveAndClaim(2L, 3L, "codex", "gpt-6-astra", "alice", "high", false);
+        assertThat(issue.getAllowSubagentsOverride()).isFalse();
+        assertThat(issue.isSubagentsAllowed()).isFalse();
+    }
+
+    @Test void implementationApprovalInheritsRepositoryChoiceWhenNoOverride() {
+        repo.setAllowSubagents(true);
+        waiting(WorkflowStage.IMPLEMENTATION);
+        service.approveAndClaim(2L, 3L, "codex", "gpt-6-astra", "alice", "high", null);
+        assertThat(issue.getAllowSubagentsOverride()).isTrue();
+    }
+
     @Test void existingApprovalRetainsNeutralIdentityModelAndReasoningWhenClaimed() {
         StageApproval decision = waiting(WorkflowStage.REVIEW);
         decision.setHarnessId("CODEX");

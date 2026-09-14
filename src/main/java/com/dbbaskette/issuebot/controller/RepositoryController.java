@@ -154,6 +154,7 @@ public class RepositoryController {
                                @RequestParam(required = false) List<String> approvalStages,
                                @RequestParam(required = false) String implementationReasoningEffort,
                                @RequestParam(required = false) String reviewReasoningEffort,
+                               @RequestParam(required = false, defaultValue = "false") boolean allowSubagents,
                                @RequestHeader(value = "HX-Request", required = false) String hx) {
         // Preserve raw fields before any resolution, including errors in other form sections.
         preserveSubmittedForm(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
@@ -161,7 +162,8 @@ public class RepositoryController {
                 reviewPassThreshold, autoStart, allowedPaths, verificationCommands,
                 implementationModel, reviewModel, followUpMode, decompositionMode,
                 preScreenEnabled, planFirst, issueBudgetUsd, customInstructions, lessonsEnabled,
-                safeWorkflowPolicy(id, workflowPolicy), approvalStages, implementationReasoningEffort, reviewReasoningEffort);
+                safeWorkflowPolicy(id, workflowPolicy), approvalStages, implementationReasoningEffort, reviewReasoningEffort,
+                allowSubagents);
         if (!GITHUB_SLUG.matcher(owner).matches() || !GITHUB_SLUG.matcher(name).matches()) {
             populateModel(model, null,
                     "Invalid repository owner/name. Use letters, numbers, '.', '_', '-' only.");
@@ -207,6 +209,7 @@ public class RepositoryController {
         repo.setMaxReviewIterations(maxReviewIterations);
         repo.setReviewPassThreshold(clampReviewPassThreshold(reviewPassThreshold));
         repo.setAutoStart(autoStart);
+        repo.setAllowSubagents(allowSubagents);
         repo.setFollowUpEnabled(followUpEnabled);
         repo.setImplementationModel(normalize(implementationModel));
         repo.setReviewModel(normalize(reviewModel));
@@ -254,6 +257,23 @@ public class RepositoryController {
         model.asMap().remove("repositorySelection");
         populateModel(model, "Repository " + repo.fullName() + " saved.", null);
         return ViewResolver.view("repositories", hx != null);
+    }
+
+    public String addOrUpdate(Model model, Long id, String owner, String name, String branch,
+            String mode, int maxIterations, boolean ciEnabled, int ciTimeoutMinutes,
+            boolean autoMerge, boolean securityReviewEnabled, int maxReviewIterations,
+            java.math.BigDecimal reviewPassThreshold, boolean autoStart, boolean followUpEnabled,
+            String allowedPaths, String verificationCommands, String implementationModel, String reviewModel,
+            String followUpMode, String decompositionMode, boolean preScreenEnabled, boolean planFirst,
+            java.math.BigDecimal issueBudgetUsd, String customInstructions, boolean lessonsEnabled,
+            String workflowPolicy, List<String> approvalStages, String implementationReasoningEffort,
+            String reviewReasoningEffort, String hx) {
+        return addOrUpdate(model, id, owner, name, branch, mode, maxIterations, ciEnabled,
+                ciTimeoutMinutes, autoMerge, securityReviewEnabled, maxReviewIterations, reviewPassThreshold,
+                autoStart, followUpEnabled, allowedPaths, verificationCommands, implementationModel, reviewModel,
+                followUpMode, decompositionMode, preScreenEnabled, planFirst, issueBudgetUsd, customInstructions,
+                lessonsEnabled, workflowPolicy, approvalStages, implementationReasoningEffort,
+                reviewReasoningEffort, false, hx);
     }
 
     public String addOrUpdate(Model model, Long id, String owner, String name, String branch,
@@ -324,7 +344,7 @@ public class RepositoryController {
             String followUpMode, String decompositionMode, boolean preScreenEnabled,
             boolean planFirst, java.math.BigDecimal issueBudgetUsd, String customInstructions,
             boolean lessonsEnabled, String workflowPolicy, List<String> approvalStages,
-            String implementationReasoningEffort, String reviewReasoningEffort) {
+            String implementationReasoningEffort, String reviewReasoningEffort, boolean allowSubagents) {
         Map<String, Object> values = new HashMap<>();
         values.put("id", id);
         values.put("owner", owner);
@@ -339,6 +359,7 @@ public class RepositoryController {
         values.put("maxReviewIterations", maxReviewIterations);
         values.put("reviewPassThreshold", reviewPassThreshold);
         values.put("autoStart", autoStart);
+        values.put("allowSubagents", allowSubagents);
         values.put("allowedPaths", allowedPaths);
         values.put("verificationCommands", verificationCommands);
         values.put("implementationReasoningEffort", implementationReasoningEffort);

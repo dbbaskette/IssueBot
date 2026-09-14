@@ -55,6 +55,16 @@ class StageApprovalControllerTest {
     }
 
     @Test
+    void passesCodexDelegationChoiceWithImplementationApproval() {
+        var issue = new TrackedIssue();
+        when(approvals.approveAndClaim(1L, 2L, "codex", "gpt-6-astra", "alice", "high", true))
+                .thenReturn(issue);
+        var flash = new RedirectAttributesModelMap();
+        controller.approve(1L, 2L, "codex", "gpt-6-astra", "high", true, () -> "alice", flash);
+        verify(workflow).processIssueAsync(issue);
+    }
+
+    @Test
     void staleOrPausedApprovalNeverDispatchesAndDoesNotLeakUnexpectedErrors() {
         when(approvals.approveAndClaim(1L, 2L, null, null, "operator"))
                 .thenThrow(new IllegalStateException("secret path and credentials"));

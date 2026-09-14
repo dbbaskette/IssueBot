@@ -44,8 +44,13 @@ public class IssueNextActionResolver {
                     "Open start controls", anchored(issue, "ready-to-start"), IssueNextAction.Tone.ACTION, true);
             case AWAITING_DECOMPOSITION -> action("Review the proposed issue split.",
                     "Review split", anchored(issue, "status-actions"), IssueNextAction.Tone.ACTION, true);
-            case FAILED -> action("Review the failure, add guidance, or retry.",
-                    "Resolve failure", anchored(issue, "recovery"), IssueNextAction.Tone.ACTION, true);
+            case FAILED -> "COMPLETION".equals(issue.getCurrentPhase())
+                    && issue.getLastFailureReason() != null
+                    && issue.getLastFailureReason().startsWith("Completion failed: Managed merge failed:")
+                    ? action("The review passed. Resolve the merge blocker, then resume this PR without recoding.",
+                            "Resume merge", anchored(issue, "recovery"), IssueNextAction.Tone.ACTION, true)
+                    : action("Review the failure, add guidance, or retry.",
+                            "Resolve failure", anchored(issue, "recovery"), IssueNextAction.Tone.ACTION, true);
             case COOLDOWN -> action("Review the failed attempt before retrying.",
                     "Review recovery", anchored(issue, "recovery"), IssueNextAction.Tone.ACTION, true);
             case IN_PROGRESS -> action(inProgressSummary(issue), "View progress",
@@ -88,9 +93,21 @@ public class IssueNextActionResolver {
     }
 
     private static String inProgressSummary(TrackedIssue issue) {
-        String phase = Humanize.phase(issue.getCurrentPhase());
-        return phase == null || phase.isBlank()
-                ? "IssueBot is processing this issue." : "IssueBot is " + phase + ".";
+        return switch (issue.getCurrentPhase() == null ? "" : issue.getCurrentPhase().toUpperCase(java.util.Locale.ROOT)) {
+            case "SETUP" -> "Preparing the repository.";
+            case "PLANNING" -> "Preparing the plan.";
+            case "IMPLEMENTATION" -> "The coding agent is working.";
+            case "LOCAL_CHECKS" -> "Running local verification.";
+            case "CI_VERIFICATION" -> "Waiting for CI checks.";
+            case "PR_CREATION" -> "Creating the pull request.";
+            case "INDEPENDENT_REVIEW" -> "Independent review is in progress.";
+            case "COMPLETION" -> "Checking and merging the reviewed PR.";
+            default -> {
+                String phase = Humanize.phase(issue.getCurrentPhase());
+                yield phase == null || phase.isBlank()
+                        ? "IssueBot is processing this issue." : "Current stage: " + phase + ".";
+            }
+        };
     }
 
     private static String blockedSummary(TrackedIssue issue) {

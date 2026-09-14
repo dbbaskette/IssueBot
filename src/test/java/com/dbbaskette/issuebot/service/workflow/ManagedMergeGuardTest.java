@@ -36,6 +36,15 @@ class ManagedMergeGuardTest {
         verify(github, never()).getCheckRuns(anyString(), anyString(), anyString());
     }
 
+    @Test void closedPullRequestCannotBeMergedAfterReview() throws Exception {
+        TrackedIssue issue = issue("{\"check_runs\":[]}");
+        when(github.getPullRequest("acme", "widgets", 55)).thenReturn(json.readTree(
+                "{\"state\":\"closed\",\"head\":{\"sha\":\"" + SHA + "\"}}"));
+        assertThatThrownBy(() -> guard.validateForMerge(issue, SHA))
+                .hasMessageContaining("pull request is closed");
+        verify(github, never()).getCheckRuns(anyString(), anyString(), anyString());
+    }
+
     @Test void pendingFailedAndIncompleteChecksFailClosed() throws Exception {
         for (String checks : new String[]{
                 "{\"check_runs\":[{\"status\":\"in_progress\"}]}",
@@ -45,6 +54,18 @@ class ManagedMergeGuardTest {
             TrackedIssue issue = issue(checks);
             assertThatThrownBy(() -> guard.validateForMerge(issue, SHA)).isInstanceOf(IllegalStateException.class);
         }
+    }
+
+    @Test void pendingCheckIsDistinguishableFromACompletedFailure() throws Exception {
+        TrackedIssue issue = issue("{\"check_runs\":[{\"status\":\"in_progress\"}]}");
+        assertThatThrownBy(() -> guard.validateForMerge(issue, SHA))
+                .isInstanceOf(ManagedMergeGuard.PendingChecksException.class)
+                .hasMessageContaining("still pending");
+        when(github.getCheckRuns("acme", "widgets", SHA)).thenReturn(json.readTree(
+                "{\"check_runs\":[{\"status\":\"completed\",\"conclusion\":\"failure\"}]}"));
+        assertThatThrownBy(() -> guard.validateForMerge(issue, SHA))
+                .isNotInstanceOf(ManagedMergeGuard.PendingChecksException.class)
+                .hasMessageContaining("did not pass");
     }
 
     @Test void noChecksAllowedOnlyForCiOptionalRepository() throws Exception {

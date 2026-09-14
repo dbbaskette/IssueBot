@@ -63,6 +63,10 @@ public class WatchedRepo {
     @Column(name = "auto_start", nullable = false)
     private boolean autoStart = true;
 
+    /** Codex implementation runs are single-agent unless this repository opts in. */
+    @Column(name = "allow_subagents", nullable = false)
+    private boolean allowSubagents = false;
+
     @Column(name = "max_review_iterations", nullable = false)
     private int maxReviewIterations = 2;
 
@@ -175,6 +179,9 @@ public class WatchedRepo {
 
     public boolean isAutoStart() { return autoStart; }
     public void setAutoStart(boolean autoStart) { this.autoStart = autoStart; }
+
+    public boolean isAllowSubagents() { return allowSubagents; }
+    public void setAllowSubagents(boolean allowSubagents) { this.allowSubagents = allowSubagents; }
 
     public boolean isFollowUpEnabled() { return followUpEnabled; }
     public void setFollowUpEnabled(boolean followUpEnabled) { this.followUpEnabled = followUpEnabled; }

@@ -61,6 +61,9 @@ public class IssueWorkflowService {
      *  so tests can zero it out and not sleep. */
     long reviewRetryBackoffBaseMs = 2000L;
 
+    /** Short recheck interval while a reviewed PR's GitHub checks are still running. */
+    long mergeCheckPollIntervalMs = 5000L;
+
     private static final DateTimeFormatter GUIDANCE_TIME = DateTimeFormatter.ofPattern("HH:mm");
 
     private final GitOperationsService gitOps;
@@ -532,7 +535,7 @@ public class IssueWorkflowService {
             eventService.log("ITERATION_STARTED",
                     "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
-            // === Phase 2: Implementation (Opus) ===
+            // === Phase 2: Implementation (selected coding harness) ===
             HarnessExecutionResult implResult = null;
             boolean harnessOwnedImplementation = approvedPlan != null && implementationTurnCheckpoints != null;
             if (resumePhase == null) {
@@ -766,7 +769,9 @@ public class IssueWorkflowService {
                     } else {
                         ciPassed = phaseCommitAndPush(trackedIssue, branchName);
                         iteration.setCiResult("SKIPPED");
-                        eventService.log("PHASE_CI_SKIPPED", "CI disabled — skipped check polling", repo, trackedIssue);
+                        eventService.log("PHASE_CI_SKIPPED",
+                                "IssueBot CI polling is off; GitHub checks may still run and must finish before merge",
+                                repo, trackedIssue);
                     }
                 } catch (Exception e) {
                     log.error("Phase 3 (CI) failed, iteration {}", iterationNum, e);
@@ -919,12 +924,12 @@ public class IssueWorkflowService {
                     return;
                 }
 
-                // Feed findings back as feedback for next implementation iteration
+                // Feed precise findings back to the existing coding session and checkout.
                 previousFeedback = buildReviewFeedback(reviewResult);
                 reviewFeedback = true; // this is the only source that warrants the implementation-response comment
                 previousDiff = diff;
                 previousCiLogs = null;
-                log.info("Review failed — feeding findings back to Opus for iteration {}", iterationNum + 1);
+                log.info("Review failed — feeding findings back to the coding harness for iteration {}", iterationNum + 1);
                 continue;
             }
 
@@ -961,11 +966,16 @@ public class IssueWorkflowService {
                 return; // Success!
             } catch (Exception e) {
                 log.error("Phase 6 (Completion) failed", e);
+                boolean reviewedMergeFailure = StageWorkflowCoordinator.managed(trackedIssue)
+                        && e.getMessage() != null
+                        && e.getMessage().startsWith("Managed merge failed:");
                 trackedIssue.setStatus(IssueStatus.FAILED);
-                trackedIssue.setCurrentPhase(null);
+                trackedIssue.setCurrentPhase(reviewedMergeFailure ? "COMPLETION" : null);
                 recordFailure(trackedIssue, FailureCategory.GIT_GITHUB,
                         "Completion failed: " + e.getMessage(), "COMPLETION", e.toString(),
-                        "Inspect the pull request and merge checks, then retry completion.",
+                        reviewedMergeFailure
+                                ? "The reviewed code is retained. Wait for GitHub checks, then resume merging this PR."
+                                : "Inspect the pull request and merge checks before retrying.",
                         FailureRetryability.OPERATOR_ACTION_REQUIRED);
                 eventService.log("PHASE_COMPLETION_FAILED",
                         "Completion failed: " + e.getMessage(), repo, trackedIssue);
@@ -1250,6 +1260,13 @@ public class IssueWorkflowService {
                                           ApprovedPlanContext approvedPlan,
                                           String legacyApprovedPlan) {
         WatchedRepo repo = trackedIssue.getRepo();
+        if (trackedIssue.getAllowSubagentsOverride() == null
+                && !cancellationService.isCancelled(trackedIssue.getId())) {
+            // Automatic starts have no form submission. Freeze the repository choice before
+            // the first coding invocation so resumed Codex sessions keep the same mode.
+            trackedIssue.setAllowSubagentsOverride(repo.isAllowSubagents());
+            issueRepository.save(trackedIssue);
+        }
         eventService.log("PHASE_IMPLEMENTATION", "Starting implementation phase", repo, trackedIssue);
 
         Long issueId = trackedIssue.getId();
@@ -1571,7 +1588,8 @@ public class IssueWorkflowService {
 
         // Post review to PR now that it's no longer a draft
         // (submitting reviews on draft PRs can interfere with merge)
-        if (reviewResult != null && !reviewResult.invocationFailed() && prNumber > 0 && !merged) {
+        if (!recoveryResume && reviewResult != null && !reviewResult.invocationFailed()
+                && prNumber > 0 && !merged) {
             postReviewToGitHub(trackedIssue, prNumber, reviewResult);
         }
 
@@ -1607,7 +1625,7 @@ public class IssueWorkflowService {
                                     .findFirstByIssueIdAndIterationNumOrderByIdDesc(
                                             trackedIssue.getId(), trackedIssue.getCurrentIteration())
                                     .orElseThrow(() -> new IllegalStateException("Reviewed iteration is missing"));
-                            String expectedSha = managedMergeGuard.validateForMerge(
+                            String expectedSha = awaitReviewedMergeChecks(
                                     trackedIssue, reviewed.getReviewedCommitSha());
                             JsonNode mergeResponse = gitHubApi.mergePullRequest(repo.getOwner(), repo.getName(),
                                     prNumber, prTitle, "squash", expectedSha);
@@ -1627,11 +1645,14 @@ public class IssueWorkflowService {
                     } catch (Exception e) {
                         log.warn("Auto-merge attempt {} failed for PR #{}: {}",
                                 attempt, prNumber, e.getMessage());
-                        if (attempt < 3) {
+                        boolean retryable = !(e instanceof MergeChecksTimedOutException)
+                                && !(e instanceof InterruptedException);
+                        if (attempt < 3 && retryable) {
                             try { Thread.sleep(5000); } catch (InterruptedException ie) {
                                 Thread.currentThread().interrupt(); break;
                             }
                         } else {
+                            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                             eventService.log("AUTO_MERGE_FAILED",
                                     "Auto-merge failed for PR #" + prNumber + ": " + e.getMessage(),
                                     repo, trackedIssue);
@@ -1669,6 +1690,39 @@ public class IssueWorkflowService {
 
         eventService.log("WORKFLOW_COMPLETED",
                 "Workflow completed — PR #" + prNumber + " (" + prUrl + ")", repo, trackedIssue);
+    }
+
+    private static final class MergeChecksTimedOutException extends IllegalStateException {
+        private MergeChecksTimedOutException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    private String awaitReviewedMergeChecks(TrackedIssue issue, String reviewedSha)
+            throws InterruptedException {
+        WatchedRepo repo = issue.getRepo();
+        int timeoutMinutes = Math.max(1, repo.getCiTimeoutMinutes());
+        long deadline = System.nanoTime() + java.time.Duration.ofMinutes(timeoutMinutes).toNanos();
+        boolean announced = false;
+        while (true) {
+            try {
+                return managedMergeGuard.validateForMerge(issue, reviewedSha);
+            } catch (ManagedMergeGuard.PendingChecksException pending) {
+                if (!announced) {
+                    eventService.log("PHASE_MERGE_WAITING_CHECKS",
+                            "Review passed; waiting for GitHub checks on PR #" + issue.getPrNumber(),
+                            repo, issue);
+                    announced = true;
+                }
+                long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                        deadline - System.nanoTime());
+                if (remainingMs <= 0) {
+                    throw new MergeChecksTimedOutException("GitHub checks did not finish within "
+                            + timeoutMinutes + " minutes; the reviewed PR remains open", pending);
+                }
+                Thread.sleep(Math.min(remainingMs, mergeCheckPollIntervalMs));
+            }
+        }
     }
 
     /**
@@ -2013,6 +2067,12 @@ public class IssueWorkflowService {
     String buildReviewFeedback(CodeReviewResult review) {
         StringBuilder fb = new StringBuilder();
         fb.append("The independent code review found issues with your implementation.\n\n");
+        fb.append("This is a focused correction pass on the current implementation, not a fresh build. "
+                + "Preserve working code and passing checks. Fix the specific findings and unmet "
+                + "acceptance criteria below, adding or updating targeted regression tests. "
+                + "You may also improve a weaker score where the change is small, safe, and relevant; "
+                + "do not rewrite unrelated parts merely to raise scores. Recheck affected behavior "
+                + "and give your own evidence-based assessment before handing back to IssueBot.\n\n");
         fb.append("**Overall:** ").append(review.summary()).append("\n\n");
 
         fb.append("**Scores:** ");
@@ -2063,7 +2123,8 @@ public class IssueWorkflowService {
             fb.append("\n**Reviewer advice:** ").append(review.advice()).append("\n");
         }
 
-        fb.append("\nPlease address ALL findings above, especially high-severity ones.\n");
+        fb.append("\nAddress all actionable findings above, prioritizing high-severity ones. "
+                + "Explain any finding you cannot resolve without changing the approved scope.\n");
         return fb.toString();
     }
 

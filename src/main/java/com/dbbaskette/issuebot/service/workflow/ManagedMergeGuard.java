@@ -13,6 +13,11 @@ import java.nio.file.Path;
 /** Fail-closed merge checks for a persisted independently reviewed commit. */
 @Service
 public class ManagedMergeGuard {
+    /** A check is still running; the reviewed commit is safe to recheck without recoding. */
+    public static class PendingChecksException extends IllegalStateException {
+        public PendingChecksException(String message) { super(message); }
+    }
+
     private final GitHubApiClient github;
 
     public ManagedMergeGuard(GitHubApiClient github) { this.github = github; }
@@ -37,6 +42,9 @@ public class ManagedMergeGuard {
         }
         WatchedRepo repo = issue.getRepo();
         JsonNode pr = github.getPullRequest(repo.getOwner(), repo.getName(), issue.getPrNumber());
+        if (pr != null && !"open".equals(pr.path("state").asText("open"))) {
+            throw new IllegalStateException("Merge blocked: the reviewed pull request is closed");
+        }
         if (pr == null || !expectedSha.equals(pr.path("head").path("sha").asText())) {
             throw new IllegalStateException("Merge blocked: pull request head changed after review; review the current commit");
         }
@@ -53,7 +61,7 @@ public class ManagedMergeGuard {
         }
         for (JsonNode check : checks) {
             if (!"completed".equals(check.path("status").asText())) {
-                throw new IllegalStateException("Merge blocked: a current CI check is still pending");
+                throw new PendingChecksException("Merge waiting: a current GitHub check is still pending");
             }
             String conclusion = check.path("conclusion").asText();
             if (!"success".equals(conclusion) && !"skipped".equals(conclusion)) {

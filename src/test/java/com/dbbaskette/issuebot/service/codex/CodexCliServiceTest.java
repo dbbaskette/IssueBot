@@ -58,7 +58,8 @@ class CodexCliServiceTest {
         List<String> command = service.buildCommand("gpt-5.6-sol", null);
 
         assertThat(command).startsWith("codex", "--ask-for-approval", "never",
-                "--sandbox", "workspace-write", "--config", "model_reasoning_effort=\"low\"", "exec");
+                "--sandbox", "workspace-write", "--disable", "multi_agent",
+                "--config", "model_reasoning_effort=\"low\"", "exec");
         assertThat(command).contains("--json", "--sandbox", "workspace-write", "--ignore-user-config",
                 "--ignore-rules", "--model", "gpt-5.6-sol", "-");
         assertThat(command).doesNotContain("--with-api-key", "--ephemeral");
@@ -78,7 +79,8 @@ class CodexCliServiceTest {
         List<String> command = service.buildPlanningCommand("gpt-5.6-sol");
 
         assertThat(command).startsWith("codex", "--ask-for-approval", "never",
-                "--sandbox", "read-only", "--config", "model_reasoning_effort=\"low\"", "exec");
+                "--sandbox", "read-only", "--disable", "multi_agent",
+                "--config", "model_reasoning_effort=\"low\"", "exec");
         assertThat(command).contains("--skip-git-repo-check", "--ephemeral",
                 "--ignore-user-config", "--ignore-rules", "--model", "gpt-5.6-sol", "-");
         assertThat(command).doesNotContain("workspace-write", "--with-api-key");
@@ -119,6 +121,32 @@ class CodexCliServiceTest {
                 .doesNotContain("sandbox_workspace_write.network_access=true");
         assertThat(service.buildPlanningCommand("gpt-6-astra", "medium"))
                 .doesNotContain("sandbox_workspace_write.network_access=true");
+    }
+
+    @Test
+    void subagentFlagIsExplicitAndPersistsOnResume() {
+        assertThat(service.buildCommand("gpt-6-astra", null, "high", false, true))
+                .containsSubsequence("--enable", "multi_agent", "--config", "model_reasoning_effort=\"high\"", "exec")
+                .doesNotContain("--disable");
+        assertThat(service.buildCommand("gpt-6-astra", "session-1", "high", false, true))
+                .containsSubsequence("--enable", "multi_agent", "exec", "resume");
+        assertThat(service.buildCommand("gpt-6-astra", null, "high", false, false))
+                .containsSubsequence("--disable", "multi_agent", "exec");
+    }
+
+    @Test
+    void issuePolicyResolvesRepositoryDefaultAndIssueOverride() {
+        var repo = new com.dbbaskette.issuebot.model.WatchedRepo("owner", "repo");
+        repo.setAllowSubagents(true);
+        var issue = new com.dbbaskette.issuebot.model.TrackedIssue(repo, 1, "Test");
+        var issues = mock(com.dbbaskette.issuebot.repository.TrackedIssueRepository.class);
+        when(issues.findById(1L)).thenReturn(java.util.Optional.of(issue));
+        var runner = new CodexCliService(new IssueBotProperties(), new CodexJsonParser(new ObjectMapper()),
+                new WorkflowCancellationService(), issues);
+        assertThat(runner.subagentsAllowedFor(1L)).isTrue();
+        issue.setAllowSubagentsOverride(false);
+        assertThat(runner.subagentsAllowedFor(1L)).isFalse();
+        assertThat(runner.subagentsAllowedFor(null)).isFalse();
     }
 
     @Test

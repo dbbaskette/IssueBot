@@ -492,8 +492,8 @@ class IssueDetailPlanReviewRenderTest {
         String html = render(issue, List.of(approved), approved, approved,
                 List.of(second, first), false);
 
-        assertThat(html).containsPattern(
-                        "(?s)Independent review passes.*?class=\"status status-completed\"[^>]*>PASSED</span>")
+        assertThat(html).contains("Implementation review · Attempt 2", "Conforms to plan",
+                        "status-completed", "Passed")
                 .contains("Recovery")
                 .contains("action=\"/issues/42/retry\"")
                 .doesNotContain("Needs guidance after review 2")
@@ -776,8 +776,8 @@ class IssueDetailPlanReviewRenderTest {
                 .contains(">+1</span>")
                 .contains("1 point from review 1")
                 .doesNotContain("review-attempt-selector");
-        assertThat(html.indexOf("id=\"review-history\""))
-                .isLessThan(html.indexOf("id=\"plan-review\""));
+        assertThat(html.indexOf("id=\"plan-review\""))
+                .isLessThan(html.indexOf("id=\"review-history\""));
     }
 
     @Test
@@ -804,6 +804,22 @@ class IssueDetailPlanReviewRenderTest {
                 .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=202#review-history\"")
                 .contains("href=\"/issues/42?planVersion=3&amp;reviewAttempt=101#review-history\"")
                 .containsPattern("href=\"[^\"]*reviewAttempt=303[^\"]*\"\\s+aria-current=\"true\"");
+    }
+
+    @Test
+    void freshAttemptDoesNotPresentAnOlderReviewAsCurrent() {
+        TrackedIssue issue = issueAwaitingApproval();
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase("IMPLEMENTATION");
+        PlanningVersion current = pending(issue, 3, "# Current design", "# Current plan", null);
+        Iteration previous = review(issue, 1, true, "{\"specComplianceScore\":0.95}");
+        WebContext context = context(issue, List.of(current), current, current, List.of(previous));
+        context.setVariable("currentReviewAvailable", false);
+
+        String html = render(context);
+
+        assertThat(html).contains("id=\"review-history\"", "The independent review will appear here when it finishes.")
+                .doesNotContain("Conforms to plan");
     }
 
     @Test

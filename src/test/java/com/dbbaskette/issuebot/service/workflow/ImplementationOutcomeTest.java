@@ -10,6 +10,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ImplementationOutcomeTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
+    @Test
+    void completionContractRequiresIndependentGateConfidenceFromLocalEvidence() {
+        assertThat(ImplementationOutcome.promptContract())
+                .contains("appropriate local checks pass")
+                .contains("evidence-based reason to expect IssueBot's independent gates to pass")
+                .contains("State any untested risk or uncertainty in limitations");
+    }
+
     private HarnessExecutionResult result(String finalText) {
         HarnessExecutionResult value = new HarnessExecutionResult();
         value.setSuccess(true);

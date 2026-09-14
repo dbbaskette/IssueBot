@@ -20,6 +20,22 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  */
 class TrackedIssueTest {
 
+    @Test
+    void codexSubagentsDefaultOffWithExplicitIssueOverride() {
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 1, "Test");
+        assertThat(issue.isSubagentsAllowed()).isFalse();
+        repo.setAllowSubagents(true);
+        assertThat(issue.isSubagentsAllowed()).isTrue();
+        issue.setAllowSubagentsOverride(false);
+        assertThat(issue.isSubagentsAllowed()).isFalse();
+        repo.setAllowSubagents(false);
+        issue.setAllowSubagentsOverride(true);
+        assertThat(issue.isSubagentsAllowed()).isTrue();
+        issue.setAllowSubagentsOverride(null);
+        assertThat(issue.isSubagentsAllowed()).isFalse();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"", " \t "})
     void blankHarnessWritesClearIdentityWithoutChoosingClaude(String blank) {

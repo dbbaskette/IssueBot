@@ -67,6 +67,25 @@ class IssueControllerTest {
         verifyNoInteractions(rejected.workflowService);
     }
 
+    @Test void reviewedMergeResumesOnlyAfterAClaimSucceeds() {
+        Fixture accepted = new Fixture(IssueStatus.FAILED);
+        accepted.issue.setPrNumber(29);
+        doReturn(new IssueDispatchService.ClaimResult(true, null, accepted.issue))
+                .when(accepted.dispatchService).claimCompletionRecovery(1L, 5);
+        assertThat(accepted.controller.resumeMerge(1L, accepted.redirectAttributes))
+                .isEqualTo("redirect:/issues/1");
+        verify(accepted.workflowService).processIssueAsync(accepted.issue);
+        verify(accepted.eventService).log(eq("MERGE_RESUMED"), contains("without rerunning implementation"),
+                eq(accepted.issue.getRepo()), eq(accepted.issue));
+
+        Fixture rejected = new Fixture(IssueStatus.FAILED);
+        doReturn(new IssueDispatchService.ClaimResult(false, "Reviewed PR changed", null))
+                .when(rejected.dispatchService).claimCompletionRecovery(1L, 5);
+        assertThat(rejected.controller.resumeMerge(1L, rejected.redirectAttributes))
+                .isEqualTo("redirect:/issues/1");
+        verifyNoInteractions(rejected.workflowService);
+    }
+
     @Test void knownUnmetPrerequisiteBlocksAllDirectRetryPostsBeforeAnyExternalWork() throws Exception {
         for (String path : List.of("/issues/1/retry", "/issues/1/retry-quick", "/issues/bulk/retry", "/issues/1/plan/retry-implementation")) {
             Fixture f = new Fixture(IssueStatus.FAILED);
@@ -586,6 +605,16 @@ class IssueControllerTest {
         org.assertj.core.api.Assertions.assertThat(captor.getValue().getReviewModelOverride()).isNull();
     }
 
+    @Test
+    void retryCanSwitchBackToSingleAgentEvenWhenRepositoryAllowsSubagents() {
+        Fixture f = new Fixture(IssueStatus.FAILED);
+        f.issue.getRepo().setAllowSubagents(true);
+        f.controller.retry(1L, null, null, null, null, null, false,
+                null, null, false, f.redirectAttributes);
+        assertThat(f.issue.getAllowSubagentsOverride()).isFalse();
+        assertThat(f.issue.isSubagentsAllowed()).isFalse();
+    }
+
     @ParameterizedTest
     @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
     void retryRejectsEveryNonRunningModeBeforeExternalCleanup(ProcessingState ignoredMode) {
@@ -725,6 +754,25 @@ class IssueControllerTest {
         verify(f.eventService).log(eq("MANUAL_START"), anyString(),
                 eq(f.issue.getRepo()), same(f.issue));
         verifyNoInteractions(f.notificationService);
+    }
+
+    @Test
+    void startPinsExplicitCodexSubagentChoiceOverRepositoryDefault() {
+        Fixture f = new Fixture(IssueStatus.PENDING);
+        f.issue.getRepo().setAllowSubagents(false);
+        f.controller.start(1L, null, null, null, null, null, null, true, f.redirectAttributes);
+        assertThat(f.issue.getAllowSubagentsOverride()).isTrue();
+        assertThat(f.issue.isSubagentsAllowed()).isTrue();
+    }
+
+    @Test
+    void startPinsRepositorySubagentDefaultForTheRun() {
+        Fixture f = new Fixture(IssueStatus.PENDING);
+        f.issue.getRepo().setAllowSubagents(true);
+        f.controller.start(1L, null, null, null, null, null, null, null, f.redirectAttributes);
+        assertThat(f.issue.getAllowSubagentsOverride()).isTrue();
+        f.issue.getRepo().setAllowSubagents(false);
+        assertThat(f.issue.isSubagentsAllowed()).isTrue();
     }
 
     @Test

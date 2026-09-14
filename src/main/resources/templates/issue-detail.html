@@ -5,8 +5,8 @@
      th:attr="data-current-issue-id=${issue.id}">
     <div th:replace="~{layout :: toasts}"></div>
 
-    <!-- === Two-column layout (#90): LEFT carries header/banners/decision cards/goal/
-           timeline/pipeline/guide; RIGHT is the sticky live terminal. Single column
+    <!-- === Two-column layout (#90): LEFT carries progress, current action, stage evidence,
+           and guidance; RIGHT is the sticky live terminal. Single column
            below 1100px (see .detail-grid in style.css) — terminal is not sticky there.
            Iteration History and Activity Log are deliberately NOT grid children: they
            stay full-width below the grid in both layouts. Modals live entirely outside
@@ -81,6 +81,9 @@
                     Next <i class="ti ti-chevron-right" aria-hidden="true"></i>
                 </button>
             </nav>
+
+            <!-- Progress stays near the issue title; it is also the live polling anchor. -->
+            <div th:replace="~{issue-detail :: live-status}"></div>
 
             <!-- One decision surface; independently refreshed children preserve poll/dialog boundaries. -->
             <section id="issue-decision" class="issue-decision panel mb-3" aria-label="Current issue decision">
@@ -165,6 +168,16 @@
             </form>
         </div>
     </section>
+    <section th:if="${completionRecoveryAvailable}" class="panel mb-3">
+        <div class="panel-body">
+            <h3>Review passed; merge needs another check</h3>
+            <p>The reviewed code and PR are kept. Resume GitHub checks and merge without rerunning implementation or review.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/resume-merge'}" method="post">
+                <button type="submit" class="btn btn-primary btn-sm"
+                        th:disabled="${processingMode?.name() != 'RUNNING' or (recoveryGuidance != null and !recoveryGuidance.retryAllowed)}">Resume merge</button>
+            </form>
+        </div>
+    </section>
     <section th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN' or issue.status.name() == 'BLOCKED'}" class="panel mb-3">
         <div class="panel-body">
             <h3>Recover blocked work</h3>
@@ -177,7 +190,7 @@
 
             <section class="panel mb-3 failure-recovery recovery-card"
                      th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
-                                  and showPlanGuidance != true}">
+                                  and showPlanGuidance != true and completionRecoveryAvailable != true}">
                 <div class="panel-header">
                     <h3>Recovery</h3>
                     <span class="status status-failed">Needs attention</span>
@@ -212,6 +225,14 @@
                             <div class="field-group" role="group" aria-label="Implementation" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.implementationModel, globalImplementationModel)}">
                                 <h4>Implementation for this attempt</h4>
                                 <div th:replace="~{fragments/reasoning :: selection('recoveryImplModel', 'implModelOverride', ${selectionRejected == true ? submittedImplModel : issue.implModelOverride}, 'implementationReasoningEffort', ${selectionRejected == true ? submittedImplementationReasoning : issue.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
+                            </div>
+                            <div class="field-group" th:if="${effectiveHarnessId == 'codex'}">
+                                <label for="recoverySubagents">Codex delegation for this attempt</label>
+                                <select id="recoverySubagents" name="allowSubagentsOverride">
+                                    <option value="" selected th:text="${'Use repository default (' + (issue.repo != null and issue.repo.allowSubagents ? 'subagents allowed' : 'single agent') + ')'}">Use repository default</option>
+                                    <option value="false">Single agent</option>
+                                    <option value="true">Allow subagents when useful</option>
+                                </select>
                             </div>
                             <div class="field-group" role="group" aria-label="Review" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.reviewModel, globalReviewModel)}">
                                 <h4>Review for this attempt</h4>
@@ -504,11 +525,202 @@
                 <strong>Waiting to restart:</strong> <span th:text="${issue.suspensionReason}"></span>
             </div>
 
+            <!-- === BLOCKED-BY INFO PANEL === -->
+            <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
+                <div class="panel-header inset-heading">
+                    <h3>Dependencies</h3>
+                    <span class="status status-blocked">WAITING</span>
+                </div>
+                <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
+                <div class="flex gap-1" style="flex-wrap:wrap">
+                    <a th:each="num : ${issue.blockerNumbers}"
+                       class="status status-blocked" target="_blank" rel="noopener"
+                       th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
+                       th:title="${'Open issue #' + num + ' on GitHub'}"
+                       th:text="${'#' + num}">
+                        #5
+                    </a>
+                </div>
+            </div>
+
+            <!-- === PLAN REVIEW REGION: always present so a running-to-plan-approval poll can
+                   hydrate the CTA destination and controls out of band. === -->
+            <div th:fragment="plan-review-region(oob)" id="plan-review"
+                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+                <span id="plan-first" aria-hidden="true"></span>
+                <div id="plan-error" th:if="${planError != null}"
+                     class="alert alert-danger" role="alert" th:text="${planError}">
+                    Plan approval could not reserve this repository.
+                </div>
+                <details th:if="${selectedPlanningVersion == null and planHtml == null}"
+                         class="panel mb-3 secondary-section plan-section"
+                         th:attr="data-ui-state-key=${'issue:' + issue.id + ':plan:pending'}">
+                    <summary class="panel-header"><h3>Plan</h3><span class="status status-pending">Not started</span></summary>
+                    <div class="panel-body"><p class="text-sm text-muted">The plan will appear here after planning begins.</p></div>
+                </details>
+            <details th:if="${selectedPlanningVersion != null}"
+                     class="panel mb-3 plan-review secondary-section" data-plan-review
+                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' or selectedPlanIsHistorical ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':plan-contract:' + selectedPlanningVersion.versionNumber}">
+                <summary class="panel-header plan-review-header">
+                    <div>
+                        <span class="eyebrow">Planning contract</span>
+                        <h3>Plan Review</h3>
+                    </div>
+                    <div class="plan-review-current" th:if="${currentPlanningVersion != null}">
+                        <span class="status"
+                              th:classappend="${'status-' + currentPlanningVersion.state.name().toLowerCase()}"
+                              th:text="${currentPlanningVersion.state}">PENDING</span>
+                        <strong th:text="${'Current version ' + currentPlanningVersion.versionNumber}">Current version 3</strong>
+                        <span th:text="${#temporals.format(currentPlanningVersion.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
+                        <span th:text="${(currentPlanningVersion.provider != null ? currentPlanningVersion.provider : 'Unknown provider') + ' · ' + (currentPlanningVersion.model != null ? currentPlanningVersion.model : 'Unknown model')}">Harness · model</span>
+                    </div>
+                </summary>
+
+                <div class="plan-history-banner" role="status" th:if="${selectedPlanIsHistorical}">
+                    <div>
+                        <strong>Historical version</strong>
+                        <span th:text="${'You are reviewing Version ' + selectedPlanningVersion.versionNumber + '. It is read-only.'}">You are reviewing Version 2. It is read-only.</span>
+                    </div>
+                    <a class="btn btn-ghost btn-sm"
+                       th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">Return to current version</a>
+                </div>
+
+                <div class="alert alert-warning"
+                     th:if="${(localVerificationRequired != null ? localVerificationRequired : issue.effectivePlanFirst()) and (localVerificationConfigured != null ? not localVerificationConfigured : issue.repo.verificationCommands == null)}">
+                    Local verification is not configured. Add a trusted command in Repository settings before starting this approved plan; IssueBot will not publish unchecked changes.
+                </div>
+                <div class="plan-review-body">
+                    <aside class="plan-version-rail" aria-label="Selected planning version">
+                        <span class="plan-version-number" th:text="${'v' + selectedPlanningVersion.versionNumber}">v3</span>
+                        <span class="status"
+                              th:classappend="${'status-' + selectedPlanningVersion.state.name().toLowerCase()}"
+                              th:text="${selectedPlanningVersion.state}">PENDING</span>
+                        <span class="plan-version-label"
+                              th:text="${selectedPlanIsHistorical ? 'Historical' : 'Current'}">Current</span>
+                    </aside>
+
+                    <div class="plan-review-workspace">
+                        <div class="plan-review-tabs" role="tablist" aria-label="Plan Review documents">
+                            <button type="button" id="plan-tab-design" class="plan-review-tab"
+                                    role="tab" aria-selected="true" aria-controls="plan-panel-design"
+                                    data-plan-tab="design">Design Spec</button>
+                            <button type="button" id="plan-tab-implementation" class="plan-review-tab"
+                                    role="tab" aria-selected="false" aria-controls="plan-panel-implementation"
+                                    tabindex="-1" data-plan-tab="implementation">Implementation Plan</button>
+                            <button type="button" id="plan-tab-history" class="plan-review-tab"
+                                    role="tab" aria-selected="false" aria-controls="plan-panel-history"
+                                    tabindex="-1" data-plan-tab="history"
+                                    th:text="${'History · ' + #lists.size(planningVersions)}">History · 3</button>
+                        </div>
+
+                        <div id="plan-panel-design" class="plan-review-panel" role="tabpanel"
+                             tabindex="0" aria-labelledby="plan-tab-design">
+                            <!--/* Both document fields are independently sanitized by MarkdownRenderer. */-->
+                            <div class="plan-doc markdown-body" th:if="${selectedDesignSpecHtml != null}"
+                                 th:utext="${selectedDesignSpecHtml}">design spec</div>
+                            <p class="plan-document-empty" th:if="${selectedDesignSpecHtml == null}">No Design Spec was stored for this version.</p>
+                        </div>
+
+                        <div id="plan-panel-implementation" class="plan-review-panel" role="tabpanel"
+                             tabindex="0" aria-labelledby="plan-tab-implementation" hidden>
+                            <div class="plan-doc markdown-body" th:if="${selectedImplementationPlanHtml != null}"
+                                 th:utext="${selectedImplementationPlanHtml}">implementation plan</div>
+                            <p class="plan-document-empty" th:if="${selectedImplementationPlanHtml == null}">No Implementation Plan was stored for this version.</p>
+                        </div>
+
+                        <div id="plan-panel-history" class="plan-review-panel" role="tabpanel"
+                             tabindex="0" aria-labelledby="plan-tab-history" hidden>
+                            <ol class="plan-version-history">
+                                <li th:each="version : ${planningVersions}"
+                                    th:classappend="${version.versionNumber == selectedPlanningVersion.versionNumber ? 'selected' : ''}">
+                                    <a class="plan-version-link"
+                                       th:attr="aria-current=${version.versionNumber == selectedPlanningVersion.versionNumber ? 'page' : null}"
+                                       th:href="@{'/issues/' + ${issue.id} + '?planVersion=' + ${version.versionNumber} + '#plan-review'}">
+                                        <span class="plan-version-history-title">
+                                            <strong th:text="${'Version ' + version.versionNumber}">Version 3</strong>
+                                            <span class="status"
+                                                  th:classappend="${'status-' + version.state.name().toLowerCase()}"
+                                                  th:text="${version.state}">PENDING</span>
+                                        </span>
+                                        <span th:text="${#temporals.format(version.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
+                                        <span th:text="${(version.provider != null ? version.provider : 'Unknown provider') + ' · ' + (version.model != null ? version.model : 'Unknown model')}">Harness · model</span>
+                                    </a>
+                                    <p th:if="${version.revisionFeedback != null and not #strings.isEmpty(version.revisionFeedback)}">
+                                        <strong>Operator revision:</strong>
+                                        <span th:text="${version.revisionFeedback}">Tighten rollback steps.</span>
+                                    </p>
+                                    <p th:if="${version.approvedAt != null}"
+                                       th:text="${'Approved ' + #temporals.format(version.approvedAt, 'MMM d, yyyy HH:mm')}">Approved Jul 17, 2026 10:00</p>
+                                </li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+            </details>
+            </div>
+
+            <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
+            <details th:if="${selectedPlanningVersion == null and planHtml != null}"
+                     class="panel mb-3 plan-doc-panel secondary-section plan-section"
+                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' ? 'open' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':plan:legacy'}">
+                <summary class="panel-header">
+                    <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
+                    <span class="text-sm text-muted">click to expand</span>
+                </summary>
+                <div class="panel-body">
+                    <div class="plan-doc markdown-body" th:utext="${planHtml}">plan</div>
+                </div>
+            </details>
+
+            <!-- Current evidence, in stable places even before each stage starts. -->
+            <section th:fragment="implementation-summary(oob)" id="implementation-summary" class="panel mb-3 stage-evidence"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+                <div class="panel-header"><h3>Implementation</h3>
+                    <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.implementationSucceeded == true ? 'status-completed' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'status-in_progress' : 'status-pending')}"
+                          th:text="${currentRunIteration != null and currentRunIteration.implementationSucceeded == true ? 'Finished' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'Working' : 'Not started')}">Not started</span></div>
+                <div class="panel-body">
+                    <p class="text-sm text-muted" th:if="${currentRunIteration == null}">Coding has not started.</p>
+                    <p class="text-sm" th:if="${currentRunIteration != null}" th:text="${currentRunIteration.implementationSucceeded == true ? 'Coding finished for the latest attempt.' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'The coding agent is working.' : 'See the latest attempt for its coding result.')}">Coding in progress.</p>
+                    <p class="text-sm text-muted" th:if="${effectiveHarnessId == 'codex'}"
+                       th:text="${issue.subagentsAllowed ? 'Codex mode: subagents allowed when useful (not necessarily used).' : 'Codex mode: single agent; subagents disabled.'}">Codex mode: single agent.</p>
+                    <a th:if="${issue.status.name() == 'IN_PROGRESS' and issue.currentPhase == 'IMPLEMENTATION'}" href="#live-terminal-panel">Live output</a>
+                    <a th:if="${currentRunIteration != null}" href="#iteration-history">Attempt details</a>
+                </div>
+            </section>
+
+            <section th:fragment="checks-summary(oob)" id="checks-summary" class="panel mb-3 stage-evidence"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+                <div class="panel-header"><h3>Checks</h3></div>
+                <div class="panel-body">
+                    <div class="flex-between mb-1"><span>Local verification</span>
+                        <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.localCheckResult == 'PASSED' ? 'status-completed' : (currentRunIteration != null and currentRunIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
+                              th:text="${currentRunIteration != null and currentRunIteration.localCheckResult != null ? currentRunIteration.localCheckResult : 'Not run'}">Not run</span></div>
+                    <div class="flex-between"><span>GitHub CI</span>
+                        <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.ciResult == 'PASSED' ? 'status-completed' : (currentRunIteration != null and currentRunIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
+                              th:text="${currentRunIteration != null and currentRunIteration.ciResult != null ? (currentRunIteration.ciResult == 'SKIPPED' ? 'Not monitored' : currentRunIteration.ciResult) : 'Not run'}">Not run</span></div>
+                    <p class="text-sm text-muted" th:if="${not issue.repo.ciEnabled}">IssueBot does not poll CI here. Any GitHub checks that start must still finish before merge.</p>
+                </div>
+            </section>
+
             <!-- === REVIEW SCORE TRAJECTORY: selected attempt against its nearest scored baseline === -->
-            <section th:if="${reviewScoreHistory != null}" th:with="history=${reviewScoreHistory}"
+            <details th:fragment="review-history-region(oob)"
+                     th:with="history=${currentReviewAvailable == false ? null : reviewScoreHistory}"
                      id="review-history" class="panel mb-3 review-history-card"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null},
+                              data-ui-state-key=${'issue:' + issue.id + ':review-history'},
+                              open=${history != null and history.selected.score.passed == false ? 'open' : null}"
                      aria-labelledby="review-history-title">
-                <header class="panel-header review-history-header">
+                <summary class="panel-header review-history-header" th:if="${history == null}">
+                    <div><span class="eyebrow">Review</span><h3 id="review-history-title">Implementation review</h3></div>
+                    <span class="status status-pending">Not started</span>
+                </summary>
+                <div class="panel-body" th:if="${history == null}">
+                    <p class="text-sm text-muted">The independent review will appear here when it finishes.</p>
+                </div>
+                <summary class="panel-header review-history-header" th:if="${history != null}">
                     <div>
                         <span class="eyebrow"
                               th:text="${'Implementation review · Attempt ' + history.selected.iterationNumber}">Implementation review</span>
@@ -518,9 +730,9 @@
                     <span class="status"
                           th:classappend="${history.selected.score.passed == null ? 'status-pending' : (history.selected.score.passed ? 'status-completed' : 'status-failed')}"
                           th:text="${history.selected.score.passed == null ? 'Unavailable' : (history.selected.score.passed ? 'Passed' : 'Changes requested')}">Result</span>
-                </header>
+                </summary>
 
-                <div class="panel-body">
+                <div class="panel-body" th:if="${history != null}">
                     <div class="review-score-overview" th:if="${history.selected.score.overall != null}">
                         <strong th:text="${history.selected.overallPercent + '%'}">95%</strong>
                         <div class="review-score-context">
@@ -648,278 +860,21 @@
                         </ul>
                     </details>
                 </div>
+            </details>
+
+            <section th:fragment="outcome-summary(oob)" id="outcome-summary" class="panel mb-3 stage-evidence"
+                     th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+                <div class="panel-header"><h3>Outcome</h3>
+                    <span class="status" th:classappend="${issue.status.name() == 'COMPLETED' ? 'status-completed' : (issue.currentPhase == 'COMPLETION' and issue.status.name() == 'IN_PROGRESS' ? 'status-in_progress' : 'status-pending')}"
+                          th:text="${issue.status.name() == 'COMPLETED' ? 'Completed' : (issue.currentPhase == 'COMPLETION' and issue.status.name() == 'IN_PROGRESS' ? 'Finalizing' : 'Not finished')}">Not finished</span></div>
+                <div class="panel-body">
+                    <p class="text-sm text-muted" th:if="${issue.prNumber == null}">A pull request will appear here after verification.</p>
+                    <a th:if="${issue.prNumber != null}" target="_blank" rel="noopener"
+                       th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/pull/' + ${issue.prNumber}"
+                       th:text="${'Pull request #' + issue.prNumber}">Pull request</a>
+                    <p class="text-sm text-muted" th:if="${issue.currentPhase == 'COMPLETION' and issue.status.name() == 'IN_PROGRESS'}">Checking the reviewed PR and waiting for GitHub checks before merge.</p>
+                </div>
             </section>
-
-            <!-- === BLOCKED-BY INFO PANEL === -->
-            <div th:if="${issue.status.name() == 'BLOCKED' and issue.blockedByIssues != null}" class="glass-card mb-3">
-                <div class="panel-header inset-heading">
-                    <h3>Dependencies</h3>
-                    <span class="status status-blocked">WAITING</span>
-                </div>
-                <p class="text-sm" style="margin-bottom:0.5rem">This issue is waiting for the following issues to be completed before processing can begin:</p>
-                <div class="flex gap-1" style="flex-wrap:wrap">
-                    <a th:each="num : ${issue.blockerNumbers}"
-                       class="status status-blocked" target="_blank" rel="noopener"
-                       th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${num}"
-                       th:title="${'Open issue #' + num + ' on GitHub'}"
-                       th:text="${'#' + num}">
-                        #5
-                    </a>
-                </div>
-            </div>
-
-            <!-- === PLAN REVIEW REGION: always present so a running-to-plan-approval poll can
-                   hydrate the CTA destination and controls out of band. === -->
-            <div th:fragment="plan-review-region(oob)" id="plan-review"
-                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-                <span id="plan-first" aria-hidden="true"></span>
-                <div id="plan-error" th:if="${planError != null}"
-                     class="alert alert-danger" role="alert" th:text="${planError}">
-                    Plan approval could not reserve this repository.
-                </div>
-            <details th:if="${selectedPlanningVersion != null}"
-                     class="panel mb-3 plan-review secondary-section" data-plan-review
-                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' or selectedPlanIsHistorical ? 'open' : null},
-                              data-ui-state-key=${'issue:' + issue.id + ':plan-contract:' + selectedPlanningVersion.versionNumber}">
-                <summary class="panel-header plan-review-header">
-                    <div>
-                        <span class="eyebrow">Planning contract</span>
-                        <h3>Plan Review</h3>
-                    </div>
-                    <div class="plan-review-current" th:if="${currentPlanningVersion != null}">
-                        <span class="status"
-                              th:classappend="${'status-' + currentPlanningVersion.state.name().toLowerCase()}"
-                              th:text="${currentPlanningVersion.state}">PENDING</span>
-                        <strong th:text="${'Current version ' + currentPlanningVersion.versionNumber}">Current version 3</strong>
-                        <span th:text="${#temporals.format(currentPlanningVersion.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
-                        <span th:text="${(currentPlanningVersion.provider != null ? currentPlanningVersion.provider : 'Unknown provider') + ' · ' + (currentPlanningVersion.model != null ? currentPlanningVersion.model : 'Unknown model')}">Harness · model</span>
-                    </div>
-                </summary>
-
-                <div class="plan-history-banner" role="status" th:if="${selectedPlanIsHistorical}">
-                    <div>
-                        <strong>Historical version</strong>
-                        <span th:text="${'You are reviewing Version ' + selectedPlanningVersion.versionNumber + '. It is read-only.'}">You are reviewing Version 2. It is read-only.</span>
-                    </div>
-                    <a class="btn btn-ghost btn-sm"
-                       th:href="@{'/issues/' + ${issue.id} + '#plan-review'}">Return to current version</a>
-                </div>
-
-                <div class="alert alert-warning"
-                     th:if="${(localVerificationRequired != null ? localVerificationRequired : issue.effectivePlanFirst()) and (localVerificationConfigured != null ? not localVerificationConfigured : issue.repo.verificationCommands == null)}">
-                    Local verification is not configured. Add a trusted command in Repository settings before starting this approved plan; IssueBot will not publish unchecked changes.
-                </div>
-                <div class="plan-review-body">
-                    <aside class="plan-version-rail" aria-label="Selected planning version">
-                        <span class="plan-version-number" th:text="${'v' + selectedPlanningVersion.versionNumber}">v3</span>
-                        <span class="status"
-                              th:classappend="${'status-' + selectedPlanningVersion.state.name().toLowerCase()}"
-                              th:text="${selectedPlanningVersion.state}">PENDING</span>
-                        <span class="plan-version-label"
-                              th:text="${selectedPlanIsHistorical ? 'Historical' : 'Current'}">Current</span>
-                    </aside>
-
-                    <div class="plan-review-workspace">
-                        <div class="plan-review-tabs" role="tablist" aria-label="Plan Review documents">
-                            <button type="button" id="plan-tab-design" class="plan-review-tab"
-                                    role="tab" aria-selected="true" aria-controls="plan-panel-design"
-                                    data-plan-tab="design">Design Spec</button>
-                            <button type="button" id="plan-tab-implementation" class="plan-review-tab"
-                                    role="tab" aria-selected="false" aria-controls="plan-panel-implementation"
-                                    tabindex="-1" data-plan-tab="implementation">Implementation Plan</button>
-                            <button type="button" id="plan-tab-history" class="plan-review-tab"
-                                    role="tab" aria-selected="false" aria-controls="plan-panel-history"
-                                    tabindex="-1" data-plan-tab="history"
-                                    th:text="${'History · ' + #lists.size(planningVersions)}">History · 3</button>
-                        </div>
-
-                        <div id="plan-panel-design" class="plan-review-panel" role="tabpanel"
-                             tabindex="0" aria-labelledby="plan-tab-design">
-                            <!--/* Both document fields are independently sanitized by MarkdownRenderer. */-->
-                            <div class="plan-doc markdown-body" th:if="${selectedDesignSpecHtml != null}"
-                                 th:utext="${selectedDesignSpecHtml}">design spec</div>
-                            <p class="plan-document-empty" th:if="${selectedDesignSpecHtml == null}">No Design Spec was stored for this version.</p>
-                        </div>
-
-                        <div id="plan-panel-implementation" class="plan-review-panel" role="tabpanel"
-                             tabindex="0" aria-labelledby="plan-tab-implementation" hidden>
-                            <div class="plan-doc markdown-body" th:if="${selectedImplementationPlanHtml != null}"
-                                 th:utext="${selectedImplementationPlanHtml}">implementation plan</div>
-                            <p class="plan-document-empty" th:if="${selectedImplementationPlanHtml == null}">No Implementation Plan was stored for this version.</p>
-                        </div>
-
-                        <div id="plan-panel-history" class="plan-review-panel" role="tabpanel"
-                             tabindex="0" aria-labelledby="plan-tab-history" hidden>
-                            <ol class="plan-version-history">
-                                <li th:each="version : ${planningVersions}"
-                                    th:classappend="${version.versionNumber == selectedPlanningVersion.versionNumber ? 'selected' : ''}">
-                                    <a class="plan-version-link"
-                                       th:attr="aria-current=${version.versionNumber == selectedPlanningVersion.versionNumber ? 'page' : null}"
-                                       th:href="@{'/issues/' + ${issue.id} + '?planVersion=' + ${version.versionNumber} + '#plan-review'}">
-                                        <span class="plan-version-history-title">
-                                            <strong th:text="${'Version ' + version.versionNumber}">Version 3</strong>
-                                            <span class="status"
-                                                  th:classappend="${'status-' + version.state.name().toLowerCase()}"
-                                                  th:text="${version.state}">PENDING</span>
-                                        </span>
-                                        <span th:text="${#temporals.format(version.createdAt, 'MMM d, yyyy HH:mm')}">Jul 17, 2026 09:30</span>
-                                        <span th:text="${(version.provider != null ? version.provider : 'Unknown provider') + ' · ' + (version.model != null ? version.model : 'Unknown model')}">Harness · model</span>
-                                    </a>
-                                    <p th:if="${version.revisionFeedback != null and not #strings.isEmpty(version.revisionFeedback)}">
-                                        <strong>Operator revision:</strong>
-                                        <span th:text="${version.revisionFeedback}">Tighten rollback steps.</span>
-                                    </p>
-                                    <p th:if="${version.approvedAt != null}"
-                                       th:text="${'Approved ' + #temporals.format(version.approvedAt, 'MMM d, yyyy HH:mm')}">Approved Jul 17, 2026 10:00</p>
-                                </li>
-                            </ol>
-                        </div>
-                    </div>
-                </div>
-
-            </details>
-            </div>
-
-            <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
-            <details th:if="${selectedPlanningVersion == null and planHtml != null}"
-                     class="panel mb-3 plan-doc-panel secondary-section plan-section"
-                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' ? 'open' : null},
-                              data-ui-state-key=${'issue:' + issue.id + ':plan:legacy'}">
-                <summary class="panel-header">
-                    <h3><i class="ti ti-file-description" aria-hidden="true"></i> Design &amp; Implementation Plan</h3>
-                    <span class="text-sm text-muted">click to expand</span>
-                </summary>
-                <div class="panel-body">
-                    <div class="plan-doc markdown-body" th:utext="${planHtml}">plan</div>
-                </div>
-            </details>
-
-            <!-- === GOAL CARD === -->
-            <details class="panel mb-3 goal-card secondary-section goal-section"
-                     th:attr="data-ui-state-key=${'issue:' + issue.id + ':goal'}">
-                <summary class="panel-header">
-                    <h3>Goal</h3>
-                    <span class="text-sm text-muted">Done when all of these hold:</span>
-                </summary>
-                <div class="panel-body">
-                    <div class="flex-between mb-1" th:if="${issue.repo.ciEnabled}">
-                        <span class="text-sm">CI checks pass</span>
-                        <span class="status"
-                              th:classappend="${latestIteration != null and latestIteration.ciResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
-                              th:text="${(latestIteration != null and latestIteration.ciResult != null) ? latestIteration.ciResult : '—'}">—</span>
-                    </div>
-                    <div class="text-sm text-muted mb-1" th:unless="${issue.repo.ciEnabled}">CI disabled — commit &amp; push after any required local checks</div>
-
-                    <div class="flex-between mb-1"
-                         th:if="${localVerificationConfigured != null ? localVerificationConfigured : issue.repo.verificationCommands != null}">
-                        <span class="text-sm">Local checks pass</span>
-                        <span class="status"
-                              th:classappend="${latestIteration != null and latestIteration.localCheckResult == 'PASSED' ? 'status-completed' : (latestIteration != null and latestIteration.localCheckResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
-                              th:text="${(latestIteration != null and latestIteration.localCheckResult != null) ? latestIteration.localCheckResult : '—'}">—</span>
-                    </div>
-                    <div class="text-sm text-muted mb-1"
-                         th:if="${(localVerificationRequired != null ? localVerificationRequired : issue.effectivePlanFirst()) and (localVerificationConfigured != null ? not localVerificationConfigured : issue.repo.verificationCommands == null)}">Local checks required — configure a trusted command in Repository settings</div>
-
-                    <div class="flex-between mb-1">
-                        <span class="text-sm">Independent review passes
-                            <span class="text-muted" th:text="${'(all dimensions ≥ ' + #numbers.formatPercent(issue.repo.reviewPassThreshold, 1, 0) + ', no high-severity findings)'}">(all dimensions ≥ 70%, no high-severity findings)</span>
-                        </span>
-                        <span class="status"
-                              th:classappend="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'status-completed' : 'status-failed') : 'status-pending'}"
-                              th:text="${(latestIteration != null and latestIteration.reviewPassed != null) ? (latestIteration.reviewPassed ? 'PASSED' : 'CHANGES REQUESTED') : '—'}">—</span>
-                    </div>
-
-                    <div class="flex-between mb-1">
-                        <span class="text-sm">Iteration budget</span>
-                        <span th:fragment="goal-budget(oob)" id="goal-budget" class="text-sm"
-                              th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}"
-                              th:text="${'iterations ' + issue.currentIteration + '/' + issue.repo.maxIterations + ' · review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">iterations 0/3 · review rounds 0/2</span>
-                    </div>
-
-                    <!--/* Cost budget progress bar — only shown when an effective budget (issue
-                           override, else repo default) is configured; unlimited issues show nothing here.
-                           budgetPct is a clamped 0–100 integer computed in IssueController#budgetPct so
-                           the template never divides (a $0.00 budget would render width:NaN%).
-                           Parser-level comment: stripped from output so the render tests can assert
-                           on the absence of these words. */-->
-                    <div class="mb-1" th:if="${effectiveBudget != null}">
-                        <div class="flex-between mb-1">
-                            <span class="text-sm">Cost budget</span>
-                            <span class="text-sm"
-                                  th:text="${'$' + #numbers.formatDecimal(issueSpent, 1, 2) + ' of $' + #numbers.formatDecimal(effectiveBudget, 1, 2)}">$1.84 of $5.00</span>
-                        </div>
-                        <div class="budget-bar-track">
-                            <div class="budget-bar-fill"
-                                 th:classappend="${budgetPct >= 100 ? 'over' : (budgetPct >= 80 ? 'warning' : '')}"
-                                 th:style="'width:' + ${budgetPct} + '%'"></div>
-                        </div>
-                    </div>
-
-                    <div class="text-sm text-muted" th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL'}">
-                        Waiting for plan approval
-                    </div>
-
-                    <div class="text-sm text-muted">
-                        On exhaustion: escalates to needs-human with 24 h cooldown<span
-                                th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN'}"
-                                th:text="' — currently ' + ${humanize.status(issue.status)}"></span>
-                    </div>
-                </div>
-            </details>
-
-            <!-- === LOOP TIMELINE (#88) — per-iteration stage durations & cost === -->
-            <!--/* The #timeline-panel wrapper ALWAYS renders (even before iteration 1, when the
-                   timeline is empty) so the id exists as an hx-swap-oob target: htmx silently drops
-                   an OOB element whose id isn't already in the DOM. The .panel inside is what's
-                   conditional, so nothing is visible until there's timeline data. */-->
-            <div th:fragment="timeline-panel(oob)" id="timeline-panel"
-                 th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-              <details class="panel mb-3 secondary-section timeline-section"
-                       th:if="${timeline != null and not #lists.isEmpty(timeline)}"
-                       th:attr="data-ui-state-key=${'issue:' + issue.id + ':timeline'}">
-                <summary class="panel-header">
-                    <h3>Timeline</h3>
-                    <span class="text-sm text-muted">Implement &rarr; verify &rarr; iterate, per attempt</span>
-                </summary>
-                <div class="panel-body">
-                    <!--/* Iterations are grouped into runs (a manual retry resets the iteration counter
-                           without deleting the previous run's rows — see TimelineAssembler's Runs
-                           javadoc). The "Run N ·" prefix only appears when the issue actually has
-                           multiple runs. */-->
-                    <th:block th:each="run : ${timeline}">
-                    <div class="timeline-iteration" th:each="it : ${run.iterations()}">
-                        <div class="flex-between mb-1">
-                            <strong th:text="${(#lists.size(timeline) > 1 ? 'Run ' + run.runNum() + ' · ' : '') + 'Iteration ' + it.iterationNum()}">Iteration 1</strong>
-                            <span class="status"
-                                  th:classappend="${it.outcomeBadge() == 'PASSED' ? 'status-completed' : (it.outcomeBadge() == 'FAILED' ? 'status-failed' : (it.outcomeBadge() == 'RUNNING' ? 'status-in_progress' : 'status-pending'))}"
-                                  th:text="${it.outcomeBadge()}">PASSED</span>
-                        </div>
-                        <div class="timeline-bar" th:if="${not #lists.isEmpty(it.segments())}">
-                            <div th:each="seg : ${it.segments()}"
-                                 class="timeline-segment"
-                                 th:classappend="'outcome-' + ${seg.outcome()}"
-                                 th:style="'width:' + ${#numbers.formatDecimal(seg.widthPct(), 1, 2, 'POINT')} + '%'"
-                                 th:title="${seg.stageName() + ' — ' + seg.durationSecs() + 's (' + seg.outcome() + ')'}">
-                                <span class="timeline-segment-label" th:if="${seg.widthPct() >= 8}"
-                                      th:text="${seg.stageName() + ' ' + seg.durationSecs() + 's'}">Stage 10s</span>
-                            </div>
-                        </div>
-                        <p class="text-sm text-muted" th:if="${#lists.isEmpty(it.segments())}">
-                            No stage data available for this iteration.
-                        </p>
-                        <div class="flex-between mt-1">
-                            <span class="text-sm text-muted"
-                                  th:text="'Cost: $' + ${#numbers.formatDecimal(it.totalCost(), 1, 4)}">Cost: $0.0000</span>
-                        </div>
-                    </div>
-                    </th:block>
-                </div>
-              </details>
-            </div>
-
-            <!-- === LIVE-REFRESHED STATUS SECTION (metrics + phase pipeline) === -->
-            <div th:replace="~{issue-detail :: live-status}"></div>
-
             <!-- === GUIDE CARD (mid-loop steering, #63) === -->
             <details th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel"
                      class="panel mb-3 secondary-section"
@@ -1067,6 +1022,15 @@
                     <h4>Implementation for this run</h4>
                     <div th:replace="~{fragments/reasoning :: selection('startImplModel', 'implModelOverride', ${selectionRejected == true ? submittedImplModel : issue.implModelOverride}, 'implementationReasoningEffort', ${selectionRejected == true ? submittedImplementationReasoning : issue.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
                 </div>
+                <div class="field-group" th:if="${effectiveHarnessId == 'codex'}">
+                    <label for="startSubagents">Codex delegation for this run</label>
+                    <select id="startSubagents" name="allowSubagentsOverride">
+                        <option value="" selected th:text="${'Use repository default (' + (issue.repo != null and issue.repo.allowSubagents ? 'subagents allowed' : 'single agent') + ')'}">Use repository default</option>
+                        <option value="false">Single agent</option>
+                        <option value="true">Allow subagents when useful</option>
+                    </select>
+                    <small class="text-muted">IssueBot chooses the mode before launching Codex, so the agent will not pause to ask.</small>
+                </div>
                 <div class="field-group" role="group" aria-label="Review" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.reviewModel, globalReviewModel)}">
                     <h4>Review for this run</h4>
                     <div th:replace="~{fragments/reasoning :: selection('startReviewModel', 'reviewModelOverride', ${selectionRejected == true ? submittedReviewModel : issue.reviewModelOverride}, 'reviewReasoningEffort', ${selectionRejected == true ? submittedReviewReasoning : issue.reviewReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
@@ -1187,8 +1151,13 @@
     </details>
 
     <!-- === ITERATION HISTORY (full width, below the grid) === -->
-    <details id="iteration-history" class="panel mb-3 secondary-section history-section"
-             th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration-history'}">
+    <details th:fragment="iteration-history" id="iteration-history"
+             class="panel mb-3 secondary-section history-section" hx-ext="morph"
+             th:attr="data-ui-state-key=${'issue:' + issue.id + ':iteration-history'},
+                      hx-get=${issue.status.name() == 'IN_PROGRESS' ? '/issues/' + issue.id + '/iteration-history' : ''},
+                      hx-trigger=${issue.status.name() == 'IN_PROGRESS' ? 'every 15s[document.getElementById(&quot;iteration-history&quot;).open]' : 'none'}"
+             hx-target="#iteration-history" hx-swap="morph:outerHTML"
+             hx-on::after-swap="htmx.process(this)">
         <summary class="panel-header">
             <h3>Iteration history</h3>
             <span class="text-sm text-muted" th:text="${#lists.size(iterationsNewestFirst) + ' attempts'}">0 attempts</span>
@@ -1326,7 +1295,8 @@
 <div th:fragment="live-status" id="live-status"
      th:if="${issue}"
      hx-ext="morph"
-     th:attr="hx-get=${issue.status.name() == 'IN_PROGRESS' ? '/issues/' + issue.id + '/live-status' : ''}"
+     th:attr="hx-get=${issue.status.name() == 'IN_PROGRESS' ? '/issues/' + issue.id + '/live-status' : ''},
+              hx-vals=${pollSelectionJson}"
      th:hx-trigger="${issue.status.name() == 'IN_PROGRESS' ? 'every 5s' : 'none'}"
      hx-target="#live-status"
      hx-swap="morph:outerHTML"
@@ -1344,46 +1314,10 @@
         <span class="text-sm text-muted" data-updated-stamp="pipeline"></span>
     </div>
 
-    <details class="panel mb-3 secondary-section issue-progress-details"
-             th:attr="data-ui-state-key=${'issue:' + issue.id + ':progress-details'}">
-        <summary class="panel-header">
-            <h3>Progress details</h3>
-            <span class="text-sm text-muted" th:text="${workflowStepper.selectedStage.label}">Implementation</span>
-        </summary>
-        <div class="panel-body">
-    <div class="metrics-grid mb-3">
-        <div class="metric-card">
-            <div class="label">Repository</div>
-            <div class="value small" th:text="${issue.repo.fullName()}">owner/repo</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Iteration</div>
-            <div class="value" th:text="${issue.currentIteration + '/' + issue.repo.maxIterations}">0/5</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Branch</div>
-            <div class="value small" th:text="${issue.branchName != null ? issue.branchName : '—'}">—</div>
-        </div>
-        <div class="metric-card" th:if="${issue.resolvedImplModel != null or issue.resolvedReviewModel != null}">
-            <div class="label">Models</div>
-            <div class="value small"
-                 th:text="${(issue.resolvedImplModel != null ? issue.resolvedImplModel : '—') + ' / ' + (issue.resolvedReviewModel != null ? issue.resolvedReviewModel : '—')}">claude-opus-4-8 / claude-sonnet-5</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Review Iter</div>
-            <div class="value" th:text="${issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">0/2</div>
-        </div>
-        <div class="metric-card">
-            <div class="label">Cost</div>
-            <div class="value small" th:text="'$' + ${#numbers.formatDecimal(totalCost, 1, 4)}">$0.00</div>
-        </div>
-    </div>
-
-    <!-- Compact semantic workflow progress for every issue state. -->
-    <div class="panel mb-3 live-monitor workflow-stepper">
+    <section class="panel mb-3 live-monitor workflow-stepper issue-progress-summary">
         <div class="panel-header">
-            <h3>Live Progress</h3>
-            <a class="text-sm" th:href="${not #lists.isEmpty(iterations) ? '#iteration-history' : '#activity-log'}">View timing details</a>
+            <h3>Progress</h3>
+            <span class="text-sm text-muted" th:text="${workflowStepper.selectedStage.label + ' · ' + workflowStepper.selectedStage.stateText}">Work · Current</span>
         </div>
         <div class="panel-body">
             <div class="workflow-current-summary"
@@ -1394,6 +1328,14 @@
                 <span class="workflow-stage-state" th:text="${stage.stateText}">Current</span>
                 <span class="workflow-stage-detail" th:if="${stage.detail != null}" th:text="${stage.detail}">Implementation in progress</span>
             </div>
+            <div class="issue-progress-meta text-sm text-muted">
+                <span th:text="${'Attempt ' + issue.currentIteration + '/' + issue.repo.maxIterations}">Attempt 0/5</span>
+                <span th:text="${'Review rounds ' + issue.currentReviewIteration + '/' + issue.repo.maxReviewIterations}">Review rounds 0/2</span>
+                <span th:if="${effectiveBudget != null}"
+                      th:text="${'Spent $' + #numbers.formatDecimal(issueSpent, 1, 2) + ' of $' + #numbers.formatDecimal(effectiveBudget, 1, 2)}">Spent $0.00 of $5.00</span>
+            </div>
+            <details class="progress-route" th:attr="data-ui-state-key=${'issue:' + issue.id + ':progress-route'}">
+                <summary>View all stages</summary>
             <nav aria-label="Issue workflow progress">
                 <ol class="workflow-stage-list">
                     <li th:each="stage : ${workflowStepper.stages}"
@@ -1408,28 +1350,29 @@
                     </li>
                 </ol>
             </nav>
+            </details>
         </div>
-    </div>
-        </div>
-    </details>
+    </section>
 </div>
 
 <!--/* Poll response for GET /issues/{id}/live-status. Returns the pollable #live-status block
        PLUS top-level hx-swap-oob copies of regions that live ELSEWHERE on the page — the status
-       header, the goal-budget counters, and the timeline — so the whole screen refreshes on the
+       header and stage evidence — so the whole screen refreshes on the
        5s poll, not just the SSE terminal. HTMX applies the OOB siblings in place by id and morphs
        #live-status as the main swap. Kept separate from the `live-status` fragment (which is
        embedded in the page) so these OOB copies never render on initial load and duplicate. */-->
 <th:block th:fragment="live-status-poll">
     <div th:replace="~{issue-detail :: live-status}"></div>
     <div th:replace="~{issue-detail :: status-actions(true)}"></div>
-    <div th:replace="~{issue-detail :: goal-budget(true)}"></div>
-    <div th:replace="~{issue-detail :: timeline-panel(true)}"></div>
+    <div th:replace="~{issue-detail :: implementation-summary(true)}"></div>
+    <div th:replace="~{issue-detail :: checks-summary(true)}"></div>
+    <div th:replace="~{issue-detail :: outcome-summary(true)}"></div>
     <div th:replace="~{issue-detail :: approval-decision-region(true)}"></div>
     <div th:replace="~{fragments/stage-approval :: history(true)}"></div>
     <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
     <div th:replace="~{issue-detail :: next-action-callout(true)}"></div>
     <div th:replace="~{issue-detail :: recovery-region(true)}"></div>
+    <div th:replace="~{issue-detail :: review-history-region(true)}"></div>
     <th:block th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' or (issue.status.name() == 'AWAITING_APPROVAL' and issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_') and selectedPlanningVersion != null)}">
         <div th:replace="~{issue-detail :: plan-review-region(true)}"></div>
     </th:block>

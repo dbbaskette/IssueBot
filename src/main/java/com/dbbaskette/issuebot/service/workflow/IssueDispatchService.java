@@ -137,6 +137,12 @@ public class IssueDispatchService {
                 : transactions.claimHandoffRecovery(issueId, mapper, maxConcurrentIssues);
     }
 
+    public ClaimResult claimCompletionRecovery(Long issueId, int maxConcurrentIssues) {
+        return transactions == null
+                ? ClaimResult.rejected("Merge recovery is unavailable without transactional dispatch")
+                : transactions.claimCompletionRecovery(issueId, maxConcurrentIssues);
+    }
+
     /**
      * Claims a retry only when the fresh repository copy also satisfies the caller's
      * workflow-specific eligibility rule. The additional guard runs under the same

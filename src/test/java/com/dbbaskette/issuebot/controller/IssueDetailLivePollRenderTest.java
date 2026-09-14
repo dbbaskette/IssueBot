@@ -163,7 +163,7 @@ class IssueDetailLivePollRenderTest {
 
         assertThat(html).contains("workflow-stepper");
         assertThat(html).contains("aria-label=\"Issue workflow progress\"");
-        assertThat(html).contains("Live Progress");
+        assertThat(html).contains("<h3>Progress</h3>");
     }
 
     @Test
@@ -211,7 +211,7 @@ class IssueDetailLivePollRenderTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void timingLinkTargetsAnExistingStableElementInRenderedContent(boolean hasIterations) throws Exception {
+    void progressRouteStaysAvailableRegardlessOfIterations(boolean hasIterations) throws Exception {
         TrackedIssue issue = inProgressIssue(150L, 150, "IMPLEMENTATION");
         var document = parseDom(render(issue, "content", 1, false, context -> {
             if (hasIterations) {
@@ -221,11 +221,10 @@ class IssueDetailLivePollRenderTest {
             }
         }));
         Element stepper = elements(document).filter(e -> hasClass(e, "workflow-stepper")).findFirst().orElseThrow();
-        Element link = elements(stepper).filter(e -> e.elementNameMatches("a")).findFirst().orElseThrow();
-        String target = hasIterations ? "iteration-history" : "activity-log";
-        assertThat(textOf(link)).isEqualTo("View timing details");
-        assertThat(link.getAttributeValue("href")).isEqualTo("#" + target);
-        assertThat(elements(document).filter(e -> target.equals(e.getAttributeValue("id"))).count()).isEqualTo(1);
+        assertThat(elements(stepper).anyMatch(e -> e.elementNameMatches("summary")
+                && textOf(e).equals("View all stages"))).isTrue();
+        assertThat(elements(stepper).anyMatch(e -> "Issue workflow progress".equals(e.getAttributeValue("aria-label")))).isTrue();
+        assertThat(elements(document).filter(e -> "iteration-history".equals(e.getAttributeValue("id"))).count()).isEqualTo(1);
     }
 
     private INestableNode parseDom(String html) throws Exception {
@@ -286,13 +285,14 @@ class IssueDetailLivePollRenderTest {
     @Test
     void liveStatusPoll_updatesOffFragmentRegionsOutOfBand() {
         // GET /issues/{id}/live-status returns live-status-poll: the pollable #live-status block
-        // PLUS hx-swap-oob copies of the status header and goal counters (which live elsewhere on
+        // PLUS hx-swap-oob copies of the status header and evidence sections (which live elsewhere on
         // the page), so the whole screen refreshes on the 5s poll — not just the terminal/cards.
         String html = render(inProgressIssue(30L, 30, "IMPLEMENTATION"), "live-status-poll", 1, false);
 
         assertThat(html).contains("id=\"live-status\"");     // the main polled block
         assertThat(html).contains("id=\"status-actions\"");  // OOB: status header
-        assertThat(html).contains("id=\"goal-budget\"");     // OOB: iteration/review counters
+        assertThat(html).contains("id=\"implementation-summary\"", "id=\"checks-summary\"",
+                "id=\"review-history\"", "id=\"outcome-summary\"");
         assertThat(html).contains("hx-swap-oob=\"true\"");   // → updated in place on each poll
         assertThat(html).contains("id=\"next-action-callout\"")
                 .contains("hx-swap-oob=\"true\"");
@@ -451,21 +451,32 @@ class IssueDetailLivePollRenderTest {
         String html = render(inProgressIssue(31L, 31, "IMPLEMENTATION"), "content", 1, false);
 
         assertThat(html).contains("id=\"status-actions\"");
-        assertThat(html).contains("id=\"goal-budget\"");
+        assertThat(html).contains("id=\"implementation-summary\"", "id=\"checks-summary\"",
+                "id=\"review-history\"", "id=\"outcome-summary\"");
         assertThat(html).doesNotContain("hx-swap-oob");
     }
 
     @Test
-    void content_timelinePanelWrapperAlwaysRenders_evenWhenTimelineEmpty() {
-        // The OOB target id must exist on the initial page even before iteration 1 (empty timeline),
-        // otherwise htmx drops the later OOB timeline update (it needs a matching id in the DOM).
+    void content_reviewPlaceholderAlwaysRendersBeforeReview() {
         String html = render(inProgressIssue(33L, 33, "SETUP"), "content", 0, false);
 
-        assertThat(html).contains("id=\"timeline-panel\"");
+        assertThat(html).contains("id=\"review-history\"", "independent review will appear here");
     }
 
     @Test
-    void liveStatusPoll_withTimeline_emitsTimelinePanelOutOfBandWithContent() {
+    void expandedAttemptHistoryRefreshesWhileRunningAndStopsAfterCompletion() {
+        TrackedIssue issue = inProgressIssue(331L, 331, "IMPLEMENTATION");
+        String running = render(issue, "content", 1, false);
+        assertThat(running).contains("hx-get=\"/issues/331/iteration-history\"", "every 15s[",
+                "hx-target=\"#iteration-history\"", "hx-swap=\"morph:outerHTML\"");
+
+        issue.setStatus(IssueStatus.COMPLETED);
+        String completed = render(issue, "content", 1, false);
+        assertThat(completed).doesNotContain("hx-get=\"/issues/331/iteration-history\"");
+    }
+
+    @Test
+    void liveStatusPoll_emitsReviewAndChecksOutOfBand() {
         TrackedIssue issue = inProgressIssue(34L, 34, "IMPLEMENTATION");
         var timeline = List.of(new com.dbbaskette.issuebot.service.ui.TimelineAssembler.RunTimeline(1, List.of(
                 new com.dbbaskette.issuebot.service.ui.TimelineAssembler.IterationTimeline(1,
@@ -493,11 +504,10 @@ class IssueDetailLivePollRenderTest {
         templateEngine.process(spec, ctx, w);
         String html = w.toString();
 
-        int idx = html.indexOf("id=\"timeline-panel\"");
+        int idx = html.indexOf("id=\"review-history\"");
         assertThat(idx).isGreaterThan(-1);
-        // The OOB attr sits on the #timeline-panel element, and it carries the rendered timeline.
-        assertThat(html.substring(idx, Math.min(idx + 120, html.length()))).contains("hx-swap-oob=\"true\"");
-        assertThat(html).contains(">Timeline<");
+        assertThat(html.substring(idx, Math.min(idx + 160, html.length()))).contains("hx-swap-oob=\"true\"");
+        assertThat(html).contains("id=\"checks-summary\"", "GitHub CI");
     }
 
     private static int occurrences(String value, String needle) {
