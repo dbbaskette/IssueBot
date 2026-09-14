@@ -125,6 +125,7 @@ public class BacklogService {
             // item to its dedup key so pruning can retire the key with the item.
             items.add("- [ ] **[" + f.severity().toUpperCase() + " — " + f.category() + "]** `"
                     + oneLine(f.file()) + (f.line() != null ? ":" + f.line() : "") + "` — " + oneLine(f.finding())
+                    + (f.suggestion() == null || f.suggestion().isBlank() ? "" : " Suggested improvement: " + oneLine(f.suggestion()))
                     + " (from #" + sourceIssueNumber + " / PR #" + prNumber + ") <!-- k:" + key + " -->");
             added++;
         }

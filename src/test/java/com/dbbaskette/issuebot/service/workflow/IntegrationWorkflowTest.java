@@ -507,6 +507,10 @@ class IntegrationWorkflowTest {
 
         assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         assertEquals(2, issue.getCurrentIteration());
+        verify(followUpService).handleNonBlockingFindings(eq(issue), any(),
+                argThat(review -> !review.passed() && !review.invocationFailed()), eq(100));
+        verify(followUpService).handleNonBlockingFindings(eq(issue), any(),
+                argThat(CodeReviewResult::passed), eq(100));
         // Verify review was posted to GitHub
         verify(gitHubApi, atLeast(1)).createPullRequestReview(
                 anyString(), anyString(), anyInt(), anyString(), anyString(), anyList());
@@ -541,6 +545,8 @@ class IntegrationWorkflowTest {
         workflowService.processIssue(issue);
 
         // Now carries the review blockers (summary + findings + invocation-failed flag).
+        verify(followUpService).handleNonBlockingFindings(eq(issue), any(),
+                argThat(review -> !review.passed() && !review.invocationFailed()), eq(101));
         verify(iterationManager).handleMaxReviewIterationsReached(eq(issue), anyString(), anyString(), anyBoolean());
     }
 

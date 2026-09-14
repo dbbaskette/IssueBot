@@ -1,20 +1,13 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <body>
-<div th:fragment="content" th:if="${issue}" data-navigation-detail
+<div th:fragment="content" th:if="${issue}" data-navigation-detail data-stage-browser
      th:attr="data-current-issue-id=${issue.id}">
     <div th:replace="~{layout :: toasts}"></div>
 
-    <!-- === Two-column layout (#90): LEFT carries progress, current action, stage evidence,
-           and guidance; RIGHT is the sticky live terminal. Single column
-           below 1100px (see .detail-grid in style.css) — terminal is not sticky there.
-           Iteration History and Activity Log are deliberately NOT grid children: they
-           stay full-width below the grid in both layouts. Modals live entirely outside
-           this grid (see the MODALS block further down) — a modal-backdrop is
-           position:fixed so its DOM position doesn't matter for layout, and keeping
-           them out of both the grid and the #live-status polled fragment preserves the
-           hard-won invariant from PRs 96/99 (a poll re-render must never force-close an
-           open dialog). -->
+    <!-- Stage navigation controls evidence visibility. The terminal stays outside
+         polling replacements to retain its stream and buffer. Dialogs and history
+         remain separate from the stage workspace. -->
     <div class="detail-grid">
         <div class="detail-grid-left">
 
@@ -112,13 +105,6 @@
                         </div>
                         <p th:text="${latestActivityPreview}">Local checks passed.</p>
                     </div>
-                    <div class="issue-brief-activity" th:if="${recentLiveOutput != null or latestAgentOutputPreview != null}">
-                        <div class="issue-brief-label">
-                            <strong th:text="${recentLiveOutput != null ? 'Recent live output' : 'Last coding output'}">Recent live output</strong>
-                            <a th:href="${recentLiveOutput != null ? '#live-terminal-panel' : '#iteration-history'}">Full output</a>
-                        </div>
-                        <pre class="issue-brief-output" th:text="${recentLiveOutput != null ? recentLiveOutput : latestAgentOutputPreview}">Agent output</pre>
-                    </div>
                 </div>
                     <button th:if="${issue.status.name() == 'QUEUED' or issue.status.name() == 'PENDING'}"
                             type="button" class="btn btn-primary btn-sm"
@@ -129,6 +115,7 @@
                     </button>
             </section>
 
+            <div th:fragment="ready-region(oob)" id="ready-region" data-stage-current-action th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
             <section th:if="${issue.status.name() == 'READY_TO_START'}"
                      id="ready-to-start" class="panel mb-3 ready-start-card"
                      aria-labelledby="ready-to-start-title">
@@ -156,8 +143,12 @@
             <!-- === FAILURE RECOVERY REGION: always present so the live poll can hydrate the
                    CTA destination when a running issue fails. Plan-first guidance and ordinary
                    recovery are mutually exclusive contents of this one stable target. === -->
-            <div th:fragment="recovery-region(oob)" id="recovery"
+            </div>
+            <div th:fragment="recovery-region(oob)" id="recovery" data-stage-current-action
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+            <details th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN' or issue.status.name() == 'BLOCKED'}"
+                     class="recovery-options" th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery-options'}">
+                <summary>Recovery options — review findings and choose the next step</summary>
     <section th:if="${handoffRecoveryAvailable}" class="panel mb-3">
         <div class="panel-body">
             <h3>Coding finished; IssueBot rejected the status report</h3>
@@ -316,13 +307,14 @@
                                 th:title="${processingMode?.name() == 'PAUSE_AFTER_CURRENT' ? 'Processing is waiting for current work to finish and will not start another issue.' : processingMode?.name() == 'STOPPED' ? 'Processing is stopped and must be restarted before starting or retrying work.' : 'Retry implementation with this guidance'}">Retry Implementation</button>
                 </div>
             </section>
+            </details>
             </div>
 
             <!-- === INLINE APPROVAL DECISION: the wrapper is always present so the live poll can
                    hydrate this previously-empty region out of band when a running issue reaches
                    AWAITING_APPROVAL. It remains outside #live-status, so ordinary morph polling
                    never replaces an already-rendered decision card. === -->
-            <div th:fragment="approval-decision-region(oob)" id="approval-decision-region"
+            <div th:fragment="approval-decision-region(oob)" id="approval-decision-region" data-stage-current-action
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
             <div th:replace="~{fragments/stage-approval :: card}"></div>
             <section class="issue-decision__plan"
@@ -545,7 +537,13 @@
 
             <!-- === PLAN REVIEW REGION: always present so a running-to-plan-approval poll can
                    hydrate the CTA destination and controls out of band. === -->
-            <div th:fragment="plan-review-region(oob)" id="plan-review"
+            <section class="panel mb-3" data-stage-output="intake">
+                <div class="panel-header"><h3>Intake</h3></div>
+                <div class="panel-body"><p>The GitHub issue supplies the requirements for this work. Planning and implementation output are available in their stages.</p>
+                    <a target="_blank" rel="noopener" th:href="${'https://github.com/' + issue.repo.owner + '/' + issue.repo.name + '/issues/' + issue.issueNumber}">Read the original issue on GitHub</a>
+                </div>
+            </section>
+            <div th:fragment="plan-review-region(oob)" id="plan-review" data-stage-output="plan"
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <span id="plan-first" aria-hidden="true"></span>
                 <div id="plan-error" th:if="${planError != null}"
@@ -560,7 +558,7 @@
                 </details>
             <details th:if="${selectedPlanningVersion != null}"
                      class="panel mb-3 plan-review secondary-section" data-plan-review
-                     th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' or selectedPlanIsHistorical ? 'open' : null},
+                     th:attr="open=${'open'},
                               data-ui-state-key=${'issue:' + issue.id + ':plan-contract:' + selectedPlanningVersion.versionNumber}">
                 <summary class="panel-header plan-review-header">
                     <div>
@@ -663,7 +661,7 @@
 
             <!-- === LEGACY COMBINED PLAN (no first-class planning version) === -->
             <details th:if="${selectedPlanningVersion == null and planHtml != null}"
-                     class="panel mb-3 plan-doc-panel secondary-section plan-section"
+                     class="panel mb-3 plan-doc-panel secondary-section plan-section" data-stage-output="plan"
                      th:attr="open=${issue.status.name() == 'AWAITING_PLAN_APPROVAL' ? 'open' : null},
                               data-ui-state-key=${'issue:' + issue.id + ':plan:legacy'}">
                 <summary class="panel-header">
@@ -676,7 +674,7 @@
             </details>
 
             <!-- Current evidence, in stable places even before each stage starts. -->
-            <section th:fragment="implementation-summary(oob)" id="implementation-summary" class="panel mb-3 stage-evidence"
+            <section th:fragment="implementation-summary(oob)" id="implementation-summary" class="panel mb-3 stage-evidence" data-stage-output="work"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <div class="panel-header"><h3>Implementation</h3>
                     <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.implementationSucceeded == true ? 'status-completed' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'status-in_progress' : 'status-pending')}"
@@ -688,10 +686,13 @@
                        th:text="${issue.subagentsAllowed ? 'Codex mode: subagents allowed when useful (not necessarily used).' : 'Codex mode: single agent; subagents disabled.'}">Codex mode: single agent.</p>
                     <a th:if="${issue.status.name() == 'IN_PROGRESS' and issue.currentPhase == 'IMPLEMENTATION'}" href="#live-terminal-panel">Live output</a>
                     <a th:if="${currentRunIteration != null}" href="#iteration-history">Attempt details</a>
+                    <pre class="stage-saved-output" th:if="${currentRunIteration != null and currentRunIteration.claudeOutput != null}" th:text="${currentRunIteration.claudeOutput}">Coding output</pre>
+                    <p class="text-sm text-muted" th:if="${currentRunIteration == null and latestAgentOutputPreview != null}">Last saved coding output from an earlier attempt:</p>
+                    <pre class="stage-saved-output" th:if="${currentRunIteration == null and latestAgentOutputPreview != null}" th:text="${latestAgentOutputPreview}">Earlier coding output</pre>
                 </div>
             </section>
 
-            <section th:fragment="checks-summary(oob)" id="checks-summary" class="panel mb-3 stage-evidence"
+            <section th:fragment="checks-summary(oob)" id="checks-summary" class="panel mb-3 stage-evidence" data-stage-output="verify"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <div class="panel-header"><h3>Checks</h3></div>
                 <div class="panel-body">
@@ -702,16 +703,17 @@
                         <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.ciResult == 'PASSED' ? 'status-completed' : (currentRunIteration != null and currentRunIteration.ciResult == 'FAILED' ? 'status-failed' : 'status-pending')}"
                               th:text="${currentRunIteration != null and currentRunIteration.ciResult != null ? (currentRunIteration.ciResult == 'SKIPPED' ? 'Not monitored' : currentRunIteration.ciResult) : 'Not run'}">Not run</span></div>
                     <p class="text-sm text-muted" th:if="${not issue.repo.ciEnabled}">IssueBot does not poll CI here. Any GitHub checks that start must still finish before merge.</p>
+                    <pre class="stage-saved-output" th:if="${currentRunIteration != null and currentRunIteration.localCheckFailure != null}" th:text="${currentRunIteration.localCheckFailure}">Check failure output</pre>
                 </div>
             </section>
 
             <!-- === REVIEW SCORE TRAJECTORY: selected attempt against its nearest scored baseline === -->
             <details th:fragment="review-history-region(oob)"
-                     th:with="history=${currentReviewAvailable == false ? null : reviewScoreHistory}"
-                     id="review-history" class="panel mb-3 review-history-card"
+                     th:with="history=${reviewScoreHistory}"
+                     id="review-history" class="panel mb-3 review-history-card" data-stage-output="review"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null},
                               data-ui-state-key=${'issue:' + issue.id + ':review-history'},
-                              open=${history != null and history.selected.score.passed == false ? 'open' : null}"
+                              open=${'open'}"
                      aria-labelledby="review-history-title">
                 <summary class="panel-header review-history-header" th:if="${history == null}">
                     <div><span class="eyebrow">Review</span><h3 id="review-history-title">Implementation review</h3></div>
@@ -733,6 +735,7 @@
                 </summary>
 
                 <div class="panel-body" th:if="${history != null}">
+                    <p class="alert alert-info" th:if="${currentReviewAvailable == false}">Latest saved review from an earlier attempt. The current attempt has not been reviewed yet.</p>
                     <div class="review-score-overview" th:if="${history.selected.score.overall != null}">
                         <strong th:text="${history.selected.overallPercent + '%'}">95%</strong>
                         <div class="review-score-context">
@@ -862,7 +865,7 @@
                 </div>
             </details>
 
-            <section th:fragment="outcome-summary(oob)" id="outcome-summary" class="panel mb-3 stage-evidence"
+            <section th:fragment="outcome-summary(oob)" id="outcome-summary" class="panel mb-3 stage-evidence" data-stage-output="done"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <div class="panel-header"><h3>Outcome</h3>
                     <span class="status" th:classappend="${issue.status.name() == 'COMPLETED' ? 'status-completed' : (issue.currentPhase == 'COMPLETION' and issue.status.name() == 'IN_PROGRESS' ? 'status-in_progress' : 'status-pending')}"
@@ -876,6 +879,7 @@
                 </div>
             </section>
             <!-- === GUIDE CARD (mid-loop steering, #63) === -->
+            <div th:fragment="guide-region(oob)" id="guide-region" data-stage-current-action th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
             <details th:if="${issue.status.name() == 'IN_PROGRESS'}" id="guide-panel"
                      class="panel mb-3 secondary-section"
                      th:attr="data-ui-state-key=${'issue:' + issue.id + ':guide'}">
@@ -901,13 +905,14 @@
                 </div>
             </details>
 
+            </div>
         </div>
 
-        <!-- === RIGHT COLUMN: LIVE TERMINAL (sticky ≥1100px; outside HTMX swap) === -->
+        <!-- Persistent terminal connection; visibility follows the selected/current stage. -->
         <div class="detail-grid-right">
-            <div th:if="${issue.status.name() == 'IN_PROGRESS'}" class="panel mb-3 live-terminal-panel" id="live-terminal-panel">
+            <div class="panel mb-3 live-terminal-panel" id="live-terminal-panel" data-stage-terminal>
                 <div class="panel-header">
-                    <h3 th:text="${effectiveHarnessName != null ? effectiveHarnessName + ' Session' : 'Agent Session'}">Agent Session</h3>
+                    <h3>Live run activity</h3>
                     <div class="flex gap-1 terminal-toolbar" style="align-items:center;flex-wrap:wrap">
                         <span class="terminal-trim-note text-sm text-muted" id="terminal-trim-note" hidden></span>
                         <!--/* Filter box (#84): substring-hides non-matching lines live, both existing
@@ -1295,21 +1300,15 @@
 <div th:fragment="live-status" id="live-status"
      th:if="${issue}"
      hx-ext="morph"
-     th:attr="hx-get=${issue.status.name() == 'IN_PROGRESS' ? '/issues/' + issue.id + '/live-status' : ''},
-              hx-vals=${pollSelectionJson}"
-     th:hx-trigger="${issue.status.name() == 'IN_PROGRESS' ? 'every 5s' : 'none'}"
+     th:attr="hx-get=${'/issues/' + issue.id + '/live-status'},
+              hx-vals=${pollSelectionJson}, data-current-stage=${workflowStepper.selectedStage.key}, data-issue-running=${issue.status.name() == 'IN_PROGRESS'}"
+     hx-trigger="every 5s"
      hx-target="#live-status"
      hx-swap="morph:outerHTML"
      hx-on::after-swap="htmx.process(this)">
 
-    <!--/* Last-updated stamp (#83) lives INSIDE this fragment so its presence follows the
-           fragment's own lifecycle: once the issue leaves IN_PROGRESS, the next poll
-           re-renders the fragment without this element (and with hx-trigger "none"), so a
-           stamp can't keep ticking "updated Xs ago" after polling has silently stopped.
-           The 5s morph does wipe the JS-rendered text on each swap, but the global
-           htmx:afterSwap handler immediately re-marks the "pipeline" key (SWAP_TARGET_STAMPS
-           in app.js) and mark() re-renders synchronously, so the text is restored in the
-           same event turn — no visible flicker. */-->
+    <!-- The live timestamp is shown during execution; polling also continues while
+         waiting so external starts and decisions become visible without reopening. -->
     <div class="mb-1" style="text-align:right" th:if="${issue.status.name() == 'IN_PROGRESS'}">
         <span class="text-sm text-muted" data-updated-stamp="pipeline"></span>
     </div>
@@ -1334,8 +1333,6 @@
                 <span th:if="${effectiveBudget != null}"
                       th:text="${'Spent $' + #numbers.formatDecimal(issueSpent, 1, 2) + ' of $' + #numbers.formatDecimal(effectiveBudget, 1, 2)}">Spent $0.00 of $5.00</span>
             </div>
-            <details class="progress-route" th:attr="data-ui-state-key=${'issue:' + issue.id + ':progress-route'}">
-                <summary>View all stages</summary>
             <nav aria-label="Issue workflow progress">
                 <ol class="workflow-stage-list">
                     <li th:each="stage : ${workflowStepper.stages}"
@@ -1343,14 +1340,20 @@
                         th:classappend="${'stage--' + stage.state.cssName()}"
                         th:attr="aria-label=${stage.accessibleLabel},
                                  aria-current=${stage.selected and stage.state.name() != 'COMPLETED' ? 'step' : null}">
+                        <button type="button" class="workflow-stage-button"
+                                th:attr="data-select-stage=${stage.key}, aria-pressed=${stage.selected}, aria-label=${stage.accessibleLabel}">
                         <i class="ti workflow-stage-icon" th:classappend="${stage.icon}" aria-hidden="true"></i>
                         <span class="workflow-stage-label" th:text="${stage.label}">Intake</span>
                         <span class="workflow-stage-state" th:text="${stage.stateText}">Completed</span>
                         <span class="workflow-stage-detail" th:if="${stage.detail != null}" th:text="${stage.detail}">Detail</span>
+                        </button>
                     </li>
                 </ol>
             </nav>
-            </details>
+            <div class="stage-selection-bar">
+                <span data-stage-selection-label>Showing the current stage</span>
+                <button type="button" class="btn btn-ghost btn-sm" data-follow-stage hidden>Follow current stage</button>
+            </div>
         </div>
     </section>
 </div>
@@ -1372,10 +1375,10 @@
     <div th:replace="~{issue-detail :: issue-approval-modal-region(true)}"></div>
     <div th:replace="~{issue-detail :: next-action-callout(true)}"></div>
     <div th:replace="~{issue-detail :: recovery-region(true)}"></div>
+    <div th:replace="~{issue-detail :: ready-region(true)}"></div>
+    <div th:replace="~{issue-detail :: guide-region(true)}"></div>
     <div th:replace="~{issue-detail :: review-history-region(true)}"></div>
-    <th:block th:if="${issue.status.name() == 'AWAITING_PLAN_APPROVAL' or (issue.status.name() == 'AWAITING_APPROVAL' and issue.currentPhase != null and #strings.startsWith(issue.currentPhase, 'STAGE_APPROVAL_') and selectedPlanningVersion != null)}">
         <div th:replace="~{issue-detail :: plan-review-region(true)}"></div>
-    </th:block>
 </th:block>
 </body>
 </html>

@@ -20,8 +20,8 @@ import java.util.List;
  * <ul>
  *     <li>{@code OFF} — findings live only in the PR review comment, nothing further happens.</li>
  *     <li>{@code COMMENT_ONLY} — a single summary comment is posted on the original issue.</li>
- *     <li>{@code ROLLING_BACKLOG} — medium findings are appended (deduplicated) to the
- *         repo's single rolling backlog issue.</li>
+ *     <li>{@code ROLLING_BACKLOG} — medium, low, and minor findings from passed and failed
+ *         reviews are appended (deduplicated) to the repo's single rolling backlog issue.</li>
  *     <li>{@code PER_ISSUE} — legacy behavior: one new follow-up issue is created per
  *         completed issue.</li>
  * </ul>
@@ -64,17 +64,16 @@ public class FollowUpService {
             return;
         }
 
-        List<ReviewFinding> medium = review.findings().stream()
-                .filter(f -> "medium".equalsIgnoreCase(f.severity()))
-                .toList();
+        if (review.invocationFailed() || (mode != FollowUpMode.ROLLING_BACKLOG && !review.passed())) return;
         List<ReviewFinding> nonBlocking = review.findings().stream()
-                .filter(f -> "medium".equalsIgnoreCase(f.severity()) || "low".equalsIgnoreCase(f.severity()))
+                .filter(f -> "medium".equalsIgnoreCase(f.severity()) || "low".equalsIgnoreCase(f.severity())
+                        || "minor".equalsIgnoreCase(f.severity()))
                 .toList();
 
         switch (mode) {
             case ROLLING_BACKLOG -> {
-                if (medium.isEmpty()) return;
-                backlogService.addFindings(repo, medium, trackedIssue.getIssueNumber(), prNumber);
+                if (nonBlocking.isEmpty()) return;
+                backlogService.addFindings(repo, nonBlocking, trackedIssue.getIssueNumber(), prNumber);
             }
             case COMMENT_ONLY -> {
                 if (nonBlocking.isEmpty()) return;

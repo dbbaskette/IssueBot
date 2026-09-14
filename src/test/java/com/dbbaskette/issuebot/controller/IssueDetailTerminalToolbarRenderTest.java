@@ -104,9 +104,8 @@ class IssueDetailTerminalToolbarRenderTest {
     void terminalToolbar_absent_whenIssueNotInProgress() {
         String html = render(issueWithStatus(21L, 21, IssueStatus.QUEUED));
 
-        assertThat(html).doesNotContain("data-terminal-filter");
-        assertThat(html).doesNotContain("data-terminal-download");
-        assertThat(html).doesNotContain("data-terminal-scroll-lock");
+        assertThat(html).contains("data-terminal-filter", "data-terminal-download", "data-terminal-scroll-lock",
+                "data-stage-terminal", "data-issue-running=\"false\"");
     }
 
     @Test

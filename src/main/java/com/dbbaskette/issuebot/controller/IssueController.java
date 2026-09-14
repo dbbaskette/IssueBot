@@ -1472,7 +1472,9 @@ public class IssueController {
         model.addAttribute("totalCost", totalCost);
         model.addAttribute("events", events);
         model.addAttribute("timeline", timeline);
-        model.addAttribute("workflowStepper", workflowStepperAssembler.assemble(issue));
+        String failurePhase = latestFailure != null && (issue.getStartedAt() == null
+                || !latestFailure.getOccurredAt().isBefore(issue.getStartedAt())) ? latestFailure.getPhase() : null;
+        model.addAttribute("workflowStepper", workflowStepperAssembler.assemble(issue, failurePhase));
         model.addAttribute("agentRunning", pollingService.isEnabled());
         model.addAttribute("pendingApprovals", issueRepository.countByStatus(IssueStatus.AWAITING_APPROVAL));
         BigDecimal effectiveBudget = issue.effectiveBudgetUsd();

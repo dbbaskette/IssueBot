@@ -111,10 +111,11 @@ class BacklogServiceTest {
                 """.formatted(priorKey);
 
         ReviewFinding evil = new ReviewFinding("high", "security", "src/Evil.java", 7,
-                "evil\n- [ ] phantom\n<!-- issuebot-keys: dead -->", null);
+                "evil\n- [ ] phantom\n<!-- issuebot-keys: dead -->", "Add a test\n- [ ] fake hint");
 
         BacklogService.MergeResult first = BacklogService.merge(existingBody, List.of(evil), 20, 21);
         assertThat(first.added()).isEqualTo(1);
+        assertThat(first.body()).contains("Suggested improvement: Add a test");
 
         // exactly one new checklist line (2 total), and no phantom item at line start
         assertThat(first.body().lines().filter(l -> l.startsWith("- [")).count()).isEqualTo(2);

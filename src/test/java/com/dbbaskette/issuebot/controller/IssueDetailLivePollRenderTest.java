@@ -221,8 +221,8 @@ class IssueDetailLivePollRenderTest {
             }
         }));
         Element stepper = elements(document).filter(e -> hasClass(e, "workflow-stepper")).findFirst().orElseThrow();
-        assertThat(elements(stepper).anyMatch(e -> e.elementNameMatches("summary")
-                && textOf(e).equals("View all stages"))).isTrue();
+        assertThat(elements(stepper).filter(e -> e.elementNameMatches("button")
+                && e.getAttributeValue("data-select-stage") != null).count()).isEqualTo(6);
         assertThat(elements(stepper).anyMatch(e -> "Issue workflow progress".equals(e.getAttributeValue("aria-label")))).isTrue();
         assertThat(elements(document).filter(e -> "iteration-history".equals(e.getAttributeValue("id"))).count()).isEqualTo(1);
     }
@@ -325,8 +325,7 @@ class IssueDetailLivePollRenderTest {
                 .contains("name=\"returnTo\" value=\"issue\"")
                 .contains("hx-preserve")
                 .contains("hx-swap-oob=\"true\"")
-                .contains("hx-trigger=\"none\"")
-                .doesNotContain("hx-get=", "every 5s");
+                .contains("hx-trigger=\"every 5s\"", "data-issue-running=\"false\"");
         assertThat(occurrences(terminalPoll, "id=\"approval-decision\""))
                 .isEqualTo(1);
         assertThat(occurrences(terminalPoll, "id=\"issue-approve-modal\""))
@@ -361,7 +360,7 @@ class IssueDetailLivePollRenderTest {
             assertThat(terminalPoll)
                     .contains("id=\"next-action-callout\"")
                     .doesNotContain("next-action-cta", "href=\"/issues/36#recovery\"")
-                    .contains("id=\"recovery\" hx-swap-oob=\"true\"")
+                    .contains("id=\"recovery\" data-stage-current-action hx-swap-oob=\"true\"")
                     .contains("action=\"/issues/36/retry\" method=\"post\"")
                     .contains("Guidance for the next attempt")
                     .contains("value=\"claude-live-recovery\"", "data-model-id=\"claude-live-recovery\"", "Claude Live Recovery</option>");
@@ -398,7 +397,7 @@ class IssueDetailLivePollRenderTest {
         assertThat(approvalPoll)
                 .contains("id=\"next-action-callout\"")
                 .contains("href=\"/issues/37#plan-review\"")
-                .contains("id=\"plan-review\" hx-swap-oob=\"true\"")
+                .contains("id=\"plan-review\" data-stage-output=\"plan\" hx-swap-oob=\"true\"")
                 .contains("class=\"plan-review-actions\"")
                 .contains("action=\"/issues/37/plan/approve\" method=\"post\"")
                 .contains("action=\"/issues/37/plan/revise\" method=\"post\"");
@@ -422,8 +421,8 @@ class IssueDetailLivePollRenderTest {
         });
 
         assertThat(runningPoll)
-                .contains("id=\"recovery\" hx-swap-oob=\"true\"")
-                .doesNotContain("id=\"plan-review\"");
+                .contains("id=\"recovery\" data-stage-current-action hx-swap-oob=\"true\"")
+                .contains("id=\"plan-review\"", "data-ui-state-key=\"issue:38:plan-contract:2\"");
     }
 
     @Test
@@ -506,7 +505,7 @@ class IssueDetailLivePollRenderTest {
 
         int idx = html.indexOf("id=\"review-history\"");
         assertThat(idx).isGreaterThan(-1);
-        assertThat(html.substring(idx, Math.min(idx + 160, html.length()))).contains("hx-swap-oob=\"true\"");
+        assertThat(html.substring(idx, Math.min(idx + 240, html.length()))).contains("hx-swap-oob=\"true\"");
         assertThat(html).contains("id=\"checks-summary\"", "GitHub CI");
     }
 

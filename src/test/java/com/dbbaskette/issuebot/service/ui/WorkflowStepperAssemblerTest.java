@@ -24,6 +24,15 @@ class WorkflowStepperAssemblerTest {
 
     private final WorkflowStepperAssembler assembler = new WorkflowStepperAssembler();
 
+    @Test
+    void failedReviewSelectsReviewWhenWorkflowClearedItsPhase() {
+        var stepper = assembler.assemble(issue(IssueStatus.COOLDOWN, null), "INDEPENDENT_REVIEW");
+        assertThat(stepper.selectedStage().key()).isEqualTo("review");
+        assertThat(stepper.selectedStage().detail()).isEqualTo("Needs your input before retrying");
+        assertThat(assembler.assemble(issue(IssueStatus.IN_PROGRESS, "IMPLEMENTATION"), "INDEPENDENT_REVIEW")
+                .selectedStage().key()).isEqualTo("work");
+    }
+
     @ParameterizedTest
     @EnumSource(IssueStatus.class)
     void everyStatusProducesSixStableStages(IssueStatus status) {
