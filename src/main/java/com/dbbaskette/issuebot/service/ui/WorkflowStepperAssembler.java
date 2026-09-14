@@ -73,7 +73,16 @@ public final class WorkflowStepperAssembler {
     private record Selection(StageKey key, StageState state, String detail, boolean terminal) {}
 
     public WorkflowStepper assemble(TrackedIssue issue) {
-        Selection selection = selection(issue);
+        return assemble(issue, null);
+    }
+
+    public WorkflowStepper assemble(TrackedIssue issue, String failurePhase) {
+        Selection base = selection(issue);
+        boolean failedWithoutPhase = (issue.getStatus() == IssueStatus.COOLDOWN || issue.getStatus() == IssueStatus.FAILED)
+                && (issue.getCurrentPhase() == null || issue.getCurrentPhase().isBlank());
+        Selection selection = failedWithoutPhase && failurePhase != null
+                ? new Selection(stageForPhase(failurePhase, base.key()), base.state(), base.detail(), false)
+                : base;
         List<Stage> stages = Arrays.stream(StageKey.values())
                 .map(key -> stage(key, selection))
                 .toList();
@@ -125,7 +134,7 @@ public final class WorkflowStepperAssembler {
                     paused(StageKey.PLAN, "Waiting for plan approval");
             case READY_TO_START -> paused(StageKey.PLAN, "Plan approved; waiting to start");
             case AWAITING_APPROVAL -> paused(StageKey.REVIEW, "Waiting for final approval");
-            case COOLDOWN -> exceptional(issue, StageState.PAUSED, "Waiting for retry cooldown");
+            case COOLDOWN -> exceptional(issue, StageState.PAUSED, "Needs your input before retrying");
             case FAILED -> exceptional(issue, StageState.FAILED, "Workflow failed");
             case COMPLETED -> terminal("Workflow completed");
             case CANCELLED -> terminal("Decomposition child cancelled");

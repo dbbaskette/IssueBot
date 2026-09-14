@@ -52,6 +52,18 @@ This is explicit stage-prompt emulation, not native plugin loading: native-skill
 
 ## Operator surfaces and safety
 
+The issue page follows the current workflow stage by default. Select a stage to inspect
+its saved output; live refresh preserves that choice until **Follow current stage** is
+selected. Status and evidence keep refreshing while waiting for input as well as during
+execution. An earlier saved review is labeled as such while the new attempt awaits review.
+Recovery options and history are secondary disclosures. **Needs attention** requires an
+operator retry; it is not an automatic cooldown countdown.
+
+For repositories using **Rolling backlog**, every completed independent review contributes
+medium, low, and minor findings plus their suggested fixes, including when the review
+fails. Blocking defects still go through correction. Entries use the existing per-repository
+backlog and deduplication keys. Other follow-up modes retain their configured behavior.
+
 Decision history is append-only structured audit data, separate from notification delivery. It labels actor kind, not an authenticated person's identity. Reviews compare only compatible persisted attempt identities and distinguish absent evidence from empty results. Recovery links do not authenticate or change settings: ordinary GETs use cached observations, and explicit Setup re-checks establish fresh prerequisite state.
 
 The notification bell counts unread actionable groups; reading a notification does not resolve its underlying Needs You decision. Read watermarks preserve newer arrivals. Shared-instance progress/completion mutes affect informational delivery, not stored searchable history or critical attention. Return context is bounded, tab-local, expiring navigation state, never authorization.

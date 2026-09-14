@@ -19,7 +19,7 @@ class HumanizeTest {
         assertThat(Humanize.status("AWAITING_DECOMPOSITION")).isEqualTo("Awaiting split approval");
         assertThat(Humanize.status("AWAITING_PLAN_APPROVAL")).isEqualTo("Awaiting plan approval");
         assertThat(Humanize.status(IssueStatus.READY_TO_START)).isEqualTo("Ready to start");
-        assertThat(Humanize.status("COOLDOWN")).isEqualTo("Cooling down");
+        assertThat(Humanize.status("COOLDOWN")).isEqualTo("Needs attention");
     }
 
     @Test

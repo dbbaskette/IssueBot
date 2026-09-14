@@ -32,7 +32,7 @@ public final class Humanize {
             Map.entry("AWAITING_APPROVAL", "Awaiting approval"),
             Map.entry("COMPLETED", "Completed"),
             Map.entry("FAILED", "Failed"),
-            Map.entry("COOLDOWN", "Cooling down"),
+            Map.entry("COOLDOWN", "Needs attention"),
             Map.entry("DECOMPOSED", "Decomposed"),
             Map.entry("AWAITING_DECOMPOSITION", "Awaiting split approval"),
             Map.entry("AWAITING_PLAN_APPROVAL", "Awaiting plan approval"),

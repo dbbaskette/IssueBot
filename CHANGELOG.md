@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0 — 2026-09-14
+
+- Browse issue output by clicking a workflow stage, following the current stage by default while preserving a manually selected stage during updates.
+- Keep issue status and stage evidence refreshing while waiting for input, clarify manual-retry states, and align review headers consistently.
+- Capture medium, low, and minor review suggestions in the repository's rolling backlog on passed and failed reviews, retaining suggested fixes and deduplicating repeated findings.
+
 ## 0.17.0 — 2026-09-14
 
 - Add a one-command macOS home-server deploy for the current checkout, with Java/JavaScript verification, queue and active-work safety checks, running-version confirmation, and preservation of the prior queue mode.

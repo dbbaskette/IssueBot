@@ -87,7 +87,7 @@ class FollowUpServiceTest {
     }
 
     @Test
-    void rollingBacklogSendsOnlyMediumFindings() {
+    void rollingBacklogSendsMediumAndLowFindings() {
         WatchedRepo repo = repoWithMode(FollowUpMode.ROLLING_BACKLOG);
         TrackedIssue issue = trackedIssue(repo);
         ObjectNode details = issueDetails("Fix the bug");
@@ -102,7 +102,7 @@ class FollowUpServiceTest {
         @SuppressWarnings("unchecked")
         var captor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(backlogService).addFindings(eq(repo), captor.capture(), eq(42), eq(99));
-        assertThat(captor.getValue()).containsExactly(medium);
+        assertThat(captor.getValue()).containsExactly(medium, low);
         verify(gitHubApi, never()).createIssue(any(), any(), any(), any(), any());
     }
 
@@ -169,7 +169,7 @@ class FollowUpServiceTest {
     }
 
     @Test
-    void noMediumFindingsMeansNoBacklogCall() {
+    void lowFindingsAreCapturedEvenWithoutMediumFindings() {
         WatchedRepo repo = repoWithMode(FollowUpMode.ROLLING_BACKLOG);
         TrackedIssue issue = trackedIssue(repo);
         ObjectNode details = issueDetails("Fix the bug");
@@ -179,7 +179,18 @@ class FollowUpServiceTest {
 
         followUpService.handleNonBlockingFindings(issue, details, review, 99);
 
-        verifyNoInteractions(backlogService);
+        verify(backlogService).addFindings(repo, List.of(low), 42, 99);
+    }
+
+    @Test
+    void failedReviewCapturesMinorSuggestionsButNotBlockingDefects() {
+        WatchedRepo repo = repoWithMode(FollowUpMode.ROLLING_BACKLOG);
+        ReviewFinding minor = new ReviewFinding("minor", "tests", "Foo.java", 3, "Cover empty input", "Add a regression case");
+        ReviewFinding blocker = new ReviewFinding("high", "correctness", "Foo.java", 4, "Incorrect result", "Fix it now");
+        CodeReviewResult review = new CodeReviewResult(false, "Changes required", .5, .5, .5, .5, .5, .5, 1,
+                List.of(minor, blocker), "", "{}", 0, 0, "reviewer", null, List.of());
+        followUpService.handleNonBlockingFindings(trackedIssue(repo), issueDetails("Fix behavior"), review, 99);
+        verify(backlogService).addFindings(repo, List.of(minor), 42, 99);
     }
 
     // === isSelfFeeding (migrated from IssueWorkflowServiceTest.isFollowUpIssue_*) ===

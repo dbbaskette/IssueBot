@@ -154,7 +154,7 @@ class IssueDetailLayoutRenderTest {
         String html = renderContent(issue(3L, 3, IssueStatus.QUEUED), List.of());
 
         assertThat(html).contains("class=\"detail-grid-right\"");
-        assertThat(html).doesNotContain("live-terminal-panel");
+        assertThat(html).contains("data-stage-terminal", "data-issue-running=\"false\"");
     }
 
     // === Iteration History: collapsed by default, newest first ===

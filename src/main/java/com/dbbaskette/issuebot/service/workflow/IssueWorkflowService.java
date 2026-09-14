@@ -869,6 +869,18 @@ public class IssueWorkflowService {
                 reviewResult = restorePersistedReview(iteration);
             }
 
+            // Capture optional improvements before either verdict exits or retries.
+            // The rolling backlog deduplicates repeated/recovered review findings.
+            if (reviewResult != null && !reviewResult.invocationFailed() && !completionResume) {
+                if (cancelled(trackedIssue)) return;
+                try {
+                    followUpService.handleNonBlockingFindings(trackedIssue, issueDetails, reviewResult, prNumber);
+                } catch (Exception e) {
+                    log.warn("Failed to capture review suggestions for {} #{}: {}",
+                            repo.fullName(), issueNumber, e.getMessage());
+                }
+            }
+
             if (persistedReviewOutcome && reviewResult.invocationFailed()) {
                 iterationManager.handleMaxReviewIterationsReached(trackedIssue,
                         "Persisted independent review invocation failed: " + reviewResult.summary(),
@@ -931,17 +943,6 @@ public class IssueWorkflowService {
                 previousCiLogs = null;
                 log.info("Review failed — feeding findings back to the coding harness for iteration {}", iterationNum + 1);
                 continue;
-            }
-
-            // Route non-blocking review findings per the repo's follow-up mode
-            if (reviewResult != null && reviewResult.passed() && !completionResume) {
-                if (cancelled(trackedIssue)) return;
-                try {
-                    followUpService.handleNonBlockingFindings(trackedIssue, issueDetails, reviewResult, prNumber);
-                } catch (Exception e) {
-                    log.warn("Follow-up handling failed for {} #{}: {}",
-                            repo.fullName(), trackedIssue.getIssueNumber(), e.getMessage());
-                }
             }
 
             // === Phase 6: Completion ===

@@ -291,7 +291,7 @@ class IssueDetailPlanReviewRenderTest {
         awaiting.setStatus(IssueStatus.IN_PROGRESS);
         String activeHtml = render(awaiting, List.of(version), version, version, List.of());
         assertThat(activeHtml).containsPattern("(?s)<details[^>]*class=\"panel mb-3 plan-review secondary-section\"[^>]*>")
-                .doesNotContain("class=\"panel mb-3 plan-review secondary-section\" data-plan-review open=\"open\"");
+                .contains("class=\"panel mb-3 plan-review secondary-section\" data-plan-review open=\"open\"");
     }
 
     @Test
@@ -818,8 +818,8 @@ class IssueDetailPlanReviewRenderTest {
 
         String html = render(context);
 
-        assertThat(html).contains("id=\"review-history\"", "The independent review will appear here when it finishes.")
-                .doesNotContain("Conforms to plan");
+        assertThat(html).contains("id=\"review-history\"", "Latest saved review from an earlier attempt.",
+                "The current attempt has not been reviewed yet.", "Conforms to plan");
     }
 
     @Test
