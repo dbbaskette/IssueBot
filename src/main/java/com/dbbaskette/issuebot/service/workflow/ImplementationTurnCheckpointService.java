@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Objects;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 
 /** Atomically checkpoints each native harness turn before another turn can start. */
 @Service
@@ -77,6 +78,16 @@ public class ImplementationTurnCheckpointService {
                 result.getInputTokens(), result.getOutputTokens(), estimated, result.getModel());
         cost.setPhase("IMPLEMENTATION");
         costs.save(cost);
+    }
+
+    /** Close a blocked coding attempt on the authoritative row, preserving every committed turn. */
+    @Transactional
+    public void closeFailed(Long issueId, Long iterationId) {
+        Iteration iteration = lock(issueId, iterationId).iteration();
+        if (iteration.getCompletedAt() == null) {
+            iteration.setCompletedAt(LocalDateTime.now());
+            iterations.saveAndFlush(iteration);
+        }
     }
 
     /** Reopen the same implementation run after trusted local verification fails. */

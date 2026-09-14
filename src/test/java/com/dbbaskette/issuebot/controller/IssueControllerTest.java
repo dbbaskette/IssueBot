@@ -43,12 +43,30 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class IssueControllerTest {
+    @Test void recoveredHandoffStartsChecksOnlyAfterAClaimSucceeds() {
+        Fixture accepted = new Fixture(IssueStatus.COOLDOWN);
+        doReturn(new IssueDispatchService.ClaimResult(true, null, accepted.issue))
+                .when(accepted.dispatchService).claimHandoffRecovery(eq(1L), any(ObjectMapper.class), eq(5));
+        assertThat(accepted.controller.recoverHandoff(1L, accepted.redirectAttributes))
+                .isEqualTo("redirect:/issues/1");
+        verify(accepted.workflowService).processIssueAsync(accepted.issue);
+        verify(accepted.eventService).log(eq("HANDOFF_RECOVERED"), anyString(), eq(accepted.issue.getRepo()), eq(accepted.issue));
+
+        Fixture rejected = new Fixture(IssueStatus.COOLDOWN);
+        doReturn(new IssueDispatchService.ClaimResult(false, "Other work is active", null))
+                .when(rejected.dispatchService).claimHandoffRecovery(eq(1L), any(ObjectMapper.class), eq(5));
+        assertThat(rejected.controller.recoverHandoff(1L, rejected.redirectAttributes))
+                .isEqualTo("redirect:/issues/1");
+        verifyNoInteractions(rejected.workflowService);
+    }
+
     @Test void knownUnmetPrerequisiteBlocksAllDirectRetryPostsBeforeAnyExternalWork() throws Exception {
         for (String path : List.of("/issues/1/retry", "/issues/1/retry-quick", "/issues/bulk/retry", "/issues/1/plan/retry-implementation")) {
             Fixture f = new Fixture(IssueStatus.FAILED);

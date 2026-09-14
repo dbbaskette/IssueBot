@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0 — 2026-09-14
+
+- Accept longer exact verification commands in coding handoffs and identify the specific invalid check when a handoff is malformed.
+- Close blocked coding attempts on the authoritative iteration row so saved turns, session details, and output survive the failure path.
+- Offer a guarded way to reuse an older rejected `COMPLETE` handoff and proceed directly to trusted checks and independent review without rerunning coding.
+
 ## 0.13.0 — 2026-09-12
 
 - Capture only durable, repository-wide lessons: ask for transferable rules, allow verified documentation references, reject obvious issue-specific details, and skip duplicates.

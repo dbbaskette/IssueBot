@@ -8,6 +8,7 @@ import com.dbbaskette.issuebot.repository.TrackedIssueRepository;
 import com.dbbaskette.issuebot.repository.IssueGuidanceRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.function.Function;
@@ -128,6 +129,12 @@ public class IssueDispatchService {
 
     public ClaimResult claimRetry(Long issueId) {
         return claimRetry(issueId, issue -> null);
+    }
+
+    public ClaimResult claimHandoffRecovery(Long issueId, ObjectMapper mapper, int maxConcurrentIssues) {
+        return transactions == null
+                ? ClaimResult.rejected("Handoff recovery is unavailable without transactional dispatch")
+                : transactions.claimHandoffRecovery(issueId, mapper, maxConcurrentIssues);
     }
 
     /**

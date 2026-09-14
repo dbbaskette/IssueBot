@@ -155,6 +155,16 @@
                    recovery are mutually exclusive contents of this one stable target. === -->
             <div th:fragment="recovery-region(oob)" id="recovery"
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
+    <section th:if="${handoffRecoveryAvailable}" class="panel mb-3">
+        <div class="panel-body">
+            <h3>Coding finished; IssueBot rejected the status report</h3>
+            <p>The saved report now passes validation. Keep this branch and attempt, then run trusted checks and independent review without asking the coding agent to redo the work.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/recover-handoff'}" method="post">
+                <button type="submit" class="btn btn-primary btn-sm"
+                        th:disabled="${processingMode?.name() != 'RUNNING' or (recoveryGuidance != null and !recoveryGuidance.retryAllowed)}">Run final checks</button>
+            </form>
+        </div>
+    </section>
     <section th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN' or issue.status.name() == 'BLOCKED'}" class="panel mb-3">
         <div class="panel-body">
             <h3>Recover blocked work</h3>

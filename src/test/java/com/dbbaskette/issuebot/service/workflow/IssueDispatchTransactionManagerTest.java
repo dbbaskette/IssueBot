@@ -7,6 +7,7 @@ import com.dbbaskette.issuebot.service.event.EventService;
 import com.dbbaskette.issuebot.service.git.PlanningWorkspaceService;
 import com.dbbaskette.issuebot.service.github.GitHubApiClient;
 import com.dbbaskette.issuebot.service.notification.NotificationService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -56,6 +57,48 @@ class IssueDispatchTransactionManagerTest {
     @Autowired private DecompositionGroupRepository decompositionGroups;
     @Autowired private DecompositionChildRepository decompositionChildren;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
+
+    @Test
+    void oldRejectedCompleteHandoffResumesTrustedChecksWithoutNewCodingAttempt() {
+        Long issueId = seedApprovedIssue(IssueStatus.COOLDOWN, 0);
+        String longCommand = "./mvnw -pl examples/local-agent -am "
+                + "-Dtest=ApprovalRecoveryIT,".repeat(20);
+        String answer = "ISSUEBOT_IMPLEMENTATION_V1: "
+                + "{\"status\":\"COMPLETE\",\"summary\":\"Implemented approved plan\","
+                + "\"checks\":[{\"command\":\"" + longCommand + "\",\"result\":\"PASS: 97 tests\"}],"
+                + "\"limitations\":\"Trusted final checks pending\"}";
+        Long iterationId = new TransactionTemplate(transactionManager).execute(tx -> {
+            TrackedIssue issue = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+            issue.getRepo().setVerificationCommands("./mvnw verify");
+            repos.saveAndFlush(issue.getRepo());
+            issue.setCurrentIteration(1);
+            issue.setBranchName("issuebot/issue-8-existing-work");
+            issue.setLastFailureReason("Coding harness blocked: Invalid implementation handoff: "
+                    + "Each check needs a bounded command and result");
+            issues.saveAndFlush(issue);
+            Iteration iteration = new Iteration(issue, 1);
+            iteration.setCompletedAt(LocalDateTime.now());
+            iteration.setClaudeOutput(answer);
+            return iterations.saveAndFlush(iteration).getId();
+        });
+
+        var result = dispatch.claimHandoffRecovery(issueId, new ObjectMapper(), 10);
+
+        assertThat(result.claimed()).isTrue();
+        TrackedIssue resumed = issues.findByIdWithApprovedPlanningVersion(issueId).orElseThrow();
+        assertThat(resumed.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        assertThat(resumed.getCurrentPhase()).isEqualTo("LOCAL_CHECKS");
+        assertThat(resumed.getWorkflowRun()).isZero();
+        assertThat(resumed.getBranchName()).isEqualTo("issuebot/issue-8-existing-work");
+        assertThat(resumed.getLastFailureReason()).isNull();
+        Iteration iteration = iterations.findById(iterationId).orElseThrow();
+        assertThat(iteration.getImplementationSucceeded()).isTrue();
+        assertThat(iteration.getImplementationTurnCount()).isZero();
+        assertThat(iteration.getImplementationCompletedAt()).isNotNull();
+        assertThat(iteration.getCompletedAt()).isNull();
+        assertThat(iteration.getClaudeOutput()).isEqualTo(answer);
+        assertThat(dispatch.claimHandoffRecovery(issueId, new ObjectMapper(), 10).claimed()).isFalse();
+    }
     @Test void knownUnmetPrerequisiteRejectsBothLockedRetryClaimsWithoutMutation() {
         Long ordinary = seedApprovedIssue(IssueStatus.FAILED, 0, 91);
         Long guided = seedApprovedIssue(IssueStatus.FAILED, 2, 92);
