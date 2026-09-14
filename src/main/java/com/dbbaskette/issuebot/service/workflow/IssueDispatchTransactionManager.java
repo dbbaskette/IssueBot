@@ -183,9 +183,6 @@ public class IssueDispatchTransactionManager {
         }
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
-        if (!IssueWorkflowService.hasTrustedLocalVerification(issue.getRepo())) {
-            return IssueDispatchService.ClaimResult.rejected("Configure a trusted local verification command first");
-        }
         Iteration iteration = iterations.findCurrentForUpdate(issueId, issue.getCurrentIteration()).orElse(null);
         try {
             ImplementationHandoffRecovery.requireComplete(issue, iteration, mapper);

@@ -24,6 +24,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RepositoryControllerTest {
 
     @Test
+    void optionalVerificationSuggestionsCanBeCleared() {
+        Fixture f = new Fixture();
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        repo.setVerificationCommands("old-command");
+        when(f.repos.findById(38L)).thenReturn(Optional.of(repo));
+        var redirects = mock(org.springframework.web.servlet.mvc.support.RedirectAttributes.class);
+        f.controller.saveVerificationCommands(38L, "", redirects);
+        assertThat(repo.getVerificationCommands()).isNull();
+        verify(f.repos).saveAndFlush(repo);
+    }
+
+    @Test
     void repositorySubagentOptInIsSavedFromFormAndDefaultsOff() throws Exception {
         Fixture enabled = new Fixture();
         MockMvcBuilders.standaloneSetup(enabled.controller).build().perform(

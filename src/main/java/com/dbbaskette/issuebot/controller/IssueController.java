@@ -1443,11 +1443,10 @@ public class IssueController {
         if (requestedPlanVersion != null) pollSelection.put("planVersion", requestedPlanVersion);
         model.addAttribute("pollSelectionJson", pollSelection.toString());
         model.addAttribute("handoffRecoveryAvailable",
-                !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty()
-                        && ImplementationHandoffRecovery.available(issue, latestCurrentRun, objectMapper));
+                ImplementationHandoffRecovery.available(issue, latestCurrentRun, objectMapper));
         model.addAttribute("completionRecoveryAvailable",
                 CompletionRecovery.available(issue, latestCurrentRun));
-        model.addAttribute("localVerificationRequired", issue.effectivePlanFirst());
+        model.addAttribute("localVerificationRequired", false);
         model.addAttribute("localVerificationConfigured",
                 !LocalVerificationService.parseCommands(issue.getRepo().getVerificationCommands()).isEmpty());
         model.addAttribute("guidanceRequestToken", java.util.UUID.randomUUID().toString());

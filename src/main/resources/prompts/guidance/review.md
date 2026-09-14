@@ -1,10 +1,12 @@
 ## Review verification ownership
 
 Review without modifying the implementation. Evaluate the approved acceptance criteria and
-changed code using the provided local verification and CI evidence. A skipped check is not
-a pass; agent claims are not a substitute for trusted verification. Do not automatically
-repeat a full test suite already evidenced for this tree. Run a focused read-only check only
-when it resolves a concrete uncertainty and is safe in this environment. If evidence refers
+changed code using the provided harness test evidence and CI results. The coding harness owns
+local testing; IssueBot does not rerun commands. Agent-reported results are claims to evaluate,
+not an independent PASS. Missing evidence, relevant failed tests, or inadequate coverage should
+produce focused findings asking the harness to fix and test the affected behavior. Do not reject
+solely because IssueBot did not run local commands. Do not run another test suite yourself;
+inspect the code and test evidence, returning specific verification gaps for correction. If evidence refers
 to a different tree or relevant environment, identify that limitation rather than assuming
 it proves this revision. Preserve the required structured review response and scoring rules.
 

@@ -10,15 +10,14 @@ class PromptGuidanceTest {
         String prompt = PromptGuidance.configuredVerification(java.util.List.of(
                 "./mvnw verify -Poffline", "node --test 'test/*.js'"));
         assertThat(prompt).containsSubsequence("./mvnw verify -Poffline", "node --test 'test/*.js'")
-                .contains("You may run safe, relevant commands")
-                .contains("reasonable confidence in the independent gate")
-                .contains("do not bypass IssueBot's configured gate");
+                .contains("You own testing", "IssueBot does not execute or rerun local commands",
+                        "Operator-suggested verification commands", "actual results");
     }
 
     @Test
     void noConfiguredCommandsDoesNotPromiseAutomaticTests() {
         assertThat(PromptGuidance.configuredVerification(java.util.List.of()))
-                .contains("No local verification commands are configured")
+                .contains("discover appropriate checks yourself")
                 .doesNotContain("IssueBot will run these");
     }
 

@@ -96,12 +96,12 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
                 + "the example's vertical bars are not a valid status. Put the JSON on one line. "
                 + "Each check must have only text command and result fields; commands may be up to "
                 + MAX_CHECK_COMMAND_LENGTH + " characters and results up to " + MAX_CHECK_RESULT_LENGTH
-                + " characters. Summarize a longer command or result in the marker and keep its exact "
-                + "details in the final answer. "
-                + "Use COMPLETE only when the plan is implemented, appropriate local checks pass, "
+                + " characters. Commands must be exact and runnable; put a long command in a repository test script "
+                + "and report the short invocation. Summarize lengthy results, not commands. "
+                + "Use COMPLETE only when the plan is implemented, appropriate local checks pass (or no meaningful check exists and limitations explains why), "
                 + "and you have an evidence-based reason to expect IssueBot's independent gates to pass. "
                 + "State any untested risk or uncertainty in limitations; "
-                + "IssueBot will still run trusted final verification and an independent review. "
+                + "IssueBot saves your commands and results for independent review; it does not rerun local tests. "
                 + "Use CONTINUE if work remains and this session can continue. Use BLOCKED for missing "
                 + "dependencies, permissions, or information that cannot be resolved within this sandbox. "
                 + "Do not claim COMPLETE because the CLI turn ended.\n";

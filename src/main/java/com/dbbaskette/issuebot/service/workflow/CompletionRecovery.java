@@ -30,7 +30,11 @@ public final class CompletionRecovery {
                         issue.getApprovedPlanningVersion().getId())
                 || iteration.getIterationNum() != issue.getCurrentIteration()
                 || !Boolean.TRUE.equals(iteration.getReviewPassed())
-                || !"PASSED".equals(iteration.getLocalCheckResult())
+                || !("PASSED".equals(iteration.getLocalCheckResult())
+                        || (("REPORTED".equals(iteration.getLocalCheckResult())
+                                || "NOT_RUN".equals(iteration.getLocalCheckResult()))
+                            && iteration.getHarnessVerificationEvidence() != null
+                            && !iteration.getHarnessVerificationEvidence().isBlank()))
                 || !("PASSED".equals(iteration.getCiResult())
                         || "SKIPPED".equals(iteration.getCiResult()))
                 || iteration.getReviewedCommitSha() == null

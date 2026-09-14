@@ -27,6 +27,15 @@ class CompletionRecoveryTest {
         iteration.setReviewedCommitSha("a".repeat(40));
 
         assertThat(CompletionRecovery.available(issue, iteration)).isTrue();
+        iteration.setLocalCheckResult("REPORTED");
+        assertThat(CompletionRecovery.available(issue, iteration)).isFalse();
+        iteration.setHarnessVerificationEvidence("Agent reported: npm test — passed");
+        assertThat(CompletionRecovery.available(issue, iteration)).isTrue();
+        iteration.setLocalCheckResult("NOT_RUN");
+        assertThat(CompletionRecovery.available(issue, iteration)).isTrue();
+        iteration.setLocalCheckResult("FAILED");
+        assertThat(CompletionRecovery.available(issue, iteration)).isFalse();
+        iteration.setLocalCheckResult("REPORTED");
         iteration.setReviewPassed(false);
         assertThat(CompletionRecovery.available(issue, iteration)).isFalse();
         iteration.setReviewPassed(true);

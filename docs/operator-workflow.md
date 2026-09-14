@@ -1,6 +1,6 @@
 # Operator workflow and testing ownership
 
-This describes the implemented 0.9.0 workflow. The [harness-owned implementation design](superpowers/specs/2026-09-12-harness-owned-implementation-design.md) records the broader target and remaining limits. Saved repository settings, rather than defaults alone, determine a particular run.
+This describes the implemented 0.19.0 workflow. The [harness-owned implementation design](superpowers/specs/2026-09-12-harness-owned-implementation-design.md) records the broader target and remaining limits. Saved repository settings, rather than defaults alone, determine a particular run.
 
 ## From `agent-ready` to completion
 
@@ -17,11 +17,13 @@ Planning uses a protected workspace before feature-branch setup, requests assump
 
 The implementation provider receives the whole issue and approved artifacts, repository custom instructions, optional lessons, and correction feedback. For approved plans it owns focused implement/test/fix work inside one resumable coding run. Each CLI handoff must say `COMPLETE`, `CONTINUE`, or `BLOCKED` in a versioned response; ending a CLI process alone is not completion. IssueBot checkpoints each turn and its cost before another turn begins, and resumes the same session after `CONTINUE` or restart. The default limit is eight handoff turns per implementation attempt. The normal outer order is:
 
-`implementation → configured local commands → commit/push → CI if enabled → create/reuse PR → independent review → correction or completion`
+`harness implements and tests → save evidence → commit/push → CI if enabled → create/reuse PR → independent review → focused correction or completion`
 
-Local verification commands run sequentially, ignoring blank/comment lines and stopping at the first failure, with a ten-minute timeout per command. Approved-plan runs require an executable operator-configured command before implementation and recheck that requirement before publication; plan text alone is not an authorized executable gate. If none are configured for work without an approved plan, the gate does not run. For approved plans, a local failure returns its exact command/log context to the same coding run without consuming an independent-review iteration. CI-disabled work still commits and pushes after any required local gate, with CI recorded as skipped. PR creation precedes independent review; only legacy APPROVAL_GATED work creates a draft PR.
+The coding harness owns local verification: discover the build system, add appropriate regression tests, run relevant checks, repair failures, and report exact commands, results, tested tree/environment, and limitations. IssueBot does not execute or rerun local commands. The verification checkpoint saves the latest handoff evidence for the UI and independent reviewer. Reported results are labeled `REPORTED`, not an independent `PASSED`. No structured checks means `NOT_RUN`, with the reason or missing-evidence warning shown explicitly.
 
-Repository settings expose the trusted command list. Authenticated operator tooling can also submit only `verificationCommands` to `POST /repositories/{id}/verification-commands` with the usual CSRF token; this avoids rewriting unrelated repository preferences when configuring a gate for a test run.
+Repository settings expose optional suggested test commands for the harness. Existing saved commands are preserved as guidance, not executed by IssueBot. Empty settings never block implementation. The authenticated `POST /repositories/{id}/verification-commands` endpoint accepts empty `verificationCommands` to clear suggestions without changing other settings.
+
+The reviewer evaluates the code, coverage, reported commands/results, and limitations. Relevant test failures, missing necessary tests, or stale evidence should become focused correction findings. The coding harness fixes and tests those findings; IssueBot does not start a second local test loop. A justified lack of runnable checks (such as prose-only changes) is visible for review, not manufactured test success. CI remains a separate configured GitHub gate. PR creation precedes independent review; only legacy APPROVAL_GATED work creates a draft PR.
 
 Review is a fresh model invocation with the issue, approved contract, diff, changed files, repository requirements, and local/CI summaries. Parsed scores and blockers determine the verdict locally. A real review failure returns findings for correction, which goes through normal verification again. Plan First permits one dedicated correction before a second conformance miss requires human guidance. A crashed, empty, or unparseable review retries review itself up to five times before operational escalation; it does not automatically imply the code needs reimplementation. Recovery checkpoints can reuse completed CI/review outcomes.
 
@@ -32,13 +34,13 @@ Managed merge requires a passed review, the reviewed commit still matching the P
 | Check | Actual owner and boundary |
 | --- | --- |
 | Focused implementation tests | Coding harness owns the inner loop and reports exact command/result claims in its structured handoff; IssueBot does not trust those claims as final verification. |
-| Configured final local commands | IssueBot's trusted local gate. Required for approved-plan runs; duplicate configured lines run verbatim. |
+| Suggested local commands | Optional operator guidance to the harness; IssueBot never executes them. |
 | CI | GitHub, observed by IssueBot; clean-environment or platform coverage may justify command overlap. |
 | Independent review | Fresh model reasoning. It receives result summaries, not a command/tree/environment evidence ledger. Review is not technically read-only today, and anti-rerun behavior is not enforced. |
 | Merge freshness | IssueBot checks reviewed SHA and remote check status without rerunning tests. |
 | Correction | Changed code passes through the applicable gates again; prior success is not proof for a new tree. |
 
-The shared prompt bundle assigns focused development checks to implementation and configured final verification to IssueBot. Implementation receives the effective configured command list on initial/resumed runs, or an explicit notice that none are configured. An approved-plan run does not silently abandon a failed native session for a cold one. Review is instructed to consume supplied evidence and avoid automatic full-suite reruns. A harness can still choose overlapping checks: prompts are not enforcement. Review summaries are not yet an exact-tree/command/environment ledger. A model's bare `PASSED` is never grounds to skip IssueBot's trusted gate.
+The shared prompt bundle assigns local testing to the coding harness and evidence assessment to independent review. Evidence is persisted on the iteration and restored for stage/review recovery; no test command is executed from a model response. Native approved-plan sessions remain resumable. A model's bare success claim is not proof of correctness: the reviewer must assess coverage against the actual code and approved plan. Review is prompt-directed not to run another test suite; that is not an OS-level read-only enforcement boundary.
 
 For repository development, use coherent increments and focused checks at milestones, then one combined relevant suite before release. Reviewers should consume supplied evidence and request only a justified focused check for a specific doubt. Evidence reuse requires an unchanged tree and relevant environment; changed corrections still go through applicable gates.
 

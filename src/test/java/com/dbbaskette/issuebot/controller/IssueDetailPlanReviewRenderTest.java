@@ -471,9 +471,9 @@ class IssueDetailPlanReviewRenderTest {
         String html = render(issue, List.of(approved), approved, approved, List.of(second), true);
 
         assertThat(html).contains("Persisted verification evidence")
-                .contains("Local checks")
+                .contains("Earlier local checks")
                 .contains("CI verification")
-                .contains("Local checks: FAILED")
+                .contains("Earlier local checks: FAILED")
                 .contains("CI verification: PASSED");
     }
 

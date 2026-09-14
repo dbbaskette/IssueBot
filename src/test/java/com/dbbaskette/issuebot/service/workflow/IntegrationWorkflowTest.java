@@ -847,54 +847,43 @@ class IntegrationWorkflowTest {
 
     // === Plan-first mode (#64) ===
 
-    @Test
-    void approvedPlanWithoutTrustedVerificationStopsBeforeImplementationOrPublication() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", "./mvnw verify"})
+    void harnessOwnsChecksWithOrWithoutConfiguredCommands(String commands) throws Exception {
         TrackedIssue issue = createTestIssue();
         issue.getRepo().setPlanFirst(true);
-        issue.getRepo().setCiEnabled(true);
+        issue.getRepo().setCiEnabled(false);
         setupCommonMocks(issue, createIssueDetails());
-        issue.getRepo().setVerificationCommands("# no executable command");
-        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
-                new ApprovedPlanContext(7L, 1, "Approved spec", "Run ./mvnw verify")));
-
-        workflowService.processIssue(issue);
-
-        assertEquals(IssueStatus.FAILED, issue.getStatus());
-        assertTrue(issue.getLastFailureReason().contains("configured local verification command"));
-        verify(gitOps, never()).cloneOrPull(anyString(), anyString(), anyString());
-        verify(harnessService, never()).executeImplementation(
-                anyString(), any(Path.class), anyString(), any(), any(), any());
-        verify(gitOps, never()).push(any(), anyString());
-        verify(gitHubApi, never()).createPullRequest(anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyString(), anyBoolean());
-    }
-
-    @Test
-    void removingApprovedPlanVerificationDuringImplementationStopsBeforePush() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setPlanFirst(true);
-        setupCommonMocks(issue, createIssueDetails());
-        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(
-                new ApprovedPlanContext(7L, 1, "Approved spec", "Approved plan")));
+        issue.getRepo().setVerificationCommands(commands);
+        ApprovedPlanContext plan = new ApprovedPlanContext(7L, 1, "Approved spec", "Approved plan");
+        when(planFirstService.approvedContext(issue)).thenReturn(Optional.of(plan));
         when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(),
-                any(), any(), any())).thenAnswer(call -> {
-                    issue.getRepo().setVerificationCommands(null);
-                    return successResult();
-                });
+        HarnessExecutionResult result = successResult();
+        result.setFinalResult(ImplementationOutcome.MARKER + "{\"status\":\"COMPLETE\",\"summary\":\"Implemented\",\"checks\":[{\"command\":\"pnpm test\",\"result\":\"PASS: 12 tests\"}],\"limitations\":\"Live API not tested\"}");
+        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
+                .thenReturn(result);
+        when(gitHubApi.listOpenPullRequests(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), eq(false))).thenReturn(objectMapper.createObjectNode().put("number", 200));
+        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(), anyString(), anyString(),
+                any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
 
         workflowService.processIssue(issue);
 
-        assertEquals(IssueStatus.FAILED, issue.getStatus());
-        verify(harnessService).executeImplementation(anyString(), any(Path.class), anyString(),
-                any(), any(), any());
+        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
         verify(localVerificationService, never()).run(any(), any(), anyInt(), any());
-        verify(gitOps, never()).push(any(), anyString());
-        verify(gitHubApi, never()).createPullRequest(anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyString(), anyBoolean());
-        verify(iterationRepository, atLeastOnce()).save(
-                argThat(iteration -> "NOT_RUN".equals(iteration.getLocalCheckResult())));
+        verify(codeReviewService).reviewCode(any(Path.class), anyString(), anyString(), anyString(), anyString(),
+                any(), any(), anyBoolean(), anyDouble(), any(), eq(plan), argThat(evidence ->
+                        evidence.localVerificationResult().equals("REPORTED")
+                                && evidence.harnessVerificationEvidence().contains("pnpm test")
+                                && evidence.harnessVerificationEvidence().contains("Live API not tested")), any());
+        verify(iterationRepository, atLeastOnce()).save(argThat(it -> "REPORTED".equals(it.getLocalCheckResult())
+                && it.getHarnessVerificationEvidence().contains("PASS: 12 tests")));
     }
+
+
+
+
 
     @Test
     void planFirst_stopsAtAwaitingPlanApproval_withoutImplementation() throws Exception {
@@ -1806,59 +1795,7 @@ class IntegrationWorkflowTest {
 
     // === Test 13: Local verification failure skips CI for that iteration and feeds
     //     the failure into the next iteration's implementation prompt via previousCiLogs ===
-    @Test
-    void localVerificationFailure_skipsCiForThatIteration_feedsFailureToNextIteration() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setCiEnabled(true);
-        issue.getRepo().setVerificationCommands("./mvnw -q verify");
-        ObjectNode issueDetails = createIssueDetails();
-        setupCommonMocks(issue, issueDetails);
 
-        // Two iterations: first local-check fails, second local-check passes (then CI runs)
-        when(iterationManager.canIterate(issue)).thenReturn(true, true, false);
-
-        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
-                .thenReturn(successResult());
-
-        when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
-                .thenReturn(new LocalVerificationService.Result(false, "./mvnw -q verify",
-                        "BUILD FAILED: compile error in Foo.java"))
-                .thenReturn(new LocalVerificationService.Result(true, null, ""));
-
-        when(gitHubApi.getCheckRuns(anyString(), anyString(), anyString()))
-                .thenReturn(objectMapper.createObjectNode());
-
-        // Iteration 2's local check passes, CI passes, and the run completes —
-        // exercising the local-check-pass → CI-pass → COMPLETED path for real.
-        when(gitHubApi.waitForChecks(anyString(), anyString(), anyString(), anyInt())).thenReturn(true);
-        ObjectNode prNode = objectMapper.createObjectNode();
-        prNode.put("number", 201);
-        when(gitHubApi.createPullRequest(anyString(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyBoolean())).thenReturn(prNode);
-        when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),
-                anyString(), anyString(), any(), any(), anyBoolean(), anyDouble(), any(), any(), any(), any())).thenReturn(passedReview());
-
-        workflowService.processIssue(issue);
-
-        // CI (waitForChecks) must only be invoked once — the iteration whose local
-        // check failed must never have reached the CI phase.
-        verify(gitHubApi, times(1)).waitForChecks(anyString(), anyString(), anyString(), anyInt());
-
-        // The failing command's output must be fed into the next iteration's prompt,
-        // under the source-neutral verification-failure header.
-        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(harnessService, times(2)).executeImplementation(
-                promptCaptor.capture(), any(Path.class), anyString(), any(), any(), any());
-        String secondPrompt = promptCaptor.getAllValues().get(1);
-        assertTrue(secondPrompt.contains("### Verification Failure Logs"));
-        assertTrue(secondPrompt.contains("./mvnw -q verify"));
-        assertTrue(secondPrompt.contains("BUILD FAILED: compile error in Foo.java"));
-
-        // The run completed on iteration 2 instead of exhausting the budget.
-        assertEquals(IssueStatus.COMPLETED, issue.getStatus());
-        assertEquals(2, issue.getCurrentIteration());
-        verify(iterationManager, never()).handleMaxIterationsReached(issue);
-    }
 
     // === Test 15 (#63): Guidance rows unconsumed at the loop-top checkpoint for
     //     iteration 1 must be injected into iteration 1's implementation prompt
@@ -2074,28 +2011,7 @@ class IntegrationWorkflowTest {
 
     // === Test 14: An exception thrown by local verification is treated as a failed
     //     check and routes through the retry path instead of escaping the workflow ===
-    @Test
-    void localVerificationException_routesThroughRetryPath() throws Exception {
-        TrackedIssue issue = createTestIssue();
-        issue.getRepo().setCiEnabled(true);
-        issue.getRepo().setVerificationCommands("./mvnw -q verify");
-        ObjectNode issueDetails = createIssueDetails();
-        setupCommonMocks(issue, issueDetails);
 
-        when(iterationManager.canIterate(issue)).thenReturn(true, false);
-        when(harnessService.executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any()))
-                .thenReturn(successResult());
-
-        when(localVerificationService.run(any(Path.class), anyList(), anyInt(), any()))
-                .thenThrow(new RuntimeException("sandbox exploded"));
-
-        // Must not throw — the exception is converted into a failed check
-        workflowService.processIssue(issue);
-
-        // CI never reached for the failed iteration; loop exhausts and escalates normally
-        verify(gitHubApi, never()).waitForChecks(anyString(), anyString(), anyString(), anyInt());
-        verify(iterationManager).handleMaxIterationsReached(issue);
-    }
 
     // === Session continuity (#67) ===
 

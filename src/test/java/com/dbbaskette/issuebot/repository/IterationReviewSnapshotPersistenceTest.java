@@ -41,10 +41,15 @@ class IterationReviewSnapshotPersistenceTest {
         issues.saveAndFlush(issue);
 
         Iteration saved = iterations.saveAndFlush(new Iteration(issue, 2));
+        saved.setLocalCheckResult("REPORTED");
+        saved.setHarnessVerificationEvidence("Command: pnpm test\nReported result: PASS\nLimitations: no live API");
+        iterations.saveAndFlush(saved);
         Long id = saved.getId();
         entityManager.clear();
 
         Iteration reloaded = iterations.findById(id).orElseThrow();
+        assertThat(reloaded.getLocalCheckResult()).isEqualTo("REPORTED");
+        assertThat(reloaded.getHarnessVerificationEvidence()).contains("pnpm test", "no live API");
         assertThat(reloaded.getWorkflowRunSnapshot()).isEqualTo(7);
         assertThat(reloaded.getApprovedPlanSnapshotId()).isEqualTo(plan.getId());
         assertThat(reloaded.matchesAttemptIdentity(7, plan.getId())).isTrue();

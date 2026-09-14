@@ -84,7 +84,7 @@ public class WorkflowCheckpointTransactionManager {
                 .orElseThrow(() -> new IllegalStateException("Iteration no longer exists"));
         requireSameIssue(issue, iteration);
 
-        iteration.setClaudeOutput(result.getOutput());
+        iteration.setClaudeOutput(result.getFinalResultOrOutput());
         iteration.setClaudeSessionId(blankToNull(result.getSessionId()));
         iteration.setDiff(diff == null ? "" : diff);
         iteration.setImplementationSucceeded(true);

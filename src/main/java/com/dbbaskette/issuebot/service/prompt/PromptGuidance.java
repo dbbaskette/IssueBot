@@ -12,23 +12,21 @@ public final class PromptGuidance {
 
     private PromptGuidance() {}
 
-    /** Show the actual gate, not just an assertion that some verification is configured. */
+    /** Operator commands are guidance for the harness, never server-executed input. */
     public static String configuredVerification(java.util.List<String> commands) {
-        if (commands.isEmpty()) {
-            return "\n## Configured local verification\n\n"
-                    + "No local verification commands are configured. Establish appropriate local "
-                    + "test evidence for the changed scope; do not assume IssueBot will run a full suite.\n";
-        }
-        return "\n## Configured local verification\n\n"
-                + "IssueBot will run these operator-configured commands after implementation, "
-                + "subject to the verification approval gate. You may run safe, relevant commands "
-                + "yourself when needed to judge whether those independent checks will pass:\n\n"
-                + commands.stream().map(command -> "    " + command + "\n")
-                        .collect(java.util.stream.Collectors.joining())
-                + "\nUse focused checks during development. Run a broader command when focused "
-                + "evidence does not give you reasonable confidence in the independent gate; "
-                + "avoid repeating an unchanged check without a new reason. Your test claims "
-                + "do not bypass IssueBot's configured gate.\n";
+        return "\n## Harness-owned local verification\n\n"
+                + "You own testing: discover the build system, add appropriate regression coverage, run relevant checks, "
+                + "and fix failures before completing. IssueBot does not execute or rerun local commands. "
+                + "Its independent reviewer evaluates your test evidence against the code and approved plan. "
+                + "Report exact commands, actual results, tested tree/environment, and limitations in the completion handoff. "
+                + "If no meaningful checks can run, explain why; missing or failed tests are not a pass. "
+                + "Do not use production access, paid services, or destructive tests without authorization.\n"
+                + (commands.isEmpty() ? "No commands were supplied by the operator; discover appropriate checks yourself.\n"
+                    : "Operator-suggested verification commands (adapt to the repository when necessary and explain any omission):\n"
+                        + commands.stream().map(command -> "    " + command + "\n")
+                            .collect(java.util.stream.Collectors.joining()))
+                + "Use focused checks first; broaden where risk or missing coverage warrants it. "
+                + "Do not rerun unchanged checks reflexively.\n";
     }
 
     public static String forStage(Stage stage) {

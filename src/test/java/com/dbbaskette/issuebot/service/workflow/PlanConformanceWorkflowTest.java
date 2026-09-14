@@ -239,7 +239,7 @@ class PlanConformanceWorkflowTest {
 
         verify(reviewer).reviewCode(any(), anyString(), anyString(), anyString(), anyString(), anyLong(),
                 anyList(), anyBoolean(), anyDouble(), any(), eq(approvedPlan),
-                argThat(evidence -> "PASSED".equals(evidence.localVerificationResult())
+                argThat(evidence -> "NOT_RUN".equals(evidence.localVerificationResult())
                         && "SKIPPED".equals(evidence.ciResult())
                         && evidence.priorReviewContext().contains("Keep the public API stable")), any());
     }
