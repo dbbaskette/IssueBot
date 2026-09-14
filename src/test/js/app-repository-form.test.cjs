@@ -27,7 +27,8 @@ function repositoryFormHarness() {
   ];
   const checks = [
     ['pre-screen-enabled'], ['security-review'], ['lessons-enabled'], ['ci-enabled'],
-    ['auto-start', 'autoStart'], ['auto-merge', 'autoMerge'], ['plan-first', 'planFirst']
+    ['auto-start', 'autoStart'], ['allow-subagents', 'allowSubagents'],
+    ['auto-merge', 'autoMerge'], ['plan-first', 'planFirst']
   ];
   values.forEach(([id, name]) => { elements[id] = { id, name, value: 'edited' }; });
   checks.forEach(([id, name]) => { elements[id] = { id, name, checked: false }; });
@@ -113,6 +114,7 @@ test('Add Repository resets the actual submitted workflow fields to Assist defau
     decompositionMode: 'OFF',
     followUpMode: 'ROLLING_BACKLOG',
     autoStart: true,
+    allowSubagents: false,
     autoMerge: false,
     planFirst: true,
     workflowPolicy: 'LEGACY',

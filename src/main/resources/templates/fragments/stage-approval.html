@@ -27,6 +27,16 @@
                     <div th:replace="~{fragments/reasoning :: selection('stage-model', 'model', ${submitted ? stageModel : pendingStageApproval.model}, 'reasoningEffort', ${submitted ? stageReasoningEffort : savedReasoning}, ${submitted ? stageHarnessId : pendingStageApproval.harnessId}, 'harnessId', false, null)}"></div>
                     <small class="text-muted">Uses subscription CLI authentication. Repository defaults stay unchanged.</small>
                 </div>
+                <div class="field-group" th:if="${pendingStageApproval.stage.name() == 'IMPLEMENTATION'}">
+                    <label th:for="${'stageSubagents-' + pendingStageApproval.id}">Codex delegation for this implementation</label>
+                    <select th:id="${'stageSubagents-' + pendingStageApproval.id}" name="allowSubagentsOverride">
+                        <option value="" th:selected="${stageSelectionApprovalId != pendingStageApproval.id or stageAllowSubagentsOverride == null}"
+                                th:text="${'Use repository default (' + (issue.repo != null and issue.repo.allowSubagents ? 'subagents allowed' : 'single agent') + ')'}">Use repository default</option>
+                        <option value="false" th:selected="${stageSelectionApprovalId == pendingStageApproval.id and stageAllowSubagentsOverride == false}">Single agent</option>
+                        <option value="true" th:selected="${stageSelectionApprovalId == pendingStageApproval.id and stageAllowSubagentsOverride == true}">Allow subagents when useful</option>
+                    </select>
+                    <small class="text-muted">Applies only if Codex is selected above. The choice is fixed before coding begins.</small>
+                </div>
                 <button type="submit" class="btn btn-primary" th:disabled="${processingMode?.name() != 'RUNNING' and not (processingMode?.name() == 'PAUSE_AFTER_CURRENT' and issue.manualDispatch)}"
                         th:text="${'Approve ' + #strings.toLowerCase(pendingStageApproval.stage.name())}">Approve stage</button>
                 <p th:if="${processingMode?.name() != 'RUNNING' and not (processingMode?.name() == 'PAUSE_AFTER_CURRENT' and issue.manualDispatch)}" class="text-sm text-muted">Resume processing before approving this stage.</p>

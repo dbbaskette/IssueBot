@@ -1186,7 +1186,7 @@ class IssueWorkflowServiceTest {
 
         assertTrue(result.isSuccess());
         assertEquals("sess-new-1", issue.getClaudeSessionId());
-        verify(issueRepository).save(issue);
+        verify(issueRepository, times(2)).save(issue);
         verify(harnessService, times(1)).executeImplementation(anyString(), any(Path.class), anyString(), any(), any(), any());
     }
 
@@ -1215,7 +1215,8 @@ class IssueWorkflowServiceTest {
                 .thenReturn(success);
 
         HarnessExecutionResult result = workflowService.phaseImplementation(
-                issue, issueDetails, Path.of("/tmp/repo"), null, null, null, null);
+                issue, issueDetails, Path.of("/tmp/repo"), null,
+                "The independent code review found a missing edge-case test", null, null);
 
         assertTrue(result.isSuccess());
         assertEquals("sess-prior", issue.getClaudeSessionId());
@@ -1226,6 +1227,7 @@ class IssueWorkflowServiceTest {
                 promptCaptor.capture(), any(Path.class), anyString(), resumeCaptor.capture(), any(), any());
         assertEquals("sess-prior", resumeCaptor.getValue());
         assertTrue(promptCaptor.getValue().contains("Continuing the same task"));
+        assertTrue(promptCaptor.getValue().contains("missing edge-case test"));
         assertFalse(promptCaptor.getValue().contains("must not appear in a resumed prompt"));
     }
 
@@ -1467,6 +1469,9 @@ class IssueWorkflowServiceTest {
         assertTrue(feedback.contains("No tests for edge case"));
         assertTrue(feedback.contains("Focus on test coverage"));
         assertTrue(feedback.contains("tests=40%"));
+        assertTrue(feedback.contains("focused correction pass on the current implementation"));
+        assertTrue(feedback.contains("Preserve working code and passing checks"));
+        assertTrue(feedback.contains("small, safe, and relevant"));
     }
 
     /**

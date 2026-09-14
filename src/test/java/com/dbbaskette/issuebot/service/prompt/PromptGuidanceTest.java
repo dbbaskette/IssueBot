@@ -10,7 +10,8 @@ class PromptGuidanceTest {
         String prompt = PromptGuidance.configuredVerification(java.util.List.of(
                 "./mvnw verify -Poffline", "node --test 'test/*.js'"));
         assertThat(prompt).containsSubsequence("./mvnw verify -Poffline", "node --test 'test/*.js'")
-                .contains("not an instruction to execute them now")
+                .contains("You may run safe, relevant commands")
+                .contains("reasonable confidence in the independent gate")
                 .contains("do not bypass IssueBot's configured gate");
     }
 

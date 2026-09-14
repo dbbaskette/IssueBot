@@ -157,6 +157,11 @@
                         <div class="field-group" style="grid-column:1/-1">
                             <h4>Implementation defaults</h4>
                             <div th:replace="~{fragments/reasoning :: selection('implementation-model', 'implementationModel', ${repositorySelection?.implementationModel}, 'implementationReasoningEffort', ${repositorySelection?.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${globalImplementationModel})}"></div>
+                            <label class="check-row" for="allow-subagents">
+                                <input type="checkbox" id="allow-subagents" name="allowSubagents" value="true">
+                                Allow Codex subagents for this repository
+                            </label>
+                            <small class="text-muted">Off by default. When enabled, Codex may delegate coding tasks and use more tokens; IssueBot still schedules and reviews the work. Applies only when Codex is the coding harness.</small>
                         </div>
                         <div class="field-group" style="grid-column:1/-1">
                             <h4>Review defaults</h4>
@@ -284,6 +289,7 @@
                                              data-review-pass-threshold=${repo.reviewPassThreshold},
                                              data-issue-budget-usd=${repo.issueBudgetUsd},
                                              data-auto-start=${repo.autoStart},
+                                             data-allow-subagents=${repo.allowSubagents},
                                              data-follow-up-mode=${repo.followUpMode.name()},
                                              data-decomposition-mode=${repo.decompositionMode.name()},
                                              data-pre-screen-enabled=${repo.preScreenEnabled},

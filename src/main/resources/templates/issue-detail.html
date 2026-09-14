@@ -226,6 +226,14 @@
                                 <h4>Implementation for this attempt</h4>
                                 <div th:replace="~{fragments/reasoning :: selection('recoveryImplModel', 'implModelOverride', ${selectionRejected == true ? submittedImplModel : issue.implModelOverride}, 'implementationReasoningEffort', ${selectionRejected == true ? submittedImplementationReasoning : issue.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
                             </div>
+                            <div class="field-group" th:if="${effectiveHarnessId == 'codex'}">
+                                <label for="recoverySubagents">Codex delegation for this attempt</label>
+                                <select id="recoverySubagents" name="allowSubagentsOverride">
+                                    <option value="" selected th:text="${'Use repository default (' + (issue.repo != null and issue.repo.allowSubagents ? 'subagents allowed' : 'single agent') + ')'}">Use repository default</option>
+                                    <option value="false">Single agent</option>
+                                    <option value="true">Allow subagents when useful</option>
+                                </select>
+                            </div>
                             <div class="field-group" role="group" aria-label="Review" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.reviewModel, globalReviewModel)}">
                                 <h4>Review for this attempt</h4>
                                 <div th:replace="~{fragments/reasoning :: selection('recoveryReviewModel', 'reviewModelOverride', ${selectionRejected == true ? submittedReviewModel : issue.reviewModelOverride}, 'reviewReasoningEffort', ${selectionRejected == true ? submittedReviewReasoning : issue.reviewReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
@@ -676,6 +684,8 @@
                 <div class="panel-body">
                     <p class="text-sm text-muted" th:if="${currentRunIteration == null}">Coding has not started.</p>
                     <p class="text-sm" th:if="${currentRunIteration != null}" th:text="${currentRunIteration.implementationSucceeded == true ? 'Coding finished for the latest attempt.' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'The coding agent is working.' : 'See the latest attempt for its coding result.')}">Coding in progress.</p>
+                    <p class="text-sm text-muted" th:if="${effectiveHarnessId == 'codex'}"
+                       th:text="${issue.subagentsAllowed ? 'Codex mode: subagents allowed when useful (not necessarily used).' : 'Codex mode: single agent; subagents disabled.'}">Codex mode: single agent.</p>
                     <a th:if="${issue.status.name() == 'IN_PROGRESS' and issue.currentPhase == 'IMPLEMENTATION'}" href="#live-terminal-panel">Live output</a>
                     <a th:if="${currentRunIteration != null}" href="#iteration-history">Attempt details</a>
                 </div>
@@ -1011,6 +1021,15 @@
                 <div class="field-group" role="group" aria-label="Implementation" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.implementationModel, globalImplementationModel)}">
                     <h4>Implementation for this run</h4>
                     <div th:replace="~{fragments/reasoning :: selection('startImplModel', 'implModelOverride', ${selectionRejected == true ? submittedImplModel : issue.implModelOverride}, 'implementationReasoningEffort', ${selectionRejected == true ? submittedImplementationReasoning : issue.implementationReasoningEffort}, ${effectiveHarnessId}, null, true, ${inheritedRoleModel})}"></div>
+                </div>
+                <div class="field-group" th:if="${effectiveHarnessId == 'codex'}">
+                    <label for="startSubagents">Codex delegation for this run</label>
+                    <select id="startSubagents" name="allowSubagentsOverride">
+                        <option value="" selected th:text="${'Use repository default (' + (issue.repo != null and issue.repo.allowSubagents ? 'subagents allowed' : 'single agent') + ')'}">Use repository default</option>
+                        <option value="false">Single agent</option>
+                        <option value="true">Allow subagents when useful</option>
+                    </select>
+                    <small class="text-muted">IssueBot chooses the mode before launching Codex, so the agent will not pause to ask.</small>
                 </div>
                 <div class="field-group" role="group" aria-label="Review" th:with="inheritedRoleModel=${T(com.dbbaskette.issuebot.controller.HarnessCatalogAdvice).inheritedModel(harnessCatalog, effectiveHarnessId, issue.repo?.reviewModel, globalReviewModel)}">
                     <h4>Review for this run</h4>

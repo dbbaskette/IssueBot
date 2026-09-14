@@ -6,8 +6,11 @@ rerun affected checks without requesting approval for each safe local test.
 Do not run tests that require production access, paid services, or destructive side effects
 without the necessary authorization. Use disposable local fixtures where available.
 
-IssueBot runs configured local verification and CI gates after implementation. Avoid reflexive
-full-suite runs merely to satisfy multiple skills. Run broader local checks when needed to
-establish correctness or when no suitable configured verification exists. Report commands,
-results, the tested revision or working-tree state, and any limitations. Evidence from an
-unchanged tree and environment can inform your work; it does not waive IssueBot's trusted gates.
+Before declaring completion, use the relevant tests, build checks, and diff inspection to form
+your own evidence-based judgment about whether IssueBot's independent local and CI gates are
+likely to pass. Do not outsource this judgment to IssueBot. Start with focused checks; broaden
+only where risk or missing coverage warrants it, and do not rerun unchanged checks reflexively.
+If a check fails, repair your change and rerun the affected checks. Report exact commands,
+results, the tested revision or working-tree state, remaining gaps, and your confidence in the
+independent gates. IssueBot still runs its configured verification and CI after implementation;
+your evidence does not waive those gates.

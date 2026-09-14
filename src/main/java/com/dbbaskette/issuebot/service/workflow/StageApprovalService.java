@@ -224,6 +224,13 @@ public class StageApprovalService {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public TrackedIssue approveAndClaim(Long issueId, Long approvalId,
             String provider, String model, String actor, String reasoningEffort) {
+        return approveAndClaim(issueId, approvalId, provider, model, actor, reasoningEffort, null);
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public TrackedIssue approveAndClaim(Long issueId, Long approvalId,
+            String provider, String model, String actor, String reasoningEffort,
+            Boolean allowSubagentsOverride) {
         Prepared prepared = transaction(() -> prepareClaim(issueId, approvalId, provider, model, reasoningEffort));
         HarnessSelection chosen = selection.resolve(prepared.issue(), prepared.decision().getStage(),
                 prepared.provider(), prepared.model(), prepared.reasoning());
@@ -239,6 +246,11 @@ public class StageApprovalService {
             approve(decision, actor == null || actor.isBlank() ? "operator" : actor);
             approvals.saveAndFlush(decision);
             issue.setStatus(IssueStatus.IN_PROGRESS);
+            if (decision.getStage() == WorkflowStage.IMPLEMENTATION
+                    && "codex".equals(chosen.harnessId())) {
+                issue.setAllowSubagentsOverride(allowSubagentsOverride != null
+                        ? allowSubagentsOverride : issue.getRepo().isAllowSubagents());
+            }
             issue.setSuspensionReason(null);
             issue.setCurrentPhase(switch (decision.getStage()) {
                 case VERIFICATION -> "LOCAL_CHECKS";

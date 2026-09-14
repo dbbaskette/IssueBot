@@ -48,7 +48,7 @@ public class CodexCliService {
         return executeTask(prompt, directory, model, sessionId,
                 properties.getCodexCli().getImplementationReasoningEffort(),
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false,
-                networkAllowedFor(issueId));
+                networkAllowedFor(issueId), subagentsAllowedFor(issueId));
     }
 
     public HarnessExecutionResult executeReview(String prompt, Path directory, String model,
@@ -77,7 +77,7 @@ public class CodexCliService {
                                                         Consumer<String> callback) {
         return executeTask(prompt, directory, model, sessionId, reasoningLevel,
                 properties.getCodexCli().getTimeoutMinutes(), issueId, callback, false,
-                networkAllowedFor(issueId));
+                networkAllowedFor(issueId), subagentsAllowedFor(issueId));
     }
 
     public HarnessExecutionResult executeReview(String prompt, Path directory, String model,
@@ -113,7 +113,7 @@ public class CodexCliService {
                                           int timeoutMinutes, Long issueId,
                                           Consumer<String> callback, boolean planningMode) {
         return executeTask(prompt, directory, model, sessionId, reasoningEffort,
-                timeoutMinutes, issueId, callback, planningMode, false);
+                timeoutMinutes, issueId, callback, planningMode, false, false);
     }
 
     private HarnessExecutionResult executeTask(String prompt, Path directory, String model,
@@ -121,9 +121,25 @@ public class CodexCliService {
                                           int timeoutMinutes, Long issueId,
                                           Consumer<String> callback, boolean planningMode,
                                           boolean networkAccess) {
+        return executeTask(prompt, directory, model, sessionId, reasoningEffort,
+                timeoutMinutes, issueId, callback, planningMode, networkAccess, false);
+    }
+
+    private HarnessExecutionResult executeTask(String prompt, Path directory, String model,
+                                          String sessionId, String reasoningEffort,
+                                          int timeoutMinutes, Long issueId,
+                                          Consumer<String> callback, boolean planningMode,
+                                          boolean networkAccess, boolean subagentsAllowed) {
         List<String> command = planningMode
                 ? buildPlanningCommand(model, reasoningEffort)
-                : buildCommand(model, sessionId, reasoningEffort, networkAccess);
+                : buildCommand(model, sessionId, reasoningEffort, networkAccess, subagentsAllowed);
+        if (subagentsAllowed) {
+            prompt = "IssueBot permits Codex subagents for this coding run. Use them only when useful; "
+                    + "do not ask the operator to choose a delegation mode.\n\n" + prompt;
+        } else if (issueId != null && !planningMode) {
+            prompt = "IssueBot selected single-agent execution for this run. Do not spawn subagents "
+                    + "or ask the operator to choose a delegation mode.\n\n" + prompt;
+        }
         long started = System.currentTimeMillis();
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -190,8 +206,15 @@ public class CodexCliService {
     }
 
     List<String> buildCommand(String model, String sessionId, String reasoningEffort, boolean networkAccess) {
+        return buildCommand(model, sessionId, reasoningEffort, networkAccess, false);
+    }
+
+    List<String> buildCommand(String model, String sessionId, String reasoningEffort,
+                              boolean networkAccess, boolean subagentsAllowed) {
         List<String> command = new ArrayList<>(List.of(
                 "codex", "--ask-for-approval", "never", "--sandbox", "workspace-write"));
+        command.add(subagentsAllowed ? "--enable" : "--disable");
+        command.add("multi_agent");
         if (networkAccess) {
             command.add("--config");
             command.add("sandbox_workspace_write.network_access=true");
@@ -217,6 +240,8 @@ public class CodexCliService {
     List<String> buildPlanningCommand(String model, String reasoningEffort) {
         List<String> command = new ArrayList<>(List.of(
                 "codex", "--ask-for-approval", "never", "--sandbox", "read-only"));
+        command.add("--disable");
+        command.add("multi_agent");
         addReasoningEffort(command, reasoningEffort);
         command.add("exec");
         command.add("--skip-git-repo-check");
@@ -267,6 +292,13 @@ public class CodexCliService {
         return issueRepository.findById(issueId)
                 .map(issue -> properties.getCodexCli().getNetworkAllowedRepositories()
                         .contains(issue.getRepo().fullName()))
+                .orElse(false);
+    }
+
+    boolean subagentsAllowedFor(Long issueId) {
+        if (issueId == null) return false;
+        return issueRepository.findById(issueId)
+                .map(com.dbbaskette.issuebot.model.TrackedIssue::isSubagentsAllowed)
                 .orElse(false);
     }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0 — 2026-09-14
+
+- Run Codex as a single agent by default. Repositories can allow subagents, and each issue start, retry, or implementation approval can override that policy.
+- Pass the delegation choice directly to Codex and show the effective mode on the issue page.
+- Ask the coding harness to form its own test-backed judgment about the independent checks without reflexive full-suite runs.
+- On a failed independent review, feed focused findings back to the existing coding work and preserve passing behavior instead of treating the correction as a fresh implementation.
+
 ## 0.15.0 — 2026-09-14
 
 - Wait up to the repository's CI timeout for pending GitHub checks before merging reviewed work; keep a guarded merge-only recovery path instead of requiring another coding attempt.

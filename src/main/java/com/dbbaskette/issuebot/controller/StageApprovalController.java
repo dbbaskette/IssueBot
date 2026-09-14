@@ -30,12 +30,16 @@ public class StageApprovalController {
                           @RequestParam(required = false) String harnessId,
                           @RequestParam(required = false) String model,
                           @RequestParam(required = false) String reasoningEffort,
+                          @RequestParam(required = false) Boolean allowSubagentsOverride,
                           Principal principal, RedirectAttributes redirect) {
         try {
             String actor = principal == null ? "operator" : principal.getName();
-            var issue = reasoningEffort == null
-                    ? approvals.approveAndClaim(id, approvalId, harnessId, model, actor)
-                    : approvals.approveAndClaim(id, approvalId, harnessId, model, actor, reasoningEffort);
+            var issue = allowSubagentsOverride != null
+                    ? approvals.approveAndClaim(id, approvalId, harnessId, model, actor,
+                            reasoningEffort, allowSubagentsOverride)
+                    : reasoningEffort == null
+                            ? approvals.approveAndClaim(id, approvalId, harnessId, model, actor)
+                            : approvals.approveAndClaim(id, approvalId, harnessId, model, actor, reasoningEffort);
             cancellation.clear(id);
             workflow.processIssueAsync(issue);
             redirect.addFlashAttribute("success", "Stage approved and queued to run.");
@@ -45,8 +49,14 @@ public class StageApprovalController {
             redirect.addFlashAttribute("stageHarnessId", harnessId);
             redirect.addFlashAttribute("stageModel", model);
             redirect.addFlashAttribute("stageReasoningEffort", reasoningEffort);
+            redirect.addFlashAttribute("stageAllowSubagentsOverride", allowSubagentsOverride);
         }
         return "redirect:/issues/" + id + "#stage-approval";
+    }
+
+    public String approve(Long id, Long approvalId, String harnessId, String model,
+            String reasoningEffort, Principal principal, RedirectAttributes redirect) {
+        return approve(id, approvalId, harnessId, model, reasoningEffort, null, principal, redirect);
     }
 
     private static String safeError(RuntimeException error) {

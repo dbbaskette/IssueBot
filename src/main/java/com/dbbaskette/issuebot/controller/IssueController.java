@@ -348,12 +348,14 @@ public class IssueController {
                         @RequestParam(required = false, defaultValue = "false") boolean continueSession,
                         @RequestParam(required = false) String implementationReasoningEffort,
                         @RequestParam(required = false) String reviewReasoningEffort,
+                        @RequestParam(required = false) Boolean allowSubagentsOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         String error;
         try {
             error = performRetry(issue, instructions, implModelOverride, reviewModelOverride,
-                    budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort);
+                    budgetOverrideUsd, planFirstOverride, continueSession, implementationReasoningEffort,
+                    reviewReasoningEffort, allowSubagentsOverride);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
@@ -363,6 +365,15 @@ public class IssueController {
             redirectAttributes.addFlashAttribute("success", "Issue retry started");
         }
         return "redirect:/issues/" + id;
+    }
+
+    public String retry(Long id, String instructions, String implModelOverride, String reviewModelOverride,
+            BigDecimal budgetOverrideUsd, String planFirstOverride, boolean continueSession,
+            String implementationReasoningEffort, String reviewReasoningEffort,
+            RedirectAttributes redirectAttributes) {
+        return retry(id, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort,
+                null, redirectAttributes);
     }
 
     @PostMapping("/{id}/recover-handoff")
@@ -446,12 +457,20 @@ public class IssueController {
                                 String reviewModelOverride, BigDecimal budgetOverrideUsd,
                                 String planFirstOverride, boolean continueSession) {
         return performRetry(issue, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
-                planFirstOverride, continueSession, null, null);
+                planFirstOverride, continueSession, null, null, null);
     }
 
     private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
             String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
             boolean continueSession, String implementationReasoningEffort, String reviewReasoningEffort) {
+        return performRetry(issue, instructions, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, continueSession, implementationReasoningEffort, reviewReasoningEffort, null);
+    }
+
+    private String performRetry(TrackedIssue issue, String instructions, String implModelOverride,
+            String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
+            boolean continueSession, String implementationReasoningEffort, String reviewReasoningEffort,
+            Boolean allowSubagentsOverride) {
         if (!dispatchService.isRunning()) {
             return "Processing is paused";
         }
@@ -503,6 +522,8 @@ public class IssueController {
                     candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
                     candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
                     candidate.setImplModelOverride(normalize(implModelOverride));
+                    candidate.setAllowSubagentsOverride(allowSubagentsOverride != null
+                            ? allowSubagentsOverride : candidate.getRepo().isAllowSubagents());
                     candidate.setReviewModelOverride(normalize(reviewModelOverride));
                     candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
                     candidate.setPlanFirstOverride(planOverride);
@@ -582,13 +603,15 @@ public class IssueController {
                         @RequestParam(required = false) String planFirstOverride,
                         @RequestParam(required = false) String implementationReasoningEffort,
                         @RequestParam(required = false) String reviewReasoningEffort,
+                        @RequestParam(required = false) Boolean allowSubagentsOverride,
                         RedirectAttributes redirectAttributes) {
         TrackedIssue issue = issueRepository.findById(id).orElseThrow();
         boolean readyStart = issue.getStatus() == IssueStatus.READY_TO_START;
         String error;
         try {
             error = claimAndDispatchStart(issue, implModelOverride, reviewModelOverride,
-                    budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort);
+                    budgetOverrideUsd, planFirstOverride, readyStart, implementationReasoningEffort,
+                    reviewReasoningEffort, allowSubagentsOverride);
         } catch (IllegalArgumentException ex) { error = ex.getMessage(); }
         if (error != null) {
             redirectAttributes.addFlashAttribute("error", error);
@@ -599,6 +622,14 @@ public class IssueController {
                     readyStart ? "Implementation started." : "Issue started");
         }
         return "redirect:/issues/" + id;
+    }
+
+    public String start(Long id, String implModelOverride, String reviewModelOverride,
+            BigDecimal budgetOverrideUsd, String planFirstOverride,
+            String implementationReasoningEffort, String reviewReasoningEffort,
+            RedirectAttributes redirectAttributes) {
+        return start(id, implModelOverride, reviewModelOverride, budgetOverrideUsd, planFirstOverride,
+                implementationReasoningEffort, reviewReasoningEffort, null, redirectAttributes);
     }
 
     /**
@@ -630,12 +661,20 @@ public class IssueController {
                                          String planFirstOverride, boolean readyStart) {
 
         return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd,
-                planFirstOverride, readyStart, null, null);
+                planFirstOverride, readyStart, null, null, null);
     }
 
     private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
             String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
             boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort) {
+        return claimAndDispatchStart(issue, implModelOverride, reviewModelOverride, budgetOverrideUsd,
+                planFirstOverride, readyStart, implementationReasoningEffort, reviewReasoningEffort, null);
+    }
+
+    private String claimAndDispatchStart(TrackedIssue issue, String implModelOverride,
+            String reviewModelOverride, BigDecimal budgetOverrideUsd, String planFirstOverride,
+            boolean readyStart, String implementationReasoningEffort, String reviewReasoningEffort,
+            Boolean allowSubagentsOverride) {
         String selectionError = selectionError(issue, implModelOverride, reviewModelOverride,
                 implementationReasoningEffort, reviewReasoningEffort);
         if (selectionError != null) return selectionError;
@@ -650,6 +689,8 @@ public class IssueController {
             candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
             candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));
             candidate.setImplModelOverride(normalize(implModelOverride));
+            candidate.setAllowSubagentsOverride(allowSubagentsOverride != null
+                    ? allowSubagentsOverride : candidate.getRepo().isAllowSubagents());
             candidate.setReviewModelOverride(normalize(reviewModelOverride));
             candidate.setBudgetOverrideUsd(normalizeBudget(budgetOverrideUsd));
             if (candidate.getStatus() != IssueStatus.READY_TO_START) {
@@ -698,6 +739,7 @@ public class IssueController {
             @RequestParam(required = false) String reviewModelOverride,
             @RequestParam(required = false) String implementationReasoningEffort,
             @RequestParam(required = false) String reviewReasoningEffort,
+            @RequestParam(required = false) Boolean allowSubagentsOverride,
             @RequestParam(required = false) BigDecimal budgetOverrideUsd,
             @RequestParam(required = false) String planFirstOverride, RedirectAttributes redirect) {
         try {
@@ -712,6 +754,8 @@ public class IssueController {
             var result = recoveryDispatch.claimManualStart(id, properties.getMaxConcurrentIssues(),
                     candidate -> checkGate(candidate, null), candidate -> {
                         candidate.setImplModelOverride(normalize(implModelOverride));
+                        candidate.setAllowSubagentsOverride(allowSubagentsOverride != null
+                                ? allowSubagentsOverride : candidate.getRepo().isAllowSubagents());
                         candidate.setReviewModelOverride(normalize(reviewModelOverride));
                         candidate.setImplementationReasoningEffort(normalize(implementationReasoningEffort));
                         candidate.setReviewReasoningEffort(normalize(reviewReasoningEffort));

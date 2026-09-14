@@ -1324,6 +1324,7 @@
     setValue('review-model-reasoning', ds.reviewReasoningEffort);
     syncReasoningPickers();
     setChecked('auto-start', ds.autoStart);
+    setChecked('allow-subagents', ds.allowSubagents);
     setValue('follow-up-mode', ds.followUpMode);
     setValue('decomposition-mode', ds.decompositionMode);
     setChecked('pre-screen-enabled', ds.preScreenEnabled);

@@ -535,7 +535,7 @@ public class IssueWorkflowService {
             eventService.log("ITERATION_STARTED",
                     "Starting iteration " + iterationNum + "/" + maxIterations, repo, trackedIssue);
 
-            // === Phase 2: Implementation (Opus) ===
+            // === Phase 2: Implementation (selected coding harness) ===
             HarnessExecutionResult implResult = null;
             boolean harnessOwnedImplementation = approvedPlan != null && implementationTurnCheckpoints != null;
             if (resumePhase == null) {
@@ -924,12 +924,12 @@ public class IssueWorkflowService {
                     return;
                 }
 
-                // Feed findings back as feedback for next implementation iteration
+                // Feed precise findings back to the existing coding session and checkout.
                 previousFeedback = buildReviewFeedback(reviewResult);
                 reviewFeedback = true; // this is the only source that warrants the implementation-response comment
                 previousDiff = diff;
                 previousCiLogs = null;
-                log.info("Review failed — feeding findings back to Opus for iteration {}", iterationNum + 1);
+                log.info("Review failed — feeding findings back to the coding harness for iteration {}", iterationNum + 1);
                 continue;
             }
 
@@ -1260,6 +1260,13 @@ public class IssueWorkflowService {
                                           ApprovedPlanContext approvedPlan,
                                           String legacyApprovedPlan) {
         WatchedRepo repo = trackedIssue.getRepo();
+        if (trackedIssue.getAllowSubagentsOverride() == null
+                && !cancellationService.isCancelled(trackedIssue.getId())) {
+            // Automatic starts have no form submission. Freeze the repository choice before
+            // the first coding invocation so resumed Codex sessions keep the same mode.
+            trackedIssue.setAllowSubagentsOverride(repo.isAllowSubagents());
+            issueRepository.save(trackedIssue);
+        }
         eventService.log("PHASE_IMPLEMENTATION", "Starting implementation phase", repo, trackedIssue);
 
         Long issueId = trackedIssue.getId();
@@ -2060,6 +2067,12 @@ public class IssueWorkflowService {
     String buildReviewFeedback(CodeReviewResult review) {
         StringBuilder fb = new StringBuilder();
         fb.append("The independent code review found issues with your implementation.\n\n");
+        fb.append("This is a focused correction pass on the current implementation, not a fresh build. "
+                + "Preserve working code and passing checks. Fix the specific findings and unmet "
+                + "acceptance criteria below, adding or updating targeted regression tests. "
+                + "You may also improve a weaker score where the change is small, safe, and relevant; "
+                + "do not rewrite unrelated parts merely to raise scores. Recheck affected behavior "
+                + "and give your own evidence-based assessment before handing back to IssueBot.\n\n");
         fb.append("**Overall:** ").append(review.summary()).append("\n\n");
 
         fb.append("**Scores:** ");
@@ -2110,7 +2123,8 @@ public class IssueWorkflowService {
             fb.append("\n**Reviewer advice:** ").append(review.advice()).append("\n");
         }
 
-        fb.append("\nPlease address ALL findings above, especially high-severity ones.\n");
+        fb.append("\nAddress all actionable findings above, prioritizing high-severity ones. "
+                + "Explain any finding you cannot resolve without changing the approved scope.\n");
         return fb.toString();
     }
 

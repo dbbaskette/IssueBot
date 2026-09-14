@@ -24,6 +24,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RepositoryControllerTest {
 
     @Test
+    void repositorySubagentOptInIsSavedFromFormAndDefaultsOff() throws Exception {
+        Fixture enabled = new Fixture();
+        MockMvcBuilders.standaloneSetup(enabled.controller).build().perform(
+                baseRequest().param("allowSubagents", "true")).andExpect(status().isOk());
+        ArgumentCaptor<WatchedRepo> chosen = ArgumentCaptor.forClass(WatchedRepo.class);
+        verify(enabled.repos).save(chosen.capture());
+        assertThat(chosen.getValue().isAllowSubagents()).isTrue();
+
+        Fixture omitted = new Fixture();
+        MockMvcBuilders.standaloneSetup(omitted.controller).build().perform(baseRequest())
+                .andExpect(status().isOk());
+        verify(omitted.repos).save(chosen.capture());
+        assertThat(chosen.getValue().isAllowSubagents()).isFalse();
+    }
+
+    @Test
     void targetedVerificationUpdateDoesNotRewriteOtherRepositorySettings() {
         Fixture f = new Fixture();
         WatchedRepo repo = new WatchedRepo("dbbaskette", "adksi");
