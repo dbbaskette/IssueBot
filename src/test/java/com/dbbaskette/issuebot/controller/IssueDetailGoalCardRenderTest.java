@@ -63,6 +63,8 @@ class IssueDetailGoalCardRenderTest {
     private WebContext baseContext(TrackedIssue issue, Iteration latestIteration) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
+        context.setVariable("implementationSummary", com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(
+                issue, latestIteration, new com.fasterxml.jackson.databind.ObjectMapper()));
         context.setVariable("latestIteration", latestIteration);
         context.setVariable("currentRunIteration", latestIteration);
         List<Iteration> iterations = latestIteration == null ? List.of() : List.of(latestIteration);

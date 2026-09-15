@@ -89,6 +89,8 @@ class IssueDetailLivePollRenderTest {
                           Consumer<WebContext> customize) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
+        context.setVariable("implementationSummary", com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(
+                issue, null, new com.fasterxml.jackson.databind.ObjectMapper()));
         context.setVariable("latestIteration", null);
         context.setVariable("iterations", List.of());
         context.setVariable("iterationsNewestFirst", List.of());
@@ -484,6 +486,8 @@ class IssueDetailLivePollRenderTest {
 
         WebContext ctx = new WebContext(webExchange, Locale.US);
         ctx.setVariable("issue", issue);
+        ctx.setVariable("implementationSummary", com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(
+                issue, null, new com.fasterxml.jackson.databind.ObjectMapper()));
         ctx.setVariable("latestIteration", null);
         ctx.setVariable("iterations", List.of());
         ctx.setVariable("iterationsNewestFirst", List.of());

@@ -213,7 +213,9 @@ public class IssuePollingService {
      */
     private void resumePendingIssues(WatchedRepo repo) {
         if (!processingControl.isRunning()) return;
-        List<TrackedIssue> pending = issueRepository.findByRepoAndStatus(repo, IssueStatus.PENDING);
+        if (!repo.isAutoStart()) return;
+        List<TrackedIssue> pending = issueRepository.findByRepoAndStatus(repo, IssueStatus.PENDING)
+                .stream().filter(issue -> !issue.isOnHold()).toList();
         if (pending.isEmpty()) return;
 
         // Lowest issue number first, so decomposed parts resume 1/X → N/X (findByRepoAndStatus
@@ -242,11 +244,12 @@ public class IssuePollingService {
      */
     private void drainQueuedIssues(WatchedRepo repo) {
         if (!processingControl.isRunning()) return;
-        List<TrackedIssue> queued = issueRepository.findByRepoAndStatus(repo, IssueStatus.QUEUED);
+        List<TrackedIssue> queued = issueRepository.findByRepoAndStatus(repo, IssueStatus.QUEUED)
+                .stream().filter(issue -> !issue.isOnHold()).toList();
         if (queued.isEmpty()) return;
 
         // Manual-start repos: don't auto-drain queued issues
-        if (!repo.isAutoStart() && repo.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.LEGACY) {
+        if (!repo.isAutoStart()) {
             log.debug("{} has auto-start OFF — {} queued issue(s) await manual start",
                     repo.fullName(), queued.size());
             return;
@@ -317,6 +320,7 @@ public class IssuePollingService {
                                 IssueStatus.AWAITING_PLAN_APPROVAL, IssueStatus.READY_TO_START,
                                 IssueStatus.AWAITING_DECOMPOSITION))
                 .stream()
+                .filter(candidate -> !candidate.isOnHold() || candidate.getStatus() != IssueStatus.READY_TO_START)
                 .filter(candidate -> candidateId == null
                         || !Objects.equals(candidate.getId(), candidateId))
                 .findFirst();
@@ -442,7 +446,7 @@ public class IssuePollingService {
         }
 
         // Auto-start OFF: discover and queue but don't start
-        if (!repo.isAutoStart() && repo.getWorkflowPolicy() == com.dbbaskette.issuebot.model.WorkflowPolicy.LEGACY) {
+        if (!repo.isAutoStart()) {
             tracked.setStatus(IssueStatus.QUEUED);
             issueRepository.save(tracked);
             eventService.log("ISSUE_DISCOVERED",

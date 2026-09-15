@@ -12,6 +12,11 @@ import java.util.List;
 @Entity
 @Table(name = "tracked_issues", uniqueConstraints = @UniqueConstraint(columnNames = {"repo_id", "issue_number"}))
 public class TrackedIssue {
+    @Column(name = "on_hold", nullable = false)
+    private boolean onHold;
+    public boolean isOnHold() { return onHold; }
+    public void setOnHold(boolean value) { onHold = value; }
+
     private boolean manualDispatch;
     public boolean isManualDispatch() { return manualDispatch; }
     public void setManualDispatch(boolean value) { manualDispatch = value; }

@@ -155,7 +155,7 @@ class IssuesQueueRenderTest {
     }
 
     @Test
-    void readyReservationRowIsReadOnlyAndCannotBeBulkSelected() {
+    void readyReservationCanBeSelectedForHoldWithoutHidingItsReservation() {
         WatchedRepo repo = new WatchedRepo("acme", "widgets");
         TrackedIssue reservation = new TrackedIssue(repo, 41, "Ready implementation");
         reservation.setId(1L);
@@ -164,9 +164,9 @@ class IssuesQueueRenderTest {
         String html = renderTableRows(List.of(reservation), reservation);
 
         assertThat(html)
-                .doesNotContain("class=\"bulk-select\"")
+                .contains("class=\"bulk-select\"")
                 .contains("class=\"bulk-read-only")
-                .contains("Issue #41 is reserved and cannot be selected for bulk actions")
+                .contains("Issue #41 has a workflow reservation")
                 .contains(">Reserved</span>");
     }
 

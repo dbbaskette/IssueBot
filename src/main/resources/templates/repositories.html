@@ -85,6 +85,12 @@
                         <p class="text-sm text-muted">Model choices are overrides made when approving an AI stage; this form does not save models per stage.</p>
                     </fieldset>
 
+                    <div class="checkbox-field">
+                        <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
+                        <label for="auto-start">Automatically start next issue</label>
+                    </div>
+                    <p class="text-sm text-muted">Applies to every workflow. Turn off to finish current work, then wait for you to Start the next issue. No new planning starts automatically.</p>
+
                     <details class="workflow-existing-settings" data-workflow-existing-settings open
                              data-repository-disclosure="existing-workflow" data-ui-state-key="editor:new:existing-workflow"
                              data-ui-state-default-open="true">
@@ -97,10 +103,6 @@
                                     <option value="AUTONOMOUS">Autonomous</option>
                                     <option value="APPROVAL_GATED">Approval Gated</option>
                                 </select>
-                            </div>
-                            <div class="checkbox-field">
-                                <input type="checkbox" id="auto-start" name="autoStart" value="true" checked>
-                                <label for="auto-start">Auto-start issues</label>
                             </div>
                             <div class="checkbox-field">
                                 <input type="checkbox" id="auto-merge" name="autoMerge" value="true">
@@ -264,6 +266,7 @@
                         </td>
                         <td data-label="Branch" th:text="${repo.branch}">main</td>
                         <td data-label="Workflow and checkpoints" class="repo-workflow-summary">
+                            <p th:text="${repo.autoStart ? 'Next issue: automatic start' : 'Next issue: manual start'}">Next issue: automatic start</p>
                             <strong th:text="${repo.workflowPolicy.name() == 'AUTOMATED' ? 'Automatic' : (repo.workflowPolicy.name() == 'STAGED' ? 'Approval checkpoints' : 'Existing settings')}">Workflow</strong>
                             <p th:if="${repo.workflowPolicy.name() == 'AUTOMATED'}">No routine approval checkpoints.</p>
                             <p th:if="${repo.workflowPolicy.name() == 'STAGED'}" th:text="${#strings.isEmpty(repo.approvalStages) ? 'No stages require approval.' : 'Approve before: ' + #strings.toLowerCase(#strings.replace(repo.approvalStages, ',', ', '))}">Checkpoints</p>

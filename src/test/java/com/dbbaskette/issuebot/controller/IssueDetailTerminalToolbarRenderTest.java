@@ -58,6 +58,8 @@ class IssueDetailTerminalToolbarRenderTest {
     private String render(TrackedIssue issue) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
+        context.setVariable("implementationSummary", com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(
+                issue, null, new com.fasterxml.jackson.databind.ObjectMapper()));
         context.setVariable("latestIteration", null);
         context.setVariable("iterations", List.of());
         context.setVariable("iterationsNewestFirst", List.of());

@@ -45,6 +45,60 @@ import static org.mockito.Mockito.*;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class IssueDispatchTransactionManagerTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(WorkflowPolicy.class)
+    void manualRepositoryBlocksAutomaticStartForEveryPolicyButAllowsExplicitStart(WorkflowPolicy policy) {
+        Long id = seedApprovedIssue(IssueStatus.QUEUED, 0);
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(id).orElseThrow();
+            issue.getRepo().setWorkflowPolicy(policy);
+            issue.getRepo().setAutoStart(false);
+            repos.saveAndFlush(issue.getRepo());
+        });
+        assertThat(dispatch.claimStart(id).reason()).contains("autostart is off");
+        assertThat(dispatch.claimStart(id, IssueDispatchTransactionManager.StartMutation.none()).claimed()).isTrue();
+        assertThat(dispatch.setHold(id, true)).contains("Only waiting");
+        assertThat(issues.findById(id).orElseThrow().getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+        markCompleted(id);
+    }
+
+    @Test void holdsPersistAndExplicitStartReleasesOnlyAfterDependenciesAreSatisfied() {
+        Long id = seedApprovedIssue(IssueStatus.QUEUED, 0);
+        assertThat(dispatch.setHold(id, true)).isNull();
+        assertThat(issues.findById(id).orElseThrow().isOnHold()).isTrue();
+        assertThat(dispatch.claimStart(id).reason()).contains("on hold");
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(id).orElseThrow();
+            issue.setBlockedByIssues("999");
+            issues.saveAndFlush(issue);
+        });
+        assertThat(dispatch.claimStart(id, IssueDispatchTransactionManager.StartMutation.none()).claimed()).isFalse();
+        assertThat(issues.findById(id).orElseThrow().isOnHold()).isTrue();
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(id).orElseThrow();
+            issue.setBlockedByIssues(null);
+            issues.saveAndFlush(issue);
+        });
+        var claim = dispatch.claimStart(id, IssueDispatchTransactionManager.StartMutation.none());
+        assertThat(claim.claimed()).isTrue();
+        assertThat(claim.issue().isOnHold()).isFalse();
+        assertThat(claim.issue().getApprovedPlanningVersion()).isNotNull();
+        markCompleted(id);
+    }
+
+    @Test void readyHoldPreservesPlanAndDoesNotCancelAnAlreadyStartedWorkflow() {
+        Long id = seedApprovedIssue(IssueStatus.READY_TO_START, 0);
+        assertThat(dispatch.setHold(id, true)).isNull();
+        assertThat(dispatch.claimReadyStart(id).claimed()).isFalse();
+        assertThat(dispatch.setHold(id, false)).isNull();
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var issue = issues.findById(id).orElseThrow();
+            issue.getRepo().setAutoStart(false);
+            repos.saveAndFlush(issue.getRepo());
+        });
+        assertThat(dispatch.claimReadyStart(id).claimed()).isTrue();
+        markCompleted(id);
+    }
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     private com.dbbaskette.issuebot.service.git.GitOperationsService gitOperations;
     @org.junit.jupiter.api.io.TempDir java.nio.file.Path workspace;
@@ -210,6 +264,12 @@ class IssueDispatchTransactionManagerTest {
     @AfterEach
     void restoreRunningProcessingState() {
         new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            // This class intentionally commits transactions. Do not leak occupied worker slots
+            // into subsequent tests that exercise the global capacity gate.
+            issues.findByStatus(IssueStatus.IN_PROGRESS).forEach(issue -> {
+                issue.setStatus(IssueStatus.COMPLETED);
+                issues.save(issue);
+            });
             ProcessingControl control = controls.findById(ProcessingControl.SINGLETON_ID)
                     .orElseGet(() -> controls.save(new ProcessingControl(ProcessingState.RUNNING)));
             control.setState(ProcessingState.RUNNING);

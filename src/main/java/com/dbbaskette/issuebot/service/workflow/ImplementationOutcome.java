@@ -125,7 +125,10 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
                 + "State any untested risk or uncertainty in limitations; "
                 + "IssueBot saves your commands and results for independent review; it does not rerun local tests. "
                 + "Use CONTINUE if work remains and this session can continue. Use BLOCKED for missing "
-                + "dependencies, permissions, or information that cannot be resolved within this sandbox. "
+                + "dependencies, permissions, or information that cannot be resolved within this sandbox after safe, relevant diagnosis and recovery. "
+                + "Do not stop at the first environment error: inspect documented fixture setup, network/dependency availability, "
+                + "and Docker/database reachability when relevant, and attempt permitted remedies. Report those attempts and the precise "
+                + "operator action needed if still blocked; do not weaken tests, substitute pinned dependencies, or bypass permissions. "
                 + "Do not claim COMPLETE because the CLI turn ended.\n";
     }
 }

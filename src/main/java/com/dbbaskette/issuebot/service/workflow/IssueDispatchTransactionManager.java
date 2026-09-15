@@ -132,6 +132,11 @@ public class IssueDispatchTransactionManager {
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        if (actor == Actor.AUTOMATION && (issue.isOnHold() || !issue.getRepo().isAutoStart())) {
+            return IssueDispatchService.ClaimResult.rejected(issue.isOnHold()
+                    ? "Issue is on hold. Start it explicitly or release the hold."
+                    : "Repository autostart is off. Start this issue explicitly.");
+        }
         if (issue.getStatus() != IssueStatus.PENDING && issue.getStatus() != IssueStatus.QUEUED) {
             return IssueDispatchService.ClaimResult.rejected(
                     "Cannot start issue in " + issue.getStatus() + " status");
@@ -139,6 +144,7 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setOnHold(false);
         issue.setManualDispatch(false);
         return claim(issue, actor, Action.START);
     }
@@ -158,6 +164,9 @@ public class IssueDispatchTransactionManager {
         if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
         TrackedIssue issue = lockIssueAndRepo(issueId);
         if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        if (actor == Actor.AUTOMATION && issue.isOnHold()) {
+            return IssueDispatchService.ClaimResult.rejected("Issue is on hold");
+        }
         if (issue.getStatus() != IssueStatus.READY_TO_START) {
             return IssueDispatchService.ClaimResult.rejected(
                     "Cannot start issue in " + issue.getStatus() + " status");
@@ -169,8 +178,22 @@ public class IssueDispatchTransactionManager {
         String serialized = repositoryGate(issue);
         if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setOnHold(false);
         issue.setManualDispatch(false);
         return claim(issue, actor, Action.START);
+    }
+
+    @Transactional
+    public String setHold(Long issueId, boolean hold) {
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return "Issue not found";
+        if (issue.getStatus() != IssueStatus.PENDING && issue.getStatus() != IssueStatus.QUEUED
+                && issue.getStatus() != IssueStatus.READY_TO_START && issue.getStatus() != IssueStatus.BLOCKED) {
+            return "Only waiting issues can be held; running work is not interrupted";
+        }
+        issue.setOnHold(hold);
+        issues.saveAndFlush(issue);
+        return null;
     }
 
     @Transactional
