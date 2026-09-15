@@ -1,0 +1,17 @@
+{
+  "name": "IssueBot",
+  "install": "git config --global commit.gpgsign false && ./mvnw --batch-mode -q clean package -DskipTests",
+  "terminals": [
+    {
+      "name": "issuebot",
+      "command": "java -jar target/issuebot.jar",
+      "description": "Runs the IssueBot Spring Boot dashboard on http://localhost:8090"
+    }
+  ],
+  "ports": [
+    {
+      "name": "dashboard",
+      "port": 8090
+    }
+  ]
+}
