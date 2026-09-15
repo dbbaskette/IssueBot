@@ -884,6 +884,18 @@ public class IssueController {
                 status, repoId, q, page, redirectAttributes);
     }
 
+    @PostMapping("/bulk/hold")
+    public String bulkHold(@RequestParam(required = false) List<Long> ids,
+                           @RequestParam(defaultValue = "true") boolean hold,
+                           @RequestParam(required = false) String status,
+                           @RequestParam(required = false) Long repoId,
+                           @RequestParam(required = false) String q,
+                           @RequestParam(required = false) Integer page,
+                           RedirectAttributes redirectAttributes) {
+        return handleBulk(ids, issue -> dispatchService.setHold(issue.getId(), hold),
+                hold ? "Held" : "Released hold on", status, repoId, q, page, redirectAttributes);
+    }
+
     @PostMapping("/bulk/retry")
     public String bulkRetry(@RequestParam(required = false) List<Long> ids,
                             @RequestParam(required = false) String status,
@@ -1450,6 +1462,8 @@ public class IssueController {
         model.addAttribute("latestAgentOutputPreview", latestCurrentRun == null ? null
                 : previewAgentOutput(latestCurrentRun.getClaudeOutput(), 600));
         model.addAttribute("currentRunIteration", latestCurrentRun);
+        model.addAttribute("implementationSummary",
+                com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(issue, latestCurrentRun, objectMapper));
         // A previous run's passing review must not look like the result of a fresh attempt.
         model.addAttribute("currentReviewAvailable", requestedReviewAttempt != null
                 || (latestCurrentRun != null && latestCurrentRun.getReviewPassed() != null));

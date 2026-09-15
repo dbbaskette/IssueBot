@@ -889,6 +889,8 @@ class IssueDetailPlanReviewRenderTest {
                                List<Iteration> reviewAttempts) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
+        context.setVariable("implementationSummary", com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(
+                issue, null, new com.fasterxml.jackson.databind.ObjectMapper()));
         context.setVariable("latestIteration", reviewAttempts.isEmpty() ? null : reviewAttempts.getFirst());
         context.setVariable("iterations", reviewAttempts.reversed());
         context.setVariable("iterationsNewestFirst", reviewAttempts);

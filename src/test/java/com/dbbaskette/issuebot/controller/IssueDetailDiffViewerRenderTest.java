@@ -58,6 +58,8 @@ class IssueDetailDiffViewerRenderTest {
     private String render(TrackedIssue issue, List<Iteration> iterations) {
         WebContext context = new WebContext(webExchange, Locale.US);
         context.setVariable("issue", issue);
+        context.setVariable("implementationSummary", com.dbbaskette.issuebot.service.workflow.ImplementationSummary.from(
+                issue, null, new com.fasterxml.jackson.databind.ObjectMapper()));
         context.setVariable("latestIteration", iterations.isEmpty() ? null : iterations.get(iterations.size() - 1));
         context.setVariable("iterations", iterations);
         // Iteration History (#90) reads this newest-first view; mirrors IssueController.

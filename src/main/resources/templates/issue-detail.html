@@ -16,6 +16,7 @@
                     <a href="/issues" hx-get="/issues" hx-target="#content" hx-push-url="true"
                        data-navigation-return class="btn btn-ghost btn-sm">&larr; Back to queue</a>
                     <h2 th:text="${'#' + issue.issueNumber + ' — ' + issue.issueTitle}">Issue Title</h2>
+                    <p th:if="${issue.onHold}" class="text-sm"><span class="status status-pending">On hold</span> Automatic start is disabled for this issue. Start explicitly or release its hold from the queue.</p>
                     <div class="flex gap-1 text-sm" style="flex-wrap:wrap">
                         <a class="repo-link" target="_blank" rel="noopener"
                            th:href="'https://github.com/' + ${issue.repo.owner} + '/' + ${issue.repo.name} + '/issues/' + ${issue.issueNumber}"
@@ -690,16 +691,25 @@
             <section th:fragment="implementation-summary(oob)" id="implementation-summary" class="panel mb-3 stage-evidence" data-stage-output="work"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
                 <div class="panel-header"><h3>Implementation</h3>
-                    <span class="status" th:classappend="${currentRunIteration != null and currentRunIteration.implementationSucceeded == true ? 'status-completed' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'status-in_progress' : 'status-pending')}"
-                          th:text="${currentRunIteration != null and currentRunIteration.implementationSucceeded == true ? 'Finished' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'Working' : 'Not started')}">Not started</span></div>
+                    <span class="status" th:classappend="${implementationSummary.css()}"
+                          th:text="${implementationSummary.label()}">Not started</span></div>
                 <div class="panel-body">
-                    <p class="text-sm text-muted" th:if="${currentRunIteration == null}">Coding has not started.</p>
-                    <p class="text-sm" th:if="${currentRunIteration != null}" th:text="${currentRunIteration.implementationSucceeded == true ? 'Coding finished for the latest attempt.' : (issue.currentPhase == 'IMPLEMENTATION' and issue.status.name() == 'IN_PROGRESS' ? 'The coding agent is working.' : 'See the latest attempt for its coding result.')}">Coding in progress.</p>
+                    <p class="text-sm" th:text="${implementationSummary.message()}">Coding has not started.</p>
+                    <p class="text-sm" th:if="${not #strings.isEmpty(implementationSummary.limitations())}"><strong>Remaining verification: </strong><span th:text="${implementationSummary.limitations()}"></span></p>
+                    <details th:if="${not #lists.isEmpty(implementationSummary.checks())}" th:attr="data-ui-state-key=${'issue:' + issue.id + ':implementation-checks'}">
+                        <summary>Agent-reported checks</summary>
+                        <dl th:each="check : ${implementationSummary.checks()}">
+                            <dt><code th:text="${check.command()}"></code></dt><dd th:text="${check.result()}"></dd>
+                        </dl>
+                    </details>
                     <p class="text-sm text-muted" th:if="${effectiveHarnessId == 'codex'}"
                        th:text="${issue.subagentsAllowed ? 'Codex mode: subagents allowed when useful (not necessarily used).' : 'Codex mode: single agent; subagents disabled.'}">Codex mode: single agent.</p>
                     <a th:if="${issue.status.name() == 'IN_PROGRESS' and issue.currentPhase == 'IMPLEMENTATION'}" href="#live-terminal-panel">Live output</a>
                     <a th:if="${currentRunIteration != null}" href="#iteration-history">Attempt details</a>
-                    <pre class="stage-saved-output" th:if="${currentRunIteration != null and currentRunIteration.claudeOutput != null}" th:text="${currentRunIteration.claudeOutput}">Coding output</pre>
+                    <details th:if="${currentRunIteration != null and currentRunIteration.claudeOutput != null}" th:attr="data-ui-state-key=${'issue:' + issue.id + ':implementation-output'}">
+                        <summary>Full coding output</summary>
+                        <pre class="stage-saved-output" th:text="${currentRunIteration.claudeOutput}">Coding output</pre>
+                    </details>
                     <p class="text-sm text-muted" th:if="${currentRunIteration == null and latestAgentOutputPreview != null}">Last saved coding output from an earlier attempt:</p>
                     <pre class="stage-saved-output" th:if="${currentRunIteration == null and latestAgentOutputPreview != null}" th:text="${latestAgentOutputPreview}">Earlier coding output</pre>
                 </div>

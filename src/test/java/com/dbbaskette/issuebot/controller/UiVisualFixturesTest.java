@@ -101,6 +101,27 @@ class UiVisualFixturesTest {
     @TempDir Path tempDir;
 
     @Test
+    void bulkHoldAndReleasePreservePlansAndSkipActiveWorkWhileProcessingIsStopped() throws Exception {
+        var repo = repos.saveAndFlush(new WatchedRepo("fixture", "holds"));
+        var waiting = issues.saveAndFlush(issue(repo, 1, "Waiting", IssueStatus.QUEUED, null));
+        var active = issues.saveAndFlush(issue(repo, 2, "Active", IssueStatus.IN_PROGRESS, "IMPLEMENTATION"));
+        when(processingControl.isRunning()).thenReturn(false);
+        mvc.perform(post("/issues/bulk/hold").with(csrf())
+                        .param("ids", waiting.getId().toString(), active.getId().toString()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash()
+                        .attribute("success", "Held 1, skipped 1 (not eligible)"));
+        assertThat(issues.findById(waiting.getId()).orElseThrow().isOnHold()).isTrue();
+        assertThat(issues.findById(active.getId()).orElseThrow().isOnHold()).isFalse();
+        mvc.perform(post("/issues/bulk/hold").with(csrf()).param("hold", "false")
+                        .param("ids", waiting.getId().toString()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().is3xxRedirection());
+        assertThat(issues.findById(waiting.getId()).orElseThrow().isOnHold()).isFalse();
+        assertThat(issues.findById(active.getId()).orElseThrow().getCurrentPhase()).isEqualTo("IMPLEMENTATION");
+        verify(harnessService, never()).probeCliAvailability(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
     void rendersAndExportsEveryScreenStateWithoutLiveProbesOrMutations() throws Exception {
         when(polling.isEnabled()).thenReturn(false);
         when(processingControl.mode()).thenReturn(ProcessingState.STOPPED);
@@ -156,6 +177,22 @@ class UiVisualFixturesTest {
         repo.setLessonsEnabled(true);
         repo.setIssueBudgetUsd(new BigDecimal("15.00"));
         repo = repos.saveAndFlush(repo);
+        TrackedIssue blockedImplementation = issue(repo, 170, "Verify PostgreSQL-backed storage", IssueStatus.FAILED, null);
+        blockedImplementation = issues.saveAndFlush(blockedImplementation);
+        var blockedIteration = new Iteration(blockedImplementation, 1);
+        blockedIteration.setImplementationOutcome("BLOCKED");
+        blockedIteration.setClaudeOutput("Work retained.\nISSUEBOT_IMPLEMENTATION_V1: "
+                + "{\"status\":\"BLOCKED\",\"summary\":\"PostgreSQL fixture unavailable after checking Docker reachability\","
+                + "\"checks\":[{\"command\":\"./mvnw verify\",\"result\":\"24 passed; database tests skipped\"}],"
+                + "\"limitations\":\"Database integration remains unverified\"}");
+        iterations.saveAndFlush(blockedIteration);
+        String blockedPage = render(get("/issues/" + blockedImplementation.getId()), 200);
+        assertThat(blockedPage).contains("Implementation attempt retained", "Agent-reported checks",
+                "24 passed; database tests skipped", "Full coding output");
+        put(routes, "/fixtures/blocked-implementation", "blocked-implementation", blockedPage, blockedPage);
+        var heldIssue = issue(repo, 171, "Waiting for the operator to choose the next task", IssueStatus.QUEUED, null);
+        heldIssue.setOnHold(true);
+        issues.saveAndFlush(heldIssue);
         lessons.saveAndFlush(new RepoLesson(repo.getId(),
                 "Claim durable checkpoints before dispatching a worker.", 138));
 

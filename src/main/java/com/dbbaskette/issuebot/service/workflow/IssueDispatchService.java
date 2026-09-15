@@ -58,6 +58,11 @@ public class IssueDispatchService {
         return control.isRunning();
     }
 
+    public String setHold(Long issueId, boolean hold) {
+        return transactions == null ? "Transactional queue control is unavailable"
+                : transactions.setHold(issueId, hold);
+    }
+
     public ClaimResult claimImplementationExtension(Long issueId, Long iterationId, int newLimit, int capacity) {
         return transactions == null ? ClaimResult.rejected("Transactional recovery is unavailable")
                 : transactions.claimImplementationExtension(issueId, iterationId, newLimit, capacity);
@@ -89,6 +94,9 @@ public class IssueDispatchService {
     }
 
     private ClaimResult claimStartLoaded(TrackedIssue issue) {
+        if (issue.isOnHold() || !issue.getRepo().isAutoStart()) {
+            return ClaimResult.rejected("Issue is on hold or repository autostart is off");
+        }
         return claimStartLoaded(issue, IssueDispatchTransactionManager.StartMutation.none());
     }
 
@@ -100,6 +108,7 @@ public class IssueDispatchService {
         String serialized = repositoryGate(issue);
         if (serialized != null) return ClaimResult.rejected(serialized);
         mutation.apply(issue);
+        issue.setOnHold(false);
         issue.setStatus(IssueStatus.IN_PROGRESS);
         issue.setSuspensionReason(null);
         issues.save(issue);

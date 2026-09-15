@@ -4042,6 +4042,9 @@ button.glass-pill, a.glass-pill, .toast-dismiss, .notif-bell-btn, .mobile-menu-b
 [data-stage-browser] .workflow-stage-detail { display: none; }
 .stage-selection-bar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-top: .8rem; color: var(--text-secondary); font-size: .85rem; }
 .stage-saved-output { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; padding: 1rem; background: var(--bg); border-radius: .5rem; }
+.stage-evidence dl { margin: 1rem 0; }
+.stage-evidence dt code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.stage-evidence dd { margin: .35rem 0 0; overflow-wrap: anywhere; }
 [data-stage-browser] .review-history-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: .75rem; }
 [data-stage-browser] .review-history-header > div { min-width: 0; text-align: left; }
 [data-stage-browser] .review-history-header > .status { justify-self: end; }

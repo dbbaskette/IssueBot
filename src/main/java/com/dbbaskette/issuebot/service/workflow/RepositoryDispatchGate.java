@@ -14,6 +14,8 @@ public final class RepositoryDispatchGate {
     }
 
     public static TrackedIssue blocker(TrackedIssue issue, List<TrackedIssue> active) {
+        active = active.stream().filter(candidate -> !candidate.isOnHold()
+                || candidate.getStatus() != IssueStatus.READY_TO_START).toList();
         TrackedIssue readyOwner = active.stream()
                 .filter(candidate -> candidate.getStatus() == IssueStatus.READY_TO_START)
                 .min(Comparator.comparingInt(TrackedIssue::getIssueNumber))

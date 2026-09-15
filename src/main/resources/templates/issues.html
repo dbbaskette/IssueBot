@@ -61,6 +61,10 @@
          a confirm modal first since it's destructive (skips the workflow entirely). -->
     <div id="bulk-action-bar" class="bulk-action-bar" hidden>
         <span id="bulk-selected-count" class="bulk-count">0 selected</span>
+        <button type="submit" form="bulk-form" formaction="/issues/bulk/hold" formmethod="post"
+                class="btn btn-outline btn-sm" title="Keep waiting issues from starting automatically. Running work is unchanged.">Hold selected</button>
+        <button type="submit" form="bulk-form" formaction="/issues/bulk/hold?hold=false" formmethod="post"
+                class="btn btn-outline btn-sm">Release hold</button>
         <button type="submit" form="bulk-form" formaction="/issues/bulk/start" formmethod="post"
                 class="btn btn-primary btn-sm"
                 th:disabled="${processingMode?.name() != 'RUNNING'}"
@@ -177,11 +181,7 @@
         hx-target="#content"
         hx-push-url="true">
         <td class="checkbox-col">
-            <input th:if="${issue.status.name() != 'READY_TO_START'
-                          and (decompositionMemberships == null
-                               or decompositionMemberships[issue.id] == null
-                               or decompositionMemberships[issue.id].current())}"
-                   type="checkbox" class="bulk-select" name="ids" th:value="${issue.id}"
+            <input type="checkbox" class="bulk-select" name="ids" th:value="${issue.id}"
                    onclick="event.stopPropagation()"
                    th:attr="aria-label='Select issue #' + ${issue.issueNumber}">
             <span th:if="${issue.status.name() == 'READY_TO_START'
@@ -189,7 +189,7 @@
                              and decompositionMemberships[issue.id] != null
                              and not decompositionMemberships[issue.id].current())}"
                   class="bulk-read-only" role="note"
-                  th:attr="aria-label='Issue #' + ${issue.issueNumber} + ' is reserved and cannot be selected for bulk actions'">Reserved</span>
+                  th:attr="aria-label='Issue #' + ${issue.issueNumber} + ' has a workflow reservation'">Reserved</span>
         </td>
         <td class="queue-repo-cell" th:text="${issue.repo.fullName()}">owner/repo</td>
         <td class="queue-number-cell" th:text="${'#' + issue.issueNumber}">#1</td>
@@ -210,10 +210,11 @@
             </span>
             <span class="queue-next-action" th:if="${nextActions != null and nextActions[issue.id] != null}">
                 <strong>Next:</strong>
-                <span th:text="${dependencyReasons != null and dependencyReasons[issue.id] != null ? dependencyReasons[issue.id] : nextActions[issue.id].summary()}">Review the issue.</span>
+                <span th:text="${issue.onHold ? 'On hold. Release hold for automatic scheduling, or Start explicitly. Dependencies still apply.' : (dependencyReasons != null and dependencyReasons[issue.id] != null ? dependencyReasons[issue.id] : nextActions[issue.id].summary())}">Review the issue.</span>
             </span>
         </td>
         <td class="issue-status-cell">
+            <span th:if="${issue.onHold}" class="status status-pending">On hold</span>
             <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
                   th:text="${humanize.status(issue.status)}">Pending</span>
             <span class="failure-inline"

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.21.0 — 2026-09-15
+
+- Hold and release selected waiting issues without deleting plans; explicit Start releases a hold after dependency checks.
+- Apply repository autostart to every workflow, leaving current work running while new issues wait for manual start.
+- Show retained blocked implementation results and readable agent-reported checks instead of misleading Not started status.
+- Require safe environment diagnosis and recovery before a harness reports an infrastructure blocker; preserve permission and test-integrity boundaries.
+
 ## 0.20.0 — 2026-09-15
 
 - Use the durable coding-harness completion loop for every implementation path, preserving sessions after failed resumes instead of silently restarting.

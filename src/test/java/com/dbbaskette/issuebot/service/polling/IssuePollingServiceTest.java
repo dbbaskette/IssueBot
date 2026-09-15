@@ -670,6 +670,9 @@ class IssuePollingServiceTest {
 
         TrackedIssue issue96 = new TrackedIssue(testRepo, 96, "Sub-task");
         issue96.setStatus(IssueStatus.QUEUED);
+        TrackedIssue held = new TrackedIssue(testRepo, 95, "Held predecessor without a dependency");
+        held.setStatus(IssueStatus.QUEUED);
+        held.setOnHold(true);
 
         when(repoRepository.findAll()).thenReturn(List.of(testRepo));
         when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
@@ -683,7 +686,7 @@ class IssuePollingServiceTest {
 
         // Stateful mocks reflect issue96's live status as the cycle mutates it.
         when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.QUEUED))
-                .thenAnswer(inv -> issue96.getStatus() == IssueStatus.QUEUED ? List.of(issue96) : List.of());
+                .thenAnswer(inv -> issue96.getStatus() == IssueStatus.QUEUED ? List.of(held, issue96) : List.of(held));
         when(issueRepository.findByRepoAndStatus(testRepo, IssueStatus.PENDING))
                 .thenAnswer(inv -> issue96.getStatus() == IssueStatus.PENDING ? List.of(issue96) : List.of());
         when(issueRepository.findByRepoAndStatusIn(eq(testRepo), anyList()))
@@ -694,6 +697,8 @@ class IssuePollingServiceTest {
         // Dispatched exactly once and claimed IN_PROGRESS (not left PENDING for resume to re-grab).
         verify(workflowService, times(1)).processIssueAsync(issue96);
         assertEquals(IssueStatus.IN_PROGRESS, issue96.getStatus());
+        assertEquals(IssueStatus.QUEUED, held.getStatus());
+        assertTrue(held.isOnHold());
     }
 
     @Test
@@ -789,9 +794,11 @@ class IssuePollingServiceTest {
         verify(workflowService, never()).processIssueAsync(any());
     }
 
-    @Test
-    void evaluateSingleIssueFromWebhook_underCapacityButAutoStartOff_returnsQueued() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.dbbaskette.issuebot.model.WorkflowPolicy.class)
+    void evaluateSingleIssueFromWebhook_underCapacityButAutoStartOff_returnsQueued(com.dbbaskette.issuebot.model.WorkflowPolicy policy) {
         WatchedRepo manualRepo = new WatchedRepo("owner", "manual-repo");
+        manualRepo.setWorkflowPolicy(policy);
         manualRepo.setAutoStart(false);
         properties.setMaxConcurrentIssues(3);
         when(issueRepository.countByStatus(IssueStatus.IN_PROGRESS)).thenReturn(0L);
