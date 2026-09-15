@@ -1,5 +1,10 @@
 # Harness-owned implementation, IssueBot-owned final gates
 
+Historical design: local gate ownership was superseded in 0.19.0. See
+[the 0.20.0 capability and recovery contract](../../harness-capabilities.md) and
+[the approved completion spec](2026-09-15-harness-ownership-completion.md) for current
+behavior. The historical local-command requirements below are not current instructions.
+
 Status: core implementation loop shipped in 0.9.0; exact-tree verification evidence,
 strict read-only independent review, and the broader UI migration remain follow-up work.
 This changes the execution-ownership decision in the

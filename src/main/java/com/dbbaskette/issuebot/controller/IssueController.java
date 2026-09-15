@@ -413,6 +413,21 @@ public class IssueController {
         return "redirect:/issues/" + id;
     }
 
+    @PostMapping("/{id}/extend-implementation")
+    public String extendImplementation(@PathVariable Long id, @RequestParam Long iterationId,
+            @RequestParam int handoffLimit, RedirectAttributes redirectAttributes) {
+        var claim = dispatchService.claimImplementationExtension(id, iterationId, handoffLimit,
+                properties.getMaxConcurrentIssues());
+        if (!claim.claimed()) redirectAttributes.addFlashAttribute("error", claim.reason());
+        else {
+            eventService.log("IMPLEMENTATION_EXTENDED", "Operator extended coding handoff limit to " + handoffLimit,
+                    claim.issue().getRepo(), claim.issue());
+            workflowService.processIssueAsync(claim.issue());
+            redirectAttributes.addFlashAttribute("success", "Continuing the retained coding session");
+        }
+        return "redirect:/issues/" + id;
+    }
+
     /**
      * Per-row "Retry with defaults" quick action (#87) — the row-Start pattern applied to
      * FAILED/COOLDOWN rows: no instructions, no model/budget/plan-first overrides, no session
@@ -1444,6 +1459,9 @@ public class IssueController {
         model.addAttribute("pollSelectionJson", pollSelection.toString());
         model.addAttribute("handoffRecoveryAvailable",
                 ImplementationHandoffRecovery.available(issue, latestCurrentRun, objectMapper));
+        model.addAttribute("implementationLimitRecoveryAvailable",
+                com.dbbaskette.issuebot.service.workflow.ImplementationLimitRecovery.available(issue, latestCurrentRun));
+        model.addAttribute("retainedImplementation", latestCurrentRun);
         model.addAttribute("completionRecoveryAvailable",
                 CompletionRecovery.available(issue, latestCurrentRun));
         model.addAttribute("localVerificationRequired", false);

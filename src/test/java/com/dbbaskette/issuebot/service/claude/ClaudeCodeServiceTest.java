@@ -80,6 +80,8 @@ class ClaudeCodeServiceTest {
         var result = new com.dbbaskette.issuebot.service.harness.HarnessExecutionResult();
         doReturn(result).when(runner).executeTask(anyString(), any(), anyString(), anyString(),
                 anyInt(), anyInt(), any(), any(), any(), any());
+        doReturn(result).when(runner).executeCommand(anyList(), anyString(), any(), anyString(),
+                anyInt(), anyInt(), any(), any(), any(), anyBoolean());
         assertSame(result, runner.executeImplementation("implement", java.nio.file.Path.of("."),
                 "claude-opus-4-8", "xhigh", "session-1", 7L, null));
         assertSame(result, runner.executeReview("review", java.nio.file.Path.of("."),
@@ -89,9 +91,11 @@ class ClaudeCodeServiceTest {
         verify(runner).executeTask("implement", java.nio.file.Path.of("."), "claude-opus-4-8", "xhigh",
                 properties.getClaudeCode().getMaxTurnsPerInvocation(), properties.getClaudeCode().getTimeoutMinutes(),
                 null, "session-1", 7L, null);
-        verify(runner).executeTask("review", java.nio.file.Path.of("."), "claude-opus-4-8", "high",
-                properties.getClaudeCode().getReviewMaxTurns(), properties.getClaudeCode().getReviewTimeoutMinutes(),
-                null, null, 7L, null);
+        verify(runner).executeCommand(argThat(command -> command.contains("Read,Glob,Grep")
+                        && command.contains("--safe-mode") && !command.contains("--dangerously-skip-permissions")),
+                eq("review"), eq(java.nio.file.Path.of(".")), eq("claude-opus-4-8"),
+                eq(properties.getClaudeCode().getReviewMaxTurns()), eq(properties.getClaudeCode().getReviewTimeoutMinutes()),
+                isNull(), eq(7L), isNull(), eq(true));
         verify(runner).executeTask("classify", java.nio.file.Path.of("."), "claude-haiku-4-5", "default",
                 properties.getClaudeCode().getReviewMaxTurns(), properties.getClaudeCode().getReviewTimeoutMinutes(),
                 null, null, null, null);

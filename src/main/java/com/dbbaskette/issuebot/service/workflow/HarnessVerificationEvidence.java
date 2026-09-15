@@ -22,6 +22,18 @@ public record HarnessVerificationEvidence(String status, String text) {
             }
             StringBuilder text = new StringBuilder("Agent-reported test evidence; IssueBot did not rerun these commands.\n");
             text.append("Handoff: ").append(outcome.status()).append("\n");
+            if (iteration.getHandoffTreeIdentity() != null) {
+                text.append("IssueBot-observed handoff tree: ").append(iteration.getHandoffTreeIdentity())
+                        .append("\nObserved at: ").append(iteration.getHandoffObservedAt())
+                        .append("\nThis observation does not prove tests ran against that tree.\n");
+            }
+            if (outcome.evidence() == null) {
+                text.append("Tested tree, environment, and timestamp: not supplied; freshness is unverified.\n");
+            } else {
+                text.append("Claimed tested tree: ").append(outcome.evidence().testedTree())
+                        .append("\nClaimed environment: ").append(outcome.evidence().environment())
+                        .append("\nClaimed tested at: ").append(outcome.evidence().testedAt()).append("\n");
+            }
             for (var check : outcome.checks()) {
                 text.append("\nCommand: ").append(check.command())
                         .append("\nReported result: ").append(check.result()).append("\n");

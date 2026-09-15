@@ -23,6 +23,8 @@ import static com.dbbaskette.issuebot.service.history.DecisionDraft.*;
  */
 @Service
 public class IssueDispatchTransactionManager {
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.dbbaskette.issuebot.service.git.GitOperationsService gitOperations;
     @org.springframework.beans.factory.annotation.Autowired private DecisionProducer decisions;
     @org.springframework.beans.factory.annotation.Autowired private PrerequisiteStatusService prerequisites;
 
@@ -66,6 +68,53 @@ public class IssueDispatchTransactionManager {
         this.iterations = iterations;
         this.decompositionReservations =
                 new DecompositionReservationService(decompositionGroups, decompositionChildren);
+    }
+
+    @Transactional
+    public IssueDispatchService.ClaimResult claimImplementationExtension(Long issueId, Long expectedIterationId,
+                                                                        int newLimit, int maxConcurrentIssues) {
+        String pause = rejectIfNotRunning();
+        if (pause != null) return IssueDispatchService.ClaimResult.rejected(pause);
+        TrackedIssue issue = lockIssueAndRepo(issueId);
+        if (issue == null) return IssueDispatchService.ClaimResult.rejected("Issue not found");
+        Iteration iteration = iterations.findCurrentForUpdate(issueId, issue.getCurrentIteration()).orElse(null);
+        if (!ImplementationLimitRecovery.available(issue, iteration)
+                || !java.util.Objects.equals(iteration.getId(), expectedIterationId)) {
+            return IssueDispatchService.ClaimResult.rejected("This retained coding attempt is not available to extend");
+        }
+        if (newLimit <= iteration.getImplementationHandoffLimit() || newLimit > 100) {
+            return IssueDispatchService.ClaimResult.rejected("Choose a larger handoff limit, up to 100");
+        }
+        String prerequisite = prerequisites.retryRejection();
+        if (prerequisite != null) return IssueDispatchService.ClaimResult.rejected(prerequisite);
+        if (issues.countByStatus(IssueStatus.IN_PROGRESS) >= maxConcurrentIssues)
+            return IssueDispatchService.ClaimResult.rejected("Global concurrency limit reached");
+        String serialized = repositoryGate(issue);
+        if (serialized != null) return IssueDispatchService.ClaimResult.rejected(serialized);
+        try (var git = gitOperations.openRepo(issue.getRepo().getOwner(), issue.getRepo().getName())) {
+            if (!issue.getBranchName().equals(git.getRepository().getBranch()))
+                return IssueDispatchService.ClaimResult.rejected("The retained workspace branch changed; inspect before recovery");
+            String identity = WorkspaceEvidenceIdentity.capture(git.getRepository().getWorkTree().toPath());
+            if (iteration.getHandoffTreeIdentity() == null || !iteration.getHandoffTreeIdentity().startsWith("sha256:")
+                    || !iteration.getHandoffTreeIdentity().equals(identity))
+                return IssueDispatchService.ClaimResult.rejected("The retained workspace contents changed or cannot be verified; inspect before recovery");
+        } catch (Exception missing) {
+            return IssueDispatchService.ClaimResult.rejected("The retained workspace is unavailable; repair it before recovery");
+        }
+        iteration.setImplementationHandoffLimit(newLimit);
+        iteration.setImplementationStopReason(null);
+        iteration.setCompletedAt(null);
+        issue.setClaudeSessionId(iteration.getClaudeSessionId());
+        issue.setStatus(IssueStatus.IN_PROGRESS);
+        issue.setCurrentPhase("IMPLEMENTATION");
+        issue.setCooldownUntil(null);
+        issue.setLastFailureReason(null);
+        issue.setSuspensionReason(null);
+        iterations.saveAndFlush(iteration);
+        TrackedIssue saved = issues.saveAndFlush(issue);
+        decisions.accepted(saved, decisions.transitionKey(saved, Action.RESUME),
+                Actor.OPERATOR, Action.RESUME, Reason.USER_REQUEST);
+        return IssueDispatchService.ClaimResult.claimed(saved);
     }
 
     @Transactional

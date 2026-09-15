@@ -650,6 +650,7 @@ class IntegrationWorkflowTest {
         TrackedIssue issue = createTestIssue();
         issue.setCurrentReviewIteration(0);
         issue.setResolvedReviewModel("claude-sonnet-5"); // normally set by processIssue; we call the phase directly
+        issue.setResolvedImplModel("claude-opus-4-8");
         com.dbbaskette.issuebot.model.Iteration iter = new com.dbbaskette.issuebot.model.Iteration(issue, 1);
         java.util.concurrent.atomic.AtomicInteger seenAtCall = new java.util.concurrent.atomic.AtomicInteger(-1);
         when(codeReviewService.reviewCode(any(Path.class), anyString(), anyString(),

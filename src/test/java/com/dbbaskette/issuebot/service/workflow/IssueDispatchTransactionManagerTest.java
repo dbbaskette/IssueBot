@@ -45,6 +45,9 @@ import static org.mockito.Mockito.*;
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class IssueDispatchTransactionManagerTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    private com.dbbaskette.issuebot.service.git.GitOperationsService gitOperations;
+    @org.junit.jupiter.api.io.TempDir java.nio.file.Path workspace;
     @org.springframework.test.context.bean.override.mockito.MockitoBean private PrerequisiteStatusService prerequisites;
 
     @Autowired private IssueDispatchTransactionManager dispatch;
@@ -57,6 +60,51 @@ class IssueDispatchTransactionManagerTest {
     @Autowired private DecompositionGroupRepository decompositionGroups;
     @Autowired private DecompositionChildRepository decompositionChildren;
     @MockitoSpyBean private IssueGuidanceRepository guidance;
+
+    @Test
+    void limitExtensionKeepsRunAndRejectsDuplicateClaims() throws Exception {
+        Long issueId = seedApprovedIssue(IssueStatus.FAILED, 0);
+        try (var git = org.eclipse.jgit.api.Git.init().setDirectory(workspace.toFile()).call()) {
+            java.nio.file.Files.writeString(workspace.resolve("code.txt"), "retained work");
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage("fixture").setAuthor("Test", "test@example.invalid").call();
+            git.checkout().setCreateBranch(true).setName("issuebot/retained").call();
+        }
+        when(gitOperations.openRepo(anyString(), anyString()))
+                .thenAnswer(ignored -> org.eclipse.jgit.api.Git.open(workspace.toFile()));
+        Long iterationId = new TransactionTemplate(transactionManager).execute(tx -> {
+            var issue = issues.findById(issueId).orElseThrow();
+            issue.setCurrentIteration(1);
+            issue.setBranchName("issuebot/retained");
+            issues.saveAndFlush(issue);
+            var iteration = new Iteration(issue, 1, issue.getWorkflowRun(), issue.getApprovedPlanningVersion().getId());
+            iteration.setImplementationHandoffLimit(8);
+            iteration.setImplementationStopReason("HANDOFF_LIMIT");
+            iteration.setImplementationOutcome("CONTINUE");
+            iteration.setClaudeSessionId("retained-session");
+            iteration.setHandoffTreeIdentity(WorkspaceEvidenceIdentity.capture(workspace));
+            iteration.setCompletedAt(LocalDateTime.now());
+            return iterations.saveAndFlush(iteration).getId();
+        });
+        assertThat(dispatch.claimImplementationExtension(issueId, iterationId, 8, 10).claimed()).isFalse();
+        java.nio.file.Files.writeString(workspace.resolve("code.txt"), "externally changed");
+        assertThat(dispatch.claimImplementationExtension(issueId, iterationId, 16, 10).reason())
+                .contains("contents changed");
+        java.nio.file.Files.writeString(workspace.resolve("code.txt"), "retained work");
+        var claim = dispatch.claimImplementationExtension(issueId, iterationId, 16, 10);
+        assertThat(claim.claimed()).isTrue();
+        assertThat(claim.issue().getWorkflowRun()).isZero();
+        assertThat(claim.issue().getCurrentIteration()).isEqualTo(1);
+        assertThat(claim.issue().getClaudeSessionId()).isEqualTo("retained-session");
+        assertThat(claim.issue().getCurrentPhase()).isEqualTo("IMPLEMENTATION");
+        assertThat(iterations.findById(iterationId).orElseThrow().getCompletedAt()).isNull();
+        assertThat(dispatch.claimImplementationExtension(issueId, iterationId, 24, 10).claimed()).isFalse();
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+            var saved = issues.findById(issueId).orElseThrow();
+            saved.setStatus(IssueStatus.COMPLETED);
+            issues.saveAndFlush(saved);
+        });
+    }
 
     @Test
     void oldRejectedCompleteHandoffResumesTrustedChecksWithoutNewCodingAttempt() {

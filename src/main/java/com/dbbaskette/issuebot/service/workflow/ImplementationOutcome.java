@@ -9,7 +9,12 @@ import java.util.List;
 
 /** A provider-neutral claim about plan progress; IssueBot's gates still establish correctness. */
 public record ImplementationOutcome(Status status, String summary, List<Check> checks,
-                                    String limitations) {
+                                    String limitations, Evidence evidence) {
+    public ImplementationOutcome(Status status, String summary, List<Check> checks, String limitations) {
+        this(status, summary, checks, limitations, null);
+    }
+    /** Claims made by the harness, distinct from IssueBot's observation of the handoff tree. */
+    public record Evidence(String testedTree, String environment, String testedAt) {}
     public enum Status { COMPLETE, CONTINUE, BLOCKED }
     public record Check(String command, String result) {}
 
@@ -34,7 +39,7 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
         if (json == null) throw new IllegalArgumentException("Coding harness omitted " + MARKER.trim());
         try {
             JsonNode root = mapper.readTree(json);
-            if (!root.isObject() || root.size() != 4
+            if (!root.isObject() || (root.size() != 4 && !(root.size() == 5 && root.has("evidence")))
                     || !root.has("status") || !root.has("summary")
                     || !root.has("checks") || !root.has("limitations")) {
                 throw new IllegalArgumentException("Outcome must contain status, summary, checks, and limitations");
@@ -74,8 +79,22 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
             if (!limitationNode.isTextual() || limitationNode.asText().length() > 2000) {
                 throw new IllegalArgumentException("Outcome limitations must be text up to 2000 characters");
             }
+            Evidence evidence = null;
+            if (root.has("evidence")) {
+                JsonNode node = root.get("evidence");
+                if (!node.isObject() || node.size() != 3) {
+                    throw new IllegalArgumentException("Evidence must contain testedTree, environment, and testedAt");
+                }
+                for (String field : List.of("testedTree", "environment", "testedAt")) {
+                    if (!node.path(field).isTextual() || node.path(field).asText().length() > 2000) {
+                        throw new IllegalArgumentException("Evidence " + field + " must be text up to 2000 characters");
+                    }
+                }
+                evidence = new Evidence(node.path("testedTree").asText().strip(),
+                        node.path("environment").asText().strip(), node.path("testedAt").asText().strip());
+            }
             return new ImplementationOutcome(status, summary, List.copyOf(checks),
-                    limitationNode.asText().strip());
+                    limitationNode.asText().strip(), evidence);
         } catch (IllegalArgumentException invalid) {
             throw invalid;
         } catch (Exception invalid) {
@@ -85,20 +104,23 @@ public record ImplementationOutcome(Status status, String summary, List<Check> c
 
     public static String promptContract() {
         return "\n## Required implementation outcome\n"
-                + "Own the full approved-plan implementation loop: implement coherent slices, run focused checks, "
+                + "Own the full issue implementation loop, including the approved plan when supplied: implement coherent slices, run focused checks, "
                 + "repair failures, and continue until every acceptance criterion is met or an external blocker "
                 + "requires operator guidance. Do not finish a turn with a progress-only narrative. "
                 + "End your final message with exactly one single-line marker of this form:\n"
                 + MARKER + "{\"status\":\"COMPLETE|CONTINUE|BLOCKED\",\"summary\":\"what is done and why independent checks should pass, or what is blocked\","
                 + "\"checks\":[{\"command\":\"exact command\",\"result\":\"PASS or failure summary\"}],"
-                + "\"limitations\":\"remaining limitations or empty string\"}\n"
+                + "\"limitations\":\"remaining limitations or empty string\","
+                + "\"evidence\":{\"testedTree\":\"tested commit/tree and any uncommitted or untracked changes\","
+                + "\"environment\":\"relevant runtime, dependencies and fixture limitations\","
+                + "\"testedAt\":\"actual check timestamp, or unknown\"}}\n"
                 + "Replace the status placeholder with exactly one of COMPLETE, CONTINUE, or BLOCKED; "
                 + "the example's vertical bars are not a valid status. Put the JSON on one line. "
                 + "Each check must have only text command and result fields; commands may be up to "
                 + MAX_CHECK_COMMAND_LENGTH + " characters and results up to " + MAX_CHECK_RESULT_LENGTH
                 + " characters. Commands must be exact and runnable; put a long command in a repository test script "
                 + "and report the short invocation. Summarize lengthy results, not commands. "
-                + "Use COMPLETE only when the plan is implemented, appropriate local checks pass (or no meaningful check exists and limitations explains why), "
+                + "Use COMPLETE only when the assigned requirements are implemented, appropriate local checks pass (or no meaningful check exists and limitations explains why), "
                 + "and you have an evidence-based reason to expect IssueBot's independent gates to pass. "
                 + "State any untested risk or uncertainty in limitations; "
                 + "IssueBot saves your commands and results for independent review; it does not rerun local tests. "

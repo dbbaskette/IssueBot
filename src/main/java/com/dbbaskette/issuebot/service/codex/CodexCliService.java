@@ -55,7 +55,7 @@ public class CodexCliService {
                                            Long issueId, Consumer<String> callback) {
         return executeTask(prompt, directory, model, null,
                 properties.getCodexCli().getReviewReasoningEffort(),
-                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, false);
+                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, true);
     }
 
     public HarnessExecutionResult executeUtility(String prompt, Path directory, Consumer<String> callback) {
@@ -84,7 +84,7 @@ public class CodexCliService {
                                                 String reasoningLevel, Long issueId,
                                                 Consumer<String> callback) {
         return executeTask(prompt, directory, model, null, reasoningLevel,
-                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, false);
+                properties.getCodexCli().getReviewTimeoutMinutes(), issueId, callback, true);
     }
 
     public HarnessExecutionResult executeUtility(String prompt, Path directory, String model,

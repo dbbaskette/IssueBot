@@ -9,6 +9,10 @@ import org.springframework.stereotype.Component;
 /** Legacy model-only view over the shared tuple resolver. */
 @Component
 public class ModelResolver {
+    public void validateIndependentModels(TrackedIssue issue, String harnessId) {
+        com.dbbaskette.issuebot.service.harness.IndependentReviewPolicy.requireDistinct(
+                harnessId, issue.getResolvedImplModel(), harnessId, issue.getResolvedReviewModel());
+    }
     private final IssueBotProperties properties;
     private final HarnessSelectionService selections;
 

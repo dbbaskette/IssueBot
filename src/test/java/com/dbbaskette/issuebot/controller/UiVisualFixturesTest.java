@@ -359,6 +359,8 @@ class UiVisualFixturesTest {
                 "Integrity verified", "setup:skill-provenance",
                 com.dbbaskette.issuebot.service.harness.ManagedSkillBundle.bundled().identity().digest());
         put(routes, "/setup", "setup", setup, setupFragment);
+        assertThat(setup).contains("Harness capabilities and restrictions", "Read-only sandbox",
+                "Prompt-emulated managed stage guidance", "setup:harness-capabilities");
 
         String prereqs = render(get("/setup/prereqs"), 200);
         assertThat(prereqs).contains("Not verified");
@@ -416,6 +418,28 @@ class UiVisualFixturesTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyString());
 
+        TrackedIssue limited = issue(repo, 190, "Continue a retained implementation session",
+                IssueStatus.FAILED, null);
+        limited.setCurrentIteration(1);
+        limited.setBranchName("issuebot/190-retained");
+        limited.setLastFailureReason("Coding harness reached its handoff limit");
+        limited = issues.saveAndFlush(limited);
+        Iteration retained = new Iteration(limited, 1, limited.getWorkflowRun(), null);
+        retained.setImplementationHandoffLimit(8);
+        retained.setImplementationTurnCount(8);
+        retained.setImplementationStopReason("HANDOFF_LIMIT");
+        retained.setImplementationOutcome("CONTINUE");
+        retained.setClaudeSessionId("synthetic-session");
+        retained.setCompletedAt(LocalDateTime.now());
+        iterations.saveAndFlush(retained);
+        String retainedPage = render(get("/issues/" + limited.getId()), 200);
+        assertThat(retainedPage).contains("Continue the retained coding session", "Extend and continue",
+                "name=\"iterationId\"", "name=\"handoffLimit\"");
+        assertThat(retainedPage).contains("Extend the limit and continue your retained coding session.",
+                "implementation-extension-", "hx-preserve=\"true\"")
+                .doesNotContain("The cause is unavailable. Inspect the evidence");
+        put(routes, "/issues/" + limited.getId(), "issue-retained-session", retainedPage,
+                render(hx(get("/issues/" + limited.getId())), 200));
         export(routes);
     }
 

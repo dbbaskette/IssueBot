@@ -7,6 +7,27 @@ import java.util.Objects;
 @Entity
 @Table(name = "iterations")
 public class Iteration {
+    @Column(name = "implementation_harness_id", length = 40)
+    private String implementationHarnessId;
+    public String getImplementationHarnessId() { return implementationHarnessId; }
+    public void setImplementationHarnessId(String value) { implementationHarnessId = value; }
+    @Column(name = "implementation_handoff_limit")
+    private Integer implementationHandoffLimit;
+    @Column(name = "implementation_stop_reason", length = 40)
+    private String implementationStopReason;
+    @Column(name = "handoff_tree_identity", length = 128)
+    private String handoffTreeIdentity;
+    @Column(name = "handoff_observed_at")
+    private LocalDateTime handoffObservedAt;
+
+    public Integer getImplementationHandoffLimit() { return implementationHandoffLimit; }
+    public void setImplementationHandoffLimit(Integer value) { implementationHandoffLimit = value; }
+    public String getImplementationStopReason() { return implementationStopReason; }
+    public void setImplementationStopReason(String value) { implementationStopReason = value; }
+    public String getHandoffTreeIdentity() { return handoffTreeIdentity; }
+    public void setHandoffTreeIdentity(String value) { handoffTreeIdentity = value; }
+    public LocalDateTime getHandoffObservedAt() { return handoffObservedAt; }
+    public void setHandoffObservedAt(LocalDateTime value) { handoffObservedAt = value; }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

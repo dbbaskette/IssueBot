@@ -27,6 +27,10 @@ import java.util.Optional;
 
 @Controller
 public class SetupController {
+    @org.springframework.web.bind.annotation.ModelAttribute("managedHarnessProfiles")
+    public java.util.List<com.dbbaskette.issuebot.service.harness.ManagedHarnessProfile> managedHarnessProfiles() {
+        return com.dbbaskette.issuebot.service.harness.ManagedHarnessProfile.profiles();
+    }
     @org.springframework.web.bind.annotation.ModelAttribute("managedSkillBundle")
     public com.dbbaskette.issuebot.service.harness.ManagedSkillBundle.Identity managedSkillBundle() {
         return com.dbbaskette.issuebot.service.harness.ManagedSkillBundle.bundled().identity();

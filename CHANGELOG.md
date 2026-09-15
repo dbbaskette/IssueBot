@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.20.0 — 2026-09-15
+
+- Use the durable coding-harness completion loop for every implementation path, preserving sessions after failed resumes instead of silently restarting.
+- Retain handoff-limit and resumable-timeout attempts with explicit Extend and continue controls, bounded extensions, and workspace freshness checks.
+- Require distinct implementation/review models, preserve the implementation provider on each attempt, and restrict review to read-only capabilities.
+- Capture reported test-tree/environment claims separately from observed workspace identity; reject changed handoff trees before review and return focused verification requests to the coding session.
+- Clarify managed capability profiles in Setup and remove conflicting local-verification ownership instructions.
+
 ## 0.19.0 — 2026-09-14
 
 - Make local testing the coding harness's responsibility: IssueBot no longer requires configured commands or reruns tests. Existing commands become optional harness guidance.

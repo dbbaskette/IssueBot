@@ -40,6 +40,31 @@ public class ImplementationTurnCheckpointService {
     }
 
     @Transactional
+    public int initializeLimit(Long issueId, Long iterationId, int configuredLimit) {
+        Iteration iteration = lock(issueId, iterationId).iteration();
+        if (iteration.getImplementationHandoffLimit() == null) {
+            iteration.setImplementationHandoffLimit(Math.max(1, Math.min(100, configuredLimit)));
+            iterations.saveAndFlush(iteration);
+        }
+        return iteration.getImplementationHandoffLimit();
+    }
+
+    @Transactional
+    public void observeWorkspace(Long issueId, Long iterationId, String identity) {
+        Iteration iteration = lock(issueId, iterationId).iteration();
+        iteration.setHandoffTreeIdentity(identity);
+        iteration.setHandoffObservedAt(LocalDateTime.now());
+        iterations.saveAndFlush(iteration);
+    }
+
+    @Transactional
+    public void stop(Long issueId, Long iterationId, String reason) {
+        Iteration iteration = lock(issueId, iterationId).iteration();
+        iteration.setImplementationStopReason(reason);
+        iterations.saveAndFlush(iteration);
+    }
+
+    @Transactional
     public void record(Long issueId, Long iterationId, int ordinal,
                        ImplementationOutcome outcome, HarnessExecutionResult result) {
         Locked locked = lock(issueId, iterationId);

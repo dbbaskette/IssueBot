@@ -207,7 +207,6 @@ public class IssueWorkflowService {
                 ? null : trackedIssue.getApprovedPlanningVersion().getId();
         boolean recoveringHarnessImplementation = "IMPLEMENTATION".equalsIgnoreCase(
                 trackedIssue.getCurrentPhase())
-                && recoveringPlanId != null
                 && trackedIssue.getCurrentIteration() > 0
                 && iterationRepository.findFirstByIssueIdAndIterationNumOrderByIdDesc(
                         trackedIssue.getId(), trackedIssue.getCurrentIteration())
@@ -257,6 +256,14 @@ public class IssueWorkflowService {
         if (!preserveStageRouting) {
             trackedIssue.setResolvedImplModel(modelResolver.implementationModel(trackedIssue, executionHarness));
             trackedIssue.setResolvedReviewModel(modelResolver.reviewModel(trackedIssue, executionHarness));
+            if (trackedIssue.getCurrentIteration() == 0) {
+                try {
+                    modelResolver.validateIndependentModels(trackedIssue, executionHarness);
+                } catch (com.dbbaskette.issuebot.service.harness.HarnessSelectionException invalid) {
+                    failSetup(trackedIssue, repo, issueNumber, invalid);
+                    return;
+                }
+            }
         }
         issueRepository.save(trackedIssue);
         eventService.log("WORKFLOW_STARTED", "Starting issue workflow (models: "
@@ -508,6 +515,7 @@ public class IssueWorkflowService {
                         trackedIssue.getWorkflowRun(),
                         approvedPlan == null ? null : approvedPlan.id());
                 iteration.setImplModel(trackedIssue.getResolvedImplModel());
+                iteration.setImplementationHarnessId(trackedIssue.getResolvedHarnessId());
                 iterationRepository.save(iteration);
             }
 
@@ -530,7 +538,7 @@ public class IssueWorkflowService {
 
             // === Phase 2: Implementation (selected coding harness) ===
             HarnessExecutionResult implResult = null;
-            boolean harnessOwnedImplementation = approvedPlan != null && implementationTurnCheckpoints != null;
+            boolean harnessOwnedImplementation = implementationTurnCheckpoints != null;
             if (resumePhase == null) {
                 try {
                     implResult = harnessOwnedImplementation
@@ -564,7 +572,7 @@ public class IssueWorkflowService {
                             "Implementation failed: " + e.getMessage(), repo, trackedIssue);
                     if (harnessOwnedImplementation) {
                         iterationManager.handleHarnessBlocked(trackedIssue,
-                                "Coding harness could not checkpoint the approved-plan run: " + e.getMessage());
+                                "Coding harness could not checkpoint the implementation run: " + e.getMessage());
                         return;
                     }
                     previousFeedback = "Implementation failed: " + e.getMessage();
@@ -649,6 +657,10 @@ public class IssueWorkflowService {
 
             // Save harness evidence before a verification/CI approval pause so the operator can inspect it.
             if (runsPhase(resumePhase, RecoveryResumePhase.LOCAL_CHECKS)) {
+                if (iteration.getHandoffTreeIdentity() == null) {
+                    iteration.setHandoffTreeIdentity(WorkspaceEvidenceIdentity.capture(repoPath));
+                    iteration.setHandoffObservedAt(LocalDateTime.now());
+                }
                 HarnessVerificationEvidence evidence = HarnessVerificationEvidence.capture(
                         iteration, implResult, objectMapper);
                 iteration.setLocalCheckResult(evidence.status());
@@ -1199,7 +1211,7 @@ public class IssueWorkflowService {
         HarnessExecutionResult result = harnessService.executeImplementation(prompt, repoPath,
                 trackedIssue.getResolvedImplModel(), resumeId, issueId, line -> streamClaudeLog(issueId, line));
 
-        if (!result.isSuccess() && resumed && approvedPlan == null) {
+        if (!result.isSuccess() && resumed && approvedPlan == null && implementationTurnCheckpoints == null) {
             // An operator cancellation kills the CLI process, which surfaces here as a
             // failed invocation — that must NOT trigger the cold fallback (it would spawn
             // a brand-new process the operator just asked to stop). Return the failed
@@ -1256,6 +1268,8 @@ public class IssueWorkflowService {
             String previousCiLogs, String lastRunFailureReason,
             ApprovedPlanContext approvedPlan, String legacyApprovedPlan) {
         Iteration persisted = iterationRepository.findById(iteration.getId()).orElseThrow();
+        int persistedLimit = implementationTurnCheckpoints.initializeLimit(issue.getId(), iteration.getId(), maxImplementationTurns);
+        int handoffLimit = persistedLimit > 0 ? persistedLimit : maxImplementationTurns;
         List<ImplementationTurnLedger.Turn> turns = new ArrayList<>(
                 ImplementationTurnLedger.read(persisted.getImplementationTurnsJson(), objectMapper));
         if (persisted.getClaudeSessionId() != null && !persisted.getClaudeSessionId().isBlank()) {
@@ -1275,15 +1289,17 @@ public class IssueWorkflowService {
             if (persisted.getLocalCheckFailure() != null) {
                 previousCiLogs = persisted.getLocalCheckFailure();
             } else {
-                previousAssessment = "Continue the approved plan in this same session. "
+                previousAssessment = "Continue the assigned requirements in this same session. "
                         + "Previous progress: " + last.outcome().summary();
             }
         }
-        while (turns.size() < maxImplementationTurns) {
+        while (turns.size() < handoffLimit) {
             BigDecimal budget = issue.effectiveBudgetUsd();
             BigDecimal spent = budget == null ? null : costRepository.totalCostForIssue(issue);
             if (cancellationService.isCancelled(issue.getId())
                     || (spent != null && spent.compareTo(budget) > 0)) {
+                implementationTurnCheckpoints.stop(issue.getId(), iteration.getId(),
+                        cancellationService.isCancelled(issue.getId()) ? "CANCELLED" : "BUDGET_EXHAUSTED");
                 return ImplementationTurnLedger.aggregate(turns, false,
                         "Implementation stopped by cancellation or budget limit");
             }
@@ -1295,12 +1311,21 @@ public class IssueWorkflowService {
             HarnessExecutionResult turn = phaseImplementation(issue, details, repoPath,
                     previousDiff, previousAssessment, previousCiLogs, lastRunFailureReason,
                     approvedPlan, legacyApprovedPlan);
+            implementationTurnCheckpoints.observeWorkspace(issue.getId(), iteration.getId(),
+                    WorkspaceEvidenceIdentity.capture(repoPath));
             if (!turn.isSuccess()) {
+                boolean resumableTimeout = turn.isTimedOut()
+                        && ((turn.getSessionId() != null && !turn.getSessionId().isBlank())
+                            || (issue.getClaudeSessionId() != null && !issue.getClaudeSessionId().isBlank()));
+                if (resumableTimeout && (turn.getSessionId() == null || turn.getSessionId().isBlank()))
+                    turn.setSessionId(issue.getClaudeSessionId());
+                implementationTurnCheckpoints.stop(issue.getId(), iteration.getId(),
+                        resumableTimeout ? "INVOCATION_TIMEOUT" : "INVOCATION_FAILED");
                 String reason = turn.getErrorMessage() == null || turn.getErrorMessage().isBlank()
                         ? "Coding harness invocation failed"
                         : truncate(turn.getErrorMessage(), 1000);
                 ImplementationOutcome blocked = new ImplementationOutcome(
-                        ImplementationOutcome.Status.BLOCKED, reason, List.of(),
+                        resumableTimeout ? ImplementationOutcome.Status.CONTINUE : ImplementationOutcome.Status.BLOCKED, reason, List.of(),
                         "Resume or reset only after the harness environment is repaired.");
                 implementationTurnCheckpoints.record(issue.getId(), iteration.getId(),
                         turns.size() + 1, blocked, turn);
@@ -1325,21 +1350,24 @@ public class IssueWorkflowService {
                     "Coding turn " + turns.size() + ": " + outcome.status() + " — "
                             + truncate(outcome.summary(), 300), issue.getRepo(), issue);
             if (outcome.status() == ImplementationOutcome.Status.COMPLETE) {
+                implementationTurnCheckpoints.stop(issue.getId(), iteration.getId(), null);
                 return ImplementationTurnLedger.aggregate(turns, true, null);
             }
             if (outcome.status() == ImplementationOutcome.Status.BLOCKED) {
+                implementationTurnCheckpoints.stop(issue.getId(), iteration.getId(), "BLOCKED");
                 return ImplementationTurnLedger.aggregate(turns, false,
                         "Coding harness blocked: " + outcome.summary());
             }
             previousDiff = null;
             previousCiLogs = null;
-            previousAssessment = "Continue the approved plan in this same session. "
+            previousAssessment = "Continue the assigned requirements in this same session. "
                     + "Previous progress: " + outcome.summary();
             lastRunFailureReason = null;
         }
+        implementationTurnCheckpoints.stop(issue.getId(), iteration.getId(), "HANDOFF_LIMIT");
         return ImplementationTurnLedger.aggregate(turns, false,
-                "Coding harness reached the " + maxImplementationTurns
-                        + "-turn limit before completing the approved plan");
+                "Coding harness reached the " + handoffLimit
+                        + "-handoff limit before completing the assigned requirements; implementation is incomplete");
     }
 
     /**
@@ -1648,6 +1676,17 @@ public class IssueWorkflowService {
                                              List<String> criteria,
                                              ApprovedPlanContext approvedPlan,
                                              String priorReviewContext) {
+        String currentIdentity = WorkspaceEvidenceIdentity.capture(repoPath);
+        if (iteration.getHandoffTreeIdentity() != null
+                && iteration.getHandoffTreeIdentity().startsWith("sha256:")
+                && !iteration.getHandoffTreeIdentity().equals(currentIdentity)) {
+            throw new IllegalStateException("Workspace changed after coding handoff; refresh implementation evidence before review");
+        }
+        com.dbbaskette.issuebot.service.harness.IndependentReviewPolicy.requireDistinct(
+                iteration.getImplementationHarnessId() == null ? trackedIssue.getResolvedHarnessId()
+                        : iteration.getImplementationHarnessId(),
+                iteration.getImplModel() == null ? trackedIssue.getResolvedImplModel() : iteration.getImplModel(),
+                harnessService.harnessId(), trackedIssue.getResolvedReviewModel());
         WatchedRepo repo = trackedIssue.getRepo();
         String reviewModelLabel = trackedIssue.getResolvedReviewModel() != null
                 ? trackedIssue.getResolvedReviewModel() : "the review model";
