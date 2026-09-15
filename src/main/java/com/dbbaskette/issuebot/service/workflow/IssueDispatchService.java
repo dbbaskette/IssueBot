@@ -58,6 +58,11 @@ public class IssueDispatchService {
         return control.isRunning();
     }
 
+    public ClaimResult claimImplementationExtension(Long issueId, Long iterationId, int newLimit, int capacity) {
+        return transactions == null ? ClaimResult.rejected("Transactional recovery is unavailable")
+                : transactions.claimImplementationExtension(issueId, iterationId, newLimit, capacity);
+    }
+
     public synchronized ClaimResult claimStart(Long issueId) {
         if (transactions != null) return transactions.claimStart(issueId);
         if (!control.isRunning()) return ClaimResult.rejected("Processing is paused");

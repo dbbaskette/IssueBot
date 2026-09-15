@@ -79,8 +79,11 @@ public final class ManagedSkillBundle {
                 + "Follow the task's exact response format. Planning returns artifacts without writing files "
                 + "or asking for approval. Implementation completes only its authorized scope. Review is "
                 + "read-only and returns the requested review result; do not delegate another review. "
-                + "IssueBot owns approvals, workspaces, stage transitions, final verification, commits, "
-                + "publication and merges. Do not perform those operations or start another skill workflow. "
+                + "The implementation harness owns all local implementation, test discovery, test execution, "
+                + "debugging and repair until the requirements are satisfied. IssueBot does not run local tests. "
+                + "IssueBot owns approvals, workspace allocation, stage transitions, CI observation, independent review, commits, "
+                + "publication and merges. Do not perform those outer operations or restart the outer approval workflow. "
+                + "Use relevant project instructions and available approved capabilities inside your assigned stage. "
                 + "References to interactive helpers are not instructions to discover personal plugins. "
                 + "Use the provided verification ownership and report real blockers in the required response.\n\n"
                 + "## Stage task\n\n" + task;

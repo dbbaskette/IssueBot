@@ -1,6 +1,6 @@
 # Operator workflow and testing ownership
 
-This describes the implemented 0.19.0 workflow. The [harness-owned implementation design](superpowers/specs/2026-09-12-harness-owned-implementation-design.md) records the broader target and remaining limits. Saved repository settings, rather than defaults alone, determine a particular run.
+This describes the implemented 0.20.0 workflow. The [managed harness capability contract](harness-capabilities.md) describes execution, recovery, and review boundaries. Saved repository settings, rather than defaults alone, determine a particular run.
 
 ## From `agent-ready` to completion
 
@@ -15,7 +15,7 @@ An open labeled issue in a watched repository is discovered by polling or the la
 
 Planning uses a protected workspace before feature-branch setup, requests assumptions, meaningful alternatives, a simplest sufficient design, and coherent implementation milestones, and verifies the source was unchanged. Both artifacts are generated in one call. Revisions preserve previous versions and supply operator feedback. This is not a multi-turn design conversation or a durable per-plan-task execution ledger.
 
-The implementation provider receives the whole issue and approved artifacts, repository custom instructions, optional lessons, and correction feedback. For approved plans it owns focused implement/test/fix work inside one resumable coding run. Each CLI handoff must say `COMPLETE`, `CONTINUE`, or `BLOCKED` in a versioned response; ending a CLI process alone is not completion. IssueBot checkpoints each turn and its cost before another turn begins, and resumes the same session after `CONTINUE` or restart. The default limit is eight handoff turns per implementation attempt. The normal outer order is:
+The implementation provider receives the whole issue, approved artifacts when present, repository custom instructions, optional lessons, and correction feedback. Every implementation path uses one resumable coding run for implement/test/fix work. Each CLI handoff must say `COMPLETE`, `CONTINUE`, or `BLOCKED`; process exit alone is not completion. IssueBot checkpoints turns and costs before continuation. The default is eight handoffs per attempt. Retained limit/timeout sessions can be explicitly extended up to 100 after workspace and dispatch checks, without resetting budgets. The normal outer order is:
 
 `harness implements and tests → save evidence → commit/push → CI if enabled → create/reuse PR → independent review → focused correction or completion`
 
@@ -36,11 +36,11 @@ Managed merge requires a passed review, the reviewed commit still matching the P
 | Focused implementation tests | Coding harness owns the inner loop and reports exact command/result claims in its structured handoff; IssueBot does not trust those claims as final verification. |
 | Suggested local commands | Optional operator guidance to the harness; IssueBot never executes them. |
 | CI | GitHub, observed by IssueBot; clean-environment or platform coverage may justify command overlap. |
-| Independent review | Fresh model reasoning. It receives result summaries, not a command/tree/environment evidence ledger. Review is not technically read-only today, and anti-rerun behavior is not enforced. |
+| Independent review | A distinct configured model in a fresh read-only session, consuming reported command/tree/environment claims and separately observed handoff identity. Focused execution requests return to the coding session. |
 | Merge freshness | IssueBot checks reviewed SHA and remote check status without rerunning tests. |
 | Correction | Changed code passes through the applicable gates again; prior success is not proof for a new tree. |
 
-The shared prompt bundle assigns local testing to the coding harness and evidence assessment to independent review. Evidence is persisted on the iteration and restored for stage/review recovery; no test command is executed from a model response. Native approved-plan sessions remain resumable. A model's bare success claim is not proof of correctness: the reviewer must assess coverage against the actual code and approved plan. Review is prompt-directed not to run another test suite; that is not an OS-level read-only enforcement boundary.
+The shared prompt bundle assigns local testing to the coding harness and evidence assessment to independent review. Evidence is persisted on the iteration and restored for recovery; no test command is executed from a model response. Reported claims are distinct from IssueBot's content fingerprint and observation time. A changed fingerprint blocks review. Codex review uses its read-only sandbox; Claude review is limited to Read/Glob/Grep in safe mode. A model's bare success claim is not proof of correctness: review assesses actual code, requirements, coverage, and limitations.
 
 For repository development, use coherent increments and focused checks at milestones, then one combined relevant suite before release. Reviewers should consume supplied evidence and request only a justified focused check for a specific doubt. Evidence reuse requires an unchanged tree and relevant environment; changed corrections still go through applicable gates.
 

@@ -30,7 +30,12 @@ public class StageModelSelectionService {
             }
             return new HarnessSelection(null, null, null);
         }
-        return selections.resolve(harnessId, model, reasoning);
+        HarnessSelection selected = selections.resolve(harnessId, model, reasoning);
+        if (stage == WorkflowStage.REVIEW && issue.getResolvedImplModel() != null) {
+            IndependentReviewPolicy.requireDistinct(issue.getResolvedHarnessId(), issue.getResolvedImplModel(),
+                    selected.harnessId(), selected.modelId());
+        }
+        return selected;
     }
 
     public void validate(HarnessSelection selection) {

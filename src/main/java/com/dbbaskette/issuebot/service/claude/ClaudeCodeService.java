@@ -69,9 +69,9 @@ public class ClaudeCodeService {
                                                 String model, String reasoningLevel,
                                                 Long issueId, Consumer<String> lineCallback) {
         IssueBotProperties.ClaudeCodeConfig config = properties.getClaudeCode();
-        return executeTask(prompt, workingDirectory, model, reasoningLevel,
-                config.getReviewMaxTurns(), config.getReviewTimeoutMinutes(),
-                null, null, issueId, lineCallback);
+        return executeCommand(buildPlanningCommand(prompt, model, reasoningLevel, config.getReviewMaxTurns()),
+                prompt, workingDirectory, model, config.getReviewMaxTurns(),
+                config.getReviewTimeoutMinutes(), null, issueId, lineCallback, true);
     }
 
     public HarnessExecutionResult executeUtility(String prompt, Path workingDirectory,
@@ -115,7 +115,7 @@ public class ClaudeCodeService {
                 issueId, lineCallback, false);
     }
 
-    private HarnessExecutionResult executeCommand(List<String> command, String prompt,
+    HarnessExecutionResult executeCommand(List<String> command, String prompt,
                                              Path workingDirectory, String model,
                                              int maxTurns, int timeoutMinutes,
                                              String resumeSessionId, Long issueId,

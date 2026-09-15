@@ -93,7 +93,7 @@
                               th:text="${workflowStepper.selectedStage.label + ' · ' + workflowStepper.selectedStage.stateText}">Implementation · Working</span>
                     </div>
                     <span class="eyebrow">Next step</span>
-                    <p id="next-action-heading" th:text="${nextAction != null ? nextAction.summary() : humanize.status(issue.status)}">Review the current issue state.</p>
+                    <p id="next-action-heading" th:text="${implementationLimitRecoveryAvailable == true ? 'Extend the limit and continue your retained coding session.' : (nextAction != null ? nextAction.summary() : humanize.status(issue.status))}">Review the current issue state.</p>
                     <a th:if="${nextAction != null and nextAction.hasAction() and not nextAction.actionRequired() and nextAction.href().contains('#')}"
                        class="text-sm issue-decision__evidence" th:href="${nextAction.href()}"
                        th:text="${nextAction.ctaLabel()}">View evidence</a>
@@ -148,7 +148,24 @@
                  th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
             <details th:if="${issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN' or issue.status.name() == 'BLOCKED'}"
                      class="recovery-options" th:attr="data-ui-state-key=${'issue:' + issue.id + ':recovery-options'}">
-                <summary>Recovery options — review findings and choose the next step</summary>
+                <summary th:text="${implementationLimitRecoveryAvailable == true ? 'Continue retained work or reset' : 'Recovery options — review findings and choose the next step'}">Recovery options</summary>
+    <section th:if="${implementationLimitRecoveryAvailable}" class="panel mb-3">
+        <div class="panel-header"><h3>Continue the retained coding session</h3></div>
+        <div class="panel-body">
+            <p>The harness reached a handoff or invocation time limit before finishing. Your code and session are retained.
+                Increasing this limit does not increase the budget or remove the invocation timeout.</p>
+            <form th:action="@{'/issues/' + ${issue.id} + '/extend-implementation'}" method="post"
+                  th:id="${'implementation-extension-' + issue.id + '-' + retainedImplementation.id}" hx-preserve="true">
+                <input type="hidden" name="iterationId" th:value="${retainedImplementation.id}">
+                <label for="implementationHandoffLimit">New total handoff limit</label>
+                <input id="implementationHandoffLimit" name="handoffLimit" type="number" max="100" required
+                       th:min="${retainedImplementation.implementationHandoffLimit + 1}"
+                       th:value="${T(java.lang.Math).min(100, retainedImplementation.implementationHandoffLimit + 8)}">
+                <button type="submit" class="btn btn-primary"
+                        th:disabled="${processingMode?.name() != 'RUNNING'}">Extend and continue</button>
+            </form>
+        </div>
+    </section>
     <section th:if="${handoffRecoveryAvailable}" class="panel mb-3">
         <div class="panel-body">
             <h3>Coding finished; IssueBot rejected the status report</h3>
@@ -181,7 +198,7 @@
 
             <section class="panel mb-3 failure-recovery recovery-card"
                      th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN')
-                                  and showPlanGuidance != true and completionRecoveryAvailable != true}">
+                                  and showPlanGuidance != true and completionRecoveryAvailable != true and implementationLimitRecoveryAvailable != true}">
                 <div class="panel-header">
                     <h3>Recovery</h3>
                     <span class="status status-failed">Needs attention</span>

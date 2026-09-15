@@ -193,6 +193,107 @@ class IssueWorkflowServiceTest {
     }
 
     private IssueWorkflowService workflowService;
+
+    @Test
+    void timeoutRetainsIncompleteSessionWithoutAutomaticallyRetrying() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "implementationTurnCheckpoints", checkpoint);
+        var issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Timeout");
+        issue.setId(1L);
+        issue.setResolvedImplModel("gpt-6-astra");
+        var iteration = new Iteration(issue, 1, 0, null);
+        iteration.setId(2L);
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        var timeout = new HarnessExecutionResult();
+        timeout.setTimedOut(true);
+        timeout.setSessionId("partial-session");
+        timeout.setErrorMessage("Invocation timed out");
+        when(harnessService.executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any()))
+                .thenReturn(timeout);
+        var result = workflowService.phaseHarnessOwnedImplementation(issue, iteration,
+                objectMapper.createObjectNode().put("title", "Timeout"), Path.of("repo"),
+                null, null, null, null, null, null);
+        assertFalse(result.isSuccess());
+        assertEquals("partial-session", result.getSessionId());
+        verify(checkpoint).stop(1L, 2L, "INVOCATION_TIMEOUT");
+        verify(checkpoint).record(eq(1L), eq(2L), eq(1),
+                argThat(outcome -> outcome.status() == ImplementationOutcome.Status.CONTINUE), eq(timeout));
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any());
+        verifyNoInteractions(codeReviewService);
+    }
+
+    @Test
+    void persistedHandoffLimitStopsBeforeReviewWithoutStartingAnotherInvocation() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(workflowService, "implementationTurnCheckpoints", checkpoint);
+        var issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Limited");
+        issue.setId(1L);
+        issue.setResolvedImplModel("gpt-6-astra");
+        var iteration = new Iteration(issue, 1, 0, null);
+        iteration.setId(2L);
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        when(checkpoint.initializeLimit(eq(1L), eq(2L), anyInt())).thenReturn(1);
+        when(harnessService.executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any()))
+                .thenReturn(ownedTurn("CONTINUE", "limited-session", 10));
+        var result = workflowService.phaseHarnessOwnedImplementation(issue, iteration,
+                objectMapper.createObjectNode().put("title", "Limited"), Path.of("repo"),
+                null, null, null, null, null, null);
+        assertFalse(result.isSuccess());
+        assertTrue(result.getErrorMessage().contains("incomplete"));
+        verify(checkpoint).stop(1L, 2L, "HANDOFF_LIMIT");
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any());
+        verifyNoInteractions(codeReviewService);
+    }
+
+    @Test
+    void nonPlanFirstImplementationContinuesAndRetainsSession() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                workflowService, "implementationTurnCheckpoints", checkpoint);
+        WatchedRepo repo = new WatchedRepo("owner", "repo");
+        TrackedIssue issue = new TrackedIssue(repo, 42, "Issue without a plan");
+        issue.setId(1L);
+        issue.setCurrentIteration(1);
+        issue.setResolvedImplModel("gpt-6-astra");
+        Iteration iteration = new Iteration(issue, 1, 0, null);
+        iteration.setId(2L);
+        when(iterationRepository.findById(2L)).thenReturn(Optional.of(iteration));
+        when(harnessService.executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any()))
+                .thenReturn(ownedTurn("CONTINUE", "non-plan-session", 100),
+                        ownedTurn("COMPLETE", "non-plan-session", 200));
+        var result = workflowService.phaseHarnessOwnedImplementation(issue, iteration,
+                objectMapper.createObjectNode().put("title", "Issue without a plan").put("body", "Requirements"),
+                Path.of("repo"), null, null, null, null, null, null);
+        assertTrue(result.isSuccess());
+        assertEquals(1, issue.getCurrentIteration());
+        verify(checkpoint, times(2)).record(eq(1L), eq(2L), anyInt(), any(), any());
+        verify(harnessService).executeImplementation(anyString(), any(), anyString(),
+                eq("non-plan-session"), eq(1L), any());
+        verifyNoInteractions(codeReviewService);
+    }
+
+    @Test
+    void durableNonPlanResumeFailureDoesNotDiscardSessionOrLaunchColdAgent() {
+        var checkpoint = mock(ImplementationTurnCheckpointService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                workflowService, "implementationTurnCheckpoints", checkpoint);
+        TrackedIssue issue = new TrackedIssue(new WatchedRepo("owner", "repo"), 42, "Resume");
+        issue.setId(1L);
+        issue.setResolvedImplModel("gpt-6-astra");
+        issue.setClaudeSessionId("retained-session");
+        HarnessExecutionResult failure = new HarnessExecutionResult();
+        failure.setSuccess(false);
+        failure.setErrorMessage("Timed out");
+        when(harnessService.executeImplementation(anyString(), any(), anyString(), any(), eq(1L), any()))
+                .thenReturn(failure);
+        var result = workflowService.phaseImplementation(issue,
+                objectMapper.createObjectNode().put("title", "Resume"), Path.of("repo"),
+                null, null, null, null, null, null);
+        assertFalse(result.isSuccess());
+        assertEquals("retained-session", issue.getClaudeSessionId());
+        verify(harnessService, times(1)).executeImplementation(anyString(), any(), anyString(),
+                eq("retained-session"), eq(1L), any());
+    }
     private ObjectMapper objectMapper;
 
     // Named mocks needed by tests that introspect interactions
@@ -1671,6 +1772,8 @@ class IssueWorkflowServiceTest {
         TrackedIssue issue = new TrackedIssue(repo, 7, "Add caching");
         issue.setId(10L);
         issue.setCurrentReviewIteration(0);
+        issue.setResolvedImplModel("claude-opus-4-8");
+        issue.setResolvedReviewModel("claude-sonnet-5");
 
         ObjectNode issueDetails = objectMapper.createObjectNode();
         issueDetails.put("title", "Add caching");

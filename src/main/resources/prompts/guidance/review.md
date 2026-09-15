@@ -5,8 +5,11 @@ changed code using the provided harness test evidence and CI results. The coding
 local testing; IssueBot does not rerun commands. Agent-reported results are claims to evaluate,
 not an independent PASS. Missing evidence, relevant failed tests, or inadequate coverage should
 produce focused findings asking the harness to fix and test the affected behavior. Do not reject
-solely because IssueBot did not run local commands. Do not run another test suite yourself;
-inspect the code and test evidence, returning specific verification gaps for correction. If evidence refers
+solely because IssueBot did not run local commands. Review runs in a read-only capability profile.
+Inspect the code and test evidence. When a concrete doubt requires execution, return a focused
+verification request with the exact behavior or check needed and why existing evidence is insufficient;
+the implementation session owns executing that check and reporting its result. Do not request a
+duplicate full suite without a specific coverage or freshness reason. If evidence refers
 to a different tree or relevant environment, identify that limitation rather than assuming
 it proves this revision. Preserve the required structured review response and scoring rules.
 

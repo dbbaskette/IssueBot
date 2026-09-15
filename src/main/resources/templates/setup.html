@@ -11,12 +11,25 @@
 
     <div class="glass-card inset-panel mb-3">
         <h3>Managed agent guidance</h3>
+        <details data-ui-state-key="setup:harness-capabilities">
+            <summary>Harness capabilities and restrictions</summary>
+            <div th:each="profile : ${managedHarnessProfiles}">
+                <h4 th:text="${profile.harness}"></h4>
+                <dl>
+                    <dt>Skills</dt><dd th:text="${profile.skillMode}"></dd>
+                    <dt>Implementation</dt><dd th:text="${profile.implementation}"></dd>
+                    <dt>Independent review</dt><dd th:text="${profile.review}"></dd>
+                    <dt>Personal configuration</dt><dd th:text="${profile.personalConfiguration}"></dd>
+                    <dt>Optional capabilities</dt><dd th:text="${profile.optionalCapabilities}"></dd>
+                </dl>
+            </div>
+        </details>
         <p class="text-sm" th:if="${managedSkillBundle != null}">
             Superpowers <strong th:text="${managedSkillBundle.version}">version</strong>
             · <span th:text="${managedSkillBundle.projection}">stage-prompt-v1</span> · Integrity verified
         </p>
         <p class="text-sm text-muted">Bundled with this IssueBot release for both Codex and Claude.
-            Isolated from personal plugins; IssueBot owns approvals and verification.</p>
+            Managed stage guidance; the coding harness owns local testing and IssueBot owns approvals and independent review.</p>
         <details class="skill-provenance" th:if="${managedSkillBundle != null}" data-ui-state-key="setup:skill-provenance">
             <summary>Bundle provenance</summary>
             <p class="text-sm">Source commit: <code th:text="${managedSkillBundle.commit}"></code></p>
