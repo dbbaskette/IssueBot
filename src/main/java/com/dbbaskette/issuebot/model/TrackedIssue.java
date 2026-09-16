@@ -12,6 +12,10 @@ import java.util.List;
 @Entity
 @Table(name = "tracked_issues", uniqueConstraints = @UniqueConstraint(columnNames = {"repo_id", "issue_number"}))
 public class TrackedIssue {
+    @Column(name = "waiting_for_input", nullable = false)
+    private boolean waitingForInput;
+    public boolean isWaitingForInput() { return waitingForInput; }
+    public void setWaitingForInput(boolean value) { waitingForInput = value; }
     @Column(name = "on_hold", nullable = false)
     private boolean onHold;
     public boolean isOnHold() { return onHold; }

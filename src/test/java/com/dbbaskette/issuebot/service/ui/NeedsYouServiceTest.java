@@ -39,6 +39,16 @@ class NeedsYouServiceTest {
         verifyNoMoreInteractions(issues);
     }
 
+    @Test void waitingNativeInputIsActionableWithoutChangingItsRunStatus() {
+        var waiting=issue(9,IssueStatus.IN_PROGRESS);waiting.setWaitingForInput(true);
+        when(issues.findByStatusInOrderByIdDesc(any())).thenReturn(List.of(waiting));
+        var snapshot=service.snapshot();
+        assertThat(snapshot.totalCount()).isEqualTo(1);
+        assertThat(snapshot.needsHuman()).containsExactly(waiting);
+        assertThat(new IssueNextActionResolver().resolve(waiting).href()).endsWith("#harness-input");
+        assertThat(waiting.getStatus()).isEqualTo(IssueStatus.IN_PROGRESS);
+    }
+
     @Test void attentionParentAndChildrenAreRemovedFromEveryStandaloneSection() {
         List<TrackedIssue> rows = List.of(issue(6, IssueStatus.AWAITING_APPROVAL),
                 issue(5, IssueStatus.AWAITING_PLAN_APPROVAL), issue(4, IssueStatus.READY_TO_START),

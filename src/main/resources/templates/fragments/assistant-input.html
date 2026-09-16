@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"><body>
+<section th:fragment="panel" id="harness-input" class="mb-3"
+         th:hx-get="@{'/issues/' + ${assistantIssueId} + '/assistant-input'}"
+         hx-trigger="every 3s" hx-swap="outerHTML" aria-label="Assistant input">
+    <article th:each="request : ${assistantRequests}" class="panel mb-2">
+        <div class="panel-header">
+            <h3 th:text="${request.state}">Waiting for your input</h3>
+            <span class="text-muted text-sm" th:text="${request.harness}">Assistant</span>
+        </div>
+        <div class="panel-body">
+            <p style="white-space:pre-wrap;overflow-wrap:anywhere" th:text="${request.summary}"></p>
+            <p th:if="${request.session != null}" class="text-muted text-sm">Retained session: <code th:text="${request.session}"></code></p>
+            <p th:if="${request.actionable}" class="text-muted">The current attempt is paused. Answer here to continue the same run; its execution timer is paused too.</p>
+            <p th:if="${request.state == 'Connection lost — recovery needed'}" class="text-muted">The native connection is gone. Your work and this request are retained. An approval cannot be replayed into a new connection. Do not retry merely to answer this request.</p>
+            <details data-ui-state-scope="assistant-input" th:open="${request.actionable and not request.question}"
+                     th:attr="data-ui-state-key=${'input:' + request.id + ':details'}">
+                <summary>Requested action and context</summary>
+                <pre class="text-sm" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:20rem;overflow:auto" th:text="${request.details}"></pre>
+            </details>
+            <form th:if="${request.actionable}" th:id="${'assistant-response-' + request.id}" hx-preserve="true"
+                  th:action="@{'/issues/' + ${assistantIssueId} + '/assistant-input/' + ${request.id}}" method="post" class="mt-2">
+                <div th:each="question, position : ${request.questions}" class="form-group">
+                    <label th:for="${'answer-' + request.id + '-' + position.index}" th:text="${question.text}"></label>
+                    <p class="text-muted text-sm" th:if="${not #lists.isEmpty(question.options)}" th:text="${'Suggestions: ' + #strings.listJoin(question.options, ', ')}"></p>
+                    <textarea rows="3" maxlength="4096" required th:id="${'answer-' + request.id + '-' + position.index}" th:name="${'answer' + position.index}" placeholder="Your answer or guidance"></textarea>
+                </div>
+                <div class="flex gap-1 mt-2">
+                    <button th:if="${request.question}" type="submit" class="btn btn-primary">Send answer and continue</button>
+                    <th:block th:unless="${request.question}">
+                        <button type="submit" name="decision" value="allow" class="btn btn-primary" th:text="${request.allowLabel}">Allow once</button>
+                        <button type="submit" name="decision" value="deny" class="btn btn-ghost">Deny; try another approach</button>
+                    </th:block>
+                </div>
+            </form>
+        </div>
+    </article>
+</section>
+</body></html>

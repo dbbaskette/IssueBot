@@ -68,6 +68,15 @@ public class ProcessingControlService {
         if (!transitionTo(ProcessingState.STOPPED, active, Action.STOP)) return;
         var activeIds = active.stream()
                 .map(issue -> issue.getId()).toList();
+        for (var issue : active) {
+            if (issue.isWaitingForInput() && !cancellationService.hasLiveProcess(issue.getId())) {
+                issue.setWaitingForInput(false);
+                issue.setStatus(IssueStatus.FAILED);
+                issue.setCurrentPhase(null);
+                issue.setLastFailureReason("Stopped by operator after assistant connection loss. Work and input history are retained.");
+                issues.save(issue);
+            }
+        }
         afterCommit(() -> activeIds.forEach(id ->
                 cancellationService.requestCancel(id, CancellationReason.OPERATOR_STOP)));
     }

@@ -1,6 +1,31 @@
 # Operator workflow and testing ownership
 
-This describes the implemented 0.20.0 workflow. The [managed harness capability contract](harness-capabilities.md) describes execution, recovery, and review boundaries. Saved repository settings, rather than defaults alone, determine a particular run.
+This describes the implemented 0.22.0 workflow. The [managed harness capability contract](harness-capabilities.md) describes execution, recovery, and review boundaries. Saved repository settings, rather than defaults alone, determine a particular run.
+
+## Assistant permissions and input
+
+Repositories have a separate **Assistant permissions** control. Ask for approval routes native
+permission requests to the issue; Approve for me selects the harness's native risk reviewer;
+Full access is a separately confirmed opt-in. This does not change stage-approval settings.
+Policies are pinned when a workflow first enters the coding harness. Saved edits apply to new
+workflows, not an already pinned run. Older CLIs that reject a policy do not fall back to bypass.
+
+Use `ISSUEBOT_USERNAME` and `ISSUEBOT_PASSWORD` to enable dashboard login before using these
+controls. Permission changes and input responses require authentication even if other local
+dashboard pages are anonymous; browser submissions also require CSRF tokens.
+
+Native permission requests and questions appear on the issue and in Needs You. Allow once
+grants only the access in that request. Codex permission-profile requests instead say **Allow for
+this turn**, because their native grant lasts for the current turn. Denial asks the assistant to try another approach.
+Questions require an answer even with automatic permissions. While waiting, the same process,
+workspace, session, attempt and repository reservation remain active; operator wait time is
+excluded from the coding timeout. Answer drafts survive the panel's refresh.
+
+If the process disappears, the request becomes recovery-needed. IssueBot never replays an
+approval into a new process or automatically creates a replacement attempt. The request's
+session identity and work remain available. Stop can explicitly end the retained run; repair
+the environment before choosing an existing recovery/retry action. This release does not
+claim transparent reconnection to a dead native request.
 
 ## From `agent-ready` to completion
 

@@ -45,7 +45,7 @@
                 </div>
                 <div th:fragment="status-actions(oob)" id="status-actions" class="flex gap-1" style="align-items:center"
                      th:attr="hx-swap-oob=${oob != null and oob ? 'true' : null}">
-                    <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${humanize.status(issue.status)}">Status</span>
+                    <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}" th:text="${issue.waitingForInput ? 'Waiting for input' : humanize.status(issue.status)}">Status</span>
                     <button th:if="${issue.status.name() != 'COMPLETED' and issue.status.name() != 'IN_PROGRESS' and issue.status.name() != 'AWAITING_APPROVAL' and issue.status.name() != 'AWAITING_PLAN_APPROVAL' and issue.status.name() != 'READY_TO_START'
                                        and not (decompositionGroup != null and decompositionGroup.parent() and decompositionGroup.releasable())}"
                             type="button" class="btn btn-success btn-sm" data-modal-open="complete-modal">
@@ -78,6 +78,8 @@
 
             <!-- Progress stays near the issue title; it is also the live polling anchor. -->
             <div th:replace="~{issue-detail :: live-status}"></div>
+            <section id="harness-input" th:hx-get="@{'/issues/' + ${issue.id} + '/assistant-input'}"
+                     hx-trigger="load" hx-swap="outerHTML" aria-label="Assistant input"></section>
 
             <!-- One decision surface; independently refreshed children preserve poll/dialog boundaries. -->
             <section id="issue-decision" class="issue-decision panel mb-3" aria-label="Current issue decision">
@@ -89,7 +91,7 @@
                 <div class="issue-brief-main">
                     <div class="issue-brief-meta">
                         <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
-                              th:text="${humanize.status(issue.status)}">In progress</span>
+                              th:text="${issue.waitingForInput ? 'Waiting for input' : humanize.status(issue.status)}">In progress</span>
                         <span th:if="${workflowStepper != null}"
                               th:text="${workflowStepper.selectedStage.label + ' · ' + workflowStepper.selectedStage.stateText}">Implementation · Working</span>
                     </div>

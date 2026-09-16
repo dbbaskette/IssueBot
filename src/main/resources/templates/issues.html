@@ -216,7 +216,7 @@
         <td class="issue-status-cell">
             <span th:if="${issue.onHold}" class="status status-pending">On hold</span>
             <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
-                  th:text="${humanize.status(issue.status)}">Pending</span>
+                  th:text="${issue.waitingForInput ? 'Waiting for input' : humanize.status(issue.status)}">Pending</span>
             <span class="failure-inline"
                   th:if="${(issue.status.name() == 'FAILED' or issue.status.name() == 'COOLDOWN') and issue.lastFailureReason != null}"
                   th:text="${issue.lastFailureReason}">Failure reason</span>

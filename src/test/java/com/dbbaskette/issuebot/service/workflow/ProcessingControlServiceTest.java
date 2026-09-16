@@ -102,6 +102,22 @@ class ProcessingControlServiceTest {
     }
 
     @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void stopRetainsLiveWaitForCancellationButFinalizesDisconnectedWait(boolean live) {
+        TrackedIssue active=issue(1L,IssueStatus.IN_PROGRESS);
+        active.setWaitingForInput(true);active.setCurrentIteration(2);active.getRepo().setId(1L);
+        when(repos.findAll()).thenReturn(List.of(active.getRepo()));
+        when(repos.findByIdForUpdate(1L)).thenReturn(Optional.of(active.getRepo()));
+        when(issues.findByRepoIdForUpdateOrderByIssueNumber(1L)).thenReturn(List.of(active));
+        when(cancellationService.hasLiveProcess(1L)).thenReturn(live);
+        serviceWithPersistedMode(ProcessingState.RUNNING).stopNow();
+        assertThat(active.getStatus()).isEqualTo(live ? IssueStatus.IN_PROGRESS : IssueStatus.FAILED);
+        assertThat(active.isWaitingForInput()).isEqualTo(live);
+        assertThat(active.getCurrentIteration()).isEqualTo(2);
+        verify(cancellationService).requestCancel(1L,CancellationReason.OPERATOR_STOP);
+    }
+
+    @ParameterizedTest
     @EnumSource(value = ProcessingState.class, names = {"PAUSE_AFTER_CURRENT", "STOPPED"})
     void restartPersistsRunningAndRepeatedRestartIsIdempotent(ProcessingState initialMode) {
         ProcessingControlService service = serviceWithPersistedMode(initialMode);

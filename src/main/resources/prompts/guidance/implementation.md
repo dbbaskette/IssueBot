@@ -13,8 +13,12 @@ whether the configured local Docker daemon and disposable database fixture are r
 Use the project's documented fixture startup when permitted; Docker-backed PostgreSQL tests
 are legitimate local verification. Preserve existing containers and unrelated services.
 Do not replace pinned dependencies, weaken tests, expose a Docker socket, change host security,
-or repeatedly retry a known permission denial to manufacture a pass. If recovery needs new
-authority or unavailable infrastructure, retain the work and report the exact failed command,
+or repeatedly retry a known permission denial to manufacture a pass. When recovery needs new
+authority or a user decision, use the harness's native permission or question channel if it is
+available and wait for the operator's response within this run. A pending response is not a
+failed implementation and is not a reason to start over. Respect a denial and try a permitted
+alternative; do not bypass it. If input cannot be requested or the necessary infrastructure
+remains unavailable, retain the work and report the exact failed command,
 diagnostics and remedies attempted, and the specific operator action required. Distinguish
 skipped tests and substitute-dependency diagnostics from acceptance evidence.
 

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "features": [
+    {"id":"coding","description":"Coding adapter and trusted fixture verification","javaTests":["CodexHarnessAdapterTest","ClaudeHarnessAdapterTest","CodingHarnessServiceTest","PromptGuidanceTest"],"jsTests":[],"liveTest":"LiveAgentAcceptanceTest#coding","assertions":["subscription-auth","fresh-session","agent-check-invoked","trusted-fixture-tests"]},
+    {"id":"harness-input","description":"Native input and durable operator decisions","javaTests":["NativeInputProtocolTest","InteractiveHarnessRunnerTest","HarnessInputServiceTest","HarnessInputRenderTest","SecurityConfigCsrfIntegrationTest","NeedsYouServiceTest","OrphanedRunRecoveryTest"],"jsTests":["src/test/js/ui-state.test.cjs"],"liveTest":"LiveAgentAcceptanceTest#input","assertions":["subscription-auth","native-question-observed","answer-delivered","same-attempt"]},
+    {"id":"independent-review","description":"Separate read-only review model","javaTests":["CodexHarnessAdapterTest","ClaudeHarnessAdapterTest","ReviewPromptBuilderTest","PlanConformanceWorkflowTest"],"jsTests":[],"liveTest":"LiveAgentAcceptanceTest#review","assertions":["subscription-auth","distinct-review-model","review-verdict","tree-unchanged"]},
+    {"id":"processing-controls","description":"Queue holds, stopping and restart safety","javaTests":["RepositoryHoldGateTest","ProcessingControlServiceTest","ProcessingControlCommitTest","WorkflowCancellationServiceTest","OrphanedRunRecoveryTest"],"jsTests":[],"assertions":["deterministic-controls"]}
+  ]
+}

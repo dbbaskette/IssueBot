@@ -1,15 +1,15 @@
 # Managed harness capabilities
 
-IssueBot 0.20.0 gives the configured harness the whole implementation assignment.
+IssueBot 0.22.0 gives the configured harness the whole implementation assignment.
 Native-like means responsibility for inspection, code, tests and repair, not inheritance
 of all personal configuration or unbounded privileges.
 
 | Boundary | Codex CLI | Claude Code |
 | --- | --- | --- |
-| Implementation | Native exec/resume; workspace-write | Native print/resume; headless permission bypass |
+| Implementation | Native app-server start/resume; repository permission policy | Native streaming print/resume; repository permission policy |
 | Local testing | Harness discovers and runs checks | Harness discovers and runs checks |
 | Maintained Superpowers | Explicit prompt projection | Explicit prompt projection |
-| Personal configuration | User config/rules ignored | Managed settings sources; personal hooks excluded |
+| Personal configuration | Native implementation reads Codex configuration with explicit policy/provider overrides; review ignores user config/rules | Managed settings sources; personal hooks excluded |
 | Review | Read-only, ephemeral, single-agent | Safe mode, Read/Glob/Grep only, nonpersistent |
 | Subscription | Existing ChatGPT login | Existing Claude subscription login |
 | Network/delegation | Saved operator-authorized run settings | Current Claude runner capabilities; not Codex sandbox guarantees |
@@ -22,7 +22,11 @@ We retain this portable fallback rather than enabling unverified native discover
 through arbitrary personal settings. Project instructions remain relevant task context;
 IssueBot does not grant instructions authority to change run permissions or publish.
 
-Claude implementation's permission bypass is **not OS-level workspace isolation**.
+Claude permission modes are **not OS-level workspace isolation**. Full access is explicit opt-in,
+not the default. Codex's app-server does not support the exec command's ignore-user-config flag;
+its native configuration must therefore be maintained on the installation host. IssueBot pins
+the approval policy, reviewer, sandbox, OpenAI provider, ChatGPT authentication, network setting
+and delegation setting. Review still uses the existing protected read-only launcher.
 Operators requiring that guarantee must provide an isolated execution environment.
 This release does not claim to deliver Docker sandboxing or parallel worktree execution.
 
@@ -30,7 +34,7 @@ This release does not claim to deliver Docker sandboxing or parallel worktree ex
 
 Handoff turns count CLI invocations, not individual tool calls or review attempts.
 Each iteration snapshots its handoff limit (default 8, bounded at 100). Invocation
-timeouts and Claude native turn limits remain configured separately. On exhaustion,
+timeouts remain configured separately and exclude time waiting for operator input. On exhaustion,
 the run is incomplete; it is not sent to review. If a timeout retains a session,
 the UI offers the same explicit recovery as handoff exhaustion. Missing sessions,
 authentication failures and environment failures require repair, not blind retry.
