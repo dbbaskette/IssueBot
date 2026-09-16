@@ -20,6 +20,10 @@ public class IssueNextActionResolver {
             return action("Review the current issue state.", "View issue", baseHref(issue),
                     IssueNextAction.Tone.NEUTRAL, false);
         }
+        if (issue.isWaitingForInput()) {
+            return action("The assistant needs your input. The current attempt and repository reservation are retained.",
+                    "Respond to assistant", anchored(issue, "harness-input"), IssueNextAction.Tone.ACTION, true);
+        }
         if (isHeldByReadyReservation(issue, readyReservation)) {
             return action(
                     "Waiting for issue #" + readyReservation.getIssueNumber()

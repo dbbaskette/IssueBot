@@ -67,6 +67,18 @@ class OrphanedRunRecoveryTest {
     }
 
     @Test
+    void nativeInputWaitIsNeverRequeuedOrChargedAnotherAttemptAfterRestart() {
+        var waiting=new TrackedIssue(repo,99,"Waiting input");
+        waiting.setStatus(IssueStatus.IN_PROGRESS);waiting.setCurrentPhase("IMPLEMENTATION");
+        waiting.setCurrentIteration(2);waiting.setWaitingForInput(true);
+        when(issueRepository.findByStatus(IssueStatus.IN_PROGRESS)).thenReturn(List.of(waiting));
+        recovery.requeueOrphanedRuns();
+        assertEquals(IssueStatus.IN_PROGRESS,waiting.getStatus());assertEquals(2,waiting.getCurrentIteration());
+        verify(issueRepository,never()).save(any());
+        verifyNoInteractions(iterationRepository,versionRepository,eventService);
+    }
+
+    @Test
     void interruptedPlanningWithPendingVersionReturnsToAwaitingApprovalWithoutDuplication() {
         TrackedIssue orphan = new TrackedIssue(repo, 96, "Sub-task");
         orphan.setId(96L);

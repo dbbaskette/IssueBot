@@ -2,424 +2,130 @@
   <img src="docs/assets/branding/issuebot-wordmark.png" alt="IssueBot" width="420">
 </p>
 
-# IssueBot
+# Less tending the backlog. More shipping.
 
-Agent guidance is bundled and versioned with IssueBot for both Codex and Claude; no global
-Superpowers installation is required. See [managed skills](docs/managed-skills.md) for
-integrity checks, stage isolation, and coordinated upgrades/rollback.
+**IssueBot turns well-defined GitHub tasks into reviewed pull requests—with you in control.**
+
+Give it a task, choose your coding assistant, and follow the work from one dashboard.
+Your assistant plans, implements, tests, and refines the change. A different model reviews
+the result before it moves toward merge. You decide where to step in.
+
+[Get started](#get-started) · [Try your first task](#try-your-first-task) · [Explore the guides](#go-further)
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Java](https://img.shields.io/badge/java-21-orange.svg)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green.svg)
 
-An autonomous dev agent that watches GitHub repositories for issues labeled `agent-ready`, implements them with Claude Code CLI or Codex CLI, runs an independent code review with a separate model, and delivers pull requests.
+## A coding assistant with a workflow around it
 
-## Why It Exists
+- **Choose your assistant.** Use Codex CLI or Claude Code with your existing subscription login. Pick the implementation and review models in Settings.
+- **See the plan before the code.** Start with a design and implementation plan, add feedback, and keep earlier versions within reach.
+- **Get a second opinion.** An independent model reviews the change. See scores, findings, and progress without hunting through GitHub comments.
+- **Stay in control.** Choose approval checkpoints or an automated workflow. Hold queued work, start a task yourself, or pause processing.
+- **Keep the conversation in one place.** Answer assistant questions, respond to permission requests, and give guidance from the task page.
+- **Run it where you work.** Your dashboard, checkouts, and workflow history live on your machine or server. No separate database service is needed.
 
-Filing a good issue is the easy part; the work between a well-specified issue and a merged pull request is not — it's the context-loading, editing, CI-waiting, and self-review that rarely fits in the gaps of a working day. IssueBot treats that entire stretch as a single autonomous loop: label an issue `agent-ready` and it clones the repo, implements the change, pushes and watches CI, opens a PR, and sets a second, independent model against its own work before anything merges. The design rests on three ideas — **separate the builder from the reviewer**, so the code that ships has already survived an adversarial read; **keep a human on the gates that matter** (plan approval, PR review, merge) rather than in the keystroke-by-keystroke loop; and **run entirely on your machine**, so your source and your API tokens never leave it. It's meant to be pointed at real repositories and left to work.
+IssueBot connects to GitHub and your selected AI provider to do the work; local hosting does
+not mean model processing happens offline. Workflow guidance is included—no separate
+Superpowers installation is required.
 
-## How It Works
+## From task to reviewed change
 
-IssueBot is a locally-running agent that automates software development tasks end-to-end. It monitors your configured GitHub repositories, picks up labeled issues, and drives them through a structured workflow with dual-model architecture: one model implements the code, a separate model reviews it independently. The coding harness is configurable as either Claude Code CLI or Codex CLI, and each role's model and reasoning are configurable together from the dashboard at the global, per-repo, and per-issue level. Defaults depend on the coding harness: Claude Code uses Opus 4.8 for implementation and Sonnet 5 for review, both with high effort; Codex CLI uses `gpt-5.6-sol` with low reasoning for implementation and `gpt-5.6-terra` with medium reasoning for review.
+**Describe → Plan → Implement and test → Independent review → Approve or merge**
 
-Labeling an open issue `agent-ready` makes it eligible for polling or webhook discovery, not an unconditional immediate start. Processing controls, dependencies, global capacity, repository reservations, and workflow policy remain authoritative. See [the actual workflow and testing ownership](docs/operator-workflow.md) for policy gates, bounded corrections, test duplication limitations, and the distinction between current prompt methodology and future native skill integration.
+The coding assistant owns the implement–test–fix loop. Review findings go back to it for
+focused corrections. Your repository settings determine which steps need your approval
+and whether a reviewed pull request can merge automatically.
 
-```mermaid
-flowchart LR
-    A[GitHub Issue<br>agent-ready] --> B[IssueBot<br>Polling]
-    B --> P[Policy-dependent planning<br>Spec + Plan when enabled]
-    P -->|Revise| P
-    P -->|Policy permits continuation| C[Setup<br>Clone & Branch]
-    C --> D[Implement<br>Selected Coding Harness]
-    D --> V[Configured local verification]
-    V -->|Fail| D
-    V -->|Pass or unconfigured| E[Commit & Push<br>CI when enabled]
-    E -->|Fail| F{Retry<br>Smart?}
-    F -->|Skip| G[FAILED<br>needs-human]
-    F -->|Yes| D
-    E -->|Pass| H[Create PR]
-    H --> I[Code Review<br>Review Model]
-    I -->|Fail| D
-    I -->|Pass| J[Backlog<br>Findings]
-    J --> K[Finalize &<br>Auto-Merge]
-    K --> L[Workflow complete<br>Merge depends on policy]
-```
+Start hands-on. Automate more as you get comfortable.
 
-### The 6-Phase Pipeline
+## Get started
 
-| Phase | What Happens | Model |
-|-------|-------------|-------|
-| **1. Setup** | Clone repo, create feature branch, generate CI workflow if needed | - |
-| **2. Implementation** | Selected agent CLI writes code based on issue spec | Implementation model (coding harness default) |
-| **3. CI Verification** | Commit, push, poll GitHub Actions for compile + test | - |
-| **4. PR Creation** | Create pull request on GitHub (draft for approval-gated repos) | - |
-| **5. Independent Review** | Separate model reviews code against spec, posts PR review comments | Review model (coding harness default) |
-| **6. Completion** | Post review to PR, route non-blocking review findings per repo setting (default: deduplicated rolling backlog issue), auto-merge if configured | - |
+### 1. Have these ready
 
-If CI or review fails, IssueBot evaluates whether a retry is worthwhile (timeout? excessive tokens? no progress?) before looping back to implementation with enhanced context. Default max: **2 iterations**. Failed issues require **manual retry** from the dashboard.
+- **Java 21 or newer** and Git. The repository includes a Maven wrapper for the build.
+- **[Codex CLI](https://github.com/openai/codex) or [Claude Code](https://code.claude.com/docs/en/overview)**, installed on the `PATH` used to start IssueBot and signed in:
 
-### Plan First approval contract
+  - Codex: run `codex login` and choose ChatGPT login.
+  - Claude Code: run `claude` and complete its subscription sign-in.
+- **A GitHub personal access token** with access to the repositories you want to manage. It needs permission to read tasks and create branches, commits, and pull requests; classic tokens use the `repo` scope.
 
-Plan First is enabled by default. LEGACY repositories can disable it or override it for an individual start/retry; AUTOMATED and STAGED policies require it. When enabled, before feature-branch setup or code changes the implementation model produces one structured planning version containing both a **Design Spec** and an **Implementation Plan**. The issue page retains every immutable numbered version.
+Your agent's subscription limits still apply. IssueBot uses subscription login rather than
+requiring an AI API key.
 
-Revision guidance creates a new version and supersedes the prior pending version without deleting or editing it. In LEGACY Plan First, one operator action approves the selected version's Design Spec and Implementation Plan together, then a separate start begins implementation. Managed policies system-accept the generated version; STAGED pauses before the configured stages. A PLANNING-stage approval authorizes generation, not a second approval of the finished artifacts. The exact accepted version is pinned as the implementation and independent-review contract.
+### 2. Download and configure
 
-Plan First review uses a fixed two-attempt conformance cycle. The first miss automatically schedules one corrective implementation using the review findings. A second miss stops in Needs Guidance. An operator can then retry with implementation guidance, which starts a fresh two-attempt cycle against the same approved version—the guidance does not revise the spec, plan, or version history.
-
-## Key Features
-
-- **Operator Decision Flow** - Current actions precede evidence; durable decision history distinguishes operator, automation, and unknown legacy actors without collecting personal identities
-- **Review and Recovery Context** - Comparable reviews show criterion/finding changes; missing collections remain unavailable. Recovery explains structured failures, preserves guidance drafts, and uses explicit fresh prerequisite observations rather than probing on page loads
-- **Notification Triage and Return Context** - Search grouped history, read only through a visible watermark, mute informational delivery without suppressing critical attention, and return to the original filtered result sequence
-- **Coding Harness Support** - Choose Claude Code CLI with a Claude subscription login or Codex CLI with a ChatGPT subscription login from Settings; model and reasoning choices follow the selected adapter's capabilities
-- **Dual-Model Architecture** - Implementation and review use independently configurable models, settable at the global, per-repo, and per-issue level for checks and balances
-- **6-Phase Workflow** - Setup, Implementation, CI Verification, PR Creation, Independent Review, Completion
-- **Independent Code Review** - The configured review model evaluates 7 dimensions: spec compliance, correctness, code quality, test coverage, architecture fit, regressions, and security
-- **Review Feedback Loop** - Failed review findings are fed back to the implementation model with specific file/line references for targeted fixes
-- **Noise-Controlled Findings** - Non-blocking review findings are routed per the per-repo `follow-up-mode` setting: `ROLLING_BACKLOG` (default) dedupes findings into a single per-repo backlog issue capped at 50 items, `COMMENT_ONLY` posts a summary comment on the original issue instead of opening a new one, `PER_ISSUE` is the legacy one-follow-up-issue-per-completed-issue behavior, and `OFF` keeps findings in the PR review comment only
-- **Approval-Gated Issue Splitting** - When an issue is too large, IssueBot proposes a sub-issue breakdown and waits for you to approve or reject it from the dashboard (`PROPOSE`, the default); `AUTO` creates sub-issues immediately and `OFF` disables splitting, all per repo. One split level only (sub-issues are never re-split further), capped at 10 open sub-issues per repo, and the parent stays open as a tracking issue that auto-closes once all sub-issues are closed
-- **Versioned Plan First** (default on) - Generates separate Design Spec and Implementation Plan artifacts before code changes, keeps immutable version history, and requires one approval for both artifacts. The approved version governs implementation and independent review; one automatic correction is allowed before the issue stops for guidance, and a guided retry preserves the approved version. Repositories and individual issues can explicitly opt out when this approval contract is not appropriate
-- **Smart Retry Intelligence** - Evaluates failure context (timeout, excessive tokens, no progress) before retrying to avoid burning tokens on hopeless attempts
-- **Manual Retry with Instructions** - Failed issues require manual retry from the dashboard with an optional text box for additional human guidance
-- **Cancel Running Issues** - A Stop button on the issue-detail page stops the running agent process at the next workflow checkpoint
-- **Pause All Processing** - A persisted global control stops active workflows at safe checkpoints and prevents future automatic starts, manual starts, and retries until processing is resumed
-- **Manual Start for Pending Work** - Pending or queued issues can be started directly from the queue or issue page while preserving repository and open-PR safety gates
-- **Durable Ordered Decomposition** - A split parent reserves its repository while IssueBot creates and runs child issues in order, survives restarts and partial GitHub failures, and closes the parent only after every child completes
-- **Actionable Failure Recovery** - Failed issues show a sanitized summary, suggested next step, optional technical details, and a guidance field for the retry
-- **Mid-Loop Guidance** - Steer a running issue from the dashboard; guidance is injected at the next iteration boundary
-- **CI-Aware** - Pushes branches, polls GitHub Checks API, and feeds failure logs back into the next iteration
-- **Security Review** - Optional OWASP-focused security analysis per repository (injection, auth, data exposure, access control)
-- **Iteration Guardrails** - Separate budgets for implementation iterations (default: 2) and review iterations, `needs-human` escalation when retries are exhausted
-- **Issue Dependency Resolution** - Uses GitHub's native issue dependencies (`blockedBy` relationships) with body-text fallback, processes issues in topological order
-- **CI Template Generation** - Auto-generates GitHub Actions workflows (Maven, Gradle, Node, Go) for repos without CI
-- **Dual Mode** - Fully autonomous (auto-merge) or approval-gated (draft PRs with human review)
-- **Honest Approvals** - Approving an issue can optionally squash-merge its PR directly from the dashboard, with inline CI status shown before you approve
-- **Dashboard Authentication** - Optional username/password login via environment variables
-- **Web Dashboard** - Liquid-glass UI with a light/dark theme toggle, real-time monitoring (live terminal streaming with scroll-lock/copy, phase pipeline, iteration history with colorized diffs, review scores), drill-through metric tiles, and keyboard-accessible navigation — mobile-responsive with hamburger menu
-- **Cost Tracking** - Per-phase token usage with separate implementation vs review cost breakdowns, a per-repo cost chart, and sortable cost tables
-- **Local-First** - Runs on your machine with an embedded H2 database; no external infrastructure required
-- **Custom Instructions** - Free-text per-repo guidance ("use constructor injection", "never touch /legacy") injected into every implementation prompt and surfaced as reviewer context in the independent code review
-- **Cross-Issue Lessons** (opt-in) - When enabled, a cheap utility-model call distills 1-3 transferable lessons from each completed (or exhausted) issue and injects them into future implementation prompts for the same repo; capped at 30 lessons (oldest evicted first), with per-lesson delete from the dashboard
-
-## Built With
-
-- [Spring Boot 3.4.2](https://spring.io/projects/spring-boot) - Application framework
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) - Claude subscription-backed headless code generation and review
-- Codex CLI - ChatGPT subscription-backed headless code generation and review
-- [JGit 7.1.0](https://www.eclipse.org/jgit/) - Git operations in Java
-- [Thymeleaf](https://www.thymeleaf.org/) + [HTMX](https://htmx.org/) - Dashboard with SSE live updates
-- [H2 Database](https://www.h2database.com/) - Embedded SQL database
-- [Flyway](https://flywaydb.org/) - Database migrations
-
-## Getting Started
-
-### Prerequisites
-
-- **Java 21+** - [Download](https://adoptium.net/)
-- **At least one agent CLI**:
-  - **Claude Code CLI** - [Install guide](https://docs.anthropic.com/en/docs/claude-code) (log in via `claude` before first use)
-  - **Codex CLI** - Install Codex CLI, make sure `codex` is on the shell `PATH` used to start IssueBot, then run `codex login` and choose ChatGPT login. If you use the bundled ChatGPT app binary directly, the path is typically `/Applications/ChatGPT.app/Contents/Resources/codex`.
-- **GitHub Personal Access Token** - With `repo` scope for the repositories you want IssueBot to manage
-
-### Installation
-
-1. Clone the repository
-
-```bash
+~~~bash
 git clone https://github.com/dbbaskette/IssueBot.git
 cd IssueBot
-```
-
-2. Add your GitHub token to `.env`
-
-```bash
 cp .env.example .env
-# Edit .env and set GITHUB_TOKEN=ghp_your_token_here
-```
+~~~
 
-3. Run IssueBot
+Open `.env` and set:
 
-```bash
-./run.sh
-```
+| Setting | What to enter |
+| --- | --- |
+| `GITHUB_TOKEN` | Your GitHub token |
+| `ISSUEBOT_USERNAME` | A dashboard username |
+| `ISSUEBOT_PASSWORD` | A strong password—replace the example value |
 
-This builds the project, kills any existing instance, and starts IssueBot on port **8090**.
+Keep `.env` private; it is excluded from Git. Dashboard login protects your controls and is
+required to change assistant permissions or answer permission requests.
 
-For the current `home-services.local` deployment, see the [macOS home-server runbook](docs/macos-home-server.md). It mirrors BlogForge's working topology: IssueBot is supervised by `launchd` so it can use the host's authenticated agent CLI, and the Dockerized Cloudflare Tunnel reaches it through `host.docker.internal`. The separate [hardened Docker deployment runbook](docs/deployment.md) remains the future topology once its independently released `codex-cli-provider` image exists.
+### 3. Build and launch
 
-Alternatively, build and run manually:
+From the repository directory:
 
-```bash
-./mvnw clean package -DskipTests
+~~~bash
+./mvnw package -DskipTests
+set -a
+. ./.env
+set +a
 java -jar target/issuebot.jar
-```
+~~~
 
-4. Open the dashboard at [http://localhost:8090](http://localhost:8090)
+Open **[localhost:8090](http://localhost:8090)** and sign in.
 
-### Fresh Start
+Visit **Setup** to check your GitHub connection and assistant login. Then open **Settings**
+to choose Codex or Claude Code and your models. Choose different models for implementation
+and independent review.
 
-To wipe the database and all cloned repos:
+## Try your first task
 
-```bash
-./run.sh --cleanup
-```
+Start with a small change in a repository you're comfortable experimenting with—for example,
+improving a validation message and adding a regression test.
 
-## Usage
+1. **Add the repository** from Repositories.
+2. **Keep the first run hands-on:** use Plan First, approval checkpoints, manual start, and manual merge.
+3. **Write a clear GitHub task** with the desired behavior and a short acceptance checklist. Add the `agent-ready` label to make it eligible for pickup.
+4. **Open the task in IssueBot.** Use the current-action panel to review the plan, give feedback, and start work when you're ready.
+5. **Follow the result.** Watch progress, inspect the review, and approve the pull request when you're satisfied.
 
-### Quick Start
+**Needs You** brings decisions together. You can also act directly on the task page.
+Automatic start and automatic merge are separate choices, so you can enable one without
+giving up control of the other.
 
-1. Open the dashboard at `http://localhost:8090`
-2. Navigate to **Repositories** and add a GitHub repository
-3. Label a GitHub issue with `agent-ready`
-4. IssueBot proposes a Design Spec and Implementation Plan on the next poll cycle (default: 60s)
-5. Review or revise the version, then approve both artifacts once to start implementation
+### Make it yours
 
-### Configuration
+Add standing instructions for each repository, choose your models and approval checkpoints,
+and decide how much autonomy to give the assistant. Start with **Ask for approval**;
+**Approve for me** uses the harness's native permission review. **Full access** is an explicit
+opt-in for environments you trust.
 
-IssueBot can be configured via the dashboard UI or by editing `~/.issuebot/config.yml`:
+## Go further
 
-```yaml
-issuebot:
-  agent-provider: claude # claude or codex; legacy claude-code remains accepted
-  poll-interval-seconds: 60
-  max-concurrent-issues: 3
+- [Workflow and operator controls](docs/operator-workflow.md)—planning, approvals, testing, and recovery.
+- [Assistant capabilities](docs/harness-capabilities.md)—what Codex and Claude Code can do and how permissions work.
+- [Included workflow guidance](docs/managed-skills.md)—the maintained guidance that travels with IssueBot.
+- [Run as a macOS service](docs/macos-home-server.md)—keep IssueBot available on a host you manage.
+- [Release notes](CHANGELOG.md)—see what's new.
 
-  claude-code:
-    implementation-model: claude-opus-4-8
-    implementation-reasoning-effort: high  # also used for planning
-    review-model: claude-sonnet-5
-    review-reasoning-effort: high
-    utility-model: claude-haiku-4-5
-    utility-reasoning-effort: default      # model does not expose configurable effort
-    max-turns-per-invocation: 30
-    timeout-minutes: 45          # implementation/planning wall-clock cap
-    review-max-turns: 15
-    review-timeout-minutes: 20   # review/utility cap (only reads a diff, so smaller)
+For your first installation, use the native launch above. Read the deployment guides before
+moving to a persistent or externally accessible service.
 
-  codex-cli:
-    implementation-model: gpt-5.6-sol
-    implementation-reasoning-effort: low  # also used for planning
-    review-model: gpt-5.6-terra
-    review-reasoning-effort: medium
-    utility-model: gpt-5.6-luna
-    utility-reasoning-effort: medium
-    timeout-minutes: 45
-    review-timeout-minutes: 20
+## Build with us
 
-  github:
-    token: ${GITHUB_TOKEN}
+Have an idea that would make your development day easier? Feedback, documentation improvements,
+and pull requests are welcome. Try IssueBot on a small task and tell us what would make the
+next one smoother.
 
-  repositories:
-    - owner: my-org
-      name: my-app
-      branch: main
-      mode: autonomous
-      max-iterations: 2
-      max-review-iterations: 2
-      security-review-enabled: false
-      ci-enabled: true
-      ci-timeout-minutes: 15
-      auto-merge: false
-      follow-up-mode: ROLLING_BACKLOG
-      decomposition-mode: PROPOSE
-      plan-first: true
-      pre-screen-enabled: true
-      # implementation-model: claude-opus-4-8   # omit model/effort pair to inherit coding harness defaults
-      # implementation-reasoning-effort: high
-      # review-model: claude-sonnet-5
-      # review-reasoning-effort: high
-      allowed-paths:
-        - src/
-        - test/
-```
-
-### Repository Settings
-
-The compatibility configuration key remains `agent-provider`, with stable values `claude` or `codex`. Existing `claude-code` configuration remains accepted; the `claude-code` and `codex-cli` configuration sections keep their names. Migration maps persisted `CLAUDE_CODE` and `CODEX` identities to `claude` and `codex` while retaining legacy columns, session IDs, and active workflow history.
-
-Every saved model selection now carries a compatible reasoning value. Models without configurable reasoning use the explicit value `default`; older model-only selections resolve the adapter's documented default when saved or dispatched. Settings, repository overrides, start/retry dialogs, and stage approvals expose paired model/reasoning controls from the coding harness catalog. Unsupported combinations are rejected before dispatch. Run overrides apply to that run without changing repository defaults.
-
-Codex implementation runs are single-agent by default. The Add/Edit Repository form can allow Codex subagents for that repository, and the issue Start, Retry, and Implementation approval controls can override the choice for one run. IssueBot passes the mode to the non-interactive Codex CLI before launch; "allowed" means Codex may delegate when useful, not that it necessarily did. This does not change the sandbox or grant new approvals. Codex is expected to run enough safe local checks to have its own evidence-based judgment that IssueBot's later independent verification is likely to pass, without reflexively running the entire suite.
-
-The Add/Edit Repository form contains one workflow editor and one save action for repository settings and approval policy:
-
-- **Existing settings** (`LEGACY`) preserves the existing autonomy settings and approval behavior, with the older controls available in advanced settings.
-- **Approval checkpoints** (`STAGED`) lets you require approval before planning, implementation, verification, independent review, and/or merge. On the issue page, one current-decision panel names the stage being approved, explains what starts and where execution next pauses, and offers coding harness/model/reasoning selection for AI-driven stages. Verification and merge are deterministic and have no model picker.
-- **Automatic** (`AUTOMATED`) progresses end to end with an immutable plan, successful independent review, and merge checks. Authentication or verification problems still stop for attention; automation never bypasses safety checks.
-
-Policy is captured when an issue first enters the workflow; changing the repository does not rewrite active approvals. Stage decisions retain their model, actor, plan artifact, and execution-run history. Fresh retries require fresh approvals. Managed stages use Claude Code or Codex CLI subscription authentication without API-key fallback. Merges are conditional on the exact reviewed commit and current CI results.
-
-The editor replaces the older autonomy presets and separate policy form. Existing repositories keep their saved policy and underlying settings until you explicitly change them. Model selections made at an approval apply to that stage, not to repository defaults. Legacy plan approval remains plan-only; the issue's current-decision panel then offers the next appropriate action.
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `mode` | `autonomous` | `autonomous` (auto-merge) or `approval-gated` (draft PR, human review) |
-| `max-iterations` | `2` | Max implementation attempts before escalating |
-| `max-review-iterations` | `2` | Max review cycles before escalating |
-| `security-review-enabled` | `false` | Enable OWASP security analysis in code review |
-| `ci-enabled` | `true` | Push and poll GitHub Actions after implementation |
-| `ci-timeout-minutes` | `15` | How long to wait for CI checks |
-| `auto-merge` | `false` | Auto-merge PRs via squash after review passes |
-| `follow-up-mode` | `ROLLING_BACKLOG` | How non-blocking review findings are captured: `ROLLING_BACKLOG` (deduped per-repo backlog issue, capped at 50 items), `COMMENT_ONLY` (summary comment on the original issue), `PER_ISSUE` (legacy: one follow-up issue per completed issue), or `OFF` (PR review comment only) |
-| `decomposition-mode` | `PROPOSE` | How oversized issues are split: `PROPOSE` (bot proposes, you approve from the dashboard), `AUTO` (legacy: splits immediately), or `OFF` (never split, escalate instead) |
-| `plan-first` | `true` | Require a versioned Design Spec and Implementation Plan with one approval before implementation. Disable at repository level, or use the per-issue start/retry override, to opt out explicitly |
-| `pre-screen-enabled` | `true` | Run a cheap utility-model pass before implementation to catch oversized issues early |
-| `implementation-model` | inherit global | Per-repo override of the implementation model |
-| `implementation-reasoning-effort` | inherit global | Compatible reasoning paired with the implementation model |
-| Codex subagents (UI) | off | Allow Codex to delegate within a repository; each issue start/retry can override it |
-| `review-model` | inherit global | Per-repo override of the review model |
-| `review-reasoning-effort` | inherit global | Compatible reasoning paired with the review model |
-| `custom-instructions` | (none) | Free-text standing guidance injected into every implementation prompt (`## Repository Instructions`) and into the review prompt as reviewer context ("the repo owner requires...") |
-| `lessons-enabled` | `false` | When on, a completed (or iteration-exhausted) issue triggers a cheap utility-model call that distills 1-3 transferable lessons, stored per-repo (capped at 30, oldest evicted first) and injected into future implementation prompts (`## Lessons from previous issues in this repo`). Curate/delete lessons from the repo row on the dashboard |
-
-### Issue Dependencies
-
-IssueBot respects dependency chains. There are two ways to declare blockers:
-
-**1. GitHub native dependencies (recommended)** — Use GitHub's built-in "Mark as blocked by" feature on the issue sidebar. IssueBot reads these via the GraphQL API.
-
-**2. Body text (legacy fallback)** — Add this line to an issue body:
-
-```
-**Blocked by:** #5, #12
-```
-
-Either way, IssueBot will wait until the blocking issues are completed before processing the blocked issue. Native GitHub dependencies are checked first; body text is used as a fallback.
-
-### Dashboard
-
-**Needs You** uses one shared snapshot for its cards and navigation badge. Decomposition groups count once rather than duplicating their parent and child items. Live events and periodic refresh keep both surfaces synchronized, including transitions to and from an empty inbox. Refresh waits while you are editing an inbox field or using a dialog so your input is preserved.
-
-The web dashboard at `http://localhost:8090` provides:
-
-- **Dashboard** - Overview metrics: active issues, completion rate, total cost
-- **Issues** - Queue with status filters, click into any issue for detail view
-- **Issue Detail** - Live terminal streaming, phase pipeline, iteration history with diffs, review scores
-- **Repositories** - Add/configure repos with review and CI settings
-- **Costs** - Per-issue and per-repo cost breakdowns
-
-### Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `http://localhost:8090` | Web dashboard |
-| `POST /webhooks/github` | GitHub webhook receiver (instant issue pickup — see below) |
-| `GET /actuator/health` | Health check |
-| `GET /actuator/metrics` | Application metrics |
-| `GET /h2-console` | H2 database console |
-
-### GitHub Webhooks (instant pickup)
-
-Polling checks for `agent-ready` issues every `poll-interval-seconds` (default 60s). Webhooks make pickup near-instant — a `labeled` event for `agent-ready` on a watched repo is evaluated immediately, and a `closed` event opportunistically re-checks blocked issues and parent trackers for that repo. Polling keeps running unchanged as the fallback/reconciliation loop, so nothing breaks if a delivery is missed; once webhooks are working reliably you can raise `poll-interval-seconds` to reduce API calls.
-
-1. Set the `ISSUEBOT_WEBHOOK_SECRET` environment variable to a random string (e.g. `openssl rand -hex 32`) and restart IssueBot. The endpoint returns `503` while this is unset — webhooks are fully opt-in.
-2. On each watched GitHub repo: **Settings → Webhooks → Add webhook**.
-   - Payload URL: `http://<your-host>:8090/webhooks/github`
-   - Content type: `application/json`
-   - Secret: the same value as `ISSUEBOT_WEBHOOK_SECRET`
-   - Events: select **Issues** only
-3. The [Setup page](http://localhost:8090/setup) shows whether the secret is configured and a per-repo "last webhook event" timestamp, so you can confirm deliveries are actually arriving.
-
-**Local-first deployments** (no public URL) need a tunnel so GitHub can reach `localhost`. [smee.io](https://smee.io) is the simplest option:
-
-```bash
-npm install -g smee-client
-smee -u https://smee.io/YOUR_CHANNEL -t http://localhost:8090/webhooks/github
-```
-
-Use the smee channel URL (`https://smee.io/YOUR_CHANNEL`) as the GitHub webhook's payload URL instead of `localhost`; the `smee` client forwards deliveries to your local instance. Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:8090`) or Tailscale Funnel work the same way if you'd rather not depend on smee.io.
-
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
-| `ISSUEBOT_USERNAME` | No | Dashboard login username (auth disabled if unset) |
-| `ISSUEBOT_PASSWORD` | No | Dashboard login password (auth disabled if unset) |
-| `ISSUEBOT_WEBHOOK_SECRET` | No | HMAC secret for `POST /webhooks/github` (webhook receiver disabled/503 if unset) |
-
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph IssueBot
-        Polling[Issue Polling Service]
-        Workflow[Workflow Engine]
-        Agent[Agent CLI Service]
-        Review[Code Review Service]
-        GitOps[Git Operations]
-        GitHub[GitHub API Client]
-        CI[CI Template Service]
-        DB[(H2 Database)]
-        Dashboard[Thymeleaf Dashboard]
-    end
-
-    GH[GitHub API] --> Polling
-    Polling --> Workflow
-    Workflow --> Agent
-    Workflow --> Review
-    Workflow --> GitOps
-    Workflow --> GitHub
-    Workflow --> CI
-    Agent --> CLI[Claude Code CLI<br>or Codex CLI]
-    Review --> CLI
-    GitHub --> GH
-    Workflow --> DB
-    Dashboard --> DB
-    Dashboard -->|SSE| Browser[Browser]
-```
-
-## Project Structure
-
-```
-src/main/java/com/dbbaskette/issuebot/
-├── config/              # Configuration properties, async, WebClient, HTMX
-├── controller/          # Dashboard controllers (issues, repos, costs, approvals)
-├── model/               # JPA entities (WatchedRepo, TrackedIssue, Iteration, Event, CostTracking)
-├── repository/          # Spring Data JPA repositories
-├── security/            # Security configuration, branch validation, log sanitization
-├── observability/       # Health indicators and Micrometer metrics
-├── service/
-│   ├── ci/             # CI workflow template generation (Maven, Gradle, Node, Go)
-│   ├── claude/         # Claude Code execution, stream-json parser
-│   ├── codex/          # Codex CLI execution, auth checks, model discovery
-│   ├── dependency/     # Issue dependency resolution (GitHub native + body-text fallback)
-│   ├── event/          # Event logging and SSE broadcasting
-│   ├── git/            # JGit operations (clone, branch, diff, commit, push)
-│   ├── github/         # GitHub API client (issues, PRs, CI checks, PR reviews)
-│   ├── harness/        # Coding harness adapters, registry, model/reasoning capabilities
-│   ├── notification/   # Desktop and dashboard notifications
-│   ├── orchestration/  # Spring AI ChatClient orchestration agent
-│   ├── polling/        # Scheduled issue detection and qualification
-│   ├── review/         # Independent code review (prompt builder, result parser)
-│   ├── tool/           # Spring AI tool definitions
-│   └── workflow/       # 6-phase workflow engine and iteration manager
-├── validation/          # Startup validation (CLI, auth, token checks)
-└── IssueBotApplication.java
-
-src/main/resources/
-├── db/migration/        # Flyway migrations (V1-V8)
-├── static/css/          # Dashboard styles
-├── templates/           # Thymeleaf templates (dashboard, issues, repos, costs)
-└── application.yml      # Default configuration
-```
-
-## Contributing
-
-Contributions are welcome! Please open an issue to discuss proposed changes before submitting a pull request.
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m 'Add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
-
-## License
-
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
-
-## Contact
-
-Dan Baskette - [GitHub](https://github.com/dbbaskette)
-
-Project Link: [https://github.com/dbbaskette/IssueBot](https://github.com/dbbaskette/IssueBot)
+Built with Java, Spring Boot, Thymeleaf, and HTMX. Distributed under the [MIT License](LICENSE).

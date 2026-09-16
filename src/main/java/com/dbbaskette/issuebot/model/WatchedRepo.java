@@ -7,6 +7,11 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "watched_repos", uniqueConstraints = @UniqueConstraint(columnNames = {"owner", "name"}))
 public class WatchedRepo {
+    @Enumerated(EnumType.STRING)
+    @Column(name = "execution_permissions", nullable = false)
+    private ExecutionPermissions executionPermissions = ExecutionPermissions.ASK;
+    public ExecutionPermissions getExecutionPermissions() { return executionPermissions; }
+    public void setExecutionPermissions(ExecutionPermissions value) { executionPermissions = java.util.Objects.requireNonNull(value); }
     private String implementationReasoningEffort;
     public String getImplementationReasoningEffort() { return implementationReasoningEffort; }
     public void setImplementationReasoningEffort(String value) { implementationReasoningEffort = value; }

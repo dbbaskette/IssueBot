@@ -269,7 +269,7 @@
                             <span class="decision-card-title" th:text="${issue.issueTitle}">Issue title</span>
                         </div>
                         <span class="status" th:classappend="${'status-' + issue.status.name().toLowerCase()}"
-                              th:text="${issue.status}">FAILED</span>
+                              th:text="${issue.waitingForInput ? 'Waiting for input' : issue.status}">FAILED</span>
                     </div>
 
                     <p class="text-sm mb-1" th:if="${issue.lastFailureReason != null}"
@@ -283,7 +283,7 @@
                     <a class="btn btn-ghost btn-sm" th:href="@{'/issues/' + ${issue.id}}"
                        th:hx-get="@{'/issues/' + ${issue.id}}" th:attr="data-navigation-issue=${issue.id}"
                        hx-target="#content" hx-push-url="true">
-                        <i class="ti ti-arrow-right" aria-hidden="true"></i> Open issue for retry options
+                        <i class="ti ti-arrow-right" aria-hidden="true"></i> <span th:text="${issue.waitingForInput ? 'Respond to assistant' : 'Open recovery options'}">Open recovery options</span>
                     </a>
                 </div>
             </div>

@@ -147,6 +147,7 @@ public class WorkflowCheckpointTransactionManager {
         issue.setCurrentPhase(null);
         issue.setSuspensionReason(null);
         issue.setLastFailureReason("Cancelled by operator");
+        issue.setWaitingForInput(false);
         return issues.saveAndFlush(issue);
     }
 

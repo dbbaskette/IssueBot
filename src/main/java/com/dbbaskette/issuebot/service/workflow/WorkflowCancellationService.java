@@ -24,6 +24,10 @@ public class WorkflowCancellationService {
     }
 
     public boolean isCancelled(Long issueId) { return cancelRequested.containsKey(issueId); }
+    public boolean hasLiveProcess(Long issueId) {
+        Process process=liveProcesses.get(issueId);
+        return process!=null && process.isAlive();
+    }
 
     public Optional<CancellationReason> reason(Long issueId) {
         return Optional.ofNullable(cancelRequested.get(issueId));

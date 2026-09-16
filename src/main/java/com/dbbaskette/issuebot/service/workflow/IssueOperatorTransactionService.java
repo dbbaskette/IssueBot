@@ -67,6 +67,12 @@ public class IssueOperatorTransactionService {
         if (transitions.findFirstByIssueIdAndScopeKeyAndKindOrderByIdDesc(id, scope, "STOP").isPresent()) return issue;
         var intent = transitions.saveAndFlush(new OperatorTransition(id, scope, "STOP", OperatorTransition.State.ACCEPTED));
         decisions.accepted(issue, "transition:" + intent.getId() + ":accepted", Actor.OPERATOR, Action.STOP, Reason.USER_REQUEST);
+        if (issue.isWaitingForInput() && !cancellation.hasLiveProcess(id)) {
+            issue.setWaitingForInput(false);
+            issue.setStatus(IssueStatus.FAILED);
+            issue.setCurrentPhase(null);
+            issue.setLastFailureReason("Stopped by operator after assistant connection loss. Work and input history are retained.");
+        }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() { cancellation.requestCancel(id); }
         });

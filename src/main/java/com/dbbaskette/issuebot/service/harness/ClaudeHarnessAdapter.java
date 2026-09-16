@@ -11,6 +11,8 @@ import java.util.function.Consumer;
 @Component
 public final class ClaudeHarnessAdapter implements CodingHarnessAdapter {
     private final ClaudeCodeService runner;
+    @org.springframework.beans.factory.annotation.Autowired
+    private InteractiveHarnessRunner interactive;
 
     public ClaudeHarnessAdapter(ClaudeCodeService runner) {
         this.runner = runner;
@@ -29,7 +31,7 @@ public final class ClaudeHarnessAdapter implements CodingHarnessAdapter {
     @Override
     public HarnessCapabilities capabilities() {
         // Native skill projection is introduced by the later methodology runtime.
-        return new HarnessCapabilities(false, true);
+        return new HarnessCapabilities(false, true, true);
     }
 
     @Override public boolean checkCliAvailable() { return runner.checkCliAvailable(); }
@@ -45,6 +47,9 @@ public final class ClaudeHarnessAdapter implements CodingHarnessAdapter {
 
     @Override
     public HarnessExecutionResult execute(HarnessExecutionRequest request, Consumer<String> callback) {
+        if (interactive != null && request.issueId() != null
+                && (request.role() == HarnessRole.IMPLEMENTATION || request.role() == HarnessRole.DEBUGGING_CORRECTIONS))
+            return interactive.execute(id(), request, callback);
         return switch (request.role()) {
             case ANALYSIS_CLASSIFICATION -> runner.executeUtility(request.prompt(), request.workingDirectory(),
                     request.model(), request.reasoningLevel(), callback);

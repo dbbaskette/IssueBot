@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.0 — 2026-09-15
+
+- Refocus the README on product benefits, straightforward setup, and a guided first task.
+- Add an extensible feature acceptance command with offline regression groups, opt-in subscription-backed agent fixtures, and JSON/Markdown evidence.
+- Add per-repository Ask for approval, native Approve for me, and explicit Full access policies, pinned to each coding workflow.
+- Bridge Codex app-server and Claude Code streaming permission/questions into durable issue-level input controls; human wait time is excluded from coding limits.
+- Retain interrupted input requests without starting a replacement attempt; surface waiting input in Needs You and preserve answer drafts during refreshes.
+- Require configured operator authentication and CSRF protection for permission changes and assistant responses.
+
 ## 0.21.0 — 2026-09-15
 
 - Hold and release selected waiting issues without deleting plans; explicit Start releases a hold after dependency checks.

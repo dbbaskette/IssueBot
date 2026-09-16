@@ -57,6 +57,7 @@ public class OrphanedRunRecovery {
         }
         int recovered = 0;
         for (TrackedIssue issue : orphaned) {
+            if (issue.isWaitingForInput()) continue; // Native requests cannot be replayed into a new process.
             if (issue.getStatus() != IssueStatus.IN_PROGRESS) {
                 continue;
             }

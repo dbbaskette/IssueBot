@@ -266,6 +266,21 @@
                         </td>
                         <td data-label="Branch" th:text="${repo.branch}">main</td>
                         <td data-label="Workflow and checkpoints" class="repo-workflow-summary">
+                            <details th:attr="data-ui-state-key=${'repo:' + repo.id + ':permissions'}">
+                                <summary th:text="${'Assistant permissions: ' + repo.executionPermissions.label()}">Assistant permissions</summary>
+                                <form th:action="@{'/repositories/' + ${repo.id} + '/execution-permissions'}" method="post" class="form-group"
+                                      th:id="${'repo-permission-form-' + repo.id}" hx-preserve="true">
+                                    <label th:for="${'permissions-' + repo.id}">Coding assistant permissions</label>
+                                    <select name="permissions" th:id="${'permissions-' + repo.id}">
+                                        <option value="ASK" th:selected="${repo.executionPermissions.name() == 'ASK'}">Ask for approval</option>
+                                        <option value="AUTO_REVIEW" th:selected="${repo.executionPermissions.name() == 'AUTO_REVIEW'}">Approve for me</option>
+                                        <option value="FULL_ACCESS" th:selected="${repo.executionPermissions.name() == 'FULL_ACCESS'}">Full access</option>
+                                    </select>
+                                    <p class="text-muted text-sm">Approve for me uses the harness's native risk review, not blanket approval. Unsupported policies fail closed. Questions still come to you. Applies to new runs, separately from stage checkpoints. Configure IssueBot login before saving permissions or answering assistant requests.</p>
+                                    <label class="text-sm"><input type="checkbox" name="confirmFullAccess" value="true"> I understand full access permits host-level actions without per-action approval.</label>
+                                    <button type="submit" class="btn btn-outline btn-sm">Save permissions</button>
+                                </form>
+                            </details>
                             <p th:text="${repo.autoStart ? 'Next issue: automatic start' : 'Next issue: manual start'}">Next issue: automatic start</p>
                             <strong th:text="${repo.workflowPolicy.name() == 'AUTOMATED' ? 'Automatic' : (repo.workflowPolicy.name() == 'STAGED' ? 'Approval checkpoints' : 'Existing settings')}">Workflow</strong>
                             <p th:if="${repo.workflowPolicy.name() == 'AUTOMATED'}">No routine approval checkpoints.</p>

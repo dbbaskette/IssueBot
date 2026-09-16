@@ -41,8 +41,8 @@ public class NeedsYouService {
                 withStatus(standalone, IssueStatus.AWAITING_PLAN_APPROVAL),
                 withStatus(standalone, IssueStatus.READY_TO_START),
                 withStatus(standalone, IssueStatus.AWAITING_DECOMPOSITION),
-                standalone.stream().filter(issue -> issue.getStatus() == IssueStatus.FAILED
-                        || issue.getStatus() == IssueStatus.COOLDOWN).toList(),
+                rows.stream().filter(issue -> issue.isWaitingForInput() || (!represented.contains(issue.getId()) && (issue.getStatus() == IssueStatus.FAILED
+                        || issue.getStatus() == IssueStatus.COOLDOWN))).toList(),
                 attention,
                 rows.stream().filter(issue -> issue.getStatus() == IssueStatus.IN_PROGRESS).count(),
                 rows.stream().filter(issue -> issue.getStatus() == IssueStatus.QUEUED).count());

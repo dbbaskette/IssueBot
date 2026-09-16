@@ -49,6 +49,15 @@ class SecurityConfigCsrfIntegrationTest {
     }
 
     @Test
+    void hostPermissionMutationsRequireLoginEvenOnAnAnonymousDashboard() throws Exception {
+        mockMvc.perform(post("/issues/999999/assistant-input/1").with(csrf()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/repositories/999999/execution-permissions").with(csrf())
+                        .param("permissions", "FULL_ACCESS").param("confirmFullAccess", "true"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void readyReleaseRequiresValidCsrfToken() throws Exception {
         mockMvc.perform(post("/issues/999999/ready/release"))
                 .andExpect(status().isForbidden());

@@ -171,6 +171,9 @@ public class IssueWorkflowService {
     public void processIssueAsync(TrackedIssue trackedIssue, String additionalInstructions) {
         try {
             processIssue(trackedIssue, additionalInstructions);
+        } catch (com.dbbaskette.issuebot.service.harness.HarnessInputInterruptedException waiting) {
+            if (cancelled(trackedIssue)) return;
+            log.info("Issue #{} retains its assistant input checkpoint: {}", trackedIssue.getIssueNumber(), waiting.getMessage());
         } catch (Exception e) {
             log.error("Unhandled error processing issue #{}: {}",
                     trackedIssue.getIssueNumber(), e.getMessage(), e);
@@ -193,7 +196,7 @@ public class IssueWorkflowService {
         if (stageWorkflow != null) {
             // A stale/direct dispatch must never overwrite a durable waiting checkpoint.
             TrackedIssue fresh = issueRepository.findById(trackedIssue.getId()).orElse(trackedIssue);
-            if (StageApprovalService.isStageWaiting(fresh)) return;
+            if (fresh.isWaitingForInput() || StageApprovalService.isStageWaiting(fresh)) return;
             stageWorkflow.snapshot(trackedIssue);
         }
         String executionHarness = harnessService.harnessId();
@@ -561,6 +564,10 @@ public class IssueWorkflowService {
                         trackCost(trackedIssue, iterationNum, implResult, "IMPLEMENTATION");
                     }
                 } catch (Exception e) {
+                    if (e instanceof com.dbbaskette.issuebot.service.harness.HarnessInputInterruptedException) {
+                        cancelled(trackedIssue);
+                        return;
+                    }
                     log.error("Phase 2 (Implementation) failed, iteration {}", iterationNum, e);
                     if (harnessOwnedImplementation) {
                         implementationTurnCheckpoints.closeFailed(trackedIssue.getId(), iteration.getId());
@@ -1011,6 +1018,7 @@ public class IssueWorkflowService {
             trackedIssue.setStatus(IssueStatus.FAILED);
             trackedIssue.setSuspensionReason(null);
             trackedIssue.setLastFailureReason("Cancelled by operator");
+            trackedIssue.setWaitingForInput(false);
             issueRepository.save(trackedIssue);
         }
         eventService.log("WORKFLOW_CANCELLED", "Cancelled by operator",

@@ -42,6 +42,10 @@ public class SecurityConfig {
         } else {
             http
                 .authorizeHttpRequests(auth -> auth
+                    // Host-permission decisions require an identified operator even when the
+                    // rest of a local dashboard is intentionally available without login.
+                    .requestMatchers(org.springframework.http.HttpMethod.POST,
+                            "/issues/*/assistant-input/*", "/repositories/*/execution-permissions").authenticated()
                     .anyRequest().permitAll()
                 );
         }
